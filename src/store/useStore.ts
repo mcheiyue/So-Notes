@@ -10,6 +10,13 @@ interface State {
   isLoaded: boolean;
   isSaving: boolean;
   
+  // Sticky Drag State
+  stickyDrag: {
+    id: string | null;
+    offsetX: number;
+    offsetY: number;
+  };
+
   // Actions
   init: () => Promise<void>;
   addNote: (x: number, y: number) => void;
@@ -18,6 +25,7 @@ interface State {
   bringToFront: (id: string) => void;
   deleteNote: (id: string) => void;
   changeColor: (id: string, color: string) => void;
+  setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number) => void;
   saveToDisk: () => Promise<void>;
 }
 
@@ -35,18 +43,16 @@ export const useStore = create<State>()(
     config: DEFAULT_CONFIG,
     isLoaded: false,
     isSaving: false,
+    
+    stickyDrag: {
+        id: null,
+        offsetX: 0,
+        offsetY: 0,
+    },
 
     init: async () => {
-      // 1. Rehydration Logic
-      // Attempt to load from JSON first (Persisted)
-      // Then load from IDB (WAL)
-      // Merge: IDB overwrites JSON if valid
-      
       let loadedData: StorageData = { notes: [], config: DEFAULT_CONFIG };
       let fromWAL = false;
-
-      // TODO: Load from Rust fs (data.json)
-      // For MVP, we assume empty or load from IDB primarily
       
       const walData = await db.loadWAL();
       if (walData) {
@@ -55,20 +61,16 @@ export const useStore = create<State>()(
         fromWAL = true;
       }
 
-      // Normalization of Z-Index & Boundary Check
       if (loadedData.notes.length > 0) {
-        loadedData.notes.sort((a, b) => a.z - b.z);
+        const currentMaxZ = Math.max(...loadedData.notes.map(n => n.z || 0), 0);
+        loadedData.config.maxZ = Math.max(currentMaxZ, loadedData.notes.length);
+        
         loadedData.notes.forEach((n, i) => {
-          n.z = i + 1;
-          
-          // Safety Boundary Check: If note is off-screen (negative coords), reset it.
-          // This rescues notes lost in "The Void".
           if (n.x < 0 || n.y < 0) {
-             n.x = 20 + (i * 10); // Cascade slightly
+             n.x = 20 + (i * 10);
              n.y = 20 + (i * 10);
           }
         });
-        loadedData.config.maxZ = loadedData.notes.length;
       }
 
       set((state) => {
@@ -77,7 +79,6 @@ export const useStore = create<State>()(
         state.isLoaded = true;
       });
       
-      // If we restored from WAL, force a disk flush immediately
       if (fromWAL) {
         get().saveToDisk();
       }
@@ -100,7 +101,7 @@ export const useStore = create<State>()(
         state.config.maxZ += 1;
       });
 
-      get().saveToDisk(); // Trigger save logic (WAL + Lazy Disk)
+      get().saveToDisk();
     },
 
     updateNote: (id, content) => {
@@ -112,14 +113,12 @@ export const useStore = create<State>()(
         }
       });
       
-      // High frequency update -> WAL Throttle
       const now = Date.now();
       if (now - lastWALSave > WAL_THROTTLE) {
         lastWALSave = now;
         db.saveWAL({ notes: get().notes, config: get().config });
       }
       
-      // Disk -> Debounce
       if (saveTimeout) clearTimeout(saveTimeout);
       saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
@@ -133,7 +132,6 @@ export const useStore = create<State>()(
         }
       });
       
-      // Layout change -> Lazy Save only
       if (saveTimeout) clearTimeout(saveTimeout);
       saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
@@ -146,7 +144,8 @@ export const useStore = create<State>()(
           note.z = state.config.maxZ;
         }
       });
-      // No immediate save for Z-index only
+      if (saveTimeout) clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
     deleteNote: (id) => {
@@ -165,33 +164,23 @@ export const useStore = create<State>()(
       });
       get().saveToDisk();
     },
+    
+    setStickyDrag: (id, offsetX = 0, offsetY = 0) => {
+        set((state) => {
+            state.stickyDrag = { id, offsetX, offsetY };
+        });
+    },
 
     saveToDisk: async () => {
       const { notes, config } = get();
       set({ isSaving: true });
-
-      // 1. Save to IDB (WAL) immediately to be safe
       await db.saveWAL({ notes, config });
 
-      // 2. Save to Disk via Rust
       const jsonString = JSON.stringify({ notes, config });
       try {
         await invoke('save_content', { filename: 'data.json', content: jsonString });
-        
-        // On success, we could clear WAL, but keeping it as a hot cache is also fine.
-        // Plan said: "flush_wal_to_disk... on success clear IDB".
-        // But for "Level 1" WAL, it acts as a mirror.
-        // We only clear if we want to ensure we rely on disk next time.
-        // But let's leave it as mirror. Rehydration logic handles the merge.
-        
-        // Actually, if we clear WAL, we might lose data if disk write succeeded but IDB clear failed? No.
-        // If disk write succeeded, we are safe.
-        // Let's NOT clear WAL for now, just overwrite it constantly. 
-        // Rehydration prefers WAL if present.
-        
       } catch (err) {
         console.error('Disk Save Failed:', err);
-        // TODO: Toast notification
       } finally {
         set({ isSaving: false });
       }

@@ -12,20 +12,20 @@ interface NoteCardProps {
 }
 
 export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
-  const { updateNote, moveNote, deleteNote, bringToFront, changeColor } = useStore();
+  const { updateNote, moveNote, deleteNote, bringToFront, changeColor, stickyDrag, setStickyDrag } = useStore();
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  
+  const isStickyDragging = stickyDrag.id === note.id;
 
-  // Auto-focus on mount if empty
   useEffect(() => {
     if (!note.content && textareaRef.current) {
       textareaRef.current.focus();
     }
-  }, []); // Run only on mount
+  }, []); 
 
-  // Auto-resize on mount and content change
   useLayoutEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -39,6 +39,28 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
 
   const handleMouseDown = () => {
     bringToFront(note.id);
+  };
+  
+  const handleContextMenu = (e: React.MouseEvent) => {
+      // Logic Fix:
+      // If NOT dragging, we consume the event and START dragging.
+      // If ALREADY dragging, we do NOTHING (let it bubble to Canvas to handle drop).
+      
+      if (!stickyDrag.id) {
+          e.preventDefault(); 
+          e.stopPropagation();
+          
+          if (nodeRef.current) {
+              const rect = nodeRef.current.getBoundingClientRect();
+              const offsetX = e.clientX - rect.left;
+              const offsetY = e.clientY - rect.top;
+              
+              bringToFront(note.id);
+              setStickyDrag(note.id, offsetX, offsetY);
+          }
+      }
+      // If stickyDrag.id is present, we let it bubble.
+      // Canvas onContextMenu will catch it and execute setStickyDrag(null).
   };
   
   const cycleColor = (e: React.MouseEvent) => {
@@ -57,6 +79,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
       scale={scale}
       onStart={handleMouseDown}
       onStop={handleStop}
+      disabled={isStickyDragging}
     >
       <div
         ref={nodeRef}
@@ -65,25 +88,25 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
           "rounded-xl transition-all duration-200 ease-out",
           "shadow-sm hover:shadow-xl",
           "border border-black/5",
-          "group"
+          "group",
+          isStickyDragging && "shadow-2xl scale-[1.02] cursor-move z-[9999]"
         )}
         style={{ 
             backgroundColor: note.color,
-            zIndex: note.z,
+            zIndex: isStickyDragging ? 99999 : note.z,
         }}
         onMouseDownCapture={handleMouseDown}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        {/* Header / Control Bar - Only visible on hover */}
         <div 
             className={cn(
                 "drag-handle h-9 flex items-center justify-between px-3 pt-1 cursor-grab active:cursor-grabbing",
                 "transition-opacity duration-200",
                 isHovered || isEditing ? "opacity-100" : "opacity-0"
             )}
+            onContextMenu={handleContextMenu}
         >
-          {/* Color Button */}
           <Tooltip content="切换颜色">
             <button
               onClick={cycleColor}
@@ -93,10 +116,13 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
             </button>
           </Tooltip>
           
-          {/* Drag Indicator (Center) */}
-          <GripHorizontal className="w-4 h-4 text-black/20" />
+          {/* Middle Grip with 1s Delay Tooltip */}
+          <Tooltip content="右键点击吸附拖动" delay={1000}>
+            <div className="flex-1 flex justify-center cursor-grab active:cursor-grabbing h-full items-center">
+                 <GripHorizontal className="w-4 h-4 text-black/20" />
+            </div>
+          </Tooltip>
 
-          {/* Delete Button */}
           <Tooltip content="删除便签">
             <button
               onClick={(e) => {
@@ -110,7 +136,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
           </Tooltip>
         </div>
 
-        {/* Content Area */}
         <div className="flex-1 px-4 pb-4 pt-0 flex flex-col">
           <textarea
             ref={textareaRef}
@@ -124,7 +149,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
             value={note.content}
             onChange={(e) => {
                 updateNote(note.id, e.target.value);
-                // Auto-resize
                 e.target.style.height = 'auto';
                 e.target.style.height = `${e.target.scrollHeight}px`;
             }}
