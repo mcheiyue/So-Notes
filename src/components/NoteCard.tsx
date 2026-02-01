@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useLayoutEffect } from "react";
 import Draggable, { DraggableData, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette } from "lucide-react";
 import { Note, NOTE_COLORS } from "../store/types";
@@ -22,6 +22,14 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
   useEffect(() => {
     if (!note.content && textareaRef.current) {
       textareaRef.current.focus();
+    }
+  }, []); // Run only on mount
+
+  // Auto-resize on mount and content change
+  useLayoutEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [note.content]);
 
@@ -53,7 +61,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
       <div
         ref={nodeRef}
         className={cn(
-          "note-card absolute flex flex-col w-[260px] h-auto min-h-[100px]", // Changed min-h to 100px and added h-auto
+          "note-card absolute flex flex-col w-[260px] h-auto min-h-[100px]",
           "rounded-xl transition-all duration-200 ease-out",
           "shadow-sm hover:shadow-xl",
           "border border-black/5",
@@ -63,7 +71,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
             backgroundColor: note.color,
             zIndex: note.z,
         }}
-        onMouseDown={handleMouseDown}
+        onMouseDownCapture={handleMouseDown}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
@@ -120,7 +128,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
                 e.target.style.height = 'auto';
                 e.target.style.height = `${e.target.scrollHeight}px`;
             }}
-            // Trigger resize on mount/focus too
             onInput={(e) => {
                 const target = e.target as HTMLTextAreaElement;
                 target.style.height = 'auto';
@@ -128,6 +135,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
             }}
             onFocus={() => setIsEditing(true)}
             onBlur={() => setIsEditing(false)}
+            onMouseDownCapture={handleMouseDown}
             spellCheck={false}
             rows={1}
           />

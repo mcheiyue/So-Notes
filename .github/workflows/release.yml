@@ -33,11 +33,18 @@ jobs:
       - name: Build (No Bundle)
         run: npm run tauri build
 
+      # 新增：重命名步骤
+      - name: Rename Release Asset
+        run: |
+          cd src-tauri/target/release
+          mv so-notes.exe "SoNotes-${{ github.ref_name }}.exe"
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: src-tauri/target/release/so-notes.exe
+          # 修改：上传重命名后的文件
+          files: src-tauri/target/release/SoNotes-*.exe
           draft: false
           prerelease: false
           body_path: RELEASE_TEMPLATE.md
