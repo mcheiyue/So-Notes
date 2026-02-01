@@ -4,6 +4,7 @@ import { X, GripHorizontal, Palette } from "lucide-react";
 import { Note, NOTE_COLORS } from "../store/types";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
+import { Tooltip } from "./Tooltip";
 
 interface NoteCardProps {
   note: Note;
@@ -55,7 +56,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
           "note-card absolute flex flex-col w-[260px] h-auto min-h-[100px]", // Changed min-h to 100px and added h-auto
           "rounded-xl transition-all duration-200 ease-out",
           "shadow-sm hover:shadow-xl",
-          "border border-black/5 dark:border-white/5",
+          "border border-black/5",
           "group"
         )}
         style={{ 
@@ -75,28 +76,30 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
             )}
         >
           {/* Color Button */}
-          <button
-            onClick={cycleColor}
-            className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70"
-            title="切换颜色"
-          >
-             <Palette className="w-4 h-4" />
-          </button>
+          <Tooltip content="切换颜色">
+            <button
+              onClick={cycleColor}
+              className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70"
+            >
+               <Palette className="w-4 h-4" />
+            </button>
+          </Tooltip>
           
           {/* Drag Indicator (Center) */}
           <GripHorizontal className="w-4 h-4 text-black/20" />
 
           {/* Delete Button */}
-          <button
-            onClick={(e) => {
-                e.stopPropagation();
-                deleteNote(note.id);
-            }}
-            className="p-1.5 rounded-md hover:bg-red-100 hover:text-red-500 transition-colors text-black/40"
-            title="删除便签"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <Tooltip content="删除便签">
+            <button
+              onClick={(e) => {
+                  e.stopPropagation();
+                  deleteNote(note.id);
+              }}
+              className="p-1.5 rounded-md hover:bg-red-100 hover:text-red-500 transition-colors text-black/40"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </Tooltip>
         </div>
 
         {/* Content Area */}

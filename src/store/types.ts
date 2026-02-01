@@ -4,11 +4,18 @@ export type NoteColor = string;
 // Opaque colors for better readability and "Solid" feel
 export const NOTE_COLORS: NoteColor[] = [
   "#FFFFFF", // Pure White (Default)
-  "#FFF4CE", // Soft Yellow
-  "#E4F7D2", // Soft Green
-  "#D6EBFD", // Soft Blue
-  "#F2E6FF", // Soft Purple
-  "#FFDCE0", // Soft Red
+  "#fef9c3", // Yellow-100
+  "#dcfce7", // Green-100
+  "#ccfbf1", // Teal-100
+  "#dbeafe", // Blue-100
+  "#f3e8ff", // Purple-100
+  "#fce7f3", // Pink-100
+  "#ffedd5", // Orange-100
+  "#fee2e2", // Red-100
+  "#f1f5f9", // Slate-100
+  "#ecfccb", // Lime-100
+  "#cffafe", // Cyan-100
+  "#ffe4e6", // Rose-100
 ];
 
 export interface Note {
