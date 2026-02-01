@@ -1,0 +1,79 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 主体黄色渐变: 模拟柔和的顶部光照 -->
+    <linearGradient id="noteGradient" x1="40" y1="40" x2="216" y2="216" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFEB3B" /> <!-- 亮黄 -->
+      <stop offset="100%" stop-color="#FBC02D" /> <!-- 深黄 -->
+    </linearGradient>
+
+    <!-- 卷角背面的渐变 -->
+    <linearGradient id="peelGradient" x1="180" y1="180" x2="220" y2="220" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFF9C4" />
+      <stop offset="100%" stop-color="#FDD835" />
+    </linearGradient>
+    
+    <!-- S 凹槽的阴影渐变: 模拟内部深度 -->
+    <linearGradient id="sInsetGradient" x1="128" y1="60" x2="128" y2="196" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F9A825" stop-opacity="0.8" /> <!-- 顶部较深 -->
+      <stop offset="100%" stop-color="#F57F17" stop-opacity="0.6" /> <!-- 底部稍浅 -->
+    </linearGradient>
+
+    <!-- 投影滤镜: Fluent 风格的柔和漫射阴影 -->
+    <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6" result="blur" />
+      <feOffset in="blur" dx="0" dy="8" result="offsetBlur" />
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3" /> <!-- 降低阴影不透明度 -->
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- 内部高光滤镜: 用于 S 的边缘 -->
+    <filter id="innerHighlight" x="-20%" y="-20%" width="140%" height="140%">
+       <feOffset dx="1" dy="1"/>
+       <feGaussianBlur stdDeviation="1"/>
+       <feComposite operator="out" in2="SourceGraphic" result="inverse"/>
+       <feFlood flood-color="white" flood-opacity="0.4" result="color"/>
+       <feComposite operator="in" in="color" in2="inverse" result="shadow"/>
+       <feComposite operator="over" in="shadow" in2="SourceGraphic"/> 
+    </filter>
+  </defs>
+
+  <!-- 1. 背景阴影组 -->
+  <g filter="url(#softShadow)">
+    
+    <!-- 2. 便签主体 -->
+    <!-- 使用 path 绘制圆角矩形，但在右下角切掉一角用于做卷角效果 -->
+    <path d="M40,32 H216 A24,24 0 0 1 240,56 V176 L176,240 H56 A24,24 0 0 1 32,216 V56 A24,24 0 0 1 56,32 Z" 
+          fill="url(#noteGradient)" />
+    
+    <!-- 3. 卷角效果 (The Peel) -->
+    <!-- 一个三角形翻折过来 -->
+    <path d="M176,240 L240,176 A 8,8 0 0 0 236,172 L180,172 A 8,8 0 0 0 172,180 L172,236 A 8,8 0 0 0 176,240 Z" 
+          fill="url(#peelGradient)" 
+          opacity="0.9"/>
+          
+    <!-- 卷角下的微妙阴影 -->
+    <path d="M176,240 L240,176 L176,176 Z" fill="black" opacity="0.1" />
+
+  </g>
+
+  <!-- 4. "S" 字母刻印 (The Brand) -->
+  <!-- 这是一个抽象的 S 路径，笔触圆润 -->
+  <path d="M168,88 
+           C168,70 152,56 128,56 
+           C104,56 88,70 88,88 
+           C88,115 168,125 168,168 
+           C168,190 150,208 128,208 
+           C100,208 80,190 80,168" 
+        fill="none" 
+        stroke="url(#sInsetGradient)" 
+        stroke-width="24" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"
+        filter="url(#innerHighlight)" />
+
+</svg>
