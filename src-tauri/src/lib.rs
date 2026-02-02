@@ -32,6 +32,8 @@ fn now_millis() -> u128 {
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
+#[tauri::command]
+async fn load_content(app: tauri::AppHandle, filename: String) -> Result<String, String> {
     let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
     let app_dir = doc_dir.join("SoNotes");
     let file_path = app_dir.join(&filename);
