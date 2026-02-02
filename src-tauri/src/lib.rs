@@ -34,9 +34,22 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
+async fn load_content(app: tauri::AppHandle, filename: String) -> Result<String, String> {
+    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let app_dir = doc_dir.join("SoNotes");
+    let file_path = app_dir.join(&filename);
+
+    if !file_path.exists() {
+        return Err("File not found".to_string());
+    }
+
+    fs::read_to_string(file_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn save_content(app: tauri::AppHandle, filename: String, content: String) -> Result<(), String> {
     let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
-    let app_dir = doc_dir.join("TrayNotes"); // Use a specific folder
+    let app_dir = doc_dir.join("SoNotes");
     
     // Ensure directory exists
     if !app_dir.exists() {
@@ -46,27 +59,49 @@ async fn save_content(app: tauri::AppHandle, filename: String, content: String) 
     let file_path = app_dir.join(&filename);
     let tmp_path = app_dir.join(format!("{}.tmp", filename));
 
-    // 1. Write to temp file
-    fs::write(&tmp_path, &content).map_err(|e| e.to_string())?;
+    // 1. Try Atomic Write (Write Tmp -> Rename)
+    if let Err(e) = fs::write(&tmp_path, &content) {
+        return fs::write(&file_path, &content)
+            .map_err(|e2| format!("Failed to write tmp: {}. Direct write failed: {}", e, e2));
+    }
 
-    // 2. Retry rename logic (Atomic Write)
+    // 2. Retry Rename Logic
     let max_retries = 5;
-    let mut last_err = String::new();
+    let mut last_rename_err = String::new();
+    let mut rename_success = false;
 
     for i in 0..max_retries {
         match fs::rename(&tmp_path, &file_path) {
-            Ok(_) => return Ok(()),
+            Ok(_) => {
+                rename_success = true;
+                break;
+            },
             Err(e) => {
-                last_err = e.to_string();
+                last_rename_err = e.to_string();
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    break;
+                }
                 thread::sleep(Duration::from_millis(100 * (i + 1) as u64));
             }
         }
     }
 
-    // Clean up temp file if rename failed
-    let _ = fs::remove_file(&tmp_path);
-    Err(format!("Failed to save after {} retries. Last error: {}", max_retries, last_err))
+    if rename_success {
+        return Ok(());
+    }
+
+    // 3. Fallback: Direct Write
+    match fs::write(&file_path, &content) {
+        Ok(_) => {
+            let _ = fs::remove_file(&tmp_path);
+            Ok(())
+        },
+        Err(e) => {
+            Err(format!("Atomic save failed ({}). Direct save failed: {}", last_rename_err, e))
+        }
+    }
 }
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -80,7 +115,6 @@ pub fn run() {
             last_toggle_time: Mutex::new(0),
         })
         .setup(|app| {
-            // Setup Tray
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let show_i = MenuItem::with_id(app, "show", "显示", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
@@ -91,9 +125,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
                     match event.id.as_ref() {
-                        "quit" => {
-                            app.exit(0);
-                        }
+                        "quit" => app.exit(0),
                         "show" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
@@ -104,70 +136,28 @@ pub fn run() {
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        ..
-                    } = event
-                    {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
                         let app = tray.app_handle();
-                        
-                        // Check throttle
                         let state = app.state::<AppState>();
                         let now = now_millis();
                         let mut last = state.last_toggle_time.lock().unwrap();
-                        if now - *last < 300 {
-                            // Too fast, ignore
-                            return;
-                        }
+                        if now - *last < 300 { return; }
                         *last = now;
 
                         if let Some(window) = app.get_webview_window("main") {
-                            // 1. Move to standard corner
                             let _ = window.move_window(Position::BottomRight);
-                            
-                            // 2. Add Floating Margin (12px offset for "Floating" look)
                             if let Ok(pos) = window.outer_position() {
-                                // Taskbar calculation fix:
-                                // Position::BottomRight places the window at the corner of the WORK AREA (excluding taskbar).
-                                // But if we subtract Y, we move it UP (on standard bottom taskbar setup).
-                                // 12px margin is good.
-                                
-                                // However, if the user says it OVERLAPS, it means Position::BottomRight ignored the taskbar or calculated wrong.
-                                // Actually, Position::BottomRight usually respects work area.
-                                // But let's try to be safer: move it slightly more UP to ensure gap.
-                                // Or maybe the taskbar is ignored?
-                                
-                                // Let's increase the bottom margin to 20px to be safe and clear the taskbar fully.
-                                let new_pos = tauri::PhysicalPosition {
-                                    x: pos.x - 16, // Move left away from edge
-                                    y: pos.y - 48, // Increased to 48px to forcibly clear taskbar overlap
-                                };
+                                let new_pos = tauri::PhysicalPosition { x: pos.x - 16, y: pos.y - 48 };
                                 let _ = window.set_position(new_pos);
                             }
-                            
-                            // Smart Toggle Logic
                             let is_visible = window.is_visible().unwrap_or(false);
                             let is_focused = window.is_focused().unwrap_or(false);
-
-                            if is_visible && is_focused {
-                                let _ = window.hide();
-                            } else {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                            if is_visible && is_focused { let _ = window.hide(); }
+                            else { let _ = window.show(); let _ = window.set_focus(); }
                         }
                     }
                 })
                 .build(app)?;
-
-            // Open dev tools in dev mode
-            // #[cfg(debug_assertions)]
-            // {
-            //     if let Some(window) = app.get_webview_window("main") {
-            //         window.open_devtools();
-            //     }
-            // }
-
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -178,29 +168,18 @@ pub fn run() {
                     let is_pinned = state.is_pinned.lock().map(|p| *p).unwrap_or(false);
                     
                     if !is_pinned {
-                        // Advanced Blur-to-Hide Logic:
-                        // Only hide if the cursor is OUTSIDE the window bounds.
-                        // This prevents hiding when dragging the title bar (which steals focus but keeps cursor on window).
-                        
                         let should_hide = if let (Ok(cursor), Ok(pos), Ok(size)) = (
                             window.cursor_position(),
                             window.outer_position(),
                             window.outer_size(),
                         ) {
-                            // Check if cursor is within window bounds
-                            // Coordinates are physical pixels
                             let cursor_x = cursor.x as i32;
                             let cursor_y = cursor.y as i32;
                             let win_x = pos.x;
                             let win_y = pos.y;
                             let win_w = size.width as i32;
                             let win_h = size.height as i32;
-                            
-                            // Add 50px buffer
                             let buffer = 50;
-                            
-                            // Calculate relative coordinates manually to handle Global cursor position
-                            // If cursor_position is global, we need to subtract window position
                             let rel_x = cursor_x - win_x;
                             let rel_y = cursor_y - win_y;
                             
@@ -208,19 +187,15 @@ pub fn run() {
                                             && rel_y >= -buffer && rel_y <= win_h + buffer;
                             !is_in_window
                         } else {
-                            // Fallback if we can't get cursor: assume true (hide) or false (safe)?
-                            // Let's be aggressive for "Blur to Hide" feature implies hiding.
                             true
                         };
 
-                        if should_hide {
-                             let _ = window.hide(); 
-                        }
+                        if should_hide { let _ = window.hide(); }
                     }
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![greet, set_pin_mode, save_content])
+        .invoke_handler(tauri::generate_handler![greet, set_pin_mode, save_content, load_content])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

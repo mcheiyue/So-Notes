@@ -34,7 +34,19 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
   }, [note.content]);
 
   const handleStop = (_e: DraggableEvent, data: DraggableData) => {
-    moveNote(note.id, data.x, data.y);
+    let newX = data.x;
+    let newY = data.y;
+    const winW = window.innerWidth;
+    const winH = window.innerHeight;
+
+    // Boundary Guard
+    if (newX < 0) newX = 0;
+    if (newY < 0) newY = 0;
+    // Ensure visibility (prevent losing right/bottom)
+    if (newX > winW - 50) newX = winW - 220;
+    if (newY > winH - 50) newY = winH - 100;
+
+    moveNote(note.id, newX, newY);
   };
 
   const handleMouseDown = () => {
@@ -42,10 +54,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
   };
   
   const handleContextMenu = (e: React.MouseEvent) => {
-      // Logic Fix:
-      // If NOT dragging, we consume the event and START dragging.
-      // If ALREADY dragging, we do NOTHING (let it bubble to Canvas to handle drop).
-      
       if (!stickyDrag.id) {
           e.preventDefault(); 
           e.stopPropagation();
@@ -59,8 +67,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
               setStickyDrag(note.id, offsetX, offsetY);
           }
       }
-      // If stickyDrag.id is present, we let it bubble.
-      // Canvas onContextMenu will catch it and execute setStickyDrag(null).
   };
   
   const cycleColor = (e: React.MouseEvent) => {
@@ -116,7 +122,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
             </button>
           </Tooltip>
           
-          {/* Middle Grip with 1s Delay Tooltip */}
           <Tooltip content="右键点击吸附拖动" delay={1000}>
             <div className="flex-1 flex justify-center cursor-grab active:cursor-grabbing h-full items-center">
                  <GripHorizontal className="w-4 h-4 text-black/20" />

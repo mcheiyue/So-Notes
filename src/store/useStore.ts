@@ -53,12 +53,32 @@ export const useStore = create<State>()(
     init: async () => {
       let loadedData: StorageData = { notes: [], config: DEFAULT_CONFIG };
       let fromWAL = false;
+      let fromDisk = false;
       
+      // 1. Try WAL first (Fastest)
       const walData = await db.loadWAL();
       if (walData) {
         console.log('Restored from WAL');
         loadedData = walData;
         fromWAL = true;
+      }
+
+      // 2. If WAL is empty, try loading from Disk (Recovery/Migration)
+      if (!fromWAL || loadedData.notes.length === 0) {
+        try {
+          const jsonContent = await invoke<string>('load_content', { filename: 'data.json' });
+          if (jsonContent) {
+            const parsed = JSON.parse(jsonContent);
+            // Basic validation
+            if (parsed && Array.isArray(parsed.notes)) {
+               console.log('Restored from Disk (Recovery)');
+               loadedData = parsed;
+               fromDisk = true;
+            }
+          }
+        } catch (e) {
+          console.warn('No disk backup found or load failed:', e);
+        }
       }
 
       if (loadedData.notes.length > 0) {
@@ -79,6 +99,12 @@ export const useStore = create<State>()(
         state.isLoaded = true;
       });
       
+      // If we recovered from disk, save back to WAL immediately so next boot is fast
+      if (fromDisk) {
+         db.saveWAL(loadedData);
+      }
+      
+      // If we loaded from WAL but want to ensure disk is in sync (optional, but good practice)
       if (fromWAL) {
         get().saveToDisk();
       }

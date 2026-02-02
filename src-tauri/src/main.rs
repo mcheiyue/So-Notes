@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    tray_notes_lib::run()
+    so_notes_lib::run()
 }

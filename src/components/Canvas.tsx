@@ -45,12 +45,33 @@ export const Canvas: React.FC = () => {
       addNote(winW / 2 - 130, winH / 2 - 80);
   };
 
+  const applyBoundaryGuard = (id: string) => {
+      const currentNote = notes.find(n => n.id === id);
+      if (currentNote) {
+          const winW = window.innerWidth;
+          const winH = window.innerHeight;
+          let newX = currentNote.x;
+          let newY = currentNote.y;
+          let corrected = false;
+
+          // 1. Left/Top Walls (Prevent negative coordinates)
+          if (newX < 0) { newX = 0; corrected = true; }
+          if (newY < 0) { newY = 0; corrected = true; }
+
+          // 2. Right/Bottom Walls (Ensure visibility)
+          if (newX > winW - 50) { newX = winW - 220; corrected = true; }
+          if (newY > winH - 50) { newY = winH - 100; corrected = true; }
+
+          if (corrected) {
+              moveNote(id, newX, newY);
+          }
+      }
+  };
+
   // Handle Global Drop
   const handleGlobalDown = (e: React.MouseEvent) => {
-      // Fix: Ignore Right Click (button 2) in MouseDown.
-      // Right click logic is handled exclusively by onContextMenu to prevent race conditions
-      // where MouseDown clears the state, causing ContextMenu to re-enable drag immediately.
       if (e.button !== 2 && stickyDrag.id) {
+          applyBoundaryGuard(stickyDrag.id);
           setStickyDrag(null);
       }
   };
@@ -71,6 +92,7 @@ export const Canvas: React.FC = () => {
       onContextMenu={(e) => {
           if (stickyDrag.id) {
               e.preventDefault();
+              applyBoundaryGuard(stickyDrag.id);
               setStickyDrag(null);
           } else {
               e.preventDefault(); 
@@ -107,11 +129,11 @@ export const Canvas: React.FC = () => {
       )}
       
       {stickyDrag.id && (
-          <div className="fixed bottom-10 left-0 w-full text-center pointer-events-none z-[99999]">
-              <span className="bg-black/80 text-white text-xs px-4 py-1.5 rounded-full shadow-lg backdrop-blur-md">
-                  再次点击放置便签
-              </span>
-          </div>
+        <div className="fixed bottom-10 left-0 w-full text-center pointer-events-none z-[99999]">
+            <span className="bg-black/80 text-white text-xs px-4 py-1.5 rounded-full shadow-lg backdrop-blur-md">
+                再次点击放置便签
+            </span>
+        </div>
       )}
       
       <div className="absolute bottom-6 right-6 z-[100]">
