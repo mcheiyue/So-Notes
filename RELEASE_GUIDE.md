@@ -29,8 +29,9 @@ npm run tauri build -- --debug
 必须检查并更新以下**两个**文件：
 1.  **package.json**: 更新 `"version"` 字段。
 2.  **src-tauri/tauri.conf.json**: 更新 `"version"` 字段。
+3.  **src-tauri/Cargo.toml**: 更新 `"version"` 字段。
 
-> **注意**: 如果没有同步更新这两个文件，可能导致前端显示版本与安装包属性不一致。
+> **注意**: 如果没有同步更新这三个文件，可能导致前端显示版本与安装包属性不一致。
 
 ### 第三步：更新变更日志 (Update Changelog)
 在 `CHANGELOG.md` 顶部添加新版本区块。请严格遵循以下风格指南。
