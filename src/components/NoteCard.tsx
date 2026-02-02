@@ -12,26 +12,81 @@ interface NoteCardProps {
 }
 
 export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
-  const { updateNote, moveNote, deleteNote, bringToFront, changeColor, stickyDrag, setStickyDrag } = useStore();
+  const { updateNote, updateTitle, moveNote, deleteNote, bringToFront, changeColor, toggleCollapse, stickyDrag, setStickyDrag } = useStore();
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   
   const isStickyDragging = stickyDrag.id === note.id;
+  
+  const displayTitle = note.title || "未命名便签";
 
   useEffect(() => {
-    if (!note.content && textareaRef.current) {
+    if (!note.title && !note.content && textareaRef.current && !note.collapsed) {
       textareaRef.current.focus();
     }
   }, []); 
 
   useLayoutEffect(() => {
-    if (textareaRef.current) {
+    if (textareaRef.current && !note.collapsed) {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  }, [note.content]);
+  }, [note.content, note.collapsed]);
+
+  // Interactive Todo Logic
+  const handleTextareaClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    const textarea = e.currentTarget;
+    const cursor = textarea.selectionStart;
+    const content = note.content;
+
+    // 1. Find line boundaries
+    const before = content.substring(0, cursor);
+    const after = content.substring(cursor);
+    const lineStart = before.lastIndexOf('\n') + 1;
+    const lineEndOffset = after.indexOf('\n');
+    const lineEnd = lineEndOffset === -1 ? content.length : cursor + lineEndOffset;
+    
+    const line = content.substring(lineStart, lineEnd);
+
+    // 2. Regex to match markdown checkbox: - [ ] or * [x]
+    // Group 1: Prefix ("- " or "* ")
+    // Group 2: State (" " or "x")
+    const match = line.match(/^(\s*[-*]\s*)\[([ xX])\]/);
+
+    if (match) {
+        const prefix = match[1];
+        const state = match[2];
+        
+        // 3. Calculate Checkbox range
+        const checkboxStart = lineStart + prefix.length;
+        const checkboxEnd = checkboxStart + 3; // "[ ]" is 3 chars
+
+        // 4. Check if click is inside [ ]
+        if (cursor >= checkboxStart && cursor <= checkboxEnd) {
+             e.preventDefault(); // Stop normal selection behavior
+             
+             // Toggle State
+             const newState = (state === ' ' ? 'x' : ' ');
+             
+             // Replace content
+             const newContent = 
+                content.substring(0, checkboxStart + 1) + 
+                newState + 
+                content.substring(checkboxStart + 2);
+
+             updateNote(note.id, newContent);
+
+             // Restore cursor position
+             requestAnimationFrame(() => {
+                 if (textareaRef.current) {
+                    textareaRef.current.setSelectionRange(cursor, cursor);
+                 }
+             });
+        }
+    }
+  };
 
   const handleStop = (_e: DraggableEvent, data: DraggableData) => {
     let newX = data.x;
@@ -39,10 +94,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
     const winW = window.innerWidth;
     const winH = window.innerHeight;
 
-    // Boundary Guard
     if (newX < 0) newX = 0;
     if (newY < 0) newY = 0;
-    // Ensure visibility (prevent losing right/bottom)
     if (newX > winW - 50) newX = winW - 220;
     if (newY > winH - 50) newY = winH - 100;
 
@@ -76,6 +129,11 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
       changeColor(note.id, NOTE_COLORS[nextIndex]);
   };
 
+  const handleDoubleClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      toggleCollapse(note.id);
+  };
+
   return (
     <Draggable
       nodeRef={nodeRef}
@@ -90,7 +148,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
       <div
         ref={nodeRef}
         className={cn(
-          "note-card absolute flex flex-col w-[260px] h-auto min-h-[100px]",
+          "note-card absolute flex flex-col w-[260px]",
+          note.collapsed ? "h-[36px] overflow-hidden" : "h-auto min-h-[100px]",
           "rounded-xl transition-all duration-200 ease-out",
           "shadow-sm hover:shadow-xl",
           "border border-black/5",
@@ -109,66 +168,105 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
             className={cn(
                 "drag-handle h-9 flex items-center justify-between px-3 pt-1 cursor-grab active:cursor-grabbing",
                 "transition-opacity duration-200",
-                isHovered || isEditing ? "opacity-100" : "opacity-0"
+                note.collapsed || isHovered || isEditing || note.title ? "opacity-100" : "opacity-0"
             )}
             onContextMenu={handleContextMenu}
+            onDoubleClick={handleDoubleClick}
         >
+          {/* Left: Palette */}
           <Tooltip content="切换颜色">
             <button
               onClick={cycleColor}
-              className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70"
+              className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70 flex-shrink-0"
             >
                <Palette className="w-4 h-4" />
             </button>
           </Tooltip>
           
-          <Tooltip content="右键点击吸附拖动" delay={1000}>
-            <div className="flex-1 flex justify-center cursor-grab active:cursor-grabbing h-full items-center">
-                 <GripHorizontal className="w-4 h-4 text-black/20" />
-            </div>
-          </Tooltip>
+          {/* Center: Title (Collapsed) or Grip (Expanded) */}
+          <div className="flex-1 flex justify-center cursor-grab active:cursor-grabbing h-full items-center px-2 overflow-hidden">
+             {note.collapsed ? (
+                 <Tooltip content="双击展开" delay={500}>
+                    <span 
+                        className={cn(
+                            "text-sm font-bold truncate select-none w-full text-center block",
+                            note.title ? "text-gray-800 opacity-90" : "text-gray-500 italic opacity-70"
+                        )}
+                    >
+                        {displayTitle}
+                    </span>
+                 </Tooltip>
+             ) : (
+                <Tooltip content="双击折叠 / 右键吸附" delay={1000}>
+                    <GripHorizontal className="w-4 h-4 text-black/20" />
+                </Tooltip>
+             )}
+          </div>
 
+          {/* Right: Delete */}
           <Tooltip content="删除便签">
             <button
               onClick={(e) => {
                   e.stopPropagation();
                   deleteNote(note.id);
               }}
-              className="p-1.5 rounded-md hover:bg-red-100 hover:text-red-500 transition-colors text-black/40"
+              className="p-1.5 rounded-md hover:bg-red-100 hover:text-red-500 transition-colors text-black/40 flex-shrink-0"
             >
               <X className="w-4 h-4" />
             </button>
           </Tooltip>
         </div>
 
-        <div className="flex-1 px-4 pb-4 pt-0 flex flex-col">
-          <textarea
-            ref={textareaRef}
-            className={cn(
-                "w-full resize-none bg-transparent outline-none overflow-hidden",
-                "text-gray-800",
-                "placeholder-gray-400 font-normal text-[15px] leading-relaxed",
-                "selection:bg-black/10"
-            )}
-            placeholder="记点什么..."
-            value={note.content}
-            onChange={(e) => {
-                updateNote(note.id, e.target.value);
-                e.target.style.height = 'auto';
-                e.target.style.height = `${e.target.scrollHeight}px`;
-            }}
-            onInput={(e) => {
-                const target = e.target as HTMLTextAreaElement;
-                target.style.height = 'auto';
-                target.style.height = `${target.scrollHeight}px`;
-            }}
-            onFocus={() => setIsEditing(true)}
-            onBlur={() => setIsEditing(false)}
-            onMouseDownCapture={handleMouseDown}
-            spellCheck={false}
-            rows={1}
-          />
-        </div>
+        {/* Expanded Content: Auto-Hiding Title Input + Textarea */}
+        {!note.collapsed && (
+            <div className="flex-1 px-4 pb-4 pt-0 flex flex-col gap-1">
+              {/* Explicit Title Input */}
+              <input 
+                type="text"
+                className={cn(
+                    "w-full bg-transparent outline-none transition-all duration-200",
+                    "text-gray-900 font-bold text-[16px]",
+                    "placeholder-gray-400/50",
+                    (!note.title && !isHovered && !isEditing) ? "hidden" : "block"
+                )}
+                placeholder="标题"
+                value={note.title}
+                onChange={(e) => updateTitle(note.id, e.target.value)}
+                onFocus={() => setIsEditing(true)}
+                onBlur={() => setIsEditing(false)}
+                onMouseDownCapture={handleMouseDown}
+              />
+              
+              {/* Content Textarea */}
+              <textarea
+                ref={textareaRef}
+                className={cn(
+                    "w-full resize-none bg-transparent outline-none overflow-hidden",
+                    "text-gray-800",
+                    "placeholder-gray-400 font-normal text-[15px] leading-relaxed",
+                    "selection:bg-black/10"
+                )}
+                placeholder="记点什么..."
+                value={note.content}
+                onClick={handleTextareaClick}
+                onChange={(e) => {
+                    updateNote(note.id, e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = `${e.target.scrollHeight}px`;
+                }}
+                onInput={(e) => {
+                    const target = e.target as HTMLTextAreaElement;
+                    target.style.height = 'auto';
+                    target.style.height = `${target.scrollHeight}px`;
+                }}
+                onFocus={() => setIsEditing(true)}
+                onBlur={() => setIsEditing(false)}
+                onMouseDownCapture={handleMouseDown}
+                spellCheck={false}
+                rows={1}
+              />
+            </div>
+        )}
       </div>
     </Draggable>
   );

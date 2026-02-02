@@ -1,25 +1,56 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from "../utils/cn";
 
 interface TooltipProps {
   content: string;
   children: React.ReactNode;
   side?: 'top' | 'bottom' | 'left' | 'right';
-  delay?: number; // Delay in ms
+  delay?: number;
 }
 
 export function Tooltip({ content, children, side = 'top', delay = 0 }: TooltipProps) {
   const [isVisible, setIsVisible] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<number>(undefined);
 
-  const positionClasses = {
-    top: "bottom-full mb-2",
-    bottom: "top-full mt-2",
-    left: "right-full mr-2",
-    right: "left-full ml-2",
+  const calculatePosition = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+
+    // Basic offset spacing
+    const gap = 8; 
+
+    let top = 0;
+    let left = 0;
+
+    switch (side) {
+      case 'top':
+        top = rect.top + scrollY - gap; // We'll adjust for height later via CSS transform
+        left = rect.left + scrollX + rect.width / 2;
+        break;
+      case 'bottom':
+        top = rect.bottom + scrollY + gap;
+        left = rect.left + scrollX + rect.width / 2;
+        break;
+      case 'left':
+        top = rect.top + scrollY + rect.height / 2;
+        left = rect.left + scrollX - gap;
+        break;
+      case 'right':
+        top = rect.top + scrollY + rect.height / 2;
+        left = rect.right + scrollX + gap;
+        break;
+    }
+
+    setCoords({ top, left });
   };
 
   const handleMouseEnter = () => {
+    calculatePosition(); // Recalculate on enter
     timeoutRef.current = window.setTimeout(() => {
       setIsVisible(true);
     }, delay);
@@ -32,24 +63,47 @@ export function Tooltip({ content, children, side = 'top', delay = 0 }: TooltipP
     setIsVisible(false);
   };
 
+  // Close on scroll/resize to prevent floating ghosts
+  useEffect(() => {
+    if (!isVisible) return;
+    const handleUpdate = () => setIsVisible(false);
+    window.addEventListener('scroll', handleUpdate);
+    window.addEventListener('resize', handleUpdate);
+    return () => {
+        window.removeEventListener('scroll', handleUpdate);
+        window.removeEventListener('resize', handleUpdate);
+    };
+  }, [isVisible]);
+
   return (
     <div 
-        className="relative flex items-center justify-center"
+        ref={triggerRef}
+        className="relative flex items-center justify-center" // Removed z-index from here
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
     >
       {children}
-      <div 
-        className={cn(
-            "absolute transition-all duration-200",
-            "px-2 py-1 bg-white/90 backdrop-blur-sm text-slate-500 text-xs tracking-wide",
-            "rounded shadow-md border border-slate-200 whitespace-nowrap z-50 pointer-events-none",
-            positionClasses[side],
-            isVisible ? "opacity-100 visible translate-y-0" : "opacity-0 invisible translate-y-1"
-        )}
-      >
-        {content}
-      </div>
+      {isVisible && createPortal(
+          <div 
+            className={cn(
+                "fixed z-[999999] px-2 py-1 bg-white/95 backdrop-blur text-slate-600 text-xs font-medium tracking-wide",
+                "rounded shadow-lg border border-slate-200 whitespace-nowrap pointer-events-none",
+                "transition-opacity duration-200 animate-in fade-in zoom-in-95",
+                // Positioning transforms to center the tooltip relative to the coordinate
+                side === 'top' && "-translate-x-1/2 -translate-y-full",
+                side === 'bottom' && "-translate-x-1/2",
+                side === 'left' && "-translate-x-full -translate-y-1/2",
+                side === 'right' && "-translate-y-1/2"
+            )}
+            style={{ 
+                top: coords.top, 
+                left: coords.left 
+            }}
+          >
+            {content}
+          </div>,
+          document.body
+      )}
     </div>
   );
 }

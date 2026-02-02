@@ -20,11 +20,13 @@ interface State {
   // Actions
   init: () => Promise<void>;
   addNote: (x: number, y: number) => void;
+  updateTitle: (id: string, title: string) => void;
   updateNote: (id: string, content: string) => void;
   moveNote: (id: string, x: number, y: number) => void;
   bringToFront: (id: string) => void;
   deleteNote: (id: string) => void;
   changeColor: (id: string, color: string) => void;
+  toggleCollapse: (id: string) => void;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number) => void;
   saveToDisk: () => Promise<void>;
 }
@@ -55,7 +57,7 @@ export const useStore = create<State>()(
       let fromWAL = false;
       let fromDisk = false;
       
-      // 1. Try WAL first (Fastest)
+      // 1. Try WAL first
       const walData = await db.loadWAL();
       if (walData) {
         console.log('Restored from WAL');
@@ -63,13 +65,12 @@ export const useStore = create<State>()(
         fromWAL = true;
       }
 
-      // 2. If WAL is empty, try loading from Disk (Recovery/Migration)
+      // 2. Try Disk
       if (!fromWAL || loadedData.notes.length === 0) {
         try {
           const jsonContent = await invoke<string>('load_content', { filename: 'data.json' });
           if (jsonContent) {
             const parsed = JSON.parse(jsonContent);
-            // Basic validation
             if (parsed && Array.isArray(parsed.notes)) {
                console.log('Restored from Disk (Recovery)');
                loadedData = parsed;
@@ -90,6 +91,9 @@ export const useStore = create<State>()(
              n.x = 20 + (i * 10);
              n.y = 20 + (i * 10);
           }
+          // Migration
+          if (n.collapsed === undefined) n.collapsed = false;
+          if (n.title === undefined) n.title = "";
         });
       }
 
@@ -99,25 +103,20 @@ export const useStore = create<State>()(
         state.isLoaded = true;
       });
       
-      // If we recovered from disk, save back to WAL immediately so next boot is fast
-      if (fromDisk) {
-         db.saveWAL(loadedData);
-      }
-      
-      // If we loaded from WAL but want to ensure disk is in sync (optional, but good practice)
-      if (fromWAL) {
-        get().saveToDisk();
-      }
+      if (fromDisk) db.saveWAL(loadedData);
+      if (fromWAL) get().saveToDisk();
     },
 
     addNote: (x, y) => {
       const newNote: Note = {
         id: crypto.randomUUID(),
+        title: '',
         content: '',
         x,
         y,
         z: get().config.maxZ + 1,
         color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
+        collapsed: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -128,6 +127,26 @@ export const useStore = create<State>()(
       });
 
       get().saveToDisk();
+    },
+
+    updateTitle: (id, title) => {
+      set((state) => {
+        const note = state.notes.find((n) => n.id === id);
+        if (note) {
+          note.title = title;
+          note.updatedAt = Date.now();
+        }
+      });
+      
+      // Throttle WAL save
+      const now = Date.now();
+      if (now - lastWALSave > WAL_THROTTLE) {
+        lastWALSave = now;
+        db.saveWAL({ notes: get().notes, config: get().config });
+      }
+      
+      if (saveTimeout) clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
     updateNote: (id, content) => {
@@ -187,6 +206,16 @@ export const useStore = create<State>()(
          if (note) {
            note.color = color;
          }
+      });
+      get().saveToDisk();
+    },
+
+    toggleCollapse: (id) => {
+      set((state) => {
+        const note = state.notes.find((n) => n.id === id);
+        if (note) {
+          note.collapsed = !note.collapsed;
+        }
       });
       get().saveToDisk();
     },

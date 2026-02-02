@@ -22,11 +22,13 @@ export interface Note {
   id: string;
   x: number;
   y: number;
+  title: string;
   content: string;
   color: NoteColor;
   z: number;
   width?: number;
   height?: number;
+  collapsed?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -34,6 +36,7 @@ export interface Note {
 export interface AppConfig {
   version: number;
   maxZ: number;
+  maximized?: boolean;
 }
 
 export interface StorageData {
