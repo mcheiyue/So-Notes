@@ -75,7 +75,7 @@ export const useStore = create<State>()(
       }
 
       // 2. Conflict Resolution: Timestamp Arbitration
-      const getLatestUpdate = (data: StorageData | null) => {
+      const getLatestUpdate = (data: StorageData | null | undefined) => {
         if (!data || data.notes.length === 0) return 0;
         return Math.max(...data.notes.map(n => n.updatedAt || 0));
       };
