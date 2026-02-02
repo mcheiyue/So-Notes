@@ -1,34 +1,55 @@
-# Changelog
+# 更新日志 (Changelog)
 
-All notable changes to this project will be documented in this file.
+本项目的所有重要变更都将记录在此文件中。
 
 ## [v1.0.3] - 2026-02-02
 
-### ⚠️ Breaking Changes
-- **Rename**: Project renamed from "TrayNotes" to "SoNotes".
-- **Storage**: Data storage path moved from `Documents/TrayNotes` to `Documents/SoNotes`. Manual migration required for existing users.
+### ⚠️ 重大变更 (Breaking Changes)
+*   **品牌重塑**: 项目名称由 "TrayNotes" 正式更名为 "**SoNotes**"。
+*   **数据迁移**:
+    *   数据存储路径由 `Documents/TrayNotes` 变更为 `Documents/SoNotes`。
+    *   **迁移指南**: 旧版本用户需手动将原文件夹内的 `data.json` 和 `assets` 目录移动到新位置以保留数据。
 
-### Fixed
-- **Data Persistence**: Implemented atomic save with fallback to direct write to fix "OS Error 2".
-- **Data Recovery**: Application now correctly loads data from `data.json` if local state is empty on startup.
+### 🐛 核心修复 (Critical Fixes)
+*   **数据持久化 (OS Error 2)**: 实现了原子写入+回退机制。当遇到文件锁定（如杀毒软件扫描）时，会自动降级为直接写入，确保数据绝对安全。
+*   **启动恢复**: 修复了应用启动时未从磁盘加载数据的问题。现在会优先检查 IndexedDB，若为空则自动从磁盘读取。
 
-### Added
-- **Boundary Guard**: Added logic to snap notes to `(0,0)` if dragged off-screen (negative coordinates).
+### ✨ 新特性 (Features)
+*   **边界卫士 (Boundary Guard)**: 当便签被拖拽出屏幕左侧或上方（坐标 < 0）时，会自动吸附回 `(0, 0)`，防止便签丢失。
 
-## [v1.0.2] - 2026-02-02
+## [v1.0.2] - 2026-02-01
 
-### Fixed
-- **Build**: Fixed CI/CD workflow issues.
-- **Deps**: Minor dependency updates.
+### ✨ 新功能 (New Features)
+*   **右键吸附拖动**: 专为触控板优化。在拖动栏**右键**即可进入吸附模式，再次点击放置。
+*   **操作提示**: 拖动栏增加延迟 1秒的悬浮提示。
 
-## [v1.0.1] - 2026-02-02
+### 🐛 问题修复 (Bug Fixes)
+*   **UI 高度**: 修复便签启动时高度被压缩的问题，现自动根据内容展开。
+*   **层级修复**: 点击文字区域现在能正确置顶便签。
+*   **新建修复**: 恢复了双击背景空白处新建便签的功能。
 
-### Changed
-- **Documentation**: Updated README and documentation assets.
+### 🚀 优化 (Optimizations)
+*   **体积优化**: 开启 LTO 和符号表剔除，安装包体积减少约 30%。
+*   **发布规范**: Release 产物重命名为 `SoNotes-v1.0.2.exe`。
+
+## [v1.0.1] - 2026-02-01
+
+### ✨ 视觉升级 (Visual Upgrades)
+*   **云母效果 (Mica)**: 启用 Windows 11 原生磨砂玻璃背景。
+*   **智能柔光**: 深色模式下自动调整不透明度和滤镜，更加护眼。
+*   **多彩配色**: 新增 6 种莫兰迪色系，共 13 种颜色可选。
+
+### 💄 UI/UX 优化
+*   **无边框设计**: 移除原生阴影，改用 1px 精致内描边，消除黑角伪影。
+*   **圆角统一**: 调整为 Rounded-LG。
+*   **全面汉化**: 界面与托盘菜单完全中文化。
 
 ## [v1.0.0] - 2026-02-01
 
-### Added
-- Initial release of SoNotes (formerly TrayNotes).
-- Basic sticky note functionality with markdown support.
-- Local storage persistence.
+### 🎉 Initial Release
+*   **SoNotes (随心记)** 首个版本发布。
+*   **核心功能**:
+    *   原生 Windows 11 风格 (Mica + Fluent Design)。
+    *   极简托盘交互。
+    *   双击新建，自动保存。
+    *   本地数据存储，隐私安全。
