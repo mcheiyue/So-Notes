@@ -32,9 +32,6 @@ fn now_millis() -> u128 {
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
-
-#[tauri::command]
-async fn load_content(app: tauri::AppHandle, filename: String) -> Result<String, String> {
     let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
     let app_dir = doc_dir.join("SoNotes");
     let file_path = app_dir.join(&filename);
@@ -103,13 +100,6 @@ async fn save_content(app: tauri::AppHandle, filename: String, content: String) 
 }
 
 
-
-#[tauri::command]
-fn get_data_path(app: tauri::AppHandle) -> Result<String, String> {
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
-    let app_dir = doc_dir.join("SoNotes").join("data.json");
-    Ok(app_dir.to_string_lossy().to_string())
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -230,7 +220,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![greet, set_pin_mode, save_content, load_content, get_data_path])
+        .invoke_handler(tauri::generate_handler![greet, set_pin_mode, save_content, load_content])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -6,8 +6,6 @@ import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
 
-import { invoke } from '@tauri-apps/api/core';
-
 interface NoteCardProps {
   note: Note;
   scale: number;
@@ -131,20 +129,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
       changeColor(note.id, NOTE_COLORS[nextIndex]);
   };
 
-  const handleDoubleClick = async (e: React.MouseEvent) => {
+  const handleDoubleClick = (e: React.MouseEvent) => {
       e.stopPropagation();
-      
-      // Shift + DoubleClick: Show data path for debugging
-      if (e.shiftKey) {
-          try {
-              const path = await invoke('get_data_path');
-              alert(`Data Path: ${path}`);
-          } catch (err) {
-              alert(`Failed to get path: ${err}`);
-          }
-          return;
-      }
-
       toggleCollapse(note.id);
   };
 
