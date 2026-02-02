@@ -3,41 +3,81 @@
 本文档旨在规范 **SoNotes** 的版本发布流程。AI 助手（Sisyphus）在执行发布任务时**必须严格遵循**以下步骤。
 
 ## 核心原则
-1.  **文档先行**: 代码变更后，必须先更新文档 (`CHANGELOG.md` 和 `RELEASE_TEMPLATE.md`)，再打 Tag。
-2.  **中文优先**: 所有对外发布的文档（Release Notes, Changelog）必须使用**简体中文**。
-3.  **原子化**: 发布相关的文档变更应单独提交，commit message 固定格式。
+1.  **验证优先**: 必须在本地构建通过后，才能进行发布操作。
+2.  **文档先行**: 代码变更后，必须先更新文档 (`CHANGELOG.md` 和 `RELEASE_TEMPLATE.md`)，再打 Tag。
+3.  **中文优先**: 所有对外发布的文档 (Release Notes, Changelog) 必须使用**简体中文**。
+4.  **原子化**: 发布相关的文档变更应单独提交，commit message 固定格式。
 
 ## 详细发布步骤
 
-### 第一步：更新变更日志 (Update Changelog)
-在 `CHANGELOG.md` 顶部添加新版本区块。
+### 第一步：本地构建验证 (Local Build Verification)
+在开始发布流程前，必须确保当前代码在本地能够成功构建，避免将破坏性代码推送到 Release。
 
-**格式要求**:
-- 标题: `## [vX.Y.Z] - YYYY-MM-DD`
-- 分类:
-    - `### ⚠️ 重大变更 (Breaking Changes)` (如有)
-    - `### ✨ 新特性 (Features)`
-    - `### 🐛 问题修复 (Bug Fixes)`
-    - `### 🚀 优化 (Optimizations)`
-- 内容: 使用中文简练描述变更点。
+```bash
+# 1. 运行类型检查 (Type Check)
+npm run tsc
 
-### 第二步：准备发布模板 (Prepare Release Template)
+# 2. 运行本地构建 (Build Check)
+# 这一步会同时编译前端和 Rust 后端，确保两者都无错误
+npm run tauri build -- --debug
+```
+*如果构建失败，立即停止发布流程并修复代码。*
+
+### 第二步：更新版本号 (Version Bump)
+将项目中的所有版本号统一更新为目标版本 `vX.Y.Z`。
+
+必须检查并更新以下**两个**文件：
+1.  **package.json**: 更新 `"version"` 字段。
+2.  **src-tauri/tauri.conf.json**: 更新 `"version"` 字段。
+
+> **注意**: 如果没有同步更新这两个文件，可能导致前端显示版本与安装包属性不一致。
+
+### 第三步：更新变更日志 (Update Changelog)
+在 `CHANGELOG.md` 顶部添加新版本区块。请严格遵循以下风格指南。
+
+**风格指南 (Style Guide)**:
+1.  **标题格式**: `## [vX.Y.Z] - YYYY-MM-DD`
+2.  **分类标题**:
+    *   `### ⚠️ 重大变更 (Breaking Changes)` (仅在发生破坏性更新时使用)
+    *   `### ✨ 新特性 (Features)`
+    *   `### 🐛 问题修复 (Bug Fixes)`
+    *   `### 🚀 优化 (Optimizations)`
+    *   `### 🧹 清理 (Cleanup)` (用于代码重构、移除废弃功能等)
+3.  **列表项格式**:
+    *   统一使用 `*` 作为列表符。
+    *   **关键词导向**: 每个条目以 `* **核心功能 (English Term)**` 开头。
+    *   **详尽描述**: 对于重要特性，**强烈建议**使用引用块 (`>`) 或多行子列表进行详细阐述。不要只写“实现了X功能”，而要解释“它带来了什么价值”或“用户该如何使用”。
+    *   **场景化**: 描述使用场景，而不仅仅是技术实现。
+
+**示例**:
+```markdown
+## [v1.0.5] - 2026-02-02
+
+### ✨ 新特性 (Features)
+*   **交互式待办 (Interactive Todo)**
+    > 不再是静态文本。现在您可以直接点击 Markdown 列表中的 `[ ]` 方框来勾选任务，无需进入编辑模式，体验如同原生 App 般丝滑。
+
+### 🐛 问题修复 (Bug Fixes)
+*   **数据同步 (Sync)**: 引入了时间戳仲裁机制，彻底修复了多环境（开发版/发布版）下数据可能被旧缓存覆盖的严重 Bug。
+```
+
+### 第四步：准备发布模板 (Prepare Release Template)
 将本次版本的更新内容（即 `CHANGELOG.md` 中对应的新版本部分）复制并覆盖到 `RELEASE_TEMPLATE.md`。
 
 **注意**:
 - `RELEASE_TEMPLATE.md` 仅包含**当前版本**的更新说明。
 - CI/CD 工具会自动读取此文件作为 GitHub Release 的 Body。
 
-### 第三步：提交文档变更 (Commit)
-将上述两个文件的变更提交到 git。
+### 第五步：提交变更 (Commit)
+将上述文件的变更提交到 git。
 
 ```bash
-git add CHANGELOG.md RELEASE_TEMPLATE.md
-git commit -m "docs: prepare release vX.Y.Z"
+git add package.json src-tauri/tauri.conf.json CHANGELOG.md RELEASE_TEMPLATE.md
+git commit -m "chore(release): prepare vX.Y.Z"
 ```
 
-### 第四步：打标签与推送 (Tag & Push)
-**必须在提交文档变更后执行**。
+### 第六步：打标签与推送 (Tag & Push)
+**必须在提交变更后执行**。
 
 ```bash
 # 打标签

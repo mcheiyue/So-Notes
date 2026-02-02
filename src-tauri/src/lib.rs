@@ -101,7 +101,16 @@ async fn save_content(app: tauri::AppHandle, filename: String, content: String) 
     }
 }
 
-
+#[tauri::command]
+fn check_hide_on_leave(window: tauri::Window, state: tauri::State<AppState>) {
+    let is_pinned = state.is_pinned.lock().map(|p| *p).unwrap_or(false);
+    if !is_pinned {
+        // 如果当前窗口未聚焦（说明可能处于死锁状态），此时鼠标移出，应立即隐藏
+        if let Ok(false) = window.is_focused() {
+            let _ = window.hide();
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -116,22 +125,42 @@ pub fn run() {
         })
         .setup(|app| {
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let show_i = MenuItem::with_id(app, "show", "显示", true, None::<&str>)?;
+            let pin_i = MenuItem::with_id(app, "pin", "钉住窗口", true, None::<&str>)?;
             let reset_i = MenuItem::with_id(app, "reset", "重置窗口", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &reset_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&pin_i, &reset_i, &quit_i])?;
+            
+            // 克隆 MenuItem 句柄以便在事件闭包中使用
+            let pin_i_clone = pin_i.clone();
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| {
+                .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
                         "quit" => app.exit(0),
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
+                        "pin" => {
+                            let state = app.state::<AppState>();
+                            let mut is_pinned = false;
+                            
+                            // 1. 切换 Pin 状态
+                            if let Ok(mut pinned_lock) = state.is_pinned.lock() {
+                                *pinned_lock = !*pinned_lock;
+                                is_pinned = *pinned_lock;
                             }
+
+                            // 2. 更新窗口行为
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.set_always_on_top(is_pinned);
+                                if is_pinned {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                            
+                            // 3. 更新菜单文案
+                            let new_text = if is_pinned { "取消钉住" } else { "钉住窗口" };
+                            let _ = pin_i_clone.set_text(new_text);
                         }
                         "reset" => {
                             if let Some(window) = app.get_webview_window("main") {
@@ -147,8 +176,6 @@ pub fn run() {
                                     let screen_h = screen_size.height as f64 / scale_factor;
                                     
                                     // Calculate position: Bottom-Right with margin
-                                    // x = ScreenWidth - WindowWidth - Margin
-                                    // y = ScreenHeight - WindowHeight - TaskbarMargin
                                     let new_x = screen_w - 400.0 - 20.0;
                                     let new_y = screen_h - 600.0 - 50.0; // 50px for taskbar safety
                                     
@@ -189,40 +216,20 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::Focused(focused) = event {
-                if !focused {
-                    let app_handle = window.app_handle();
-                    let state = app_handle.state::<AppState>();
-                    let is_pinned = state.is_pinned.lock().map(|p| *p).unwrap_or(false);
-                    
-                    if !is_pinned {
-                        let should_hide = if let (Ok(cursor), Ok(pos), Ok(size)) = (
-                            window.cursor_position(),
-                            window.outer_position(),
-                            window.outer_size(),
-                        ) {
-                            let cursor_x = cursor.x as i32;
-                            let cursor_y = cursor.y as i32;
-                            let win_x = pos.x;
-                            let win_y = pos.y;
-                            let win_w = size.width as i32;
-                            let win_h = size.height as i32;
-                            let buffer = 50;
-                            let rel_x = cursor_x - win_x;
-                            let rel_y = cursor_y - win_y;
-                            
-                            let is_in_window = rel_x >= -buffer && rel_x <= win_w + buffer 
-                                            && rel_y >= -buffer && rel_y <= win_h + buffer;
-                            !is_in_window
-                        } else {
-                            true
+                if *focused {
+                    let state = window.state::<AppState>();
+                    {
+                        if let Ok(mut last_time) = state.last_toggle_time.lock() {
+                            *last_time = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_millis();
                         };
-
-                        if should_hide { let _ = window.hide(); }
                     }
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![greet, set_pin_mode, save_content, load_content])
+        .invoke_handler(tauri::generate_handler![greet, set_pin_mode, save_content, load_content, check_hide_on_leave])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
