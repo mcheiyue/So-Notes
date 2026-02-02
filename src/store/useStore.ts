@@ -53,58 +53,87 @@ export const useStore = create<State>()(
     },
 
     init: async () => {
-      let loadedData: StorageData = { notes: [], config: DEFAULT_CONFIG };
-      let fromWAL = false;
-      let fromDisk = false;
-      
-      // 1. Try WAL first
-      const walData = await db.loadWAL();
-      if (walData) {
-        console.log('Restored from WAL');
-        loadedData = walData;
-        fromWAL = true;
-      }
+      let finalData: StorageData = { notes: [], config: DEFAULT_CONFIG };
+      let source: 'WAL' | 'DISK' | 'NEW' = 'NEW';
 
-      // 2. Try Disk
-      if (!fromWAL || loadedData.notes.length === 0) {
+      // 1. Load both sources in parallel
+      const [walData, diskJson] = await Promise.all([
+        db.loadWAL(),
+        invoke<string>('load_content', { filename: 'data.json' }).catch(() => null)
+      ]);
+
+      let diskData: StorageData | null = null;
+      if (diskJson) {
         try {
-          const jsonContent = await invoke<string>('load_content', { filename: 'data.json' });
-          if (jsonContent) {
-            const parsed = JSON.parse(jsonContent);
-            if (parsed && Array.isArray(parsed.notes)) {
-               console.log('Restored from Disk (Recovery)');
-               loadedData = parsed;
-               fromDisk = true;
-            }
+          const parsed = JSON.parse(diskJson);
+          if (parsed && Array.isArray(parsed.notes)) {
+            diskData = parsed;
           }
         } catch (e) {
-          console.warn('No disk backup found or load failed:', e);
+          console.warn('Failed to parse disk data:', e);
         }
       }
 
-      if (loadedData.notes.length > 0) {
-        const currentMaxZ = Math.max(...loadedData.notes.map(n => n.z || 0), 0);
-        loadedData.config.maxZ = Math.max(currentMaxZ, loadedData.notes.length);
+      // 2. Conflict Resolution: Timestamp Arbitration
+      const getLatestUpdate = (data: StorageData | null) => {
+        if (!data || data.notes.length === 0) return 0;
+        return Math.max(...data.notes.map(n => n.updatedAt || 0));
+      };
+
+      const walTime = getLatestUpdate(walData);
+      const diskTime = getLatestUpdate(diskData);
+
+      console.log(`Init Arbitration -> WAL: ${walTime}, DISK: ${diskTime}`);
+
+      // Decision Logic
+      if (diskData && diskTime > walTime) {
+        // Disk is newer (or WAL is empty/stale) -> Use Disk
+        console.log('Using DISK (Newer content found)');
+        finalData = diskData;
+        source = 'DISK';
+      } else if (walData && walData.notes.length > 0) {
+        // WAL is newer or equal -> Use WAL
+        console.log('Using WAL (Cache is active)');
+        finalData = walData;
+        source = 'WAL';
+      } else if (diskData) {
+        // Fallback to Disk if WAL is empty
+        console.log('Using DISK (WAL empty)');
+        finalData = diskData;
+        source = 'DISK';
+      }
+
+      // 3. Hydrate State
+      if (finalData.notes.length > 0) {
+        const currentMaxZ = Math.max(...finalData.notes.map(n => n.z || 0), 0);
+        finalData.config.maxZ = Math.max(currentMaxZ, finalData.notes.length);
         
-        loadedData.notes.forEach((n, i) => {
-          if (n.x < 0 || n.y < 0) {
-             n.x = 20 + (i * 10);
-             n.y = 20 + (i * 10);
-          }
-          // Migration
-          if (n.collapsed === undefined) n.collapsed = false;
-          if (n.title === undefined) n.title = "";
+        // Data Migration / Sanity Check
+        finalData.notes.forEach((n, i) => {
+           if (n.x < 0 || n.y < 0) { n.x = 20 + (i * 10); n.y = 20 + (i * 10); }
+           if (n.collapsed === undefined) n.collapsed = false;
+           if (n.title === undefined) n.title = "";
+           if (!n.updatedAt) n.updatedAt = n.createdAt || Date.now();
         });
       }
 
       set((state) => {
-        state.notes = loadedData.notes;
-        state.config = loadedData.config;
+        state.notes = finalData.notes;
+        state.config = finalData.config;
         state.isLoaded = true;
       });
       
-      if (fromDisk) db.saveWAL(loadedData);
-      if (fromWAL) get().saveToDisk();
+      // 4. Sync Sources
+      // If we chose DISK, we must update the stale WAL immediately
+      if (source === 'DISK') {
+          await db.saveWAL(finalData);
+      }
+      // If we chose WAL (and it was indeed newer), we eventually save to disk,
+      // but only if it strictly has changes. 
+      // Safe default: If loading from WAL, trigger a lazy save to ensure consistency.
+      if (source === 'WAL') {
+          get().saveToDisk(); 
+      }
     },
 
     addNote: (x, y) => {
@@ -231,7 +260,7 @@ export const useStore = create<State>()(
       set({ isSaving: true });
       await db.saveWAL({ notes, config });
 
-      const jsonString = JSON.stringify({ notes, config });
+      const jsonString = JSON.stringify({ notes, config }, null, 2);
       try {
         await invoke('save_content', { filename: 'data.json', content: jsonString });
       } catch (err) {

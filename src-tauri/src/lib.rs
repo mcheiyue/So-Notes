@@ -103,6 +103,14 @@ async fn save_content(app: tauri::AppHandle, filename: String, content: String) 
 }
 
 
+
+#[tauri::command]
+fn get_data_path(app: tauri::AppHandle) -> Result<String, String> {
+    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let app_dir = doc_dir.join("SoNotes").join("data.json");
+    Ok(app_dir.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -117,7 +125,8 @@ pub fn run() {
         .setup(|app| {
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let show_i = MenuItem::with_id(app, "show", "显示", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let reset_i = MenuItem::with_id(app, "reset", "重置窗口", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &reset_i, &quit_i])?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -128,6 +137,32 @@ pub fn run() {
                         "quit" => app.exit(0),
                         "show" => {
                             if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "reset" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                // 1. Reset Size
+                                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 400.0, height: 600.0 }));
+                                
+                                // 2. Move to Bottom-Right (Tray Area)
+                                if let Ok(Some(monitor)) = window.current_monitor() {
+                                    let screen_size = monitor.size();
+                                    let scale_factor = monitor.scale_factor();
+                                    
+                                    let screen_w = screen_size.width as f64 / scale_factor;
+                                    let screen_h = screen_size.height as f64 / scale_factor;
+                                    
+                                    // Calculate position: Bottom-Right with margin
+                                    // x = ScreenWidth - WindowWidth - Margin
+                                    // y = ScreenHeight - WindowHeight - TaskbarMargin
+                                    let new_x = screen_w - 400.0 - 20.0;
+                                    let new_y = screen_h - 600.0 - 50.0; // 50px for taskbar safety
+                                    
+                                    let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x: new_x, y: new_y }));
+                                }
+
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
@@ -195,7 +230,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![greet, set_pin_mode, save_content, load_content])
+        .invoke_handler(tauri::generate_handler![greet, set_pin_mode, save_content, load_content, get_data_path])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
