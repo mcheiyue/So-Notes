@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS } from './types';
+import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState } from './types';
 import { db } from './db';
 
 interface State {
@@ -17,23 +17,36 @@ interface State {
     offsetY: number;
   };
 
+  // Selection & UI State
+  selectedIds: string[];
+  contextMenu: ContextMenuState;
+
   // Actions
   init: () => Promise<void>;
   addNote: (x: number, y: number) => void;
   updateTitle: (id: string, title: string) => void;
   updateNote: (id: string, content: string) => void;
   moveNote: (id: string, x: number, y: number) => void;
+  moveSelectedNotes: (dx: number, dy: number, excludeId?: string) => void;
+  arrangeNotes: () => void;
   bringToFront: (id: string) => void;
   deleteNote: (id: string) => void;
+  deleteSelectedNotes: () => void; // Batch delete
   changeColor: (id: string, color: string) => void;
   toggleCollapse: (id: string) => void;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number) => void;
+  
+  // Selection Actions
+  setSelectedIds: (ids: string[]) => void;
+  toggleSelection: (id: string) => void;
+  clearSelection: () => void;
+  setContextMenu: (menu: ContextMenuState) => void;
+
   saveToDisk: () => Promise<void>;
 }
 
 // Helper to debounce disk saves
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-
 const DEBOUNCE_DELAY = 2000; // 2 seconds lazy save
 const WAL_THROTTLE = 100;    // 100ms throttle for IndexedDB
 
@@ -51,6 +64,9 @@ export const useStore = create<State>()(
         offsetX: 0,
         offsetY: 0,
     },
+
+    selectedIds: [],
+    contextMenu: { isOpen: false, x: 0, y: 0, type: 'CANVAS' },
 
     init: async () => {
       let finalData: StorageData = { notes: [], config: DEFAULT_CONFIG };
@@ -210,6 +226,35 @@ export const useStore = create<State>()(
       saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
+    moveSelectedNotes: (dx, dy, excludeId) => {
+        set((state) => {
+            state.selectedIds.forEach(id => {
+                if (id === excludeId) return;
+                const note = state.notes.find(n => n.id === id);
+                if (note) {
+                    note.x += dx;
+                    note.y += dy;
+                }
+            });
+        });
+        if (saveTimeout) clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
+    },
+
+    arrangeNotes: () => {
+        const GRID_SIZE = 20;
+        set((state) => {
+            // Simple snap to grid for now. 
+            // Better algorithm: Pack them tightly? Or just snap positions?
+            // "Arrange" usually means organize. Let's do simple Grid Snap first.
+            state.notes.forEach(note => {
+                note.x = Math.round(note.x / GRID_SIZE) * GRID_SIZE;
+                note.y = Math.round(note.y / GRID_SIZE) * GRID_SIZE;
+            });
+        });
+        get().saveToDisk();
+    },
+
     bringToFront: (id) => {
       set((state) => {
         const note = state.notes.find((n) => n.id === id);
@@ -253,6 +298,45 @@ export const useStore = create<State>()(
         set((state) => {
             state.stickyDrag = { id, offsetX, offsetY };
         });
+    },
+
+    setSelectedIds: (ids) => {
+        set((state) => {
+            state.selectedIds = ids;
+        });
+    },
+
+    toggleSelection: (id) => {
+        set((state) => {
+            if (state.selectedIds.includes(id)) {
+                state.selectedIds = state.selectedIds.filter(i => i !== id);
+            } else {
+                state.selectedIds.push(id);
+            }
+        });
+    },
+
+    clearSelection: () => {
+        set((state) => {
+            state.selectedIds = [];
+        });
+    },
+
+    setContextMenu: (menu) => {
+        set((state) => {
+            state.contextMenu = menu;
+        });
+    },
+
+    deleteSelectedNotes: () => {
+        const { selectedIds } = get();
+        if (selectedIds.length === 0) return;
+        
+        set((state) => {
+            state.notes = state.notes.filter(note => !selectedIds.includes(note.id));
+            state.selectedIds = [];
+        });
+        get().saveToDisk();
     },
 
     saveToDisk: async () => {

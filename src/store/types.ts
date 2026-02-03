@@ -39,6 +39,14 @@ export interface AppConfig {
   maximized?: boolean;
 }
 
+export interface ContextMenuState {
+  isOpen: boolean;
+  x: number;
+  y: number;
+  type: 'CANVAS' | 'NOTE';
+  targetId?: string;
+}
+
 export interface StorageData {
   notes: Note[];
   config: AppConfig;
