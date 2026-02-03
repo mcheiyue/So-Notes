@@ -15,6 +15,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
   const { updateNote, updateTitle, moveNote, moveSelectedNotes, deleteNote, bringToFront, changeColor, toggleCollapse, stickyDrag, setContextMenu, selectedIds, toggleSelection } = useStore();
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   
@@ -24,8 +25,21 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
   const displayTitle = note.title || "未命名便签";
 
   useEffect(() => {
-    if (!note.title && !note.content && textareaRef.current && !note.collapsed) {
-      textareaRef.current.focus();
+    // Auto-focus logic:
+    // 1. New empty note (standard)
+    // 2. Just created note (pasted content) - checking createdAt < 1000ms
+    const isJustCreated = Date.now() - note.createdAt < 1000;
+    
+    if ((!note.title && !note.content) || isJustCreated) {
+        if (!note.collapsed) {
+             // Only focus Title if we have content (Paste & Create scenario)
+             if (note.content && titleRef.current) {
+                 titleRef.current.focus();
+             } else if (textareaRef.current) {
+                 // Standard New Note (Empty) -> Focus Textarea
+                 textareaRef.current.focus();
+             }
+        }
     }
   }, []); 
 
@@ -286,6 +300,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
             <div className="flex-1 px-4 pb-4 pt-0 flex flex-col gap-1">
               {/* Explicit Title Input */}
               <input 
+                ref={titleRef}
                 type="text"
                 className={cn(
                     "w-full bg-transparent outline-none transition-all duration-200",

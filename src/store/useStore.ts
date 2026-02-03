@@ -24,15 +24,17 @@ interface State {
   // Actions
   init: () => Promise<void>;
   addNote: (x: number, y: number) => void;
+  addNoteWithContent: (x: number, y: number, content: string) => void;
   updateTitle: (id: string, title: string) => void;
   updateNote: (id: string, content: string) => void;
   moveNote: (id: string, x: number, y: number) => void;
   moveSelectedNotes: (dx: number, dy: number, excludeId?: string) => void;
-  arrangeNotes: () => void;
+  arrangeNotes: (startX?: number, startY?: number) => void;
   bringToFront: (id: string) => void;
   deleteNote: (id: string) => void;
   deleteSelectedNotes: () => void; // Batch delete
   changeColor: (id: string, color: string) => void;
+  changeSelectedNotesColor: (color: string) => void;
   toggleCollapse: (id: string) => void;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number) => void;
   
@@ -174,6 +176,28 @@ export const useStore = create<State>()(
       get().saveToDisk();
     },
 
+    addNoteWithContent: (x, y, content) => {
+      const newNote: Note = {
+        id: crypto.randomUUID(),
+        title: '', // Optional: extract first line as title? For now empty.
+        content: content,
+        x,
+        y,
+        z: get().config.maxZ + 1,
+        color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
+        collapsed: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      set((state) => {
+        state.notes.push(newNote);
+        state.config.maxZ += 1;
+      });
+
+      get().saveToDisk();
+    },
+
     updateTitle: (id, title) => {
       set((state) => {
         const note = state.notes.find((n) => n.id === id);
@@ -241,15 +265,67 @@ export const useStore = create<State>()(
         saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
-    arrangeNotes: () => {
-        const GRID_SIZE = 20;
+    arrangeNotes: (startX = 50, startY = 50) => {
         set((state) => {
-            // Simple snap to grid for now. 
-            // Better algorithm: Pack them tightly? Or just snap positions?
-            // "Arrange" usually means organize. Let's do simple Grid Snap first.
-            state.notes.forEach(note => {
-                note.x = Math.round(note.x / GRID_SIZE) * GRID_SIZE;
-                note.y = Math.round(note.y / GRID_SIZE) * GRID_SIZE;
+            const winW = window.innerWidth;
+            const COLUMN_WIDTH = 320; // Approx card width (300) + gap (20)
+            const ROW_GAP = 20;
+            
+            // 1. Determine targets: Selection or All
+            let targetNotes = state.notes;
+            const isGroupArrange = state.selectedIds.length > 0;
+            
+            if (isGroupArrange) {
+                targetNotes = state.notes.filter(n => state.selectedIds.includes(n.id));
+            }
+
+            if (targetNotes.length === 0) return;
+
+            // 2. Sort by spatial position (Top-Left -> Bottom-Right)
+            // Weight Y more than X to form "reading order"
+            // Primary Sort: Y (bands of 50px? No, precise Y)
+            // Let's use simple Y * 10000 + X score? 
+            // Better: Y then X.
+            const sortedNotes = [...targetNotes].sort((a, b) => {
+                const dy = a.y - b.y;
+                if (Math.abs(dy) > 50) return dy; // If Y differs significantly, sort by Y
+                return a.x - b.x; // Otherwise sort by X (same 'row')
+            });
+
+            // 3. Row-based Layout with Boundary Check
+            let currentX = startX;
+            let currentY = startY;
+            let maxRowH = 0;
+            
+            // Boundary Guard for Start Position
+            if (currentX + COLUMN_WIDTH > winW) currentX = Math.max(20, winW - COLUMN_WIDTH * 2);
+            if (currentY > window.innerHeight - 100) currentY = 50; // Reset to top if starting too low
+
+            sortedNotes.forEach((note) => {
+                // Check if we need to wrap to new row
+                if (currentX + COLUMN_WIDTH > winW - 20) {
+                    currentX = startX;
+                    currentY += maxRowH + ROW_GAP;
+                    maxRowH = 0; // Reset row height
+                }
+
+                // Update Note Position in State
+                // We need to find the actual note object in the drafted state
+                const stateNote = state.notes.find(n => n.id === note.id);
+                if (stateNote) {
+                    stateNote.x = currentX;
+                    stateNote.y = currentY;
+                }
+
+                // Advance X
+                currentX += COLUMN_WIDTH;
+                
+                // Track max height for next row (assume default height 200 if not measured)
+                // Since we don't know actual DOM height here, we assume a standard height or 
+                // we could improve this by passing heights from UI.
+                // For now, fixed row step or safe estimate.
+                const estimatedHeight = note.collapsed ? 50 : 200; // Rough estimate
+                if (estimatedHeight > maxRowH) maxRowH = estimatedHeight;
             });
         });
         get().saveToDisk();
@@ -270,6 +346,8 @@ export const useStore = create<State>()(
     deleteNote: (id) => {
       set((state) => {
         state.notes = state.notes.filter((n) => n.id !== id);
+        // Fix: Ghost Selection - also remove from selectedIds if present
+        state.selectedIds = state.selectedIds.filter(selId => selId !== id);
       });
       get().saveToDisk();
     },
@@ -282,6 +360,18 @@ export const useStore = create<State>()(
          }
       });
       get().saveToDisk();
+    },
+
+    changeSelectedNotesColor: (color) => {
+        set((state) => {
+            state.selectedIds.forEach(id => {
+                const note = state.notes.find(n => n.id === id);
+                if (note) {
+                    note.color = color;
+                }
+            });
+        });
+        get().saveToDisk();
     },
 
     toggleCollapse: (id) => {

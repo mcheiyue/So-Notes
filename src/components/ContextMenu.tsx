@@ -1,9 +1,49 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
+import { readText } from '@tauri-apps/plugin-clipboard-manager';
+import { cn } from '../utils/cn';
 
 export const ContextMenu: React.FC = () => {
-  const { contextMenu, setContextMenu, deleteNote, changeColor, bringToFront, addNote, setStickyDrag, deleteSelectedNotes, selectedIds, arrangeNotes } = useStore();
+  const { 
+    contextMenu, 
+    setContextMenu, 
+    deleteNote, 
+    changeColor, 
+    changeSelectedNotesColor,
+    bringToFront, 
+    addNote, 
+    addNoteWithContent,
+    setStickyDrag, 
+    deleteSelectedNotes, 
+    selectedIds, 
+    arrangeNotes
+  } = useStore();
   const menuRef = useRef<HTMLDivElement>(null);
+  const [hasClipboardText, setHasClipboardText] = useState(false);
+  const [confirmArrange, setConfirmArrange] = useState(false);
+
+  // Check clipboard content when menu opens
+  useEffect(() => {
+    if (contextMenu.isOpen) {
+      // Reset confirmation state on open
+      setConfirmArrange(false);
+      
+      if (contextMenu.type === 'CANVAS') {
+        readText().then(text => {
+            console.log('Clipboard text:', text); // Debug
+            setHasClipboardText(!!text && text.trim().length > 0);
+        }).catch(err => {
+            console.error('Clipboard read failed:', err);
+            setHasClipboardText(false);
+        });
+      }
+    }
+  }, [contextMenu.isOpen, contextMenu.type]);
+
+  const handleAction = (action: () => void) => {
+    action();
+    setContextMenu({ ...contextMenu, isOpen: false });
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -22,11 +62,6 @@ export const ContextMenu: React.FC = () => {
 
   if (!contextMenu.isOpen) return null;
 
-  const handleAction = (action: () => void) => {
-    action();
-    setContextMenu({ ...contextMenu, isOpen: false });
-  };
-
   // Adjust position to keep menu within viewport
   // Simple clamping logic (can be improved with measuring actual height)
   const menuX = Math.min(contextMenu.x, window.innerWidth - 160);
@@ -41,6 +76,12 @@ export const ContextMenu: React.FC = () => {
     { name: 'Gray', value: '#F3F4F6' },
   ];
 
+  // Logic: Group Context if target is in selection and we have > 1 items
+  const isGroupContext = contextMenu.type === 'NOTE' && 
+                         contextMenu.targetId && 
+                         selectedIds.includes(contextMenu.targetId) && 
+                         selectedIds.length > 1;
+
   return (
     <div
       ref={menuRef}
@@ -50,19 +91,62 @@ export const ContextMenu: React.FC = () => {
     >
       {contextMenu.type === 'CANVAS' && (
         <>
-          <div
-            className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
-            onClick={() => handleAction(() => addNote(contextMenu.x, contextMenu.y))}
-          >
-            <span>📝</span> 新建便签
-          </div>
-          {/* Future: Paste to Create */}
-           <div className="h-px bg-gray-200 my-1" />
+          {/* Global Mode: No selection OR Single Selection (treat as global for canvas actions) */}
+          {selectedIds.length <= 1 && (
+            <>
+              <div
+                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                onClick={() => handleAction(() => addNote(contextMenu.x, contextMenu.y))}
+              >
+                <span>📝</span> 新建便签
+              </div>
+              
+              {hasClipboardText && (
+                 <div
+                    className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                    onClick={() => handleAction(async () => {
+                        const text = await readText();
+                        if (text) {
+                            addNoteWithContent(contextMenu.x, contextMenu.y, text);
+                        }
+                    })}
+                  >
+                    <span>📋</span> 粘贴并新建
+                  </div>
+              )}
+              
+               <div className="h-px bg-gray-200 my-1" />
+           </>
+          )}
+
            <div
-            className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
-            onClick={() => handleAction(() => arrangeNotes())}
+            className={cn(
+                "px-4 py-2 cursor-pointer text-sm flex items-center gap-2 transition-colors duration-200",
+                confirmArrange 
+                    ? "bg-red-50 text-red-600 font-medium hover:bg-red-100" 
+                    : "hover:bg-gray-100 text-gray-700"
+            )}
+            onClick={(e) => {
+                e.stopPropagation(); // Prevent menu close on first click
+                // Only treat as Group Mode if > 1 items selected
+                if (selectedIds.length > 1) {
+                    // Group arrange: No confirmation needed (safe operation)
+                    handleAction(() => arrangeNotes(contextMenu.x, contextMenu.y));
+                } else {
+                    // Global arrange: Require confirmation
+                    if (!confirmArrange) {
+                        setConfirmArrange(true);
+                    } else {
+                        handleAction(() => arrangeNotes(contextMenu.x, contextMenu.y));
+                    }
+                }
+            }}
           >
-            <span>🧹</span> 整理便签 (Snap Grid)
+            <span>🧹</span> 
+            {selectedIds.length > 1 
+                ? '整理选中 (Arrange)' 
+                : (confirmArrange ? '确认归拢? (Click Again)' : '一键归拢 (Smart Arrange)')
+            }
           </div>
         </>
       )}
@@ -72,17 +156,16 @@ export const ContextMenu: React.FC = () => {
            <div
             className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
             onClick={() => handleAction(() => {
-                // Trigger Sticky Drag for this note
-                // We need to calculate offset, but for now center it or use 0,0
-                // Ideally we should pass offset when opening context menu, but simplified for now.
                 setStickyDrag(contextMenu.targetId!, 0, 0); 
             })}
           >
-            <span>🧲</span> 吸附移动
+            <span>🧲</span> {isGroupContext ? '群组吸附' : '吸附移动'}
           </div>
           <div className="h-px bg-gray-200 my-1" />
           
-          <div className="px-4 py-2 text-xs text-gray-500 font-semibold">颜色</div>
+          <div className="px-4 py-2 text-xs text-gray-500 font-semibold">
+            {isGroupContext ? '批量改色' : '颜色'}
+          </div>
           <div className="px-4 py-1 flex gap-2 flex-wrap">
             {colors.map((c) => (
               <div
@@ -90,7 +173,13 @@ export const ContextMenu: React.FC = () => {
                 className="w-5 h-5 rounded-full cursor-pointer border border-gray-300 hover:scale-110 transition-transform"
                 style={{ backgroundColor: c.value }}
                 title={c.name}
-                onClick={() => handleAction(() => changeColor(contextMenu.targetId!, c.value))}
+                onClick={() => handleAction(() => {
+                    if (isGroupContext) {
+                        changeSelectedNotesColor(c.value);
+                    } else {
+                        changeColor(contextMenu.targetId!, c.value);
+                    }
+                })}
               />
             ))}
           </div>
@@ -104,18 +193,20 @@ export const ContextMenu: React.FC = () => {
             <span>🔝</span> 置顶
           </div>
           
+          <div className="h-px bg-gray-200 my-1" />
+
           <div
             className="px-4 py-2 hover:bg-red-50 cursor-pointer text-sm text-red-600 flex items-center gap-2"
             onClick={() => handleAction(() => {
-                if (selectedIds.includes(contextMenu.targetId!)) {
+                if (isGroupContext) {
                     deleteSelectedNotes();
                 } else {
                     deleteNote(contextMenu.targetId!);
                 }
             })}
           >
-            <span>🗑️</span> 删除
-            {selectedIds.includes(contextMenu.targetId!) && selectedIds.length > 1 && ` (${selectedIds.length})`}
+            <span>🗑️</span> 
+            {isGroupContext ? `批量删除 (${selectedIds.length})` : '删除'}
           </div>
         </>
       )}

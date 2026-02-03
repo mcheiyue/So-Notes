@@ -46,10 +46,14 @@ async fn load_content(app: tauri::AppHandle, filename: String) -> Result<String,
 }
 
 #[tauri::command]
-async fn save_content(app: tauri::AppHandle, filename: String, content: String) -> Result<(), String> {
+async fn save_content(
+    app: tauri::AppHandle,
+    filename: String,
+    content: String,
+) -> Result<(), String> {
     let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
     let app_dir = doc_dir.join("SoNotes");
-    
+
     // Ensure directory exists
     if !app_dir.exists() {
         fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
@@ -74,7 +78,7 @@ async fn save_content(app: tauri::AppHandle, filename: String, content: String) 
             Ok(_) => {
                 rename_success = true;
                 break;
-            },
+            }
             Err(e) => {
                 last_rename_err = e.to_string();
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -94,10 +98,11 @@ async fn save_content(app: tauri::AppHandle, filename: String, content: String) 
         Ok(_) => {
             let _ = fs::remove_file(&tmp_path);
             Ok(())
-        },
-        Err(e) => {
-            Err(format!("Atomic save failed ({}). Direct save failed: {}", last_rename_err, e))
         }
+        Err(e) => Err(format!(
+            "Atomic save failed ({}). Direct save failed: {}",
+            last_rename_err, e
+        )),
     }
 }
 
@@ -115,6 +120,7 @@ fn check_hide_on_leave(window: tauri::Window, state: tauri::State<AppState>) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -128,7 +134,7 @@ pub fn run() {
             let pin_i = MenuItem::with_id(app, "pin", "钉住窗口", true, None::<&str>)?;
             let reset_i = MenuItem::with_id(app, "reset", "重置窗口", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&pin_i, &reset_i, &quit_i])?;
-            
+
             // 克隆 MenuItem 句柄以便在事件闭包中使用
             let pin_i_clone = pin_i.clone();
 
@@ -142,7 +148,7 @@ pub fn run() {
                         "pin" => {
                             let state = app.state::<AppState>();
                             let mut is_pinned = false;
-                            
+
                             // 1. 切换 Pin 状态
                             if let Ok(mut pinned_lock) = state.is_pinned.lock() {
                                 *pinned_lock = !*pinned_lock;
@@ -157,29 +163,38 @@ pub fn run() {
                                     let _ = window.set_focus();
                                 }
                             }
-                            
+
                             // 3. 更新菜单文案
-                            let new_text = if is_pinned { "取消钉住" } else { "钉住窗口" };
+                            let new_text = if is_pinned {
+                                "取消钉住"
+                            } else {
+                                "钉住窗口"
+                            };
                             let _ = pin_i_clone.set_text(new_text);
                         }
                         "reset" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 // 1. Reset Size
-                                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 400.0, height: 600.0 }));
-                                
+                                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                                    width: 400.0,
+                                    height: 600.0,
+                                }));
+
                                 // 2. Move to Bottom-Right (Tray Area)
                                 if let Ok(Some(monitor)) = window.current_monitor() {
                                     let screen_size = monitor.size();
                                     let scale_factor = monitor.scale_factor();
-                                    
+
                                     let screen_w = screen_size.width as f64 / scale_factor;
                                     let screen_h = screen_size.height as f64 / scale_factor;
-                                    
+
                                     // Calculate position: Bottom-Right with margin
                                     let new_x = screen_w - 400.0 - 20.0;
                                     let new_y = screen_h - 600.0 - 50.0; // 50px for taskbar safety
-                                    
-                                    let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x: new_x, y: new_y }));
+
+                                    let _ = window.set_position(tauri::Position::Logical(
+                                        tauri::LogicalPosition { x: new_x, y: new_y },
+                                    ));
                                 }
 
                                 let _ = window.show();
@@ -190,24 +205,37 @@ pub fn run() {
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        ..
+                    } = event
+                    {
                         let app = tray.app_handle();
                         let state = app.state::<AppState>();
                         let now = now_millis();
                         let mut last = state.last_toggle_time.lock().unwrap();
-                        if now - *last < 300 { return; }
+                        if now - *last < 300 {
+                            return;
+                        }
                         *last = now;
 
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.move_window(Position::BottomRight);
                             if let Ok(pos) = window.outer_position() {
-                                let new_pos = tauri::PhysicalPosition { x: pos.x - 16, y: pos.y - 48 };
+                                let new_pos = tauri::PhysicalPosition {
+                                    x: pos.x - 16,
+                                    y: pos.y - 48,
+                                };
                                 let _ = window.set_position(new_pos);
                             }
                             let is_visible = window.is_visible().unwrap_or(false);
                             let is_focused = window.is_focused().unwrap_or(false);
-                            if is_visible && is_focused { let _ = window.hide(); }
-                            else { let _ = window.show(); let _ = window.set_focus(); }
+                            if is_visible && is_focused {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
                     }
                 })
@@ -229,7 +257,13 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![greet, set_pin_mode, save_content, load_content, check_hide_on_leave])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            set_pin_mode,
+            save_content,
+            load_content,
+            check_hide_on_leave
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

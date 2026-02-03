@@ -2,9 +2,7 @@ import React, { useRef, useEffect } from "react";
 import { useStore } from "../store/useStore";
 import { NoteCard } from "./NoteCard";
 import { ContextMenu } from "./ContextMenu";
-import { Plus } from "lucide-react";
 import { cn } from "../utils/cn";
-import { Tooltip } from "./Tooltip";
 
 export const Canvas: React.FC = () => {
   const { notes, addNote, init, isLoaded, stickyDrag, setStickyDrag, moveNote, setContextMenu, setSelectedIds, selectedIds, moveSelectedNotes, clearSelection } = useStore();
@@ -79,13 +77,6 @@ export const Canvas: React.FC = () => {
     }
   };
   
-  const handleAddNote = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      const winW = window.innerWidth;
-      const winH = window.innerHeight;
-      addNote(winW / 2 - 130, winH / 2 - 80);
-  };
-
   const applyBoundaryGuard = (id: string) => {
       const winW = window.innerWidth;
       const winH = window.innerHeight;
@@ -270,7 +261,7 @@ export const Canvas: React.FC = () => {
             双击空白处新建便签
           </p>
           <p className="text-xs text-black/20 mt-1">
-            或点击右下角按钮
+            或右键点击 &rarr; 新建
           </p>
         </div>
       )}
@@ -282,23 +273,6 @@ export const Canvas: React.FC = () => {
             </span>
         </div>
       )}
-      
-      <div className="absolute bottom-6 right-6 z-[100]">
-        <Tooltip content="新建便签">
-          <button 
-            onClick={handleAddNote}
-            className={cn(
-                "w-12 h-12 rounded-full",
-                "bg-slate-900 text-white hover:bg-slate-800",
-                "shadow-xl hover:shadow-2xl hover:scale-105 active:scale-95",
-                "flex items-center justify-center",
-                "transition-all duration-200 ease-out"
-            )}
-          >
-            <Plus className="w-6 h-6" strokeWidth={2.5} />
-          </button>
-        </Tooltip>
-      </div>
     </div>
   );
 };
