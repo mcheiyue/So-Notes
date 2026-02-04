@@ -148,29 +148,34 @@ pub fn run() {
                         "pin" => {
                             let state = app.state::<AppState>();
                             let mut is_pinned = false;
-
-                            // 1. 切换 Pin 状态
-                            if let Ok(mut pinned_lock) = state.is_pinned.lock() {
-                                *pinned_lock = !*pinned_lock;
-                                is_pinned = *pinned_lock;
+                            {
+                                let mut is_pinned_guard = state.is_pinned.lock().unwrap();
+                                *is_pinned_guard = !*is_pinned_guard;
+                                is_pinned = *is_pinned_guard;
                             }
 
-                            // 2. 更新窗口行为
+                            // Update menu item text
+                            let pin_text = if is_pinned { "取消钉住" } else { "钉住窗口" };
+                            let _ = pin_i_clone.set_text(pin_text);
+
+                            // Update window behavior
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.set_always_on_top(is_pinned);
                                 if is_pinned {
+                                    // Fix: Ensure window is in correct position before pinning
+                                    let _ = window.move_window(Position::BottomRight);
+                                    if let Ok(pos) = window.outer_position() {
+                                        let new_pos = tauri::PhysicalPosition {
+                                            x: pos.x - 16,
+                                            y: pos.y - 48,
+                                        };
+                                        let _ = window.set_position(new_pos);
+                                    }
+                                    
                                     let _ = window.show();
                                     let _ = window.set_focus();
                                 }
                             }
-
-                            // 3. 更新菜单文案
-                            let new_text = if is_pinned {
-                                "取消钉住"
-                            } else {
-                                "钉住窗口"
-                            };
-                            let _ = pin_i_clone.set_text(new_text);
                         }
                         "reset" => {
                             if let Some(window) = app.get_webview_window("main") {
