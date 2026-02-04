@@ -300,39 +300,53 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
 
             {/* Expanded Content: Auto-Hiding Title Input + Textarea */}
         {!note.collapsed && (
-            <div className="flex-1 px-4 pb-4 pt-0 flex flex-col gap-1 min-h-0">
-              {/* Explicit Title Input */}
-              <input 
-                ref={titleRef}
-                type="text"
-                className={cn(
-                    "w-full bg-transparent outline-none transition-all duration-200 flex-shrink-0",
-                    "text-gray-900 font-bold text-[16px]",
-                    "placeholder-gray-400/50",
-                    (!note.title && !isHovered && !isEditing) ? "hidden" : "block"
-                )}
-                placeholder="标题"
-                value={note.title}
-                onChange={(e) => updateTitle(note.id, e.target.value)}
-                onFocus={() => setIsEditing(true)}
-                onBlur={() => setIsEditing(false)}
-                onMouseDownCapture={handleMouseDown}
-            />
+            <div className="flex-1 pb-4 pt-0 flex flex-col gap-1 min-h-0 relative">
+              {/* Explicit Title Input - Add padding here since parent lost it */}
+              <div className="px-4">
+                  <input 
+                    ref={titleRef}
+                    type="text"
+                    className={cn(
+                        "w-full bg-transparent outline-none transition-all duration-200 flex-shrink-0",
+                        "text-gray-900 font-bold text-[16px]",
+                        "placeholder-gray-400/50",
+                        (!note.title && !isHovered && !isEditing) ? "hidden" : "block"
+                    )}
+                    placeholder="标题"
+                    value={note.title}
+                    onChange={(e) => updateTitle(note.id, e.target.value)}
+                    onFocus={() => setIsEditing(true)}
+                    onBlur={() => setIsEditing(false)}
+                    onMouseDownCapture={handleMouseDown}
+                />
+              </div>
               
               {/* Content Textarea */}
               <textarea
                 ref={textareaRef}
                 className={cn(
-                    "w-full resize-none bg-transparent outline-none",
+                    "w-full resize-none bg-transparent outline-none px-4", // Add padding back here
                     "text-gray-800",
                     "placeholder-gray-400 font-normal text-[15px] leading-relaxed",
                     "selection:bg-black/10",
-                    // Scrollbar styling
-                    "scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
+                    // Scrollbar styling - thin and rounded
+                    "scrollbar-thin scrollbar-thumb-black/10 scrollbar-track-transparent hover:scrollbar-thumb-black/20",
+                    "transition-all duration-300 ease-in-out" // Smooth height transition
                 )}
                 style={{
-                    maxHeight: '60vh', // Limit height to 60% of viewport
-                    overflowY: 'auto'
+                    // Dynamic Height Logic:
+                    // If selected or editing: Max 60vh, scrollable
+                    // If inactive: Max 200px, hidden overflow (masked)
+                    maxHeight: (isSelected || isEditing) ? '60vh' : '200px',
+                    overflowY: (isSelected || isEditing) ? 'auto' : 'hidden',
+                    
+                    // Gradient Mask for inactive state
+                    maskImage: (isSelected || isEditing) 
+                        ? 'none' 
+                        : 'linear-gradient(to bottom, black 0%, black 70%, transparent 100%)',
+                    WebkitMaskImage: (isSelected || isEditing) 
+                        ? 'none' 
+                        : 'linear-gradient(to bottom, black 0%, black 70%, transparent 100%)'
                 }}
                 placeholder="记点什么..."
                 value={note.content}
