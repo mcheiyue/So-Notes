@@ -34,7 +34,10 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
         if (!note.collapsed) {
              // Only focus Title if we have content (Paste & Create scenario)
              if (note.content && titleRef.current) {
-                 titleRef.current.focus();
+                 setIsEditing(true);
+                 setTimeout(() => {
+                    titleRef.current?.focus();
+                 }, 0);
              } else if (textareaRef.current) {
                  // Standard New Note (Empty) -> Focus Textarea
                  textareaRef.current.focus();
