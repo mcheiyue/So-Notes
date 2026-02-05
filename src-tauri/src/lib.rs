@@ -2,7 +2,7 @@ use std::{fs, sync::Mutex, thread, time::Duration};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
@@ -10,6 +10,7 @@ use tauri_plugin_positioner::{Position, WindowExt};
 struct AppState {
     is_pinned: Mutex<bool>,
     last_toggle_time: Mutex<u128>, // SystemTime as u128 millis
+    pin_menu_item: Mutex<Option<MenuItem<tauri::Wry>>>, // Store the menu item
 }
 
 #[tauri::command]
@@ -117,6 +118,27 @@ fn check_hide_on_leave(window: tauri::Window, state: tauri::State<AppState>) {
     }
 }
 
+#[tauri::command]
+fn frontend_unpin(app: tauri::AppHandle, state: tauri::State<AppState>) {
+    // 1. Update State
+    if let Ok(mut is_pinned) = state.is_pinned.lock() {
+        *is_pinned = false;
+    }
+
+    // 2. Update Menu Text
+    if let Ok(guard) = state.pin_menu_item.lock() {
+        if let Some(item) = guard.as_ref() {
+             let _ = item.set_text("钉住窗口");
+        }
+    }
+    
+    // 3. Update Window Behavior & Emit Event
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_always_on_top(false);
+        let _ = window.emit("pin-state-changed", false);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -128,10 +150,19 @@ pub fn run() {
         .manage(AppState {
             is_pinned: Mutex::new(false),
             last_toggle_time: Mutex::new(0),
+            pin_menu_item: Mutex::new(None),
         })
         .setup(|app| {
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let pin_i = MenuItem::with_id(app, "pin", "钉住窗口", true, None::<&str>)?;
+            
+            // Store the pin menu item in AppState
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(mut guard) = state.pin_menu_item.lock() {
+                    *guard = Some(pin_i.clone());
+                }
+            }
+            
             let reset_i = MenuItem::with_id(app, "reset", "重置窗口", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&pin_i, &reset_i, &quit_i])?;
 
@@ -161,6 +192,9 @@ pub fn run() {
                             // Update window behavior
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.set_always_on_top(is_pinned);
+                                // Emit event to frontend
+                                let _ = window.emit("pin-state-changed", is_pinned);
+
                                 if is_pinned {
                                     // Fix: Ensure window is in correct position before pinning
                                     let _ = window.move_window(Position::BottomRight);
@@ -267,7 +301,8 @@ pub fn run() {
             set_pin_mode,
             save_content,
             load_content,
-            check_hide_on_leave
+            check_hide_on_leave,
+            frontend_unpin
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,11 +1,10 @@
 import React, { useRef, useEffect } from "react";
 import { useStore } from "../store/useStore";
 import { NoteCard } from "./NoteCard";
-import { ContextMenu } from "./ContextMenu";
 import { cn } from "../utils/cn";
 
 export const Canvas: React.FC = () => {
-  const { notes, addNote, init, isLoaded, stickyDrag, setStickyDrag, moveNote, setContextMenu, setSelectedIds, selectedIds, moveSelectedNotes, clearSelection } = useStore();
+  const { notes, currentBoardId, addNote, init, isLoaded, stickyDrag, setStickyDrag, moveNote, setContextMenu, setSelectedIds, selectedIds, moveSelectedNotes, clearSelection } = useStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const scale = 1;
 
@@ -205,7 +204,7 @@ export const Canvas: React.FC = () => {
     <div
       ref={containerRef}
       className={cn(
-        "w-screen h-screen overflow-hidden relative select-none",
+        "w-full h-full overflow-hidden relative select-none",
         "bg-zinc-50/90 dark:bg-zinc-50/98 dark:brightness-[0.90] dark:contrast-[0.95] dark:grayscale-[0.05] transition-colors duration-300",
         "border border-black/10 dark:border-white/10 rounded-lg"
       )}
@@ -234,10 +233,18 @@ export const Canvas: React.FC = () => {
                backgroundSize: '20px 20px'
            }}
       />
+      
+      {/* Board Badge (Current Context) */}
+      <div className="absolute top-8 left-4 pointer-events-none z-0">
+         <div className="flex items-center gap-2 px-3 py-1.5 bg-black/5 dark:bg-white/5 rounded-lg text-xs font-medium text-black/30 dark:text-white/30 backdrop-blur-sm">
+            <span>{useStore.getState().boards.find(b => b.id === currentBoardId)?.icon || '📌'}</span>
+            <span>{useStore.getState().boards.find(b => b.id === currentBoardId)?.name || 'Main'}</span>
+         </div>
+      </div>
 
       <div 
           data-tauri-drag-region 
-          className="drag-handle-area absolute top-0 left-0 w-full h-6 z-50 flex items-center justify-center group cursor-grab"
+          className="drag-handle-area absolute top-0 left-0 w-full h-6 z-[100000] flex items-center justify-center group cursor-grab"
       >
           <div className="w-12 h-1 bg-black/10 rounded-full mt-2 transition-colors group-hover:bg-black/20" />
       </div>
@@ -249,16 +256,16 @@ export const Canvas: React.FC = () => {
         style={{ display: 'none' }}
       />
       
-      {notes.map((note) => (
+      {notes
+        .filter(note => note.boardId === currentBoardId) // Filter by current board
+        .map((note) => (
         <NoteCard key={note.id} note={note} scale={scale} /> 
       ))}
       
-      <ContextMenu />
-
-      {notes.length === 0 && (
+      {notes.filter(n => n.boardId === currentBoardId).length === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
           <p className="text-lg font-medium text-black/30">
-            双击空白处新建便签
+            {currentBoardId === 'default' ? '双击空白处新建便签' : '当前看板为空'}
           </p>
           <p className="text-xs text-black/20 mt-1">
             或右键点击 &rarr; 新建

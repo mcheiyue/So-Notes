@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Canvas } from "./components/Canvas";
+import { BoardDock } from "./components/BoardDock";
+import { PinFab } from "./components/PinFab";
+import { ContextMenu } from "./components/ContextMenu";
 
 function App() {
   const isMouseDownRef = useRef(false);
@@ -49,8 +52,12 @@ function App() {
   }, []);
 
   return (
-    <div className="w-screen h-screen">
+    <div className="w-full h-screen fixed inset-0 overflow-hidden">
        <Canvas />
+       {/* UI Overlay Components - Moved out of Canvas to avoid filter/transform issues */}
+       <BoardDock />
+       <PinFab />
+       <ContextMenu />
     </div>
   );
 }

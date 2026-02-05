@@ -30,7 +30,9 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
     // 2. Just created note (pasted content) - checking createdAt < 1000ms
     const isJustCreated = Date.now() - note.createdAt < 1000;
     
-    if ((!note.title && !note.content) || isJustCreated) {
+    // Fix: Only auto-focus if the note was JUST created (New or Paste).
+    // Prevents old empty notes from stealing focus on board switch.
+    if (isJustCreated) {
         if (!note.collapsed) {
              // Only focus Title if we have content (Paste & Create scenario)
              if (note.content && titleRef.current) {

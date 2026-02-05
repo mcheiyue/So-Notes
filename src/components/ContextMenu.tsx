@@ -16,7 +16,10 @@ export const ContextMenu: React.FC = () => {
     setStickyDrag, 
     deleteSelectedNotes, 
     selectedIds, 
-    arrangeNotes
+    arrangeNotes,
+    setDockVisible,
+    boards,
+    currentBoardId
   } = useStore();
   const menuRef = useRef<HTMLDivElement>(null);
   const [hasClipboardText, setHasClipboardText] = useState(false);
@@ -30,7 +33,6 @@ export const ContextMenu: React.FC = () => {
       
       if (contextMenu.type === 'CANVAS') {
         readText().then(text => {
-            console.log('Clipboard text:', text); // Debug
             setHasClipboardText(!!text && text.trim().length > 0);
         }).catch(err => {
             console.error('Clipboard read failed:', err);
@@ -94,6 +96,16 @@ export const ContextMenu: React.FC = () => {
           {/* Global Mode: No selection OR Single Selection (treat as global for canvas actions) */}
           {selectedIds.length <= 1 && (
             <>
+               <div
+                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                onClick={() => handleAction(() => {
+                    setDockVisible(true);
+                    // No need to set isOpen:false manually as handleAction does it
+                })}
+              >
+                <span>📑</span> 切换看板 ({boards.find(b => b.id === currentBoardId)?.name || 'Main'})
+              </div>
+              
               <div
                 className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
                 onClick={() => handleAction(() => addNote(contextMenu.x, contextMenu.y))}

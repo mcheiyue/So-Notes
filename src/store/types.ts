@@ -20,6 +20,7 @@ export const NOTE_COLORS: NoteColor[] = [
 
 export interface Note {
   id: string;
+  boardId: string; // New field
   x: number;
   y: number;
   title: string;
@@ -31,6 +32,13 @@ export interface Note {
   collapsed?: boolean;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface Board {
+  id: string;
+  name: string;
+  icon: string; // Emoji or Lucide icon name
+  createdAt: number;
 }
 
 export interface AppConfig {
@@ -49,10 +57,22 @@ export interface ContextMenuState {
 
 export interface StorageData {
   notes: Note[];
+  boards: Board[];
+  currentBoardId: string;
   config: AppConfig;
 }
 
+export const DEFAULT_BOARD: Board = {
+  id: 'default',
+  name: '主板 (Main)',
+  icon: '📌',
+  createdAt: 0
+};
+
 export const DEFAULT_CONFIG: AppConfig = {
-  version: 1,
+  version: 2, // Bump version
   maxZ: 1,
 };
+
+// Board Icons for Random Picker
+export const BOARD_ICONS = ['💡', '🚀', '🎨', '🧸', '📅', '🛒', '🎵', '📚', '💼', '🏠'];

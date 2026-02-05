@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState } from './types';
+import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD } from './types';
 import { db } from './db';
 
 interface State {
   notes: Note[];
+  boards: Board[];
+  currentBoardId: string;
   config: AppConfig;
   isLoaded: boolean;
   isSaving: boolean;
@@ -20,9 +22,20 @@ interface State {
   // Selection & UI State
   selectedIds: string[];
   contextMenu: ContextMenuState;
+  
+  // Dock UI State (Transient)
+  isDockVisible: boolean;
 
   // Actions
   init: () => Promise<void>;
+  
+  // Board Actions
+  switchBoard: (boardId: string) => void;
+  createBoard: (name: string, icon: string) => void;
+  deleteBoard: (boardId: string) => void;
+  updateBoard: (boardId: string, updates: Partial<Board>) => void;
+  setDockVisible: (visible: boolean) => void;
+
   addNote: (x: number, y: number) => void;
   addNoteWithContent: (x: number, y: number, content: string) => void;
   updateTitle: (id: string, title: string) => void;
@@ -69,9 +82,19 @@ export const useStore = create<State>()(
 
     selectedIds: [],
     contextMenu: { isOpen: false, x: 0, y: 0, type: 'CANVAS' },
+    
+    // New State Init
+    boards: [DEFAULT_BOARD],
+    currentBoardId: DEFAULT_BOARD.id,
+    isDockVisible: false,
 
     init: async () => {
-      let finalData: StorageData = { notes: [], config: DEFAULT_CONFIG };
+      let finalData: StorageData = { 
+        notes: [], 
+        boards: [DEFAULT_BOARD], 
+        currentBoardId: DEFAULT_BOARD.id, 
+        config: DEFAULT_CONFIG 
+      };
       let source: 'WAL' | 'DISK' | 'NEW' = 'NEW';
 
       // 1. Load both sources in parallel
@@ -101,22 +124,22 @@ export const useStore = create<State>()(
       const walTime = getLatestUpdate(walData);
       const diskTime = getLatestUpdate(diskData);
 
-      console.log(`Init Arbitration -> WAL: ${walTime}, DISK: ${diskTime}`);
+      // console.log(`Init Arbitration -> WAL: ${walTime}, DISK: ${diskTime}`);
 
       // Decision Logic
       if (diskData && diskTime > walTime) {
         // Disk is newer (or WAL is empty/stale) -> Use Disk
-        console.log('Using DISK (Newer content found)');
+        // console.log('Using DISK (Newer content found)');
         finalData = diskData;
         source = 'DISK';
       } else if (walData && walData.notes.length > 0) {
         // WAL is newer or equal -> Use WAL
-        console.log('Using WAL (Cache is active)');
+        // console.log('Using WAL (Cache is active)');
         finalData = walData;
         source = 'WAL';
       } else if (diskData) {
         // Fallback to Disk if WAL is empty
-        console.log('Using DISK (WAL empty)');
+        // console.log('Using DISK (WAL empty)');
         finalData = diskData;
         source = 'DISK';
       }
@@ -131,13 +154,26 @@ export const useStore = create<State>()(
            if (n.x < 0 || n.y < 0) { n.x = 20 + (i * 10); n.y = 20 + (i * 10); }
            if (n.collapsed === undefined) n.collapsed = false;
            if (n.title === undefined) n.title = "";
+           if (!n.boardId) n.boardId = 'default'; // Migration: Assign default board
            if (!n.updatedAt) n.updatedAt = n.createdAt || Date.now();
         });
+      }
+      
+      // Ensure boards exist (Migration from v1.0.9)
+      if (!finalData.boards || finalData.boards.length === 0) {
+          finalData.boards = [DEFAULT_BOARD];
+          finalData.currentBoardId = DEFAULT_BOARD.id;
+      }
+      // Ensure currentBoardId is valid
+      if (!finalData.currentBoardId || !finalData.boards.find(b => b.id === finalData.currentBoardId)) {
+          finalData.currentBoardId = finalData.boards[0].id;
       }
 
       set((state) => {
         state.notes = finalData.notes;
         state.config = finalData.config;
+        state.boards = finalData.boards;
+        state.currentBoardId = finalData.currentBoardId;
         state.isLoaded = true;
       });
       
@@ -154,9 +190,74 @@ export const useStore = create<State>()(
       }
     },
 
+    switchBoard: (boardId) => {
+        set((state) => {
+            if (state.boards.find(b => b.id === boardId)) {
+                state.currentBoardId = boardId;
+                state.selectedIds = []; // Clear selection to prevent ghost edits
+                state.stickyDrag = { id: null, offsetX: 0, offsetY: 0 }; // Reset drag
+                
+                // Force Scroll Reset (Fix Viewport Shift)
+                window.scrollTo(0, 0);
+            }
+        });
+    },
+
+    createBoard: (name, icon) => {
+        const newBoard: Board = {
+            id: crypto.randomUUID(),
+            name,
+            icon,
+            createdAt: Date.now()
+        };
+        set((state) => {
+            state.boards.push(newBoard);
+            state.currentBoardId = newBoard.id; // Auto-switch
+            state.selectedIds = [];
+        });
+        get().saveToDisk();
+    },
+
+    deleteBoard: (boardId) => {
+        const { boards } = get();
+        if (boards.length <= 1) return; // Prevent deleting last board
+        
+        // Find fallback board
+        const fallbackId = boards.find(b => b.id !== boardId)?.id || 'default';
+
+        set((state) => {
+            // Move notes to fallback (or delete? Moving is safer)
+            state.notes.forEach(n => {
+                if (n.boardId === boardId) {
+                    n.boardId = fallbackId;
+                }
+            });
+            
+            state.boards = state.boards.filter(b => b.id !== boardId);
+            if (state.currentBoardId === boardId) {
+                state.currentBoardId = fallbackId;
+                state.selectedIds = [];
+            }
+        });
+        get().saveToDisk();
+    },
+    
+    updateBoard: (boardId, updates) => {
+        set((state) => {
+            const board = state.boards.find(b => b.id === boardId);
+            if (board) {
+                Object.assign(board, updates);
+            }
+        });
+        get().saveToDisk();
+    },
+
+    setDockVisible: (visible) => set({ isDockVisible: visible }),
+
     addNote: (x, y) => {
       const newNote: Note = {
         id: crypto.randomUUID(),
+        boardId: get().currentBoardId, // Assign to current board
         title: '',
         content: '',
         x,
@@ -179,6 +280,7 @@ export const useStore = create<State>()(
     addNoteWithContent: (x, y, content) => {
       const newNote: Note = {
         id: crypto.randomUUID(),
+        boardId: get().currentBoardId, // Assign to current board
         title: '', // Optional: extract first line as title? For now empty.
         content: content,
         x,
@@ -211,7 +313,7 @@ export const useStore = create<State>()(
       const now = Date.now();
       if (now - lastWALSave > WAL_THROTTLE) {
         lastWALSave = now;
-        db.saveWAL({ notes: get().notes, config: get().config });
+        db.saveWAL({ notes: get().notes, config: get().config, boards: get().boards, currentBoardId: get().currentBoardId });
       }
       
       if (saveTimeout) clearTimeout(saveTimeout);
@@ -230,7 +332,7 @@ export const useStore = create<State>()(
       const now = Date.now();
       if (now - lastWALSave > WAL_THROTTLE) {
         lastWALSave = now;
-        db.saveWAL({ notes: get().notes, config: get().config });
+        db.saveWAL({ notes: get().notes, config: get().config, boards: get().boards, currentBoardId: get().currentBoardId });
       }
       
       if (saveTimeout) clearTimeout(saveTimeout);
@@ -430,11 +532,11 @@ export const useStore = create<State>()(
     },
 
     saveToDisk: async () => {
-      const { notes, config } = get();
+      const { notes, config, boards, currentBoardId } = get();
       set({ isSaving: true });
-      await db.saveWAL({ notes, config });
+      await db.saveWAL({ notes, config, boards, currentBoardId });
 
-      const jsonString = JSON.stringify({ notes, config }, null, 2);
+      const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
       try {
         await invoke('save_content', { filename: 'data.json', content: jsonString });
       } catch (err) {
