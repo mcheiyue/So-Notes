@@ -51,6 +51,11 @@ interface State {
   toggleCollapse: (id: string) => void;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number) => void;
   
+  // New Actions for v1.1.1
+  duplicateNote: (id: string) => void;
+  moveNoteToBoard: (id: string, targetBoardId: string) => void;
+  copyNoteToBoard: (id: string, targetBoardId: string) => void;
+
   // Selection Actions
   setSelectedIds: (ids: string[]) => void;
   toggleSelection: (id: string) => void;
@@ -226,12 +231,8 @@ export const useStore = create<State>()(
         const fallbackId = boards.find(b => b.id !== boardId)?.id || 'default';
 
         set((state) => {
-            // Move notes to fallback (or delete? Moving is safer)
-            state.notes.forEach(n => {
-                if (n.boardId === boardId) {
-                    n.boardId = fallbackId;
-                }
-            });
+            // Delete all notes in this board
+            state.notes = state.notes.filter(n => n.boardId !== boardId);
             
             state.boards = state.boards.filter(b => b.id !== boardId);
             if (state.currentBoardId === boardId) {
@@ -379,6 +380,9 @@ export const useStore = create<State>()(
             
             if (isGroupArrange) {
                 targetNotes = state.notes.filter(n => state.selectedIds.includes(n.id));
+            } else {
+                // Fix: Only arrange notes in the current board!
+                targetNotes = state.notes.filter(n => n.boardId === state.currentBoardId);
             }
 
             if (targetNotes.length === 0) return;
@@ -527,6 +531,70 @@ export const useStore = create<State>()(
         set((state) => {
             state.notes = state.notes.filter(note => !selectedIds.includes(note.id));
             state.selectedIds = [];
+        });
+        get().saveToDisk();
+    },
+
+    duplicateNote: (id) => {
+        set((state) => {
+            const note = state.notes.find(n => n.id === id);
+            if (note) {
+                const newNote: Note = {
+                    ...note,
+                    id: crypto.randomUUID(),
+                    x: note.x + 20,
+                    y: note.y + 20,
+                    z: state.config.maxZ + 1,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                    // Title copy? Yes.
+                };
+                state.notes.push(newNote);
+                state.config.maxZ += 1;
+                // Auto-select the new note? Maybe not, to avoid confusion.
+            }
+        });
+        get().saveToDisk();
+    },
+
+    moveNoteToBoard: (id, targetBoardId) => {
+        set((state) => {
+            const note = state.notes.find(n => n.id === id);
+            if (note) {
+                note.boardId = targetBoardId;
+                // Smart Placement: Center it or Offset?
+                // For now, let's just keep position but offset slightly to imply movement if they switch back
+                // Or just keep it. "Stacked" issue is solved by user arranging.
+                // But let's add a small random jitter to prevent perfect stacking if bulk moving.
+                note.x += Math.floor(Math.random() * 20);
+                note.y += Math.floor(Math.random() * 20);
+                
+                // CRITICAL: Remove from selection if moved away
+                state.selectedIds = state.selectedIds.filter(selId => selId !== id);
+            }
+        });
+        get().saveToDisk();
+    },
+
+    copyNoteToBoard: (id, targetBoardId) => {
+        set((state) => {
+            const note = state.notes.find(n => n.id === id);
+            if (note) {
+                const newNote: Note = {
+                    ...note,
+                    id: crypto.randomUUID(),
+                    boardId: targetBoardId,
+                    z: state.config.maxZ + 1,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                };
+                // Jitter for target board
+                newNote.x += Math.floor(Math.random() * 20);
+                newNote.y += Math.floor(Math.random() * 20);
+                
+                state.notes.push(newNote);
+                state.config.maxZ += 1;
+            }
         });
         get().saveToDisk();
     },

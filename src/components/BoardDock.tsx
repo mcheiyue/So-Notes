@@ -5,11 +5,17 @@ import { Plus } from "lucide-react";
 import { BOARD_ICONS } from "../store/types";
 
 export const BoardDock = () => {
-  const { boards, currentBoardId, switchBoard, createBoard, deleteBoard, isDockVisible, setDockVisible } = useStore();
+  const { boards, notes, currentBoardId, switchBoard, createBoard, deleteBoard, updateBoard, isDockVisible, setDockVisible } = useStore();
   const [isInputMode, setIsInputMode] = useState(false);
   const [newBoardName, setNewBoardName] = useState("");
   const [contextMenuBoard, setContextMenuBoard] = useState<{ id: string; name: string; x: number; y: number } | null>(null);
+  
+  // Delete Confirmation State
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; count: number } | null>(null);
+  const [editingBoardId, setEditingBoardId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   // Focus input when adding mode starts
   useEffect(() => {
@@ -18,14 +24,45 @@ export const BoardDock = () => {
     }
   }, [isInputMode]);
 
+  // Focus rename input
+  useEffect(() => {
+    if (editingBoardId && editInputRef.current) {
+        editInputRef.current.focus();
+        editInputRef.current.select();
+    }
+  }, [editingBoardId]);
+
   // Reset state when dock closes
   useEffect(() => {
     if (!isDockVisible) {
       setIsInputMode(false);
       setNewBoardName("");
       setContextMenuBoard(null);
+      setEditingBoardId(null);
+      setDeleteConfirm(null);
     }
   }, [isDockVisible]);
+
+  const handleDeleteClick = () => {
+      if (!contextMenuBoard) return;
+      
+      if (deleteConfirm?.id === contextMenuBoard.id) {
+          // Second click: Confirm Delete
+          deleteBoard(contextMenuBoard.id);
+          setContextMenuBoard(null);
+          setDeleteConfirm(null);
+      } else {
+          // First click: Check count
+          const count = notes.filter(n => n.boardId === contextMenuBoard.id).length;
+          if (count > 0) {
+              setDeleteConfirm({ id: contextMenuBoard.id, count });
+          } else {
+              // No notes, delete immediately
+              deleteBoard(contextMenuBoard.id);
+              setContextMenuBoard(null);
+          }
+      }
+  };
 
   const handleCreate = () => {
     if (newBoardName.trim()) {
@@ -40,6 +77,22 @@ export const BoardDock = () => {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleCreate();
     if (e.key === 'Escape') setIsInputMode(false);
+  };
+
+  const handleRenameSave = () => {
+      if (editingBoardId && editName.trim()) {
+          updateBoard(editingBoardId, { name: editName.trim() });
+      }
+      setEditingBoardId(null);
+      setEditName("");
+  };
+
+  const handleRenameKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') handleRenameSave();
+      if (e.key === 'Escape') {
+          setEditingBoardId(null);
+          setEditName("");
+      }
   };
 
   if (!isDockVisible) return null;
@@ -69,14 +122,31 @@ export const BoardDock = () => {
                 <div className="px-3 py-2 text-xs text-zinc-500 border-b border-zinc-100 dark:border-zinc-700 font-medium bg-zinc-50/50 dark:bg-zinc-800/50">
                     {contextMenuBoard.name}
                 </div>
+                
                 <button
                     onClick={() => {
-                        deleteBoard(contextMenuBoard.id);
+                        setEditingBoardId(contextMenuBoard.id);
+                        setEditName(contextMenuBoard.name);
                         setContextMenuBoard(null);
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors border-b border-zinc-50 dark:border-zinc-700/50"
                 >
-                    <span>🗑️</span> 删除看板
+                    <span>✏️</span> 重命名
+                </button>
+
+                <button
+                    onClick={handleDeleteClick}
+                    className={cn(
+                        "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors rounded-b-lg",
+                        deleteConfirm?.id === contextMenuBoard.id
+                            ? "bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
+                            : "text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    )}
+                >
+                    <span>🗑️</span> 
+                    {deleteConfirm?.id === contextMenuBoard.id 
+                        ? `确认删除? (${deleteConfirm.count}便签)` 
+                        : '删除看板'}
                 </button>
             </div>
         )}
@@ -118,12 +188,37 @@ export const BoardDock = () => {
         >
           {boards.map((board) => {
             const isActive = currentBoardId === board.id;
+            const isEditing = editingBoardId === board.id;
+
+            if (isEditing) {
+                return (
+                    <div 
+                        key={board.id}
+                        className="w-24 px-1 flex items-center justify-center"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <input
+                            ref={editInputRef}
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            onKeyDown={handleRenameKeyDown}
+                            onBlur={handleRenameSave}
+                            className="w-full bg-zinc-100 dark:bg-zinc-800 border-none outline-none text-xs px-2 py-1 rounded text-center text-zinc-900 dark:text-zinc-100 font-medium shadow-inner"
+                        />
+                    </div>
+                );
+            }
+
             return (
               <button
                 key={board.id}
                 onClick={() => {
                    switchBoard(board.id);
                    setContextMenuBoard(null);
+                }}
+                onDoubleClick={() => {
+                    setEditingBoardId(board.id);
+                    setEditName(board.name);
                 }}
                 onContextMenu={(e) => {
                     e.preventDefault();

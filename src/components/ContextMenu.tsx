@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
+import { ChevronRight } from 'lucide-react';
 
 export const ContextMenu: React.FC = () => {
   const { 
@@ -19,17 +20,37 @@ export const ContextMenu: React.FC = () => {
     arrangeNotes,
     setDockVisible,
     boards,
-    currentBoardId
+    currentBoardId,
+    duplicateNote,
+    moveNoteToBoard,
+    copyNoteToBoard
   } = useStore();
   const menuRef = useRef<HTMLDivElement>(null);
   const [hasClipboardText, setHasClipboardText] = useState(false);
   const [confirmArrange, setConfirmArrange] = useState(false);
+  const [activeSubmenu, setActiveSubmenu] = useState<'MOVE' | 'COPY' | null>(null);
+  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSubmenuEnter = (menu: 'MOVE' | 'COPY') => {
+      if (closeTimeoutRef.current) {
+          clearTimeout(closeTimeoutRef.current);
+          closeTimeoutRef.current = null;
+      }
+      setActiveSubmenu(menu);
+  };
+
+  const handleSubmenuLeave = () => {
+      closeTimeoutRef.current = setTimeout(() => {
+          setActiveSubmenu(null);
+      }, 300); // 300ms delay to allow diagonal movement
+  };
 
   // Check clipboard content when menu opens
   useEffect(() => {
     if (contextMenu.isOpen) {
-      // Reset confirmation state on open
+      // Reset states on open
       setConfirmArrange(false);
+      setActiveSubmenu(null);
       
       if (contextMenu.type === 'CANVAS') {
         readText().then(text => {
@@ -196,6 +217,88 @@ export const ContextMenu: React.FC = () => {
             ))}
           </div>
           
+          <div className="h-px bg-gray-200 my-1" />
+          
+          {/* Duplicate */}
+          {!isGroupContext && (
+             <div
+                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                onClick={() => handleAction(() => duplicateNote(contextMenu.targetId!))}
+            >
+                <span>📄</span> 创建副本
+            </div>
+          )}
+
+          {/* Move To Board */}
+          {!isGroupContext && boards.length > 1 && (
+            <div 
+                className="relative"
+                onMouseEnter={() => handleSubmenuEnter('MOVE')}
+                onMouseLeave={handleSubmenuLeave}
+            >
+                <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span>➡️</span> 移动到...
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-gray-400" />
+                </div>
+                
+                {/* Submenu */}
+                {activeSubmenu === 'MOVE' && (
+                    <div 
+                        className="absolute left-full top-0 ml-2 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[140px] z-[10000]"
+                        onMouseEnter={() => handleSubmenuEnter('MOVE')}
+                        onMouseLeave={handleSubmenuLeave}
+                    >
+                        {boards.filter(b => b.id !== currentBoardId).map(b => (
+                            <div
+                                key={b.id}
+                                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                                onClick={() => handleAction(() => moveNoteToBoard(contextMenu.targetId!, b.id))}
+                            >
+                                <span className="text-xs">{b.icon}</span> {b.name}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+          )}
+
+          {/* Copy To Board */}
+          {!isGroupContext && boards.length > 1 && (
+            <div 
+                className="relative"
+                onMouseEnter={() => handleSubmenuEnter('COPY')}
+                onMouseLeave={handleSubmenuLeave}
+            >
+                <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span>⤴️</span> 复制到...
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-gray-400" />
+                </div>
+                
+                {/* Submenu */}
+                {activeSubmenu === 'COPY' && (
+                    <div 
+                        className="absolute left-full top-0 ml-2 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[140px] z-[10000]"
+                        onMouseEnter={() => handleSubmenuEnter('COPY')}
+                        onMouseLeave={handleSubmenuLeave}
+                    >
+                        {boards.filter(b => b.id !== currentBoardId).map(b => (
+                            <div
+                                key={b.id}
+                                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                                onClick={() => handleAction(() => copyNoteToBoard(contextMenu.targetId!, b.id))}
+                            >
+                                <span className="text-xs">{b.icon}</span> {b.name}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+          )}
+
           <div className="h-px bg-gray-200 my-1" />
           
           <div
