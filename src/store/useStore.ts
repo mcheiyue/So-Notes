@@ -51,10 +51,13 @@ interface State {
   toggleCollapse: (id: string) => void;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number) => void;
   
-  // New Actions for v1.1.1
+  // New Actions for v1.1.1 & v1.1.2
   duplicateNote: (id: string) => void;
   moveNoteToBoard: (id: string, targetBoardId: string) => void;
   copyNoteToBoard: (id: string, targetBoardId: string) => void;
+  moveSelectedNotesToBoard: (targetBoardId: string) => void;
+  copySelectedNotesToBoard: (targetBoardId: string) => void;
+  reorderBoard: (boardId: string, direction: 'left' | 'right') => void;
 
   // Selection Actions
   setSelectedIds: (ids: string[]) => void;
@@ -595,6 +598,75 @@ export const useStore = create<State>()(
                 state.notes.push(newNote);
                 state.config.maxZ += 1;
             }
+        });
+        get().saveToDisk();
+    },
+
+    moveSelectedNotesToBoard: (targetBoardId) => {
+        set((state) => {
+            const { selectedIds } = state;
+            if (selectedIds.length === 0) return;
+
+            let movedCount = 0;
+            state.notes.forEach(note => {
+                if (selectedIds.includes(note.id)) {
+                    note.boardId = targetBoardId;
+                    // Jitter to prevent perfect stacking
+                    note.x += Math.floor(Math.random() * 30); 
+                    note.y += Math.floor(Math.random() * 30);
+                    movedCount++;
+                }
+            });
+
+            if (movedCount > 0) {
+                state.selectedIds = []; // Clear selection after move
+            }
+        });
+        get().saveToDisk();
+    },
+
+    copySelectedNotesToBoard: (targetBoardId) => {
+        set((state) => {
+            const { selectedIds } = state;
+            if (selectedIds.length === 0) return;
+
+            selectedIds.forEach(id => {
+                const note = state.notes.find(n => n.id === id);
+                if (note) {
+                    const newNote: Note = {
+                        ...note,
+                        id: crypto.randomUUID(),
+                        boardId: targetBoardId,
+                        z: state.config.maxZ + 1,
+                        createdAt: Date.now(),
+                        updatedAt: Date.now(),
+                    };
+                    // Jitter
+                    newNote.x += Math.floor(Math.random() * 30);
+                    newNote.y += Math.floor(Math.random() * 30);
+                    
+                    state.notes.push(newNote);
+                    state.config.maxZ += 1;
+                }
+            });
+        });
+        get().saveToDisk();
+    },
+
+    reorderBoard: (boardId, direction) => {
+        set((state) => {
+            const index = state.boards.findIndex(b => b.id === boardId);
+            if (index === -1) return;
+
+            const newIndex = direction === 'left' ? index - 1 : index + 1;
+            
+            // Boundary Check
+            if (newIndex < 0 || newIndex >= state.boards.length) return;
+
+            // Swap
+            const temp = state.boards[index];
+            state.boards[index] = state.boards[newIndex];
+            state.boards[newIndex] = temp;
         });
         get().saveToDisk();
     },

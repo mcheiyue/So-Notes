@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useStore } from "./store/useStore";
 import { Canvas } from "./components/Canvas";
 import { BoardDock } from "./components/BoardDock";
 import { PinFab } from "./components/PinFab";
@@ -54,12 +55,32 @@ function App() {
   return (
     <div className="w-full h-screen fixed inset-0 overflow-hidden">
        <Canvas />
+       
        {/* UI Overlay Components - Moved out of Canvas to avoid filter/transform issues */}
+       
+       {/* Board Indicator (Top Left) */}
+       <div className="fixed top-8 left-4 pointer-events-none z-[50]">
+          <BoardBadge />
+       </div>
+
        <BoardDock />
        <PinFab />
        <ContextMenu />
     </div>
   );
 }
+
+// Extracted for cleaner re-renders
+const BoardBadge = () => {
+    const { boards, currentBoardId } = useStore();
+    const board = boards.find(b => b.id === currentBoardId);
+    
+    return (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-black/5 dark:bg-white/5 rounded-lg text-xs font-medium text-black/30 dark:text-white/30 backdrop-blur-sm transition-all duration-300">
+            <span>{board?.icon || '📌'}</span>
+            <span>{board?.name || 'Main'}</span>
+        </div>
+    );
+};
 
 export default App;

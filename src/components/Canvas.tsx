@@ -234,13 +234,7 @@ export const Canvas: React.FC = () => {
            }}
       />
       
-      {/* Board Badge (Current Context) */}
-      <div className="absolute top-8 left-4 pointer-events-none z-0">
-         <div className="flex items-center gap-2 px-3 py-1.5 bg-black/5 dark:bg-white/5 rounded-lg text-xs font-medium text-black/30 dark:text-white/30 backdrop-blur-sm">
-            <span>{useStore.getState().boards.find(b => b.id === currentBoardId)?.icon || '📌'}</span>
-            <span>{useStore.getState().boards.find(b => b.id === currentBoardId)?.name || 'Main'}</span>
-         </div>
-      </div>
+      {/* Board Badge moved to App.tsx for better reactivity */}
 
       <div 
           data-tauri-drag-region 

@@ -23,11 +23,14 @@ export const ContextMenu: React.FC = () => {
     currentBoardId,
     duplicateNote,
     moveNoteToBoard,
-    copyNoteToBoard
+    copyNoteToBoard,
+    moveSelectedNotesToBoard,
+    copySelectedNotesToBoard
   } = useStore();
   const menuRef = useRef<HTMLDivElement>(null);
   const [hasClipboardText, setHasClipboardText] = useState(false);
   const [confirmArrange, setConfirmArrange] = useState(false);
+  const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<'MOVE' | 'COPY' | null>(null);
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -50,6 +53,7 @@ export const ContextMenu: React.FC = () => {
     if (contextMenu.isOpen) {
       // Reset states on open
       setConfirmArrange(false);
+      setConfirmDeleteGroup(false);
       setActiveSubmenu(null);
       
       if (contextMenu.type === 'CANVAS') {
@@ -230,7 +234,7 @@ export const ContextMenu: React.FC = () => {
           )}
 
           {/* Move To Board */}
-          {!isGroupContext && boards.length > 1 && (
+          {boards.length > 1 && (
             <div 
                 className="relative"
                 onMouseEnter={() => handleSubmenuEnter('MOVE')}
@@ -238,7 +242,7 @@ export const ContextMenu: React.FC = () => {
             >
                 <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        <span>➡️</span> 移动到...
+                        <span>➡️</span> {isGroupContext ? '批量移动到...' : '移动到...'}
                     </div>
                     <ChevronRight className="w-4 h-4 text-gray-400" />
                 </div>
@@ -254,7 +258,13 @@ export const ContextMenu: React.FC = () => {
                             <div
                                 key={b.id}
                                 className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
-                                onClick={() => handleAction(() => moveNoteToBoard(contextMenu.targetId!, b.id))}
+                                onClick={() => handleAction(() => {
+                                    if (isGroupContext) {
+                                        moveSelectedNotesToBoard(b.id);
+                                    } else {
+                                        moveNoteToBoard(contextMenu.targetId!, b.id);
+                                    }
+                                })}
                             >
                                 <span className="text-xs">{b.icon}</span> {b.name}
                             </div>
@@ -265,7 +275,7 @@ export const ContextMenu: React.FC = () => {
           )}
 
           {/* Copy To Board */}
-          {!isGroupContext && boards.length > 1 && (
+          {boards.length > 1 && (
             <div 
                 className="relative"
                 onMouseEnter={() => handleSubmenuEnter('COPY')}
@@ -273,7 +283,7 @@ export const ContextMenu: React.FC = () => {
             >
                 <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        <span>⤴️</span> 复制到...
+                        <span>⤴️</span> {isGroupContext ? '批量复制到...' : '复制到...'}
                     </div>
                     <ChevronRight className="w-4 h-4 text-gray-400" />
                 </div>
@@ -289,7 +299,13 @@ export const ContextMenu: React.FC = () => {
                             <div
                                 key={b.id}
                                 className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
-                                onClick={() => handleAction(() => copyNoteToBoard(contextMenu.targetId!, b.id))}
+                                onClick={() => handleAction(() => {
+                                    if (isGroupContext) {
+                                        copySelectedNotesToBoard(b.id);
+                                    } else {
+                                        copyNoteToBoard(contextMenu.targetId!, b.id);
+                                    }
+                                })}
                             >
                                 <span className="text-xs">{b.icon}</span> {b.name}
                             </div>
@@ -311,17 +327,27 @@ export const ContextMenu: React.FC = () => {
           <div className="h-px bg-gray-200 my-1" />
 
           <div
-            className="px-4 py-2 hover:bg-red-50 cursor-pointer text-sm text-red-600 flex items-center gap-2"
-            onClick={() => handleAction(() => {
+            className={cn(
+                "px-4 py-2 cursor-pointer text-sm flex items-center gap-2 transition-colors",
+                (isGroupContext && confirmDeleteGroup) ? "bg-red-50 text-red-600 hover:bg-red-100 font-medium" : "hover:bg-red-50 text-red-600"
+            )}
+            onClick={(e) => {
                 if (isGroupContext) {
-                    deleteSelectedNotes();
+                    e.stopPropagation();
+                    if (!confirmDeleteGroup) {
+                        setConfirmDeleteGroup(true);
+                    } else {
+                        handleAction(() => deleteSelectedNotes());
+                    }
                 } else {
-                    deleteNote(contextMenu.targetId!);
+                    handleAction(() => deleteNote(contextMenu.targetId!));
                 }
-            })}
+            }}
           >
             <span>🗑️</span> 
-            {isGroupContext ? `批量删除 (${selectedIds.length})` : '删除'}
+            {isGroupContext 
+                ? (confirmDeleteGroup ? `确认删除 ${selectedIds.length} 个便签?` : `批量删除 (${selectedIds.length})`)
+                : '删除'}
           </div>
         </>
       )}

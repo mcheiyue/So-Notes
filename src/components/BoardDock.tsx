@@ -5,7 +5,7 @@ import { Plus } from "lucide-react";
 import { BOARD_ICONS } from "../store/types";
 
 export const BoardDock = () => {
-  const { boards, notes, currentBoardId, switchBoard, createBoard, deleteBoard, updateBoard, isDockVisible, setDockVisible } = useStore();
+  const { boards, notes, currentBoardId, switchBoard, createBoard, deleteBoard, updateBoard, isDockVisible, setDockVisible, reorderBoard } = useStore();
   const [isInputMode, setIsInputMode] = useState(false);
   const [newBoardName, setNewBoardName] = useState("");
   const [contextMenuBoard, setContextMenuBoard] = useState<{ id: string; name: string; x: number; y: number } | null>(null);
@@ -13,6 +13,7 @@ export const BoardDock = () => {
   // Delete Confirmation State
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; count: number } | null>(null);
   const [editingBoardId, setEditingBoardId] = useState<string | null>(null);
+  const [reorderId, setReorderId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -32,6 +33,27 @@ export const BoardDock = () => {
     }
   }, [editingBoardId]);
 
+  // Reorder Keyboard Logic
+  useEffect(() => {
+    if (!reorderId) return;
+
+    const handleReorderKey = (e: KeyboardEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (e.key === 'ArrowLeft') {
+            reorderBoard(reorderId, 'left');
+        } else if (e.key === 'ArrowRight') {
+            reorderBoard(reorderId, 'right');
+        } else if (e.key === 'Enter' || e.key === 'Escape') {
+            setReorderId(null);
+        }
+    };
+
+    window.addEventListener('keydown', handleReorderKey);
+    return () => window.removeEventListener('keydown', handleReorderKey);
+  }, [reorderId, reorderBoard]);
+
   // Reset state when dock closes
   useEffect(() => {
     if (!isDockVisible) {
@@ -40,6 +62,7 @@ export const BoardDock = () => {
       setContextMenuBoard(null);
       setEditingBoardId(null);
       setDeleteConfirm(null);
+      setReorderId(null);
     }
   }, [isDockVisible]);
 
@@ -135,6 +158,16 @@ export const BoardDock = () => {
                 </button>
 
                 <button
+                    onClick={() => {
+                        setReorderId(contextMenuBoard.id);
+                        setContextMenuBoard(null);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors border-b border-zinc-50 dark:border-zinc-700/50"
+                >
+                    <span>↔️</span> 调整顺序
+                </button>
+
+                <button
                     onClick={handleDeleteClick}
                     className={cn(
                         "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors rounded-b-lg",
@@ -189,6 +222,7 @@ export const BoardDock = () => {
           {boards.map((board) => {
             const isActive = currentBoardId === board.id;
             const isEditing = editingBoardId === board.id;
+            const isReordering = reorderId === board.id;
 
             if (isEditing) {
                 return (
@@ -213,19 +247,23 @@ export const BoardDock = () => {
               <button
                 key={board.id}
                 onClick={() => {
+                   if (isReordering) {
+                       setReorderId(null); // Click to confirm
+                       return;
+                   }
                    switchBoard(board.id);
                    setContextMenuBoard(null);
                 }}
                 onDoubleClick={() => {
+                    if (isReordering) return;
                     setEditingBoardId(board.id);
                     setEditName(board.name);
                 }}
                 onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
+                    if (isReordering) return;
                     if (board.id !== 'default') {
-                        // Calculate relative position? Or just show central menu?
-                        // Central menu is safer.
                         setContextMenuBoard({ id: board.id, name: board.name, x: 0, y: 0 });
                     }
                 }}
@@ -233,12 +271,16 @@ export const BoardDock = () => {
                   "relative group flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200",
                   isActive 
                     ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900" 
-                    : "text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-200"
+                    : "text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-200",
+                  isReordering && "ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 z-10 scale-110 animate-pulse"
                 )}
               >
                 {/* Custom Tooltip */}
-                <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-zinc-800 text-zinc-100 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-sm z-[100000]">
-                    {board.name}
+                <div className={cn(
+                    "absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-zinc-800 text-zinc-100 text-xs rounded transition-opacity pointer-events-none whitespace-nowrap shadow-sm z-[100000]",
+                    isReordering ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                )}>
+                    {isReordering ? "⬅️ 移动 ➡️" : board.name}
                     {/* Tiny triangle */}
                     <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-zinc-800" />
                 </div>

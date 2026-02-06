@@ -7,9 +7,10 @@ interface TooltipProps {
   children: React.ReactNode;
   side?: 'top' | 'bottom' | 'left' | 'right';
   delay?: number;
+  disabled?: boolean;
 }
 
-export function Tooltip({ content, children, side = 'top', delay = 0 }: TooltipProps) {
+export function Tooltip({ content, children, side = 'top', delay = 0, disabled = false }: TooltipProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -49,7 +50,15 @@ export function Tooltip({ content, children, side = 'top', delay = 0 }: TooltipP
     setCoords({ top, left });
   };
 
+  useEffect(() => {
+    if (disabled && isVisible) {
+        setIsVisible(false);
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    }
+  }, [disabled, isVisible]);
+
   const handleMouseEnter = () => {
+    if (disabled) return;
     calculatePosition(); // Recalculate on enter
     timeoutRef.current = window.setTimeout(() => {
       setIsVisible(true);

@@ -11,16 +11,37 @@ interface NoteCardProps {
   scale: number;
 }
 
-export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
-  const { updateNote, updateTitle, moveNote, moveSelectedNotes, deleteNote, bringToFront, changeColor, toggleCollapse, stickyDrag, setContextMenu, selectedIds, toggleSelection } = useStore();
+export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) => {
+  // Atomic Selectors to prevent unnecessary re-renders
+  const updateNote = useStore(state => state.updateNote);
+  const updateTitle = useStore(state => state.updateTitle);
+  const moveNote = useStore(state => state.moveNote);
+  const moveSelectedNotes = useStore(state => state.moveSelectedNotes);
+  const deleteNote = useStore(state => state.deleteNote);
+  const bringToFront = useStore(state => state.bringToFront);
+  const changeColor = useStore(state => state.changeColor);
+  const toggleCollapse = useStore(state => state.toggleCollapse);
+  const setContextMenu = useStore(state => state.setContextMenu);
+  const toggleSelection = useStore(state => state.toggleSelection);
+  const setSelectedIds = useStore(state => state.setSelectedIds);
+  
+  // Specific State Selectors
+  const isStickyDragging = useStore(state => state.stickyDrag.id === note.id);
+  const isSelected = useStore(state => state.selectedIds.includes(note.id));
+  const isGroupSelection = useStore(state => state.selectedIds.length > 1);
+
+  // We need to access full store state occasionally for group logic, but we do that via useStore.getState() in handlers.
+  // The above hooks ensure this component ONLY re-renders when:
+  // 1. Props change (note, scale) - Handled by React.memo
+  // 2. This specific note's drag state changes
+  // 3. This specific note's selection state changes
+  // 4. Group selection mode changes (affects drag behavior)
+
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  
-  const isStickyDragging = stickyDrag.id === note.id;
-  const isSelected = selectedIds.includes(note.id);
   
   const displayTitle = note.title || "未命名便签";
 
@@ -130,7 +151,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
     // 3. Group Distributed Clamp (Other Notes)
     // Since handleDrag already moved them to their raw positions (potentially out of bounds),
     // we now check and clamp them one by one.
-    if (isSelected && selectedIds.length > 1) {
+    if (isSelected && isGroupSelection) {
         // We need to access the LATEST state because handleDrag updated it.
         const state = useStore.getState();
         
@@ -157,7 +178,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
   };
 
   const handleDrag = (_e: DraggableEvent, data: DraggableData) => {
-      if (isSelected && selectedIds.length > 1) {
+      if (isSelected && isGroupSelection) {
           const deltaX = data.deltaX;
           const deltaY = data.deltaY;
           moveSelectedNotes(deltaX, deltaY, note.id);
@@ -174,7 +195,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
     // Ideally, clicking another note should probably DROP the sticky note (handled by Canvas global click?)
     // But since this is Capture phase, we run first.
     // If we do nothing, event bubbles. Canvas onClick might handle it.
-    if (stickyDrag.id) return;
+    if (useStore.getState().stickyDrag.id) return;
 
     // Selection Logic
     if (mouseEvent.ctrlKey || mouseEvent.shiftKey) {
@@ -184,7 +205,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
     }
 
     if (!isSelected) {
-        useStore.getState().setSelectedIds([note.id]);
+        setSelectedIds([note.id]);
     }
     
     bringToFront(note.id);
@@ -237,7 +258,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
           "border border-black/5",
           "group",
           isStickyDragging && "shadow-2xl scale-[1.02] cursor-move z-[9999]",
-          isSelected && !isStickyDragging && (selectedIds.length === 1 ? "border-2 border-white/80 shadow-sm" : "ring-2 ring-blue-500/50 border-blue-500/50")
+          isSelected && !isStickyDragging && (isGroupSelection ? "ring-2 ring-blue-500/50 border-blue-500/50" : "border-2 border-white/80 shadow-sm")
         )}
         style={{ 
             backgroundColor: note.color,
@@ -257,7 +278,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
             onDoubleClick={handleDoubleClick}
         >
           {/* Left: Palette */}
-          <Tooltip content="切换颜色">
+          <Tooltip content="切换颜色" disabled={isStickyDragging}>
             <button
               onClick={cycleColor}
               className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70 flex-shrink-0"
@@ -269,7 +290,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
           {/* Center: Title (Collapsed) or Grip (Expanded) */}
           <div className="flex-1 flex justify-center cursor-grab active:cursor-grabbing h-full items-center px-2 overflow-hidden">
              {note.collapsed ? (
-                 <Tooltip content="双击展开" delay={500}>
+                 <Tooltip content="双击展开" delay={500} disabled={isStickyDragging}>
                     <span 
                         className={cn(
                             "text-sm font-bold truncate select-none w-full text-center block",
@@ -280,14 +301,14 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
                     </span>
                  </Tooltip>
              ) : (
-                <Tooltip content="双击折叠 / 拖拽移动" delay={1000}>
+                <Tooltip content="双击折叠 / 拖拽移动" delay={1000} disabled={isStickyDragging}>
                     <GripHorizontal className="w-4 h-4 text-black/20" />
                 </Tooltip>
              )}
           </div>
 
           {/* Right: Delete */}
-          <Tooltip content="删除便签">
+          <Tooltip content="删除便签" disabled={isStickyDragging}>
             <button
               onClick={(e) => {
                   e.stopPropagation();
@@ -374,4 +395,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, scale }) => {
       </div>
     </Draggable>
   );
-};
+});
+
+NoteCard.displayName = "NoteCard";
