@@ -32,6 +32,7 @@ export interface Note {
   collapsed?: boolean;
   createdAt: number;
   updatedAt: number;
+  deletedAt?: number | null; // Soft delete timestamp. If present, note is in Trash.
 }
 
 export interface Board {
@@ -47,6 +48,8 @@ export interface AppConfig {
   maximized?: boolean;
 }
 
+export type ViewMode = 'BOARD' | 'TRASH';
+
 export interface ContextMenuState {
   isOpen: boolean;
   x: number;
@@ -61,6 +64,7 @@ export interface StorageData {
   currentBoardId: string;
   config: AppConfig;
 }
+
 
 export const DEFAULT_BOARD: Board = {
   id: 'default',

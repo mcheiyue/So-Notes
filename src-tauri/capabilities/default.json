@@ -1,1 +1,3 @@
-{"identifier":"default","description":"Default permissions","windows":["*"],"permissions":["core:default","clipboard-manager:allow-read-text","clipboard-manager:allow-write-text","core:window:allow-start-dragging"]}
+{"identifier":"default","description":"Default permissions","windows":["*"],"permissions":["core:default","clipboard-manager:allow-read-text","clipboard-manager:allow-write-text","core:window:allow-start-dragging",    "fs:allow-write-text-file",
+    "fs:allow-read-text-file",
+    "dialog:allow-save","dialog:allow-open"]}

@@ -251,12 +251,12 @@ export const Canvas: React.FC = () => {
       />
       
       {notes
-        .filter(note => note.boardId === currentBoardId) // Filter by current board
+        .filter(note => note.boardId === currentBoardId && !note.deletedAt) // Filter by current board and not deleted
         .map((note) => (
-        <NoteCard key={note.id} note={note} scale={scale} /> 
+        <NoteCard key={note.id} id={note.id} scale={scale} /> 
       ))}
       
-      {notes.filter(n => n.boardId === currentBoardId).length === 0 && (
+      {notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
           <p className="text-lg font-medium text-black/30">
             {currentBoardId === 'default' ? '双击空白处新建便签' : '当前看板为空'}

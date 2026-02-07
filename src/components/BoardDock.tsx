@@ -1,12 +1,22 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
-import { Plus } from "lucide-react";
-import { BOARD_ICONS } from "../store/types";
+import { Plus, Trash2, Settings, Download, Upload, Share } from "lucide-react";
+
+const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 
 export const BoardDock = () => {
-  const { boards, notes, currentBoardId, switchBoard, createBoard, deleteBoard, updateBoard, isDockVisible, setDockVisible, reorderBoard } = useStore();
+  const store = useStore();
+  const { 
+    boards, notes, currentBoardId, 
+    switchBoard, createBoard, deleteBoard, updateBoard, reorderBoard,
+    isDockVisible, setDockVisible, 
+    viewMode, setViewMode, 
+    clearSelection,
+    exportAll, importFromFile 
+  } = store;
   const [isInputMode, setIsInputMode] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [newBoardName, setNewBoardName] = useState("");
   const [contextMenuBoard, setContextMenuBoard] = useState<{ id: string; name: string; x: number; y: number } | null>(null);
   
@@ -63,8 +73,19 @@ export const BoardDock = () => {
       setEditingBoardId(null);
       setDeleteConfirm(null);
       setReorderId(null);
+      setShowSettings(false);
     }
   }, [isDockVisible]);
+
+  const onExportClick = async () => {
+    await exportAll();
+    setShowSettings(false);
+  };
+
+  const onImportClick = async () => {
+    await importFromFile();
+    setShowSettings(false);
+  };
 
   const handleDeleteClick = () => {
       if (!contextMenuBoard) return;
@@ -118,16 +139,35 @@ export const BoardDock = () => {
       }
   };
 
-  if (!isDockVisible) return null;
+  if (!isDockVisible && viewMode !== 'TRASH') return null;
+
+  // Only show overlay when:
+  // 1. In BOARD mode and dock is visible (to click-away close dock)
+  // 2. OR any context menu/input is open (to click-away close menu)
+  const showOverlay = (isDockVisible && viewMode === 'BOARD') || contextMenuBoard || isInputMode || showSettings;
 
   return (
     <>
       {/* 1. Full-screen transparent overlay for "Click outside to close" */}
-      <div 
-        className="fixed inset-0 z-[99998] bg-transparent"
-        onClick={() => { setDockVisible(false); setContextMenuBoard(null); }}
-        onContextMenu={(e) => { e.preventDefault(); setDockVisible(false); setContextMenuBoard(null); }} 
-      />
+      {showOverlay && (
+        <div 
+          className="fixed inset-0 z-[99998] bg-transparent"
+          onClick={() => { 
+            if (contextMenuBoard || isInputMode || showSettings) {
+              setContextMenuBoard(null);
+              setIsInputMode(false);
+              setShowSettings(false);
+            } else {
+              setDockVisible(false); 
+            }
+          }}
+          onContextMenu={(e) => { 
+            e.preventDefault(); 
+            setContextMenuBoard(null); 
+            if (!contextMenuBoard && !isInputMode && !showSettings) setDockVisible(false); 
+          }} 
+        />
+      )}
 
       {/* 2. Dock Container - Centered using Flexbox to avoid transform conflicts */}
       <div className="fixed bottom-8 left-0 w-full z-[99999] pointer-events-none flex justify-center">
@@ -137,10 +177,7 @@ export const BoardDock = () => {
         {contextMenuBoard && (
             <div 
                 className="absolute bottom-full mb-2 bg-white dark:bg-zinc-800 rounded-lg shadow-xl border border-black/5 dark:border-white/10 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom"
-                style={{ left: contextMenuBoard.x }} // Position relative to dock center? No, let's just center it above dock for simplicity or use fixed logic?
-                // Actually, positioning relative to the clicked item is hard in this structure.
-                // Let's simplify: Display it centrally above the dock or use a fixed overlay.
-                // Better: Just center it above the dock stack.
+                style={{ left: contextMenuBoard.x }}
             >
                 <div className="px-3 py-2 text-xs text-zinc-500 border-b border-zinc-100 dark:border-zinc-700 font-medium bg-zinc-50/50 dark:bg-zinc-800/50">
                     {contextMenuBoard.name}
@@ -159,12 +196,21 @@ export const BoardDock = () => {
 
                 <button
                     onClick={() => {
-                        setReorderId(contextMenuBoard.id);
-                        setContextMenuBoard(null);
+                      // Export this specific board (using current logic, we need to temporarily switch or just export by ID)
+                      // Since store only has exportCurrentBoard, we might need to rely on that or add exportBoard(id).
+                      // But for now, let's just use exportCurrentBoard if it matches, or disable it?
+                      // Actually, the store has exportBoard(id). Let's use that if we can access it.
+                      // But we can't easily access non-exported actions from here without exposing them.
+                      // Let's stick to what we have: if right-clicked board is current, we can export.
+                      // If not, we switch then export? That's intrusive.
+                      // Let's just remove export from here for simplicity, or keep it if it's the current board.
+                      // Wait, I previously added exportCurrentBoard to Context Menu.
+                      // Let's REMOVE it from here to simplify. Right click = Manage Board (Rename/Delete).
+                      // Exporting is a "Data" operation, best in Settings or specific menu.
+                      setContextMenuBoard(null);
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors border-b border-zinc-50 dark:border-zinc-700/50"
+                    className="hidden" 
                 >
-                    <span>↔️</span> 调整顺序
                 </button>
 
                 <button
@@ -180,6 +226,47 @@ export const BoardDock = () => {
                     {deleteConfirm?.id === contextMenuBoard.id 
                         ? `确认删除? (${deleteConfirm.count}便签)` 
                         : '删除看板'}
+                </button>
+            </div>
+        )}
+
+        {/* Settings Menu */}
+        {showSettings && (
+            <div 
+                className="absolute bottom-full mb-2 bg-white dark:bg-zinc-800 rounded-lg shadow-xl border border-black/5 dark:border-white/10 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom z-[100000]"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="px-3 py-2 text-xs text-zinc-500 border-b border-zinc-100 dark:border-zinc-700 font-medium bg-zinc-50/50 dark:bg-zinc-800/50">
+                    数据管理
+                </div>
+                
+                <button
+                    onClick={onExportClick}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors border-b border-zinc-50 dark:border-zinc-700/50"
+                >
+                    <Download className="w-4 h-4" />
+                    <span>全量备份 (JSON)</span>
+                </button>
+
+                {viewMode === 'BOARD' && (
+                  <button
+                    onClick={async () => {
+                      await store.exportCurrentBoard();
+                      setShowSettings(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors border-b border-zinc-50 dark:border-zinc-700/50"
+                  >
+                    <Share className="w-4 h-4" />
+                    <span>导出当前看板</span>
+                  </button>
+                )}
+
+                <button
+                    onClick={onImportClick}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors"
+                >
+                    <Upload className="w-4 h-4" />
+                    <span>恢复备份</span>
                 </button>
             </div>
         )}
@@ -252,6 +339,7 @@ export const BoardDock = () => {
                        return;
                    }
                    switchBoard(board.id);
+                   setViewMode('BOARD');
                    setContextMenuBoard(null);
                 }}
                 onDoubleClick={() => {
@@ -282,18 +370,18 @@ export const BoardDock = () => {
                 )}>
                     {isReordering ? "⬅️ 移动 ➡️" : board.name}
                     {/* Tiny triangle */}
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-zinc-800" />
-                </div>
-
-                <span className="text-lg leading-none filter drop-shadow-sm transform group-hover:scale-110 transition-transform">
-                  {board.icon}
-                </span>
-                
-                {/* Active Indicator: Dot below the icon */}
-                {isActive && (
-                   <div className="absolute -bottom-1 w-1 h-1 rounded-full bg-zinc-400 dark:bg-zinc-500" />
-                )}
-              </button>
+<div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-zinc-800" />
+            </div>
+            {/* Active Indicator: Dot below the icon */}
+            {isActive && (
+              <div className="absolute -bottom-1 w-1 h-1 rounded-full bg-zinc-400 dark:bg-zinc-500" />
+            )}
+            
+            {/* Board Icon */}
+            <span className="text-lg leading-none filter drop-shadow-sm transform group-hover:scale-110 transition-transform">
+              {board.icon}
+            </span>
+          </button>
             )
           })}
 
@@ -318,6 +406,51 @@ export const BoardDock = () => {
                 </div>
             )}
             <Plus className="w-5 h-5" />
+          </button>
+
+          {/* Vertical Divider */}
+          <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700 mx-1.5" />
+
+          {/* Trash Button */}
+          <button
+            onClick={() => {
+              clearSelection();
+              setViewMode(viewMode === 'TRASH' ? 'BOARD' : 'TRASH');
+            }}
+            className={cn(
+              "relative group flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200",
+              viewMode === 'TRASH'
+                ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900"
+                : "text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-200"
+            )}
+          >
+            {/* Tooltip for Trash */}
+            <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-zinc-800 text-zinc-100 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-sm z-[100000]">
+              废纸篓
+              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-zinc-800" />
+            </div>
+            <Trash2 className="w-5 h-5" />
+          </button>
+
+          {/* Vertical Divider */}
+          <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700 mx-1.5" />
+
+          {/* Settings Button */}
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className={cn(
+              "relative group flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200",
+              showSettings
+                ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900"
+                : "text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-200"
+            )}
+          >
+            {/* Tooltip for Settings */}
+            <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-zinc-800 text-zinc-100 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-sm z-[100000]">
+              设置
+              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-zinc-800" />
+            </div>
+            <Settings className="w-5 h-5" />
           </button>
         </div>
         </div>

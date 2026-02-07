@@ -3521,7 +3521,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "so-notes"
-version = "1.1.2"
+version = "1.1.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -3529,6 +3529,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
+ "tauri-plugin-fs",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-opener",
  "tauri-plugin-positioner",

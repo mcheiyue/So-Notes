@@ -1,18 +1,24 @@
 import React, { useRef, useState, useEffect, useLayoutEffect } from "react";
 import Draggable, { DraggableData, DraggableEvent } from "react-draggable";
-import { X, GripHorizontal, Palette } from "lucide-react";
-import { Note, NOTE_COLORS } from "../store/types";
+import { X, GripHorizontal, Palette, RotateCcw, Trash2 } from "lucide-react";
+import { NOTE_COLORS } from "../store/types";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
 
 interface NoteCardProps {
-  note: Note;
-  scale: number;
+  id: string; // Changed: Pass ID instead of Note object
+  isStatic?: boolean;
+  scale?: number; // Optional: Canvas scale for Draggable
 }
 
-export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) => {
-  // Atomic Selectors to prevent unnecessary re-renders
+export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = false, scale = 1 }) => {
+  // Selectors
+  const note = useStore(state => state.notes.find(n => n.id === id));
+  
+  // Guard: If note doesn't exist (e.g., deleted or invalid ID), render nothing
+  if (!note) return null;
+
   const updateNote = useStore(state => state.updateNote);
   const updateTitle = useStore(state => state.updateTitle);
   const moveNote = useStore(state => state.moveNote);
@@ -24,6 +30,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) =>
   const setContextMenu = useStore(state => state.setContextMenu);
   const toggleSelection = useStore(state => state.toggleSelection);
   const setSelectedIds = useStore(state => state.setSelectedIds);
+  const restoreNote = useStore(state => state.restoreNote);
+  const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
   
   // Specific State Selectors
   const isStickyDragging = useStore(state => state.stickyDrag.id === note.id);
@@ -78,6 +86,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) =>
 
   // Interactive Todo Logic
   const handleTextareaClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    if (isStatic) return; // Disable interaction in Trash
     const textarea = e.currentTarget;
     const cursor = textarea.selectionStart;
     const content = note.content;
@@ -240,12 +249,12 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) =>
       nodeRef={nodeRef}
       handle=".drag-handle"
       defaultPosition={{ x: note.x, y: note.y }}
-      position={{ x: note.x, y: note.y }}
+      position={isStatic ? { x: 0, y: 0 } : { x: note.x, y: note.y }} // Reset pos in grid
       scale={scale}
       onStart={handleMouseDown}
       onDrag={handleDrag}
       onStop={handleStop}
-      disabled={isStickyDragging}
+      disabled={isStickyDragging || isStatic} // Disable drag in Trash
     >
       <div
         ref={nodeRef}
@@ -258,11 +267,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) =>
           "border border-black/5",
           "group",
           isStickyDragging && "shadow-2xl scale-[1.02] cursor-move z-[9999]",
-          isSelected && !isStickyDragging && (isGroupSelection ? "ring-2 ring-blue-500/50 border-blue-500/50" : "border-2 border-white/80 shadow-sm")
+          isSelected && !isStickyDragging && (isGroupSelection ? "ring-2 ring-blue-500/50 border-blue-500/50" : "border-2 border-white/80 shadow-sm"),
+          // Trash Style Overrides
+          isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto"
         )}
         style={{ 
             backgroundColor: note.color,
-            zIndex: isStickyDragging ? 99999 : note.z,
+            zIndex: isStickyDragging ? 99999 : (isStatic ? undefined : note.z),
         }}
         onMouseDownCapture={handleMouseDown}
         onMouseEnter={() => setIsHovered(true)}
@@ -272,25 +283,40 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) =>
             className={cn(
                 "drag-handle h-9 flex items-center justify-between px-3 pt-1 cursor-grab active:cursor-grabbing",
                 "transition-opacity duration-200",
-                note.collapsed || isHovered || isEditing || note.title ? "opacity-100" : "opacity-0"
+                note.collapsed || isHovered || isEditing || note.title ? "opacity-100" : "opacity-0",
+                isStatic && "!cursor-default" // No grab cursor in trash
             )}
             onContextMenu={handleContextMenu}
-            onDoubleClick={handleDoubleClick}
+            onDoubleClick={isStatic ? undefined : handleDoubleClick}
         >
-          {/* Left: Palette */}
-          <Tooltip content="切换颜色" disabled={isStickyDragging}>
-            <button
-              onClick={cycleColor}
-              className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70 flex-shrink-0"
-            >
-               <Palette className="w-4 h-4" />
-            </button>
-          </Tooltip>
+          {/* Left: Palette or Restore */}
+          {isStatic ? (
+              <Tooltip content="还原笔记">
+                  <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        restoreNote(note.id);
+                    }}
+                    className="p-1.5 rounded-md hover:bg-green-100 hover:text-green-600 transition-colors text-black/40 flex-shrink-0"
+                  >
+                      <RotateCcw className="w-4 h-4" />
+                  </button>
+              </Tooltip>
+          ) : (
+            <Tooltip content="切换颜色" disabled={isStickyDragging}>
+                <button
+                onClick={cycleColor}
+                className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70 flex-shrink-0"
+                >
+                <Palette className="w-4 h-4" />
+                </button>
+            </Tooltip>
+          )}
           
           {/* Center: Title (Collapsed) or Grip (Expanded) */}
           <div className="flex-1 flex justify-center cursor-grab active:cursor-grabbing h-full items-center px-2 overflow-hidden">
              {note.collapsed ? (
-                 <Tooltip content="双击展开" delay={500} disabled={isStickyDragging}>
+                 <Tooltip content="双击展开" delay={500} disabled={isStickyDragging || isStatic}>
                     <span 
                         className={cn(
                             "text-sm font-bold truncate select-none w-full text-center block",
@@ -301,22 +327,28 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) =>
                     </span>
                  </Tooltip>
              ) : (
-                <Tooltip content="双击折叠 / 拖拽移动" delay={1000} disabled={isStickyDragging}>
-                    <GripHorizontal className="w-4 h-4 text-black/20" />
+                <Tooltip content="双击折叠 / 拖拽移动" delay={1000} disabled={isStickyDragging || isStatic}>
+                    <GripHorizontal className={cn("w-4 h-4 text-black/20", isStatic && "opacity-0")} />
                 </Tooltip>
              )}
           </div>
 
-          {/* Right: Delete */}
-          <Tooltip content="删除便签" disabled={isStickyDragging}>
+          {/* Right: Delete (Soft or Hard) */}
+          <Tooltip content={isStatic ? "永久删除" : "删除便签"} disabled={isStickyDragging}>
             <button
               onClick={(e) => {
                   e.stopPropagation();
-                  deleteNote(note.id);
+                  if (isStatic) {
+                      if (window.confirm("确定要永久删除吗？无法找回。")) {
+                          deleteNotePermanently(note.id);
+                      }
+                  } else {
+                      deleteNote(note.id);
+                  }
               }}
               className="p-1.5 rounded-md hover:bg-red-100 hover:text-red-500 transition-colors text-black/40 flex-shrink-0"
             >
-              <X className="w-4 h-4" />
+              {isStatic ? <Trash2 className="w-4 h-4" /> : <X className="w-4 h-4" />}
             </button>
           </Tooltip>
         </div>
@@ -333,7 +365,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) =>
                         "w-full bg-transparent outline-none transition-all duration-200 flex-shrink-0",
                         "text-gray-900 font-bold text-[16px]",
                         "placeholder-gray-400/50",
-                        (!note.title && !isHovered && !isEditing) ? "hidden" : "block"
+                        (!note.title && !isHovered && !isEditing) ? "hidden" : "block",
+                        isStatic && "pointer-events-none" // Readonly title
                     )}
                     placeholder="标题"
                     value={note.title}
@@ -341,6 +374,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) =>
                     onFocus={() => setIsEditing(true)}
                     onBlur={() => setIsEditing(false)}
                     onMouseDownCapture={handleMouseDown}
+                    readOnly={isStatic}
                 />
               </div>
               
@@ -389,6 +423,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ note, scale }) =>
                 onMouseDownCapture={handleMouseDown}
                 spellCheck={false}
                 rows={1}
+                readOnly={isStatic} // Readonly content
               />
             </div>
         )}

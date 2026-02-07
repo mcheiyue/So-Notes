@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "type": "SINGLE_BOARD",
+  "source": "so-notes",
+  "timestamp": 1770449308465,
+  "payload": {
+    "boards": [
+      {
+        "id": "98773f09-cd65-448c-85f1-e49bc9f4eaa9",
+        "name": "path",
+        "icon": "🎨",
+        "createdAt": 1770347987045
+      }
+    ],
+    "notes": [
+      {
+        "id": "8a7714a4-7a62-406c-8f50-950290c5a457",
+        "boardId": "98773f09-cd65-448c-85f1-e49bc9f4eaa9",
+        "title": "",
+        "content": "666",
+        "x": 500,
+        "y": 322,
+        "z": 4595,
+        "color": "#f1f5f9",
+        "collapsed": false,
+        "createdAt": 1770447484822,
+        "updatedAt": 1770449284269
+      },
+      {
+        "id": "3a317f58-bd7f-460b-9fb6-08199afcd3b0",
+        "boardId": "98773f09-cd65-448c-85f1-e49bc9f4eaa9",
+        "title": "",
+        "content": "",
+        "x": 246,
+        "y": 151,
+        "z": 4593,
+        "color": "#ecfccb",
+        "collapsed": false,
+        "createdAt": 1770447485708,
+        "updatedAt": 1770447485708
+      }
+    ]
+  }
+}

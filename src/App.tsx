@@ -2,12 +2,14 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "./store/useStore";
 import { Canvas } from "./components/Canvas";
+import { TrashGrid } from "./components/TrashGrid";
 import { BoardDock } from "./components/BoardDock";
 import { PinFab } from "./components/PinFab";
 import { ContextMenu } from "./components/ContextMenu";
 
 function App() {
   const isMouseDownRef = useRef(false);
+  const viewMode = useStore(state => state.viewMode);
 
   useEffect(() => {
     const handleMouseDown = () => { isMouseDownRef.current = true; };
@@ -54,18 +56,24 @@ function App() {
 
   return (
     <div className="w-full h-screen fixed inset-0 overflow-hidden">
-       <Canvas />
+       {viewMode === 'BOARD' ? (
+         <>
+           <Canvas />
+           {/* UI Overlay Components - Moved out of Canvas to avoid filter/transform issues */}
+           
+           {/* Board Indicator (Top Left) */}
+           <div className="fixed top-8 left-4 pointer-events-none z-[50]">
+              <BoardBadge />
+           </div>
+           
+           <PinFab />
+           <ContextMenu />
+         </>
+       ) : (
+         <TrashGrid />
+       )}
        
-       {/* UI Overlay Components - Moved out of Canvas to avoid filter/transform issues */}
-       
-       {/* Board Indicator (Top Left) */}
-       <div className="fixed top-8 left-4 pointer-events-none z-[50]">
-          <BoardBadge />
-       </div>
-
        <BoardDock />
-       <PinFab />
-       <ContextMenu />
     </div>
   );
 }

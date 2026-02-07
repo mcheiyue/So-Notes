@@ -128,7 +128,7 @@ export const ContextMenu: React.FC = () => {
                     // No need to set isOpen:false manually as handleAction does it
                 })}
               >
-                <span>📑</span> 切换看板 ({boards.find(b => b.id === currentBoardId)?.name || 'Main'})
+                <span>📑</span> 显示菜单
               </div>
               
               <div

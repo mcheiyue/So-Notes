@@ -1,13 +1,17 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD } from './types';
+import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode } from './types';
 import { db } from './db';
+import { generateBoardExport, generateFullBackup, processImport } from '../utils/dataTransfer';
+import { saveFile, openFile } from '../utils/fileSystem';
 
 interface State {
   notes: Note[];
+
   boards: Board[];
   currentBoardId: string;
+  viewMode: ViewMode;
   config: AppConfig;
   isLoaded: boolean;
   isSaving: boolean;
@@ -31,6 +35,7 @@ interface State {
   
   // Board Actions
   switchBoard: (boardId: string) => void;
+  setViewMode: (mode: ViewMode) => void;
   createBoard: (name: string, icon: string) => void;
   deleteBoard: (boardId: string) => void;
   updateBoard: (boardId: string, updates: Partial<Board>) => void;
@@ -44,8 +49,12 @@ interface State {
   moveSelectedNotes: (dx: number, dy: number, excludeId?: string) => void;
   arrangeNotes: (startX?: number, startY?: number) => void;
   bringToFront: (id: string) => void;
-  deleteNote: (id: string) => void;
-  deleteSelectedNotes: () => void; // Batch delete
+  deleteNote: (id: string) => void; // Soft delete
+  restoreNote: (id: string) => void; // Restore from Trash
+  deleteNotePermanently: (id: string) => void; // Hard delete
+  emptyTrash: () => void; // Hard delete all in Trash
+  restoreAllTrash: () => void; // Restore all in Trash
+  deleteSelectedNotes: () => void; // Batch soft delete
   changeColor: (id: string, color: string) => void;
   changeSelectedNotesColor: (color: string) => void;
   toggleCollapse: (id: string) => void;
@@ -66,10 +75,17 @@ interface State {
   setContextMenu: (menu: ContextMenuState) => void;
 
   saveToDisk: () => Promise<void>;
+  
+  // Data Transfer Actions
+  exportBoard: (boardId: string) => Promise<void>;
+  exportCurrentBoard: () => Promise<void>;
+  exportAll: () => Promise<void>;
+  importFromFile: () => Promise<void>;
 }
 
 // Helper to debounce disk saves
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+
 const DEBOUNCE_DELAY = 2000; // 2 seconds lazy save
 const WAL_THROTTLE = 100;    // 100ms throttle for IndexedDB
 
@@ -94,6 +110,7 @@ export const useStore = create<State>()(
     // New State Init
     boards: [DEFAULT_BOARD],
     currentBoardId: DEFAULT_BOARD.id,
+    viewMode: 'BOARD',
     isDockVisible: false,
 
     init: async () => {
@@ -202,12 +219,20 @@ export const useStore = create<State>()(
         set((state) => {
             if (state.boards.find(b => b.id === boardId)) {
                 state.currentBoardId = boardId;
+                state.viewMode = 'BOARD'; // Auto-switch to board view
                 state.selectedIds = []; // Clear selection to prevent ghost edits
                 state.stickyDrag = { id: null, offsetX: 0, offsetY: 0 }; // Reset drag
                 
                 // Force Scroll Reset (Fix Viewport Shift)
                 window.scrollTo(0, 0);
             }
+        });
+    },
+
+    setViewMode: (mode) => {
+        set((state) => {
+            state.viewMode = mode;
+            state.selectedIds = []; // Clear selection on view switch
         });
     },
 
@@ -454,11 +479,66 @@ export const useStore = create<State>()(
 
     deleteNote: (id) => {
       set((state) => {
-        state.notes = state.notes.filter((n) => n.id !== id);
-        // Fix: Ghost Selection - also remove from selectedIds if present
+        const note = state.notes.find((n) => n.id === id);
+        if (note) {
+          note.deletedAt = Date.now(); // Soft delete
+        }
+        // Remove from selection if deleted
         state.selectedIds = state.selectedIds.filter(selId => selId !== id);
       });
       get().saveToDisk();
+    },
+    
+    restoreNote: (id) => {
+        set((state) => {
+            const note = state.notes.find(n => n.id === id);
+            if (note) {
+                note.deletedAt = null; // Restore
+                
+                // Safety Check: Does the target board still exist?
+                const boardExists = state.boards.some(b => b.id === note.boardId);
+                if (!boardExists) {
+                    note.boardId = state.currentBoardId; // Fallback to current
+                }
+                
+                // Visual Feedback: Bring to top so user sees it
+                state.config.maxZ += 1;
+                note.z = state.config.maxZ;
+            }
+        });
+        get().saveToDisk();
+    },
+
+    deleteNotePermanently: (id) => {
+        set((state) => {
+            state.notes = state.notes.filter(n => n.id !== id);
+        });
+        get().saveToDisk();
+    },
+
+    emptyTrash: () => {
+        set((state) => {
+            state.notes = state.notes.filter(n => !n.deletedAt);
+        });
+        get().saveToDisk();
+    },
+
+    restoreAllTrash: () => {
+        set((state) => {
+            state.notes.forEach(note => {
+                if (note.deletedAt) {
+                    note.deletedAt = null;
+                    // Safety Check
+                    if (!state.boards.some(b => b.id === note.boardId)) {
+                        note.boardId = state.currentBoardId;
+                    }
+                    // Bring to front
+                    state.config.maxZ += 1;
+                    note.z = state.config.maxZ;
+                }
+            });
+        });
+        get().saveToDisk();
     },
     
     changeColor: (id, color) => {
@@ -532,7 +612,11 @@ export const useStore = create<State>()(
         if (selectedIds.length === 0) return;
         
         set((state) => {
-            state.notes = state.notes.filter(note => !selectedIds.includes(note.id));
+            state.notes.forEach(note => {
+                if (selectedIds.includes(note.id)) {
+                    note.deletedAt = Date.now(); // Soft delete
+                }
+            });
             state.selectedIds = [];
         });
         get().saveToDisk();
@@ -685,5 +769,57 @@ export const useStore = create<State>()(
         set({ isSaving: false });
       }
     },
+
+    exportBoard: async (boardId) => {
+        const { boards, notes } = get();
+        const board = boards.find(b => b.id === boardId);
+        if (!board) return;
+
+        const json = generateBoardExport(board, notes);
+        const fileName = `Board_${board.name.replace(/[^a-z0-9]/gi, '_')}.json`;
+        
+        await saveFile(json, fileName);
+    },
+
+    exportCurrentBoard: async () => {
+        const { currentBoardId } = get();
+        await get().exportBoard(currentBoardId);
+    },
+
+    exportAll: async () => {
+        const { boards, notes, config } = get();
+        const json = generateFullBackup(boards, notes, config);
+        const fileName = `SoNotes_Backup_${new Date().toISOString().split('T')[0]}.json`;
+        
+        await saveFile(json, fileName);
+    },
+
+    importFromFile: async () => {
+        const jsonContent = await openFile();
+        if (!jsonContent) return;
+
+        const result = processImport(jsonContent);
+        if (!result) {
+            // TODO: Show error toast?
+            console.error("Import failed: Invalid format");
+            return;
+        }
+
+        const { boards: newBoards, notes: newNotes } = result;
+        if (newBoards.length === 0) return;
+
+        set((state) => {
+            state.boards.push(...newBoards);
+            state.notes.push(...newNotes);
+            
+            // Switch to the first imported board so user sees the result
+            state.currentBoardId = newBoards[0].id;
+            state.viewMode = 'BOARD';
+            state.selectedIds = [];
+        });
+        
+        get().saveToDisk();
+    },
   }))
 );
+
