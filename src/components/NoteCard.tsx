@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useLayoutEffect } from "react";
+import React, { useRef, useState, useLayoutEffect } from "react";
 import Draggable, { DraggableData, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2 } from "lucide-react";
 import { NOTE_COLORS } from "../store/types";
@@ -7,16 +7,16 @@ import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
 
 interface NoteCardProps {
-  id: string; // Changed: Pass ID instead of Note object
+  id: string;
   isStatic?: boolean;
-  scale?: number; // Optional: Canvas scale for Draggable
+  scale?: number;
 }
 
 export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = false, scale = 1 }) => {
   // Selectors
   const note = useStore(state => state.notes.find(n => n.id === id));
   
-  // Guard: If note doesn't exist (e.g., deleted or invalid ID), render nothing
+  // Guard: If note doesn't exist
   if (!note) return null;
 
   const updateNote = useStore(state => state.updateNote);
@@ -33,180 +33,184 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const restoreNote = useStore(state => state.restoreNote);
   const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
   
-  // Specific State Selectors
   const isStickyDragging = useStore(state => state.stickyDrag.id === note.id);
   const isSelected = useStore(state => state.selectedIds.includes(note.id));
   const isGroupSelection = useStore(state => state.selectedIds.length > 1);
+  const viewport = useStore(state => state.viewport);
+  const isPanMode = useStore(state => state.interaction.isPanMode);
+  const setEdgePush = useStore(state => state.setEdgePush);
 
-  // We need to access full store state occasionally for group logic, but we do that via useStore.getState() in handlers.
-  // The above hooks ensure this component ONLY re-renders when:
-  // 1. Props change (note, scale) - Handled by React.memo
-  // 2. This specific note's drag state changes
-  // 3. This specific note's selection state changes
-  // 4. Group selection mode changes (affects drag behavior)
-
+  // Refs & Local State
   const nodeRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   
-  const displayTitle = note.title || "未命名便签";
+  const [isHovered, setIsHovered] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  
+  // Edge Push Logic Refs
+  const edgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentEdge = useRef({ top: false, bottom: false, left: false, right: false });
 
-  useEffect(() => {
-    // Auto-focus logic:
-    // 1. New empty note (standard)
-    // 2. Just created note (pasted content) - checking createdAt < 1000ms
-    const isJustCreated = Date.now() - note.createdAt < 1000;
-    
-    // Fix: Only auto-focus if the note was JUST created (New or Paste).
-    // Prevents old empty notes from stealing focus on board switch.
-    if (isJustCreated) {
-        if (!note.collapsed) {
-             // Only focus Title if we have content (Paste & Create scenario)
-             if (note.content && titleRef.current) {
-                 setIsEditing(true);
-                 setTimeout(() => {
-                    titleRef.current?.focus();
-                 }, 0);
-             } else if (textareaRef.current) {
-                 // Standard New Note (Empty) -> Focus Textarea
-                 textareaRef.current.focus();
-             }
-        }
-    }
-  }, []); 
+  // Drag State (Hybrid Control)
+  const isDragging = useRef(false);
+  // We use dragPos to control position ONLY during drag to prevent jitter/re-renders
+  // Initial value is null, meaning "use Store position"
+  const [dragPos, setDragPos] = useState<{x: number, y: number} | null>(null);
 
+  // Calculated Screen Position (from Store)
+  const screenX = note.x - viewport.x;
+  const screenY = note.y - viewport.y;
+
+  // Determine Final Position for Draggable
+  // If dragging, use local state (follows mouse, ignores viewport shift for stability)
+  // If idle, use calculated screen position (follows viewport)
+  const finalX = (isDragging.current && dragPos) ? dragPos.x : screenX;
+  const finalY = (isDragging.current && dragPos) ? dragPos.y : screenY;
+
+  // Derived Values
+  const displayTitle = note.title || "无标题";
+
+  // Auto-resize textarea
   useLayoutEffect(() => {
-    if (textareaRef.current && !note.collapsed) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  }, [note.content, note.collapsed]);
+  }, [note.content, note.collapsed, isEditing]);
 
-  // Interactive Todo Logic
-  const handleTextareaClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
-    if (isStatic) return; // Disable interaction in Trash
-    const textarea = e.currentTarget;
-    const cursor = textarea.selectionStart;
-    const content = note.content;
+  const handleDrag = (_e: DraggableEvent, data: DraggableData) => {
+      // 1. Sync Local State (Hybrid Control)
+      if (!isDragging.current) isDragging.current = true;
+      setDragPos({ x: data.x, y: data.y });
 
-    // 1. Find line boundaries
-    const before = content.substring(0, cursor);
-    const after = content.substring(cursor);
-    const lineStart = before.lastIndexOf('\n') + 1;
-    const lineEndOffset = after.indexOf('\n');
-    const lineEnd = lineEndOffset === -1 ? content.length : cursor + lineEndOffset;
-    
-    const line = content.substring(lineStart, lineEnd);
+      // Group Drag Logic
+      if (isSelected && isGroupSelection) {
+          const deltaX = data.deltaX;
+          const deltaY = data.deltaY;
+          moveSelectedNotes(deltaX, deltaY, note.id);
+      }
 
-    // 2. Regex to match markdown checkbox: - [ ] or * [x]
-    // Group 1: Prefix ("- " or "* ")
-    // Group 2: State (" " or "x")
-    const match = line.match(/^(\s*[-*]\s*)\[([ xX])\]/);
+      // 2. Edge Push Logic (Only in Safe Mode)
+      if (!isPanMode) {
+           const EDGE_THRESHOLD = 20;
+           const winW = viewport.w;
+           const winH = viewport.h;
+           const nW = nodeRef.current?.offsetWidth || 260;
+           const nH = nodeRef.current?.offsetHeight || 100;
+           
+           // Check Edge Proximity
+           const isRight = data.x > winW - nW - EDGE_THRESHOLD;
+           const isBottom = data.y > winH - nH - EDGE_THRESHOLD;
+           const isLeft = data.x < EDGE_THRESHOLD && viewport.x > 0;
+           const isTop = data.y < EDGE_THRESHOLD && viewport.y > 0;
 
-    if (match) {
-        const prefix = match[1];
-        const state = match[2];
-        
-        // 3. Calculate Checkbox range
-        const checkboxStart = lineStart + prefix.length;
-        const checkboxEnd = checkboxStart + 3; // "[ ]" is 3 chars
+           const newEdge = { top: isTop, bottom: isBottom, left: isLeft, right: isRight };
+           
+           // Detect Change
+           const hasChanged = 
+               newEdge.top !== currentEdge.current.top ||
+               newEdge.bottom !== currentEdge.current.bottom ||
+               newEdge.left !== currentEdge.current.left ||
+               newEdge.right !== currentEdge.current.right;
 
-        // 4. Check if click is inside [ ]
-        if (cursor >= checkboxStart && cursor <= checkboxEnd) {
-             e.preventDefault(); // Stop normal selection behavior
-             
-             // Toggle State
-             const newState = (state === ' ' ? 'x' : ' ');
-             
-             // Replace content
-             const newContent = 
-                content.substring(0, checkboxStart + 1) + 
-                newState + 
-                content.substring(checkboxStart + 2);
+           if (hasChanged) {
+               if (edgeTimer.current) {
+                   clearTimeout(edgeTimer.current);
+                   edgeTimer.current = null;
+               }
+               
+               setEdgePush({ top: false, bottom: false, left: false, right: false });
+               currentEdge.current = newEdge;
 
-             updateNote(note.id, newContent);
-
-             // Restore cursor position
-             requestAnimationFrame(() => {
-                 if (textareaRef.current) {
-                    textareaRef.current.setSelectionRange(cursor, cursor);
-                 }
-             });
-        }
-    }
+               if (newEdge.top || newEdge.bottom || newEdge.left || newEdge.right) {
+                    edgeTimer.current = setTimeout(() => {
+                        setEdgePush(newEdge);
+                    }, 1000);
+               }
+           }
+      }
   };
-
-  const handleStop = (_e: DraggableEvent, data: DraggableData) => {
-    // 1. Calculate Delta (Since handleDrag updates store, we can't rely on data.x - note.x?)
-    // Actually, data.x is the final position of THIS drag operation.
-    // note.x might be updated by handleDrag?
-    // Let's rely on data.x/y as the source of truth for THIS note.
+  
+    const handleStop = (_e: DraggableEvent, data: DraggableData) => {
+    isDragging.current = false;
+    setDragPos(null); // Switch back to Store control
     
-    let newX = data.x;
-    let newY = data.y;
-    const winW = window.innerWidth;
-    const winH = window.innerHeight;
+    // Cleanup Edge Push
+    if (edgeTimer.current) {
+        clearTimeout(edgeTimer.current);
+        edgeTimer.current = null;
+    }
+    setEdgePush({ top: false, bottom: false, left: false, right: false });
+    
+    // Was this an edge push? If so, apply a small "bounce back" margin for physical feel
+    // Check if we are currently at the edge (using the edge state is tricky as we just cleared it)
+    // We check coordinates instead.
+    
+    const winW = viewport.w;
+    const winH = viewport.h;
+    const noteWidth = nodeRef.current?.offsetWidth || 260;
+    const noteHeight = nodeRef.current?.offsetHeight || 100;
+    
+    // Use data.x (final drag pos)
+    let finalScreenX = data.x;
+    let finalScreenY = data.y;
 
-    // 2. Individual Clamp (This Note)
-    if (newX < 0) newX = 0;
-    if (newY < 0) newY = 0;
-    if (newX > winW - 100) newX = winW - 100;
-    if (newY > winH - 50) newY = winH - 50;
+    // 1. Calculate World Coordinates
+    let worldX = finalScreenX + viewport.x;
+    let worldY = finalScreenY + viewport.y;
 
-    moveNote(note.id, newX, newY);
-
-    // 3. Group Distributed Clamp (Other Notes)
-    // Since handleDrag already moved them to their raw positions (potentially out of bounds),
-    // we now check and clamp them one by one.
-    if (isSelected && isGroupSelection) {
-        // We need to access the LATEST state because handleDrag updated it.
-        const state = useStore.getState();
+    // 2. Safe Mode: Viewport Constraints (Cage Mode)
+    // Only applied when NOT in Pan Mode
+    if (!isPanMode) {
+        const MARGIN = 10;
         
+        // Right / Bottom with Snapback Margin
+        if (finalScreenX > winW - noteWidth) finalScreenX = winW - noteWidth - MARGIN;
+        if (finalScreenY > winH - noteHeight) finalScreenY = winH - noteHeight - MARGIN;
+
+        // Left / Top Hard Clamp
+        if (finalScreenX < 0) finalScreenX = 0;
+        if (finalScreenY < 0) finalScreenY = 0;
+        
+        // Recalculate World Coordinates based on clamped Screen Coordinates
+        worldX = finalScreenX + viewport.x;
+        worldY = finalScreenY + viewport.y;
+    }
+
+    // 3. HARD CONSTRAINT: World Origin (0,0) is impassable
+    if (worldX < 0) worldX = 0;
+    if (worldY < 0) worldY = 0;
+
+    moveNote(note.id, worldX, worldY);
+
+    // 4. Group Distributed Clamp
+    if (isSelected && isGroupSelection) {
+        const state = useStore.getState();
         state.selectedIds.forEach(id => {
-            if (id === note.id) return; // Already handled above
-            
+            if (id === note.id) return;
             const n = state.notes.find(item => item.id === id);
             if (n) {
-                let finalX = n.x;
-                let finalY = n.y;
+                let nWorldX = n.x;
+                let nWorldY = n.y;
                 let changed = false;
 
-                if (finalX < 0) { finalX = 0; changed = true; }
-                if (finalY < 0) { finalY = 0; changed = true; }
-                if (finalX > winW - 100) { finalX = winW - 100; changed = true; }
-                if (finalY > winH - 50) { finalY = winH - 50; changed = true; }
+                // Hard Limit for Group Members
+                if (nWorldX < 0) { nWorldX = 0; changed = true; }
+                if (nWorldY < 0) { nWorldY = 0; changed = true; }
 
                 if (changed) {
-                    moveNote(id, finalX, finalY);
+                    moveNote(id, nWorldX, nWorldY);
                 }
             }
         });
     }
   };
 
-  const handleDrag = (_e: DraggableEvent, data: DraggableData) => {
-      if (isSelected && isGroupSelection) {
-          const deltaX = data.deltaX;
-          const deltaY = data.deltaY;
-          moveSelectedNotes(deltaX, deltaY, note.id);
-      }
-  };
-
   const handleMouseDown = (e: DraggableEvent) => {
-    // Cast to React.MouseEvent-like object or use native event properties
-    // DraggableEvent is MouseEvent | TouchEvent (native)
     const mouseEvent = e as unknown as React.MouseEvent;
-
-    // 0. Sticky Drag Lock: If any note is sticky dragging, ignore interactions
-    // This allows the click to propagate (if not captured) or just do nothing.
-    // Ideally, clicking another note should probably DROP the sticky note (handled by Canvas global click?)
-    // But since this is Capture phase, we run first.
-    // If we do nothing, event bubbles. Canvas onClick might handle it.
     if (useStore.getState().stickyDrag.id) return;
 
-    // Selection Logic
     if (mouseEvent.ctrlKey || mouseEvent.shiftKey) {
         toggleSelection(note.id);
         mouseEvent.stopPropagation(); 
@@ -244,18 +248,26 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       toggleCollapse(note.id);
   };
 
+  const handleTextareaClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      // Allow focus
+  };
+
   return (
-    <Draggable
-      nodeRef={nodeRef}
-      handle=".drag-handle"
-      defaultPosition={{ x: note.x, y: note.y }}
-      position={isStatic ? { x: 0, y: 0 } : { x: note.x, y: note.y }} // Reset pos in grid
-      scale={scale}
-      onStart={handleMouseDown}
-      onDrag={handleDrag}
-      onStop={handleStop}
-      disabled={isStickyDragging || isStatic} // Disable drag in Trash
-    >
+      <Draggable
+        nodeRef={nodeRef}
+        handle=".drag-handle"
+        defaultPosition={undefined} // Controlled via position prop
+        position={{ x: finalX, y: finalY }}
+        scale={scale}
+        onStart={(e) => {
+            isDragging.current = true;
+            handleMouseDown(e);
+        }}
+        onDrag={handleDrag}
+        onStop={handleStop}
+        disabled={isStickyDragging || isStatic}
+      >
       <div
         ref={nodeRef}
         data-id={note.id}
@@ -268,7 +280,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           "group",
           isStickyDragging && "shadow-2xl scale-[1.02] cursor-move z-[9999]",
           isSelected && !isStickyDragging && (isGroupSelection ? "ring-2 ring-blue-500/50 border-blue-500/50" : "border-2 border-white/80 shadow-sm"),
-          // Trash Style Overrides
           isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto"
         )}
         style={{ 
@@ -284,7 +295,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 "drag-handle h-9 flex items-center justify-between px-3 pt-1 cursor-grab active:cursor-grabbing",
                 "transition-opacity duration-200",
                 note.collapsed || isHovered || isEditing || note.title ? "opacity-100" : "opacity-0",
-                isStatic && "!cursor-default" // No grab cursor in trash
+                isStatic && "!cursor-default"
             )}
             onContextMenu={handleContextMenu}
             onDoubleClick={isStatic ? undefined : handleDoubleClick}
@@ -313,7 +324,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             </Tooltip>
           )}
           
-          {/* Center: Title (Collapsed) or Grip (Expanded) */}
+          {/* Center: Title or Grip */}
           <div className="flex-1 flex justify-center cursor-grab active:cursor-grabbing h-full items-center px-2 overflow-hidden">
              {note.collapsed ? (
                  <Tooltip content="双击展开" delay={500} disabled={isStickyDragging || isStatic}>
@@ -333,7 +344,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
              )}
           </div>
 
-          {/* Right: Delete (Soft or Hard) */}
+          {/* Right: Delete */}
           <Tooltip content={isStatic ? "永久删除" : "删除便签"} disabled={isStickyDragging}>
             <button
               onClick={(e) => {
@@ -353,10 +364,9 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           </Tooltip>
         </div>
 
-            {/* Expanded Content: Auto-Hiding Title Input + Textarea */}
+        {/* Content */}
         {!note.collapsed && (
             <div className="flex-1 pb-4 pt-0 flex flex-col gap-1 min-h-0 relative">
-              {/* Explicit Title Input - Add padding here since parent lost it */}
               <div className="px-4">
                   <input 
                     ref={titleRef}
@@ -366,7 +376,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                         "text-gray-900 font-bold text-[16px]",
                         "placeholder-gray-400/50",
                         (!note.title && !isHovered && !isEditing) ? "hidden" : "block",
-                        isStatic && "pointer-events-none" // Readonly title
+                        isStatic && "pointer-events-none"
                     )}
                     placeholder="标题"
                     value={note.title}
@@ -378,26 +388,19 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 />
               </div>
               
-              {/* Content Textarea */}
               <textarea
                 ref={textareaRef}
                 className={cn(
-                    "w-full resize-none bg-transparent outline-none px-4", // Add padding back here
+                    "w-full resize-none bg-transparent outline-none px-4",
                     "text-gray-800",
                     "placeholder-gray-400 font-normal text-[15px] leading-relaxed",
                     "selection:bg-black/10",
-                    // Scrollbar styling - thin and rounded
                     "scrollbar-thin scrollbar-thumb-black/10 scrollbar-track-transparent hover:scrollbar-thumb-black/20",
-                    "transition-all duration-300 ease-in-out" // Smooth height transition
+                    "transition-all duration-300 ease-in-out"
                 )}
                 style={{
-                    // Dynamic Height Logic:
-                    // If selected or editing: Max 60vh, scrollable
-                    // If inactive: Max 200px, hidden overflow (masked)
                     maxHeight: (isSelected || isEditing) ? '60vh' : '200px',
                     overflowY: (isSelected || isEditing) ? 'auto' : 'hidden',
-                    
-                    // Gradient Mask for inactive state
                     maskImage: (isSelected || isEditing) 
                         ? 'none' 
                         : 'linear-gradient(to bottom, black 0%, black 70%, transparent 100%)',
@@ -423,7 +426,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 onMouseDownCapture={handleMouseDown}
                 spellCheck={false}
                 rows={1}
-                readOnly={isStatic} // Readonly content
+                readOnly={isStatic}
               />
             </div>
         )}

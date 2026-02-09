@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode } from './types';
+import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState } from './types';
 import { db } from './db';
 import { generateBoardExport, generateFullBackup, processImport } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
@@ -27,12 +27,25 @@ interface State {
   selectedIds: string[];
   contextMenu: ContextMenuState;
   
+  // Viewport & Canvas State (v1.1.5)
+  viewport: ViewportState;
+  canvas: AppCanvasState;
+  interaction: InteractionState;
+  
   // Dock UI State (Transient)
   isDockVisible: boolean;
 
   // Actions
   init: () => Promise<void>;
   
+  // Viewport Actions
+  setViewportSize: (w: number, h: number) => void;
+  setPanMode: (isPan: boolean) => void;
+  setEdgePush: (pushState: Partial<{ top: boolean; bottom: boolean; left: boolean; right: boolean }>) => void;
+  panViewport: (dx: number, dy: number) => void; // Delta pan
+  setViewportPosition: (x: number, y: number) => void; // Absolute pan
+  expandCanvas: (w: number, h: number) => void; // Expand world boundaries
+
   // Board Actions
   switchBoard: (boardId: string) => void;
   setViewMode: (mode: ViewMode) => void;
@@ -106,6 +119,14 @@ export const useStore = create<State>()(
 
     selectedIds: [],
     contextMenu: { isOpen: false, x: 0, y: 0, type: 'CANVAS' },
+    
+    // v1.1.5 Init
+    viewport: { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight },
+    canvas: { w: window.innerWidth, h: window.innerHeight },
+    interaction: { 
+        isPanMode: false,
+        edgePush: { top: false, bottom: false, left: false, right: false }
+    },
     
     // New State Init
     boards: [DEFAULT_BOARD],
@@ -281,6 +302,73 @@ export const useStore = create<State>()(
         get().saveToDisk();
     },
 
+    // v1.1.5 Viewport Actions
+    setViewportSize: (w, h) => {
+        set((state) => {
+            state.viewport.w = w;
+            state.viewport.h = h;
+            // Ensure canvas is at least viewport size
+            state.canvas.w = Math.max(state.canvas.w, state.viewport.x + w);
+            state.canvas.h = Math.max(state.canvas.h, state.viewport.y + h);
+        });
+    },
+
+    setPanMode: (isPan) => {
+        set((state) => {
+            state.interaction.isPanMode = isPan;
+        });
+    },
+
+    setEdgePush: (pushState) => {
+        set((state) => {
+            Object.assign(state.interaction.edgePush, pushState);
+        });
+    },
+
+    panViewport: (dx, dy) => {
+        set((state) => {
+            // Apply delta
+            let newX = state.viewport.x + dx;
+            let newY = state.viewport.y + dy;
+
+            // Enforce Top-Left Hard Wall (x >= 0, y >= 0)
+            if (newX < 0) newX = 0;
+            if (newY < 0) newY = 0;
+
+            state.viewport.x = newX;
+            state.viewport.y = newY;
+
+            // Auto-expand canvas if viewport moves into new territory
+            const neededW = newX + state.viewport.w;
+            const neededH = newY + state.viewport.h;
+            
+            if (neededW > state.canvas.w) state.canvas.w = neededW;
+            if (neededH > state.canvas.h) state.canvas.h = neededH;
+        });
+    },
+
+    setViewportPosition: (x, y) => {
+        set((state) => {
+            // Enforce Top-Left Hard Wall
+            const finalX = Math.max(0, x);
+            const finalY = Math.max(0, y);
+
+            state.viewport.x = finalX;
+            state.viewport.y = finalY;
+
+            // Expand canvas
+            state.canvas.w = Math.max(state.canvas.w, finalX + state.viewport.w);
+            state.canvas.h = Math.max(state.canvas.h, finalY + state.viewport.h);
+        });
+    },
+
+    expandCanvas: (w, h) => {
+        set((state) => {
+            state.canvas.w = Math.max(state.canvas.w, w);
+            state.canvas.h = Math.max(state.canvas.h, h);
+        });
+    },
+
     setDockVisible: (visible) => set({ isDockVisible: visible }),
 
     addNote: (x, y) => {
@@ -396,9 +484,16 @@ export const useStore = create<State>()(
         saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
-    arrangeNotes: (startX = 50, startY = 50) => {
+    arrangeNotes: (startX?: number, startY?: number) => {
         set((state) => {
-            const winW = window.innerWidth;
+            const viewport = state.viewport;
+            const worldRightEdge = viewport.x + viewport.w;
+            const worldBottomEdge = viewport.y + viewport.h;
+
+            // Default to current viewport + padding if not provided
+            const effectiveStartX = startX ?? (viewport.x + 50);
+            const effectiveStartY = startY ?? (viewport.y + 50);
+
             const COLUMN_WIDTH = 320; // Approx card width (300) + gap (20)
             const ROW_GAP = 20;
             
@@ -427,18 +522,27 @@ export const useStore = create<State>()(
             });
 
             // 3. Row-based Layout with Boundary Check
-            let currentX = startX;
-            let currentY = startY;
+            let currentX = effectiveStartX;
+            let currentY = effectiveStartY;
             let maxRowH = 0;
             
             // Boundary Guard for Start Position
-            if (currentX + COLUMN_WIDTH > winW) currentX = Math.max(20, winW - COLUMN_WIDTH * 2);
-            if (currentY > window.innerHeight - 100) currentY = 50; // Reset to top if starting too low
+            // Ensure we don't start off the right edge of the world view
+            if (currentX + COLUMN_WIDTH > worldRightEdge) {
+                currentX = Math.max(viewport.x + 20, worldRightEdge - COLUMN_WIDTH * 2);
+            }
+            // Ensure we don't start off the bottom
+            if (currentY > worldBottomEdge - 100) {
+                currentY = viewport.y + 50; 
+            }
+            
+            // Keep track of the "carriage return" X position
+            const rowStartX = currentX;
 
             sortedNotes.forEach((note) => {
                 // Check if we need to wrap to new row
-                if (currentX + COLUMN_WIDTH > winW - 20) {
-                    currentX = startX;
+                if (currentX + COLUMN_WIDTH > worldRightEdge - 20) {
+                    currentX = rowStartX;
                     currentY += maxRowH + ROW_GAP;
                     maxRowH = 0; // Reset row height
                 }

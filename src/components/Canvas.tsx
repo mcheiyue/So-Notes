@@ -4,7 +4,12 @@ import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
 
 export const Canvas: React.FC = () => {
-  const { notes, currentBoardId, addNote, init, isLoaded, stickyDrag, setStickyDrag, moveNote, setContextMenu, setSelectedIds, selectedIds, moveSelectedNotes, clearSelection } = useStore();
+  const { 
+    notes, currentBoardId, addNote, init, isLoaded, 
+    stickyDrag, setStickyDrag, moveNote, setContextMenu, 
+    setSelectedIds, selectedIds, moveSelectedNotes, clearSelection,
+    interaction, viewport, setPanMode, panViewport
+  } = useStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const scale = 1;
 
@@ -13,6 +18,13 @@ export const Canvas: React.FC = () => {
   const selectionStart = useRef({ x: 0, y: 0 });
   const selectionBoxRef = useRef<HTMLDivElement>(null);
 
+  // Pan Logic Refs
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  
+  // Edge Push Loop
+  const edgePushFrameRef = useRef<number>(0);
+
   useEffect(() => {
     const bootstrap = async () => {
       await init();
@@ -20,13 +32,98 @@ export const Canvas: React.FC = () => {
     bootstrap();
   }, [init]);
 
+  // Space Key Listener (Pan Mode)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Check for Space key
+      if (e.code === 'Space') {
+        // Ignore input fields
+        const active = document.activeElement;
+        const isInput = active instanceof HTMLInputElement || 
+                        active instanceof HTMLTextAreaElement || 
+                        active?.getAttribute('contenteditable') === 'true';
+        
+        if (!isInput) {
+           e.preventDefault(); 
+           
+           // Only toggle on initial press (ignore repeat events)
+           if (!e.repeat) {
+               const currentMode = useStore.getState().interaction.isPanMode;
+               console.log('Space Toggle:', !currentMode); // Debug log
+               setPanMode(!currentMode);
+           }
+        }
+      }
+    };
+
+    // Ensure no stale listeners
+    window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [setPanMode]);
+
+  // Edge Push Animation Loop
+  useEffect(() => {
+    const { top, bottom, left, right } = interaction.edgePush;
+    if (!top && !bottom && !left && !right) {
+        if (edgePushFrameRef.current) cancelAnimationFrame(edgePushFrameRef.current);
+        return;
+    }
+
+    const pushLoop = () => {
+        let dx = 0;
+        let dy = 0;
+        const SPEED = 5; // Pixels per frame (~300px/s)
+
+        if (left) dx -= SPEED;
+        if (right) dx += SPEED;
+        if (top) dy -= SPEED;
+        if (bottom) dy += SPEED;
+
+        if (dx !== 0 || dy !== 0) {
+            panViewport(dx, dy);
+        }
+        edgePushFrameRef.current = requestAnimationFrame(pushLoop);
+    };
+
+    edgePushFrameRef.current = requestAnimationFrame(pushLoop);
+    return () => {
+        if (edgePushFrameRef.current) cancelAnimationFrame(edgePushFrameRef.current);
+    };
+  }, [interaction.edgePush, panViewport]);
+
   const handleMouseMove = (e: React.MouseEvent) => {
+      // Safety check: If no mouse button is pressed, stop any active drag
+      // This fixes the issue where releasing mouse outside window keeps drag active
+      if (e.buttons === 0) {
+          if (isPanning.current) isPanning.current = false;
+          if (isSelecting.current) {
+              isSelecting.current = false;
+              if (selectionBoxRef.current) {
+                  selectionBoxRef.current.style.display = 'none';
+              }
+          }
+      }
+
+      // 0. Pan Viewport (Background Drag)
+      if (isPanning.current) {
+          const dx = e.clientX - panStart.current.x;
+          const dy = e.clientY - panStart.current.y;
+          // Dragging background moves viewport in OPPOSITE direction
+          panViewport(-dx, -dy);
+          panStart.current = { x: e.clientX, y: e.clientY };
+          return;
+      }
+
       // 1. Sticky Drag Logic
       if (stickyDrag.id) {
-          const newX = (e.clientX - stickyDrag.offsetX) / scale;
-          const newY = (e.clientY - stickyDrag.offsetY) / scale;
+          const newX = (e.clientX - stickyDrag.offsetX) / scale + viewport.x;
+          const newY = (e.clientY - stickyDrag.offsetY) / scale + viewport.y;
           
-          const currentNote = notes.find(n => n.id === stickyDrag.id);
+          const currentNote = useStore.getState().notes.find(n => n.id === stickyDrag.id);
           const isSelected = selectedIds.includes(stickyDrag.id);
           
           if (isSelected && selectedIds.length > 1 && currentNote) {
@@ -70,27 +167,24 @@ export const Canvas: React.FC = () => {
         !target.closest('button') && 
         !target.closest('.drag-handle-area')
     ) {
-        const x = e.clientX;
-        const y = e.clientY;
+        // Fix: Convert Screen Coordinates to World Coordinates
+        // The click (e.clientX) is in screen space.
+        // The note needs to be placed in world space.
+        const x = e.clientX + viewport.x;
+        const y = e.clientY + viewport.y;
         addNote(x, y);
     }
   };
   
   const applyBoundaryGuard = (id: string) => {
-      const winW = window.innerWidth;
-      const winH = window.innerHeight;
+      // Use useStore.getState() to access the latest viewport state
+      const state = useStore.getState();
       
       // Determine if we are guarding a group or single note
       const isSelected = selectedIds.includes(id);
       const idsToCheck = (isSelected && selectedIds.length > 0) ? selectedIds : [id];
       
       idsToCheck.forEach(noteId => {
-          // Note: We need to access LATEST state? 'notes' prop is from useStore hook, which updates on re-render.
-          // handleGlobalDown triggers a re-render? No, it's an event handler.
-          // 'notes' inside this closure might be stale if handleMouseMove updated store but component didn't re-render yet?
-          // Sticky Drag is high frequency. React state updates might be batched.
-          // Safer to use useStore.getState().notes
-          const state = useStore.getState();
           const n = state.notes.find(item => item.id === noteId);
           
           if (n) {
@@ -98,10 +192,37 @@ export const Canvas: React.FC = () => {
               let finalY = n.y;
               let changed = false;
 
+              // Infinite Canvas: Only enforce positive coordinates
               if (finalX < 0) { finalX = 0; changed = true; }
               if (finalY < 0) { finalY = 0; changed = true; }
-              if (finalX > winW - 100) { finalX = winW - 100; changed = true; }
-              if (finalY > winH - 50) { finalY = winH - 50; changed = true; }
+
+              // Safe Mode Constraints (Consistent with Normal Drag)
+                if (!state.interaction.isPanMode) {
+                    const { x: vx, y: vy, w: vw, h: vh } = state.viewport;
+                    // Match NoteCard.tsx logic: Keep note strictly inside viewport with 10px margin
+                    // Assuming default dimensions since we don't have exact note size here
+                    const ESTIMATED_W = 260; 
+                    const ESTIMATED_H = 150; 
+                    const MARGIN = 10;
+                    
+                    const LIMIT_RIGHT = vx + vw - ESTIMATED_W - MARGIN;
+                    const LIMIT_BOTTOM = vy + vh - ESTIMATED_H - MARGIN;
+                    
+                    // Clamp to Viewport
+                    // Right Edge
+                    if (finalX > LIMIT_RIGHT) { 
+                        finalX = LIMIT_RIGHT; 
+                        changed = true; 
+                    }
+                    // Bottom Edge
+                    if (finalY > LIMIT_BOTTOM) { 
+                        finalY = LIMIT_BOTTOM; 
+                        changed = true; 
+                    }
+                    // Left/Top Viewport Edge
+                    if (finalX < vx) { finalX = vx; changed = true; }
+                    if (finalY < vy) { finalY = vy; changed = true; }
+                }
 
               if (changed) {
                   moveNote(noteId, finalX, finalY);
@@ -111,6 +232,16 @@ export const Canvas: React.FC = () => {
   };
 
   const handleGlobalDown = (e: React.MouseEvent) => {
+      // 0. Start Panning (Space Mode + Left Click on Background)
+      const targetEl = e.target as HTMLElement;
+      const isInteractive = targetEl.closest('.note-card') || targetEl.closest('button') || targetEl.closest('.drag-handle-area');
+
+      if (interaction.isPanMode && e.button === 0 && !isInteractive) {
+          isPanning.current = true;
+          panStart.current = { x: e.clientX, y: e.clientY };
+          return;
+      }
+
       // 1. Handle Sticky Drag Drop
       if (e.button !== 2 && stickyDrag.id) {
           applyBoundaryGuard(stickyDrag.id);
@@ -119,13 +250,13 @@ export const Canvas: React.FC = () => {
       }
 
       // 2. Start Marquee Selection (Left Click on Canvas)
-      const target = e.target as HTMLElement;
+      const targetEl2 = e.target as HTMLElement;
       if (
           e.button === 0 && 
           !stickyDrag.id &&
-          !target.closest('.note-card') && 
-          !target.closest('button') && 
-          !target.closest('.drag-handle-area')
+          !targetEl2.closest('.note-card') && 
+          !targetEl2.closest('button') && 
+          !targetEl2.closest('.drag-handle-area')
       ) {
           isSelecting.current = true;
           selectionStart.current = { x: e.clientX, y: e.clientY };
@@ -145,7 +276,12 @@ export const Canvas: React.FC = () => {
       }
   };
 
-  const handleGlobalUp = (e: React.MouseEvent) => {
+  const handleGlobalUp = (e: React.MouseEvent | MouseEvent) => {
+      if (isPanning.current) {
+          isPanning.current = false;
+          return;
+      }
+
       if (isSelecting.current) {
           isSelecting.current = false;
           if (selectionBoxRef.current) {
@@ -198,6 +334,26 @@ export const Canvas: React.FC = () => {
       }
   };
 
+  // Global Mouse Up & Blur Handler to prevent sticky drag
+  useEffect(() => {
+      const handleWindowUp = (e: MouseEvent) => handleGlobalUp(e);
+      const handleWindowBlur = () => {
+          isPanning.current = false;
+          isSelecting.current = false;
+          if (selectionBoxRef.current) {
+              selectionBoxRef.current.style.display = 'none';
+          }
+      };
+
+      window.addEventListener('mouseup', handleWindowUp);
+      window.addEventListener('blur', handleWindowBlur);
+      
+      return () => {
+          window.removeEventListener('mouseup', handleWindowUp);
+          window.removeEventListener('blur', handleWindowBlur);
+      };
+  }, []);
+
   if (!isLoaded) return null;
 
   return (
@@ -206,7 +362,8 @@ export const Canvas: React.FC = () => {
       className={cn(
         "w-full h-full overflow-hidden relative select-none",
         "bg-zinc-50/90 dark:bg-zinc-50/98 dark:brightness-[0.90] dark:contrast-[0.95] dark:grayscale-[0.05] transition-colors duration-300",
-        "border border-black/10 dark:border-white/10 rounded-lg"
+        "border border-black/10 dark:border-white/10 rounded-lg",
+        interaction.isPanMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
       )}
       onDoubleClick={handleDoubleClick}
       onMouseMove={handleMouseMove}
@@ -230,9 +387,16 @@ export const Canvas: React.FC = () => {
       <div className="absolute inset-0 pointer-events-none opacity-[0.08]" 
            style={{
                backgroundImage: `radial-gradient(circle, #cbd5e1 1px, transparent 1px)`,
-               backgroundSize: '20px 20px'
+               backgroundSize: '20px 20px',
+               backgroundPosition: `-${viewport.x}px -${viewport.y}px`
            }}
       />
+      
+      {/* Edge Push Indicators */}
+      <div className={cn("absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", interaction.edgePush.top ? "opacity-100" : "opacity-0")} />
+      <div className={cn("absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", interaction.edgePush.bottom ? "opacity-100" : "opacity-0")} />
+      <div className={cn("absolute top-0 bottom-0 left-0 w-8 bg-gradient-to-r from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", interaction.edgePush.left ? "opacity-100" : "opacity-0")} />
+      <div className={cn("absolute top-0 bottom-0 right-0 w-8 bg-gradient-to-l from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", interaction.edgePush.right ? "opacity-100" : "opacity-0")} />
       
       {/* Board Badge moved to App.tsx for better reactivity */}
 
@@ -264,6 +428,13 @@ export const Canvas: React.FC = () => {
           <p className="text-xs text-black/20 mt-1">
             或右键点击 &rarr; 新建
           </p>
+        </div>
+      )}
+      
+      {interaction.isPanMode && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 px-4 py-2 bg-white/60 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-300 border border-white/20 dark:border-zinc-700/50 shadow-lg rounded-full text-xs font-medium z-[100000] backdrop-blur-xl pointer-events-none transition-all animate-in fade-in zoom-in-95 duration-300 select-none flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.5)]" />
+            按 Space 退出
         </div>
       )}
       

@@ -6,6 +6,7 @@ import { TrashGrid } from "./components/TrashGrid";
 import { BoardDock } from "./components/BoardDock";
 import { PinFab } from "./components/PinFab";
 import { ContextMenu } from "./components/ContextMenu";
+import { MiniMap } from "./components/MiniMap";
 
 function App() {
   const isMouseDownRef = useRef(false);
@@ -25,10 +26,16 @@ function App() {
        invoke('check_hide_on_leave');
     };
 
+    const handleResize = () => {
+        const setViewportSize = useStore.getState().setViewportSize;
+        setViewportSize(window.innerWidth, window.innerHeight);
+    };
+
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mouseup', handleMouseUp);
     window.addEventListener('blur', handleBlur);
     document.addEventListener('mouseleave', handleMouseLeave);
+    window.addEventListener('resize', handleResize);
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     
@@ -51,6 +58,7 @@ function App() {
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('blur', handleBlur);
       document.removeEventListener('mouseleave', handleMouseLeave);
+      window.removeEventListener('resize', handleResize);
     };
   }, []);
 
@@ -68,6 +76,7 @@ function App() {
            
            <PinFab />
            <ContextMenu />
+           <MiniMap />
          </>
        ) : (
          <TrashGrid />

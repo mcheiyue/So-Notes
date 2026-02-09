@@ -25,7 +25,8 @@ export const ContextMenu: React.FC = () => {
     moveNoteToBoard,
     copyNoteToBoard,
     moveSelectedNotesToBoard,
-    copySelectedNotesToBoard
+    copySelectedNotesToBoard,
+    viewport // Add viewport
   } = useStore();
   const menuRef = useRef<HTMLDivElement>(null);
   const [hasClipboardText, setHasClipboardText] = useState(false);
@@ -133,7 +134,7 @@ export const ContextMenu: React.FC = () => {
               
               <div
                 className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
-                onClick={() => handleAction(() => addNote(contextMenu.x, contextMenu.y))}
+                onClick={() => handleAction(() => addNote(contextMenu.x + viewport.x, contextMenu.y + viewport.y))}
               >
                 <span>📝</span> 新建便签
               </div>
@@ -144,7 +145,7 @@ export const ContextMenu: React.FC = () => {
                     onClick={() => handleAction(async () => {
                         const text = await readText();
                         if (text) {
-                            addNoteWithContent(contextMenu.x, contextMenu.y, text);
+                            addNoteWithContent(contextMenu.x + viewport.x, contextMenu.y + viewport.y, text);
                         }
                     })}
                   >
@@ -168,13 +169,13 @@ export const ContextMenu: React.FC = () => {
                 // Only treat as Group Mode if > 1 items selected
                 if (selectedIds.length > 1) {
                     // Group arrange: No confirmation needed (safe operation)
-                    handleAction(() => arrangeNotes(contextMenu.x, contextMenu.y));
+                    handleAction(() => arrangeNotes(contextMenu.x + viewport.x, contextMenu.y + viewport.y));
                 } else {
                     // Global arrange: Require confirmation
                     if (!confirmArrange) {
                         setConfirmArrange(true);
                     } else {
-                        handleAction(() => arrangeNotes(contextMenu.x, contextMenu.y));
+                        handleAction(() => arrangeNotes(contextMenu.x + viewport.x, contextMenu.y + viewport.y));
                     }
                 }
             }}

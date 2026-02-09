@@ -48,6 +48,28 @@ export interface AppConfig {
   maximized?: boolean;
 }
 
+export interface ViewportState {
+  x: number; // World x of top-left viewport
+  y: number; // World y of top-left viewport
+  w: number; // Width of viewport (window.innerWidth)
+  h: number; // Height of viewport (window.innerHeight)
+}
+
+export interface AppCanvasState {
+  w: number; // Total width of the world
+  h: number; // Total height of the world
+}
+
+export interface InteractionState {
+  isPanMode: boolean; // Space key pressed
+  edgePush: {
+    top: boolean;
+    bottom: boolean;
+    left: boolean;
+    right: boolean;
+  };
+}
+
 export type ViewMode = 'BOARD' | 'TRASH';
 
 export interface ContextMenuState {
