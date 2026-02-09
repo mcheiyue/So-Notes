@@ -2,7 +2,9 @@ import React, { useRef, useState, useLayoutEffect } from "react";
 import Draggable, { DraggableData, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2 } from "lucide-react";
 import { NOTE_COLORS } from "../store/types";
+import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { useStore } from "../store/useStore";
+import { useEdgePush } from "../hooks/useEdgePush";
 import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
 
@@ -38,7 +40,9 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const isGroupSelection = useStore(state => state.selectedIds.length > 1);
   const viewport = useStore(state => state.viewport);
   const isPanMode = useStore(state => state.interaction.isPanMode);
-  const setEdgePush = useStore(state => state.setEdgePush);
+  
+  // Custom Hooks
+  const { checkEdge, clearEdge } = useEdgePush();
 
   // Refs & Local State
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -48,10 +52,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   
-  // Edge Push Logic Refs
-  const edgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const currentEdge = useRef({ top: false, bottom: false, left: false, right: false });
-
   // Drag State (Hybrid Control)
   const isDragging = useRef(false);
   // We use dragPos to control position ONLY during drag to prevent jitter/re-renders
@@ -91,57 +91,18 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           moveSelectedNotes(deltaX, deltaY, note.id);
       }
 
-      // 2. Edge Push Logic (Only in Safe Mode)
-      if (!isPanMode) {
-           const EDGE_THRESHOLD = 20;
-           const winW = viewport.w;
-           const winH = viewport.h;
-           const nW = nodeRef.current?.offsetWidth || 260;
-           const nH = nodeRef.current?.offsetHeight || 100;
-           
-           // Check Edge Proximity
-           const isRight = data.x > winW - nW - EDGE_THRESHOLD;
-           const isBottom = data.y > winH - nH - EDGE_THRESHOLD;
-           const isLeft = data.x < EDGE_THRESHOLD && viewport.x > 0;
-           const isTop = data.y < EDGE_THRESHOLD && viewport.y > 0;
-
-           const newEdge = { top: isTop, bottom: isBottom, left: isLeft, right: isRight };
-           
-           // Detect Change
-           const hasChanged = 
-               newEdge.top !== currentEdge.current.top ||
-               newEdge.bottom !== currentEdge.current.bottom ||
-               newEdge.left !== currentEdge.current.left ||
-               newEdge.right !== currentEdge.current.right;
-
-           if (hasChanged) {
-               if (edgeTimer.current) {
-                   clearTimeout(edgeTimer.current);
-                   edgeTimer.current = null;
-               }
-               
-               setEdgePush({ top: false, bottom: false, left: false, right: false });
-               currentEdge.current = newEdge;
-
-               if (newEdge.top || newEdge.bottom || newEdge.left || newEdge.right) {
-                    edgeTimer.current = setTimeout(() => {
-                        setEdgePush(newEdge);
-                    }, 1000);
-               }
-           }
-      }
+      // 2. Edge Push Logic (Delegated to Hook)
+      const nW = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
+      const nH = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
+      checkEdge(data.x, data.y, nW, nH);
   };
   
-    const handleStop = (_e: DraggableEvent, data: DraggableData) => {
+  const handleStop = (_e: DraggableEvent, data: DraggableData) => {
     isDragging.current = false;
     setDragPos(null); // Switch back to Store control
     
     // Cleanup Edge Push
-    if (edgeTimer.current) {
-        clearTimeout(edgeTimer.current);
-        edgeTimer.current = null;
-    }
-    setEdgePush({ top: false, bottom: false, left: false, right: false });
+    clearEdge();
     
     // Was this an edge push? If so, apply a small "bounce back" margin for physical feel
     // Check if we are currently at the edge (using the edge state is tricky as we just cleared it)
@@ -149,8 +110,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     
     const winW = viewport.w;
     const winH = viewport.h;
-    const noteWidth = nodeRef.current?.offsetWidth || 260;
-    const noteHeight = nodeRef.current?.offsetHeight || 100;
+    const noteWidth = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
+    const noteHeight = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
     
     // Use data.x (final drag pos)
     let finalScreenX = data.x;
@@ -271,20 +232,20 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       <div
         ref={nodeRef}
         data-id={note.id}
-        className={cn(
-          "note-card absolute flex flex-col w-[260px]",
-          note.collapsed ? "h-[36px] overflow-hidden" : "h-auto min-h-[100px]",
+          className={cn(
+          `note-card absolute flex flex-col w-[${LAYOUT.NOTE_WIDTH}px]`,
+          note.collapsed ? `h-[${LAYOUT.NOTE_COLLAPSED_HEIGHT}px] overflow-hidden` : `h-auto min-h-[${LAYOUT.NOTE_MIN_HEIGHT}px]`,
           "rounded-xl transition-all duration-200 ease-out",
           "shadow-sm hover:shadow-xl",
           "border border-black/5",
           "group",
-          isStickyDragging && "shadow-2xl scale-[1.02] cursor-move z-[9999]",
+          isStickyDragging && "shadow-2xl scale-[1.02] cursor-move",
           isSelected && !isStickyDragging && (isGroupSelection ? "ring-2 ring-blue-500/50 border-blue-500/50" : "border-2 border-white/80 shadow-sm"),
           isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto"
         )}
         style={{ 
             backgroundColor: note.color,
-            zIndex: isStickyDragging ? 99999 : (isStatic ? undefined : note.z),
+            zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
         }}
         onMouseDownCapture={handleMouseDown}
         onMouseEnter={() => setIsHovered(true)}

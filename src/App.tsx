@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store/useStore";
 import { Canvas } from "./components/Canvas";
 import { TrashGrid } from "./components/TrashGrid";
@@ -37,6 +38,11 @@ function App() {
     document.addEventListener('mouseleave', handleMouseLeave);
     window.addEventListener('resize', handleResize);
 
+    // Listen for reset-viewport event from backend tray menu
+    const unlistenReset = listen('reset-viewport', () => {
+        useStore.getState().setViewportPosition(0, 0);
+    });
+
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     
     const handleChange = (e: MediaQueryListEvent | MediaQueryList) => {
@@ -53,6 +59,7 @@ function App() {
 
     mediaQuery.addEventListener('change', handleChange);
     return () => {
+      unlistenReset.then(f => f());
       mediaQuery.removeEventListener('change', handleChange);
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);

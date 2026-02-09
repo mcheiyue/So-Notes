@@ -2,13 +2,14 @@ import React, { useRef, useEffect } from "react";
 import { useStore } from "../store/useStore";
 import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
+import { LAYOUT, Z_INDEX } from "../constants/layout";
 
 export const Canvas: React.FC = () => {
   const { 
     notes, currentBoardId, addNote, init, isLoaded, 
     stickyDrag, setStickyDrag, moveNote, setContextMenu, 
     setSelectedIds, selectedIds, moveSelectedNotes, clearSelection,
-    interaction, viewport, setPanMode, panViewport
+    interaction, viewport, setPanMode, panViewport, setViewportPosition
   } = useStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const scale = 1;
@@ -21,6 +22,7 @@ export const Canvas: React.FC = () => {
   // Pan Logic Refs
   const isPanning = useRef(false);
   const panStart = useRef({ x: 0, y: 0 });
+  const lastSpacePressTime = useRef<number>(0);
   
   // Edge Push Loop
   const edgePushFrameRef = useRef<number>(0);
@@ -43,16 +45,29 @@ export const Canvas: React.FC = () => {
                         active instanceof HTMLTextAreaElement || 
                         active?.getAttribute('contenteditable') === 'true';
         
-        if (!isInput) {
-           e.preventDefault(); 
-           
-           // Only toggle on initial press (ignore repeat events)
-           if (!e.repeat) {
-               const currentMode = useStore.getState().interaction.isPanMode;
-               console.log('Space Toggle:', !currentMode); // Debug log
-               setPanMode(!currentMode);
-           }
-        }
+          if (!isInput) {
+             e.preventDefault(); 
+             
+             // Only toggle on initial press (ignore repeat events)
+             if (!e.repeat) {
+                 const now = Date.now();
+                 const DOUBLE_PRESS_DELAY = 300;
+                 
+                 if (now - lastSpacePressTime.current < DOUBLE_PRESS_DELAY) {
+                     // Double Press Detected: Reset Viewport
+                     console.log('Space Double Press: Reset Viewport');
+                     setViewportPosition(0, 0);
+                     setPanMode(false); // Exit pan mode
+                     lastSpacePressTime.current = 0; // Reset timer
+                 } else {
+                     // Single Press: Toggle Pan Mode
+                     const currentMode = useStore.getState().interaction.isPanMode;
+                     console.log('Space Toggle:', !currentMode); 
+                     setPanMode(!currentMode);
+                     lastSpacePressTime.current = now;
+                 }
+             }
+          }
       }
     };
 
@@ -63,7 +78,7 @@ export const Canvas: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [setPanMode]);
+  }, [setPanMode, setViewportPosition]);
 
   // Edge Push Animation Loop
   useEffect(() => {
@@ -201,8 +216,8 @@ export const Canvas: React.FC = () => {
                     const { x: vx, y: vy, w: vw, h: vh } = state.viewport;
                     // Match NoteCard.tsx logic: Keep note strictly inside viewport with 10px margin
                     // Assuming default dimensions since we don't have exact note size here
-                    const ESTIMATED_W = 260; 
-                    const ESTIMATED_H = 150; 
+                    const ESTIMATED_W = LAYOUT.NOTE_WIDTH; 
+                    const ESTIMATED_H = LAYOUT.NOTE_MIN_HEIGHT; 
                     const MARGIN = 10;
                     
                     const LIMIT_RIGHT = vx + vw - ESTIMATED_W - MARGIN;
@@ -402,7 +417,8 @@ export const Canvas: React.FC = () => {
 
       <div 
           data-tauri-drag-region 
-          className="drag-handle-area absolute top-0 left-0 w-full h-6 z-[100000] flex items-center justify-center group cursor-grab"
+          className="drag-handle-area absolute top-0 left-0 w-full h-6 flex items-center justify-center group cursor-grab"
+          style={{ zIndex: Z_INDEX.DRAG_HANDLE_AREA }}
       >
           <div className="w-12 h-1 bg-black/10 rounded-full mt-2 transition-colors group-hover:bg-black/20" />
       </div>
@@ -410,8 +426,8 @@ export const Canvas: React.FC = () => {
       {/* Selection Box */}
       <div
         ref={selectionBoxRef}
-        className="absolute z-[9999] bg-blue-500/10 border border-blue-500/50 border-dashed pointer-events-none"
-        style={{ display: 'none' }}
+        className="absolute bg-blue-500/10 border border-blue-500/50 border-dashed pointer-events-none"
+        style={{ display: 'none', zIndex: Z_INDEX.SELECTION_BOX }}
       />
       
       {notes
@@ -432,14 +448,20 @@ export const Canvas: React.FC = () => {
       )}
       
       {interaction.isPanMode && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 px-4 py-2 bg-white/60 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-300 border border-white/20 dark:border-zinc-700/50 shadow-lg rounded-full text-xs font-medium z-[100000] backdrop-blur-xl pointer-events-none transition-all animate-in fade-in zoom-in-95 duration-300 select-none flex items-center gap-2">
+        <div 
+            className="fixed top-6 left-1/2 -translate-x-1/2 px-4 py-2 bg-white/60 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-300 border border-white/20 dark:border-zinc-700/50 shadow-lg rounded-full text-xs font-medium backdrop-blur-xl pointer-events-none transition-all animate-in fade-in zoom-in-95 duration-300 select-none flex items-center gap-2"
+            style={{ zIndex: Z_INDEX.PAN_MODE_BADGE }}
+        >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.5)]" />
             按 Space 退出
         </div>
       )}
       
       {stickyDrag.id && (
-        <div className="fixed bottom-10 left-0 w-full text-center pointer-events-none z-[99999]">
+        <div 
+            className="fixed bottom-10 left-0 w-full text-center pointer-events-none"
+            style={{ zIndex: Z_INDEX.STICKY_DRAG_MSG }}
+        >
             <span className="bg-black/80 text-white text-xs px-4 py-1.5 rounded-full shadow-lg backdrop-blur-md">
                 再次点击放置便签
             </span>

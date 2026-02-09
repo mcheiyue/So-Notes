@@ -1,0 +1,30 @@
+
+export const LAYOUT = {
+  NOTE_WIDTH: 260,
+  NOTE_MIN_HEIGHT: 100,
+  NOTE_COLLAPSED_HEIGHT: 36,
+  
+  MINIMAP_WIDTH: 240,
+  MINIMAP_HEIGHT: 160,
+  
+  EDGE_PUSH_THRESHOLD: 20,
+  EDGE_PUSH_SPEED: 5,
+  
+  GRID_SIZE: 20,
+};
+
+export const Z_INDEX = {
+  // Base layers
+  BACKGROUND_GRID: 0,
+  NOTE_BASE: 1,
+  
+  // Overlay UI
+  MINIMAP: 999,
+  SELECTION_BOX: 9999,
+  
+  // Interaction layers
+  NOTE_DRAGGING: 99999,
+  DRAG_HANDLE_AREA: 100000,
+  PAN_MODE_BADGE: 100000,
+  STICKY_DRAG_MSG: 99999,
+};

@@ -40,6 +40,7 @@ export interface Board {
   name: string;
   icon: string; // Emoji or Lucide icon name
   createdAt: number;
+  viewport?: { x: number; y: number };
 }
 
 export interface AppConfig {

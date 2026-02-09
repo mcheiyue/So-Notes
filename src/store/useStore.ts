@@ -220,6 +220,14 @@ export const useStore = create<State>()(
         state.config = finalData.config;
         state.boards = finalData.boards;
         state.currentBoardId = finalData.currentBoardId;
+        
+        // Restore viewport for the initial board
+        const activeBoard = state.boards.find(b => b.id === state.currentBoardId);
+        if (activeBoard && activeBoard.viewport) {
+            state.viewport.x = activeBoard.viewport.x;
+            state.viewport.y = activeBoard.viewport.y;
+        }
+
         state.isLoaded = true;
       });
       
@@ -238,14 +246,28 @@ export const useStore = create<State>()(
 
     switchBoard: (boardId) => {
         set((state) => {
+            // 1. Save current viewport to OLD board
+            const oldBoard = state.boards.find(b => b.id === state.currentBoardId);
+            if (oldBoard) {
+                oldBoard.viewport = { x: state.viewport.x, y: state.viewport.y };
+            }
+
+            // 2. Switch
             if (state.boards.find(b => b.id === boardId)) {
                 state.currentBoardId = boardId;
                 state.viewMode = 'BOARD'; // Auto-switch to board view
                 state.selectedIds = []; // Clear selection to prevent ghost edits
                 state.stickyDrag = { id: null, offsetX: 0, offsetY: 0 }; // Reset drag
                 
-                // Force Scroll Reset (Fix Viewport Shift)
-                window.scrollTo(0, 0);
+                // 3. Restore viewport from NEW board
+                const newBoard = state.boards.find(b => b.id === boardId);
+                if (newBoard && newBoard.viewport) {
+                    state.viewport.x = newBoard.viewport.x;
+                    state.viewport.y = newBoard.viewport.y;
+                } else {
+                    state.viewport.x = 0;
+                    state.viewport.y = 0;
+                }
             }
         });
     },

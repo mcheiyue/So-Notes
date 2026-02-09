@@ -214,6 +214,9 @@ pub fn run() {
                         }
                         "reset" => {
                             if let Some(window) = app.get_webview_window("main") {
+                                // Emit reset-viewport event to frontend
+                                let _ = window.emit("reset-viewport", ());
+
                                 // 1. Reset Size
                                 let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
                                     width: 400.0,

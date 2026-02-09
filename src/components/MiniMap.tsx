@@ -1,18 +1,15 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { cn } from '../utils/cn';
+import { LAYOUT, Z_INDEX } from '../constants/layout';
 
 export const MiniMap: React.FC = () => {
-    const { notes, viewport, interaction } = useStore();
+    const { notes, viewport, interaction, setViewportPosition } = useStore();
+    const [isHovered, setIsHovered] = useState(false);
+    const mapRef = useRef<HTMLDivElement>(null);
     
     const visibleNotes = useMemo(() => notes.filter(n => !n.deletedAt), [notes]);
     
-    // Map Configuration
-    const MAP_WIDTH = 240;
-    const MAP_HEIGHT = 160;
-    const NOTE_WIDTH = 260; // Standard note width
-    const NOTE_HEIGHT = 100; // Standard note height
-
     // Calculate World Bounds (Always anchored at 0,0)
     const { scale } = useMemo(() => {
         // 1. Determine the maximum extent of the content
@@ -26,8 +23,8 @@ export const MiniMap: React.FC = () => {
         // Check Notes bounds
         visibleNotes.forEach(note => {
             // Use note.width if available, otherwise default
-            const w = (note as any).width || NOTE_WIDTH;
-            const h = (note as any).height || NOTE_HEIGHT;
+            const w = (note as any).width || LAYOUT.NOTE_WIDTH;
+            const h = (note as any).height || LAYOUT.NOTE_MIN_HEIGHT;
             maxContentX = Math.max(maxContentX, note.x + w);
             maxContentY = Math.max(maxContentY, note.y + h);
         });
@@ -39,8 +36,8 @@ export const MiniMap: React.FC = () => {
 
         // 3. Calculate Scale to fit within the map container
         // We use the smaller scale to ensure EVERYTHING fits
-        const scaleX = MAP_WIDTH / worldW;
-        const scaleY = MAP_HEIGHT / worldH;
+        const scaleX = LAYOUT.MINIMAP_WIDTH / worldW;
+        const scaleY = LAYOUT.MINIMAP_HEIGHT / worldH;
         const scale = Math.min(scaleX, scaleY);
 
         return { scale };
@@ -49,7 +46,7 @@ export const MiniMap: React.FC = () => {
     // Visibility Logic
     const edgePush = useStore(state => state.interaction.edgePush);
     const isEdgePushing = Object.values(edgePush).some(v => v);
-    const isVisible = interaction.isPanMode || isEdgePushing;
+    const isVisible = interaction.isPanMode || isEdgePushing || isHovered;
 
     // Helper: World to Map Coordinates
     // Since world (0,0) is map (0,0), this is a simple scaling
@@ -63,17 +60,89 @@ export const MiniMap: React.FC = () => {
     // Viewport Rect on Map
     const vp = toMap(viewport.x, viewport.y, viewport.w, viewport.h);
 
+    // --- Interaction Handlers ---
+
+    // 1. Dragging the Viewport Box (Delta Pan)
+    const handleViewportDrag = (e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent jumping
+        e.preventDefault();
+        
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startVx = viewport.x;
+        const startVy = viewport.y;
+        
+        const handleMove = (moveEvent: MouseEvent) => {
+            const dx = moveEvent.clientX - startX;
+            const dy = moveEvent.clientY - startY;
+            
+            // Convert pixel delta to world delta
+            const worldDx = dx / scale;
+            const worldDy = dy / scale;
+            
+            setViewportPosition(startVx + worldDx, startVy + worldDy);
+        };
+        
+        const handleUp = () => {
+            window.removeEventListener('mousemove', handleMove);
+            window.removeEventListener('mouseup', handleUp);
+        };
+        
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleUp);
+    };
+
+    // 2. Clicking/Dragging the Map Background (Jump to Position)
+    const handleMapDrag = (e: React.MouseEvent) => {
+        if (!mapRef.current) return;
+        e.preventDefault();
+        
+        const rect = mapRef.current.getBoundingClientRect();
+        
+        const updatePosition = (clientX: number, clientY: number) => {
+            const mapX = clientX - rect.left;
+            const mapY = clientY - rect.top;
+            
+            // Convert to World Coordinates
+            const worldX = mapX / scale;
+            const worldY = mapY / scale;
+            
+            // Center viewport on this point
+            setViewportPosition(worldX - viewport.w / 2, worldY - viewport.h / 2);
+        };
+
+        // Initial Jump
+        updatePosition(e.clientX, e.clientY);
+        
+        const handleMove = (moveEvent: MouseEvent) => {
+            updatePosition(moveEvent.clientX, moveEvent.clientY);
+        };
+        
+        const handleUp = () => {
+            window.removeEventListener('mousemove', handleMove);
+            window.removeEventListener('mouseup', handleUp);
+        };
+        
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleUp);
+    };
+
     return (
         <div 
+            ref={mapRef}
             className={cn(
-                "fixed bottom-8 right-8 z-[999]",
-                "w-[240px] h-[160px]",
+                "fixed bottom-8 right-8",
+                `w-[${LAYOUT.MINIMAP_WIDTH}px] h-[${LAYOUT.MINIMAP_HEIGHT}px]`,
                 "bg-white/60 dark:bg-zinc-900/60 backdrop-blur-xl",
                 "border border-white/40 dark:border-zinc-700/50",
                 "rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.12)]",
                 "overflow-hidden transition-all duration-300 ease-out transform",
-                isVisible ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-8 scale-95 pointer-events-none"
+                isVisible ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-8 scale-95 pointer-events-none"
             )}
+            style={{ zIndex: Z_INDEX.MINIMAP }}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+            onMouseDown={handleMapDrag}
         >
             {/* Grid Pattern Background */}
             <div 
@@ -96,35 +165,16 @@ export const MiniMap: React.FC = () => {
             {/* Content Container - Items are absolutely positioned relative to this */}
             <div className="relative w-full h-full">
                 
-                {/* Notes */}
-                {visibleNotes.map(note => {
-                    const rect = toMap(note.x, note.y, (note as any).width || NOTE_WIDTH, (note as any).height || NOTE_HEIGHT);
-                    
-                    // Skip if out of bounds (negative coordinates) - though UI requirement says anchor 0,0
-                    if (rect.left + rect.width < 0 || rect.top + rect.height < 0) return null;
-
-                    return (
-                        <div key={note.id}
-                             className={cn(
-                                 "absolute rounded-[2px] shadow-sm transition-all duration-300",
-                                 "bg-rose-400/80 dark:bg-rose-500/80 hover:bg-rose-500"
-                             )}
-                             style={{ 
-                                 left: rect.left, 
-                                 top: rect.top, 
-                                 width: Math.max(3, rect.width), // Min size for visibility
-                                 height: Math.max(3, rect.height) 
-                             }}
-                        />
-                    );
-                })}
+                {/* Notes Layer (Memoized) */}
+                <MiniMapNotes notes={visibleNotes} scale={scale} />
 
                 {/* Viewport Indicator */}
                 <div 
                     className={cn(
-                        "absolute rounded-lg shadow-sm transition-all duration-75 ease-linear",
+                        "absolute rounded-lg shadow-sm transition-all duration-75 ease-linear cursor-grab active:cursor-grabbing",
                         "border-2 border-indigo-500/60 dark:border-indigo-400/60",
-                        "bg-indigo-500/5 backdrop-brightness-110"
+                        "bg-indigo-500/5 backdrop-brightness-110",
+                        "hover:bg-indigo-500/10 hover:border-indigo-500/80"
                     )}
                     style={{ 
                         left: vp.left, 
@@ -132,6 +182,7 @@ export const MiniMap: React.FC = () => {
                         width: Math.max(vp.width, 4), 
                         height: Math.max(vp.height, 4) 
                     }}
+                    onMouseDown={handleViewportDrag}
                 >
                     {/* Viewport label (optional, kept minimal) */}
                     <div className="absolute -bottom-4 right-0 text-[8px] font-mono font-medium text-indigo-500/70 select-none">
@@ -150,3 +201,44 @@ export const MiniMap: React.FC = () => {
         </div>
     );
 };
+
+// Optimized Sub-component for Notes Layer
+const MiniMapNotes = React.memo(({ notes, scale }: { notes: any[], scale: number }) => {
+    return (
+        <>
+            {notes.map(note => {
+                const w = note.width || LAYOUT.NOTE_WIDTH;
+                const h = note.height || LAYOUT.NOTE_MIN_HEIGHT;
+                
+                const left = note.x * scale;
+                const top = note.y * scale;
+                const width = w * scale;
+                const height = h * scale;
+
+                // Skip if effectively invisible
+                if (width < 0.5 || height < 0.5) return null;
+                
+                // Skip if out of bounds (negative coordinates check)
+                if (left + width < 0 || top + height < 0) return null;
+
+                return (
+                    <div key={note.id}
+                            className={cn(
+                                "absolute rounded-[2px] shadow-sm transition-all duration-300",
+                                "bg-rose-400/80 dark:bg-rose-500/80 hover:bg-rose-500"
+                            )}
+                            style={{ 
+                                left, 
+                                top, 
+                                width: Math.max(3, width), // Min size for visibility
+                                height: Math.max(3, height) 
+                            }}
+                    />
+                );
+            })}
+        </>
+    );
+}, (prev, next) => {
+    // Custom comparison to ensure we don't re-render if only viewport changed (which shouldn't affect props passed here, but safety first)
+    return prev.scale === next.scale && prev.notes === next.notes;
+});

@@ -1,12 +1,15 @@
-## [v1.1.5] - 2026-02-09
+## [v1.1.6] - 2026-02-10
 
-### ✨ 新特性 (Features)
-- **无限画布 (Infinite Canvas)**: 突破屏幕限制，支持拖拽便签扩展画布。
-- **三轨交互模式**: 安全模式(Safe Mode)、推墙扩展(Push-to-Expand)、摄像机模式(Camera Mode)。
-- **全局导航小地图 (Mini-Map)**: 推墙或平移时自动浮现，支持快速跳转。
-- **视口记忆**: 切换看板时自动保存视口位置。
-- **快速归位**: 双击 Space 或托盘菜单重置视口。
+### ✨ Features (新特性)
+- **Interactive MiniMap**:
+  - **Click-to-Jump**: 点击小地图任意位置，画布立即平滑跳转至该坐标。
+  - **Viewport Drag**: 支持在小地图上直接拖拽视口框，快速浏览全局。
+  - **Smart Hover**: 鼠标悬停在小地图上时，阻止其自动隐藏，方便连续操作。
 
-### 🚀 优化 (Optimizations)
-- 统一拖拽边界逻辑，修复窗口拉伸适配问题。
-- 优化拖拽渲染性能，消除推墙抖动。
+### ⚡ Performance (性能优化)
+- **Render Optimization**: `MiniMap` 现在使用 `useMemo` 深度缓存计算结果，大幅减少在大画布下的重绘开销。
+
+### 🧹 Refactor (重构)
+- **Codebase Polish**:
+  - 提取 `src/constants/layout.ts` 统一管理 Note 尺寸与 Z-Index。
+  - 抽离边缘检测逻辑为 `useEdgePush` Hook，简化组件代码。
