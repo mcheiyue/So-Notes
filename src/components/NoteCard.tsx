@@ -233,8 +233,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         ref={nodeRef}
         data-id={note.id}
           className={cn(
-          `note-card absolute flex flex-col w-[${LAYOUT.NOTE_WIDTH}px]`,
-          note.collapsed ? `h-[${LAYOUT.NOTE_COLLAPSED_HEIGHT}px] overflow-hidden` : `h-auto min-h-[${LAYOUT.NOTE_MIN_HEIGHT}px]`,
+          "note-card absolute flex flex-col",
+          note.collapsed ? "overflow-hidden" : "h-auto",
           "rounded-xl transition-all duration-200 ease-out",
           "shadow-sm hover:shadow-xl",
           "border border-black/5",
@@ -244,6 +244,9 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto"
         )}
         style={{ 
+            width: LAYOUT.NOTE_WIDTH,
+            height: note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : 'auto',
+            minHeight: note.collapsed ? undefined : LAYOUT.NOTE_MIN_HEIGHT,
             backgroundColor: note.color,
             zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
         }}

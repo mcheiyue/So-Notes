@@ -132,14 +132,17 @@ export const MiniMap: React.FC = () => {
             ref={mapRef}
             className={cn(
                 "fixed bottom-8 right-8",
-                `w-[${LAYOUT.MINIMAP_WIDTH}px] h-[${LAYOUT.MINIMAP_HEIGHT}px]`,
                 "bg-white/60 dark:bg-zinc-900/60 backdrop-blur-xl",
                 "border border-white/40 dark:border-zinc-700/50",
                 "rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.12)]",
                 "overflow-hidden transition-all duration-300 ease-out transform",
                 isVisible ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-8 scale-95 pointer-events-none"
             )}
-            style={{ zIndex: Z_INDEX.MINIMAP }}
+            style={{ 
+                width: LAYOUT.MINIMAP_WIDTH,
+                height: LAYOUT.MINIMAP_HEIGHT,
+                zIndex: Z_INDEX.MINIMAP 
+            }}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
             onMouseDown={handleMapDrag}

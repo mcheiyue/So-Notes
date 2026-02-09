@@ -4,8 +4,6 @@ import { LAYOUT } from '../constants/layout';
 
 export const useEdgePush = () => {
     const setEdgePush = useStore(state => state.setEdgePush);
-    const viewport = useStore(state => state.viewport);
-    const isPanMode = useStore(state => state.interaction.isPanMode);
     
     const edgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const currentEdge = useRef({ top: false, bottom: false, left: false, right: false });
@@ -19,6 +17,11 @@ export const useEdgePush = () => {
     }, [setEdgePush]);
 
     const checkEdge = (x: number, y: number, width: number, height: number) => {
+        // Access store directly to avoid re-renders on every viewport change
+        const state = useStore.getState();
+        const viewport = state.viewport;
+        const isPanMode = state.interaction.isPanMode;
+
         // If in Pan Mode, disable Edge Push
         if (isPanMode) return;
         
