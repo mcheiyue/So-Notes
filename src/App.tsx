@@ -8,6 +8,7 @@ import { BoardDock } from "./components/BoardDock";
 import { PinFab } from "./components/PinFab";
 import { ContextMenu } from "./components/ContextMenu";
 import { MiniMap } from "./components/MiniMap";
+import ShortcutsManager from "./components/ShortcutsManager";
 
 function App() {
   const isMouseDownRef = useRef(false);
@@ -83,9 +84,10 @@ function App() {
            
            <PinFab />
            <ContextMenu />
-           <MiniMap />
-         </>
-       ) : (
+            <MiniMap />
+            <ShortcutsManager />
+          </>
+        ) : (
          <TrashGrid />
        )}
        

@@ -179,12 +179,11 @@ pub fn run() {
                         "quit" => app.exit(0),
                         "pin" => {
                             let state = app.state::<AppState>();
-                            let mut is_pinned = false;
-                            {
+                            let is_pinned = {
                                 let mut is_pinned_guard = state.is_pinned.lock().unwrap();
                                 *is_pinned_guard = !*is_pinned_guard;
-                                is_pinned = *is_pinned_guard;
-                            }
+                                *is_pinned_guard
+                            };
 
                             // Update menu item text
                             let pin_text = if is_pinned { "取消钉住" } else { "钉住窗口" };

@@ -75,6 +75,7 @@ interface State {
   
   // New Actions for v1.1.1 & v1.1.2
   duplicateNote: (id: string) => void;
+  duplicateSelectedNotes: () => void;
   moveNoteToBoard: (id: string, targetBoardId: string) => void;
   copyNoteToBoard: (id: string, targetBoardId: string) => void;
   moveSelectedNotesToBoard: (targetBoardId: string) => void;
@@ -85,6 +86,7 @@ interface State {
   setSelectedIds: (ids: string[]) => void;
   toggleSelection: (id: string) => void;
   clearSelection: () => void;
+  selectAllNotes: () => void;
   setContextMenu: (menu: ContextMenuState) => void;
 
   saveToDisk: () => Promise<void>;
@@ -727,6 +729,13 @@ export const useStore = create<State>()(
         });
     },
 
+    selectAllNotes: () => {
+        set((state) => {
+            const currentBoardNotes = state.notes.filter(n => n.boardId === state.currentBoardId);
+            state.selectedIds = currentBoardNotes.map(n => n.id);
+        });
+    },
+
     setContextMenu: (menu) => {
         set((state) => {
             state.contextMenu = menu;
@@ -765,6 +774,39 @@ export const useStore = create<State>()(
                 state.notes.push(newNote);
                 state.config.maxZ += 1;
                 // Auto-select the new note? Maybe not, to avoid confusion.
+            }
+        });
+        get().saveToDisk();
+    },
+
+    duplicateSelectedNotes: () => {
+        set((state) => {
+            const { selectedIds } = state;
+            if (selectedIds.length === 0) return;
+            
+            const newSelectedIds: string[] = [];
+
+            selectedIds.forEach(id => {
+                const note = state.notes.find(n => n.id === id);
+                if (note) {
+                    const newNote: Note = {
+                        ...note,
+                        id: crypto.randomUUID(),
+                        x: note.x + 20, // Offset slightly
+                        y: note.y + 20,
+                        z: state.config.maxZ + 1,
+                        createdAt: Date.now(),
+                        updatedAt: Date.now(),
+                    };
+                    state.notes.push(newNote);
+                    state.config.maxZ += 1;
+                    newSelectedIds.push(newNote.id);
+                }
+            });
+
+            // Auto-select the newly created duplicates for UX
+            if (newSelectedIds.length > 0) {
+                state.selectedIds = newSelectedIds;
             }
         });
         get().saveToDisk();

@@ -22,10 +22,24 @@ export const Canvas: React.FC = () => {
   // Pan Logic Refs
   const isPanning = useRef(false);
   const panStart = useRef({ x: 0, y: 0 });
+  const panDeltaRef = useRef({ dx: 0, dy: 0 });
   const lastSpacePressTime = useRef<number>(0);
   
   // Edge Push Loop
   const edgePushFrameRef = useRef<number>(0);
+
+  useEffect(() => {
+    let frameId: number;
+    const updateLoop = () => {
+      if (panDeltaRef.current.dx !== 0 || panDeltaRef.current.dy !== 0) {
+        panViewport(panDeltaRef.current.dx, panDeltaRef.current.dy);
+        panDeltaRef.current = { dx: 0, dy: 0 };
+      }
+      frameId = requestAnimationFrame(updateLoop);
+    };
+    frameId = requestAnimationFrame(updateLoop);
+    return () => cancelAnimationFrame(frameId);
+  }, [panViewport]);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -128,7 +142,8 @@ export const Canvas: React.FC = () => {
           const dx = e.clientX - panStart.current.x;
           const dy = e.clientY - panStart.current.y;
           // Dragging background moves viewport in OPPOSITE direction
-          panViewport(-dx, -dy);
+          panDeltaRef.current.dx -= dx;
+          panDeltaRef.current.dy -= dy;
           panStart.current = { x: e.clientX, y: e.clientY };
           return;
       }

@@ -15,7 +15,8 @@ export const MiniMap: React.FC = () => {
     );
     const [isHovered, setIsHovered] = useState(false);
     const mapRef = useRef<HTMLDivElement>(null);
-    
+    const viewportRef = useRef<HTMLDivElement>(null);
+
     const visibleNotes = useMemo(() => notes.filter(n => !n.deletedAt), [notes]);
     
     // Calculate World Bounds (Always anchored at 0,0)
@@ -77,21 +78,45 @@ export const MiniMap: React.FC = () => {
         
         const startX = e.clientX;
         const startY = e.clientY;
+        
+        // Capture initial state
         const startVx = viewport.x;
         const startVy = viewport.y;
+        const startLeft = vp.left;
+        const startTop = vp.top;
         
+        // Use a ref to store the latest mouse position for RAF
+        let frameId: number | null = null;
+
         const handleMove = (moveEvent: MouseEvent) => {
             const dx = moveEvent.clientX - startX;
             const dy = moveEvent.clientY - startY;
-            
-            // Convert pixel delta to world delta
-            const worldDx = dx / scale;
-            const worldDy = dy / scale;
-            
-            setViewportPosition(startVx + worldDx, startVy + worldDy);
+
+            // 1. Instant Visual Feedback (Direct DOM manipulation)
+            // This eliminates the "lag" caused by waiting for React/Store round-trip
+            if (viewportRef.current) {
+                viewportRef.current.style.left = `${startLeft + dx}px`;
+                viewportRef.current.style.top = `${startTop + dy}px`;
+            }
+
+            // 2. Throttled Store Update (Data Sync)
+            if (frameId) return; // Skip if a frame is already pending
+
+            frameId = requestAnimationFrame(() => {
+                // Convert pixel delta to world delta
+                const worldDx = dx / scale;
+                const worldDy = dy / scale;
+                
+                setViewportPosition(startVx + worldDx, startVy + worldDy);
+                frameId = null;
+            });
         };
         
         const handleUp = () => {
+            if (frameId) {
+                cancelAnimationFrame(frameId);
+                frameId = null;
+            }
             window.removeEventListener('mousemove', handleMove);
             window.removeEventListener('mouseup', handleUp);
         };
@@ -181,6 +206,7 @@ export const MiniMap: React.FC = () => {
 
                 {/* Viewport Indicator */}
                 <div 
+                    ref={viewportRef}
                     className={cn(
                         "absolute rounded-lg shadow-sm transition-all duration-75 ease-linear cursor-grab active:cursor-grabbing",
                         "border-2 border-indigo-500/60 dark:border-indigo-400/60",
