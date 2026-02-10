@@ -1,10 +1,18 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { useStore } from '../store/useStore';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
 import { LAYOUT, Z_INDEX } from '../constants/layout';
 
 export const MiniMap: React.FC = () => {
-    const { notes, viewport, interaction, setViewportPosition } = useStore();
+    const { notes, viewport, interaction, setViewportPosition } = useStore(
+        useShallow(state => ({
+            notes: state.notes,
+            viewport: state.viewport,
+            interaction: state.interaction,
+            setViewportPosition: state.setViewportPosition,
+        }))
+    );
     const [isHovered, setIsHovered] = useState(false);
     const mapRef = useRef<HTMLDivElement>(null);
     
@@ -205,43 +213,52 @@ export const MiniMap: React.FC = () => {
     );
 };
 
-// Optimized Sub-component for Notes Layer
+// Optimized Sub-component for Individual Note Item
+const MiniMapNoteItem = React.memo(({ note, scale }: { note: any, scale: number }) => {
+    const w = note.width || LAYOUT.NOTE_WIDTH;
+    const h = note.height || LAYOUT.NOTE_MIN_HEIGHT;
+    
+    const left = note.x * scale;
+    const top = note.y * scale;
+    const width = w * scale;
+    const height = h * scale;
+
+    // Skip if effectively invisible
+    if (width < 0.5 || height < 0.5) return null;
+    
+    // Skip if out of bounds (negative coordinates check)
+    if (left + width < 0 || top + height < 0) return null;
+
+    return (
+        <div 
+            className={cn(
+                "absolute rounded-[2px] shadow-sm transition-all duration-300",
+                "bg-rose-400/80 dark:bg-rose-500/80 hover:bg-rose-500"
+            )}
+            style={{ 
+                left, 
+                top, 
+                width: Math.max(3, width), // Min size for visibility
+                height: Math.max(3, height) 
+            }}
+        />
+    );
+}, (prev, next) => {
+    // Only re-render if note reference changes (Immer ensures this only happens for the moved note)
+    // or if scale changes (global zoom/pan affecting world bounds)
+    return prev.note === next.note && prev.scale === next.scale;
+});
+
+// Optimized Container for Notes Layer
 const MiniMapNotes = React.memo(({ notes, scale }: { notes: any[], scale: number }) => {
     return (
         <>
-            {notes.map(note => {
-                const w = note.width || LAYOUT.NOTE_WIDTH;
-                const h = note.height || LAYOUT.NOTE_MIN_HEIGHT;
-                
-                const left = note.x * scale;
-                const top = note.y * scale;
-                const width = w * scale;
-                const height = h * scale;
-
-                // Skip if effectively invisible
-                if (width < 0.5 || height < 0.5) return null;
-                
-                // Skip if out of bounds (negative coordinates check)
-                if (left + width < 0 || top + height < 0) return null;
-
-                return (
-                    <div key={note.id}
-                            className={cn(
-                                "absolute rounded-[2px] shadow-sm transition-all duration-300",
-                                "bg-rose-400/80 dark:bg-rose-500/80 hover:bg-rose-500"
-                            )}
-                            style={{ 
-                                left, 
-                                top, 
-                                width: Math.max(3, width), // Min size for visibility
-                                height: Math.max(3, height) 
-                            }}
-                    />
-                );
-            })}
+            {notes.map(note => (
+                <MiniMapNoteItem key={note.id} note={note} scale={scale} />
+            ))}
         </>
     );
 }, (prev, next) => {
-    // Custom comparison to ensure we don't re-render if only viewport changed (which shouldn't affect props passed here, but safety first)
-    return prev.scale === next.scale && prev.notes === next.notes;
+    // Re-render only if the notes array reference changes or scale changes
+    return prev.notes === next.notes && prev.scale === next.scale;
 });
