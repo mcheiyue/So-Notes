@@ -114,6 +114,11 @@ export const Canvas: React.FC = () => {
 
         if (dx !== 0 || dy !== 0) {
             panViewport(dx, dy);
+            // Move selected notes along with viewport to keep them static relative to screen
+            // This prevents them from "drifting" away from the cursor during edge push
+            if (selectedIds.length > 0) {
+                moveSelectedNotes(dx, dy);
+            }
         }
         edgePushFrameRef.current = requestAnimationFrame(pushLoop);
     };

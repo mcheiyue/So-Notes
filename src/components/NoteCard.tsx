@@ -54,6 +54,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   
   // Drag State (Hybrid Control)
   const isDragging = useRef(false);
+  const groupBoundsRef = useRef<{ minX: number, minY: number, width: number, height: number } | null>(null);
+
   // We use dragPos to control position ONLY during drag to prevent jitter/re-renders
   // Initial value is null, meaning "use Store position"
   const [dragPos, setDragPos] = useState<{x: number, y: number} | null>(null);
@@ -79,6 +81,46 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     }
   }, [note.content, note.collapsed, isEditing]);
 
+  const handleStart = (e: DraggableEvent, _data: DraggableData) => {
+      isDragging.current = true;
+      handleMouseDown(e);
+
+      if (isSelected && isGroupSelection) {
+          const state = useStore.getState();
+          const selectedNotes = state.notes.filter(n => state.selectedIds.includes(n.id));
+          
+          if (selectedNotes.length > 0) {
+              let minX = Infinity, minY = Infinity;
+              let maxX = -Infinity, maxY = -Infinity;
+              
+              const leaderX = note.x;
+              const leaderY = note.y;
+
+              selectedNotes.forEach(n => {
+                  const nW = n.width || LAYOUT.NOTE_WIDTH;
+                  const nH = n.height || (n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT);
+                  
+                  const relX = n.x - leaderX;
+                  const relY = n.y - leaderY;
+                  
+                  if (relX < minX) minX = relX;
+                  if (relY < minY) minY = relY;
+                  if (relX + nW > maxX) maxX = relX + nW;
+                  if (relY + nH > maxY) maxY = relY + nH;
+              });
+              
+              groupBoundsRef.current = {
+                  minX,
+                  minY,
+                  width: maxX - minX,
+                  height: maxY - minY
+              };
+          }
+      } else {
+          groupBoundsRef.current = null;
+      }
+  };
+
   const handleDrag = (_e: DraggableEvent, data: DraggableData) => {
       // 1. Sync Local State (Hybrid Control)
       if (!isDragging.current) isDragging.current = true;
@@ -92,9 +134,20 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       }
 
       // 2. Edge Push Logic (Delegated to Hook)
-      const nW = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
-      const nH = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
-      checkEdge(data.x, data.y, nW, nH);
+      let checkX = data.x;
+      let checkY = data.y;
+      let checkW = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
+      let checkH = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
+
+      // Use Group Bounding Box if available
+      if (groupBoundsRef.current) {
+          checkX = data.x + groupBoundsRef.current.minX;
+          checkY = data.y + groupBoundsRef.current.minY;
+          checkW = groupBoundsRef.current.width;
+          checkH = groupBoundsRef.current.height;
+      }
+
+      checkEdge(checkX, checkY, checkW, checkH);
   };
   
   const handleStop = (_e: DraggableEvent, data: DraggableData) => {
@@ -112,6 +165,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     const winH = viewport.h;
     const noteWidth = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
     const noteHeight = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
+    const MARGIN = 10;
     
     // Use data.x (final drag pos)
     let finalScreenX = data.x;
@@ -124,8 +178,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     // 2. Safe Mode: Viewport Constraints (Cage Mode)
     // Only applied when NOT in Pan Mode
     if (!isPanMode) {
-        const MARGIN = 10;
-        
         // Right / Bottom with Snapback Margin
         if (finalScreenX > winW - noteWidth) finalScreenX = winW - noteWidth - MARGIN;
         if (finalScreenY > winH - noteHeight) finalScreenY = winH - noteHeight - MARGIN;
@@ -156,9 +208,29 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 let nWorldY = n.y;
                 let changed = false;
 
-                // Hard Limit for Group Members
+                // Hard Limit for Group Members (Absolute World 0,0)
                 if (nWorldX < 0) { nWorldX = 0; changed = true; }
                 if (nWorldY < 0) { nWorldY = 0; changed = true; }
+
+                // Viewport Constraints (Independent Clamp)
+                // Only if NOT in Pan Mode
+                if (!isPanMode) {
+                    // Right Limit
+                    const maxWorldX = viewport.x + winW - (n.width || LAYOUT.NOTE_WIDTH) - MARGIN;
+                    if (nWorldX > maxWorldX) { nWorldX = maxWorldX; changed = true; }
+
+                    // Bottom Limit
+                    if (n.height) {
+                        const maxWorldY = viewport.y + winH - n.height - MARGIN;
+                        if (nWorldY > maxWorldY) { nWorldY = maxWorldY; changed = true; }
+                    }
+
+                    // Left Limit (Viewport)
+                    if (nWorldX < viewport.x) { nWorldX = viewport.x; changed = true; }
+                    
+                    // Top Limit (Viewport)
+                    if (nWorldY < viewport.y) { nWorldY = viewport.y; changed = true; }
+                }
 
                 if (changed) {
                     moveNote(id, nWorldX, nWorldY);
@@ -221,10 +293,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         defaultPosition={undefined} // Controlled via position prop
         position={{ x: finalX, y: finalY }}
         scale={scale}
-        onStart={(e) => {
-            isDragging.current = true;
-            handleMouseDown(e);
-        }}
+        onStart={handleStart}
         onDrag={handleDrag}
         onStop={handleStop}
         disabled={isStickyDragging || isStatic}
@@ -278,7 +347,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                   </button>
               </Tooltip>
           ) : (
-            <Tooltip content="切换颜色" disabled={isStickyDragging}>
+            <Tooltip content="切换颜色" disabled={isStickyDragging || !!dragPos}>
                 <button
                 onClick={cycleColor}
                 className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70 flex-shrink-0"
@@ -291,7 +360,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           {/* Center: Title or Grip */}
           <div className="flex-1 flex justify-center cursor-grab active:cursor-grabbing h-full items-center px-2 overflow-hidden">
              {note.collapsed ? (
-                 <Tooltip content="双击展开" delay={500} disabled={isStickyDragging || isStatic}>
+                 <Tooltip content="双击展开" delay={500} disabled={isStickyDragging || isStatic || !!dragPos}>
                     <span 
                         className={cn(
                             "text-sm font-bold truncate select-none w-full text-center block",
@@ -302,14 +371,14 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                     </span>
                  </Tooltip>
              ) : (
-                <Tooltip content="双击折叠 / 拖拽移动" delay={1000} disabled={isStickyDragging || isStatic}>
+                <Tooltip content="双击折叠 / 拖拽移动" delay={1000} disabled={isStickyDragging || isStatic || !!dragPos}>
                     <GripHorizontal className={cn("w-4 h-4 text-black/20", isStatic && "opacity-0")} />
                 </Tooltip>
              )}
           </div>
 
           {/* Right: Delete */}
-          <Tooltip content={isStatic ? "永久删除" : "删除便签"} disabled={isStickyDragging}>
+          <Tooltip content={isStatic ? "永久删除" : "删除便签"} disabled={isStickyDragging || !!dragPos}>
             <button
               onClick={(e) => {
                   e.stopPropagation();
