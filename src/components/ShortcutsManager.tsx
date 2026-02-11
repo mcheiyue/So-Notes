@@ -8,26 +8,39 @@ export default function ShortcutsManager() {
   const duplicateSelectedNotes = useStore((state) => state.duplicateSelectedNotes);
   const setViewportPosition = useStore((state) => state.setViewportPosition);
 
-  // Delete / Backspace: 删除选中笔记
-  useHotkeys(['delete', 'backspace'], (e) => {
+  const isSpotlightOpen = useStore((state) => state.isSpotlightOpen);
+  const setSpotlightOpen = useStore((state) => state.setSpotlightOpen);
+
+  // Ctrl + P / Cmd + P: 全局搜索
+  useHotkeys('mod+p', (e) => {
     e.preventDefault();
-    deleteSelectedNotes();
-  }, { enableOnFormTags: false }); // 输入框内不触发
+    setSpotlightOpen(!isSpotlightOpen);
+  }, { enableOnFormTags: true }); // 输入框内也可唤起
 
   // Ctrl + A / Cmd + A: 全选
   useHotkeys('mod+a', (e) => {
+    if (isSpotlightOpen) return;
     e.preventDefault();
     selectAllNotes();
   }, { enableOnFormTags: false });
 
+  // Delete / Backspace: 删除选中笔记
+  useHotkeys(['delete', 'backspace'], (e) => {
+    if (isSpotlightOpen) return;
+    e.preventDefault();
+    deleteSelectedNotes();
+  }, { enableOnFormTags: false });
+
   // Ctrl + D / Cmd + D: 复制副本
   useHotkeys('mod+d', (e) => {
+    if (isSpotlightOpen) return;
     e.preventDefault();
     duplicateSelectedNotes();
   }, { enableOnFormTags: false });
 
   // Ctrl + 0 / Cmd + 0: 重置视图
   useHotkeys('mod+0', (e) => {
+    if (isSpotlightOpen) return;
     e.preventDefault();
     setViewportPosition(0, 0);
     // 同时通知 Tauri 重置窗口大小（如果有相关逻辑的话，这里暂时只重置画布视口）

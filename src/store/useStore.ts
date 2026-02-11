@@ -34,11 +34,13 @@ interface State {
   
   // Dock UI State (Transient)
   isDockVisible: boolean;
+  isSpotlightOpen: boolean;
 
   // Actions
   init: () => Promise<void>;
   
   // Viewport Actions
+  setSpotlightOpen: (isOpen: boolean) => void;
   setViewportSize: (w: number, h: number) => void;
   setPanMode: (isPan: boolean) => void;
   setEdgePush: (pushState: Partial<{ top: boolean; bottom: boolean; left: boolean; right: boolean }>) => void;
@@ -135,6 +137,7 @@ export const useStore = create<State>()(
     currentBoardId: DEFAULT_BOARD.id,
     viewMode: 'BOARD',
     isDockVisible: false,
+    isSpotlightOpen: false,
 
     init: async () => {
       let finalData: StorageData = { 
@@ -394,6 +397,8 @@ export const useStore = create<State>()(
     },
 
     setDockVisible: (visible) => set({ isDockVisible: visible }),
+
+    setSpotlightOpen: (isOpen) => set({ isSpotlightOpen: isOpen }),
 
     addNote: (x, y) => {
       const newNote: Note = {

@@ -9,10 +9,12 @@ import { PinFab } from "./components/PinFab";
 import { ContextMenu } from "./components/ContextMenu";
 import { MiniMap } from "./components/MiniMap";
 import ShortcutsManager from "./components/ShortcutsManager";
+import Spotlight from "./components/Spotlight";
 
 function App() {
   const isMouseDownRef = useRef(false);
   const viewMode = useStore(state => state.viewMode);
+  const isSpotlightOpen = useStore(state => state.isSpotlightOpen);
 
   useEffect(() => {
     const handleMouseDown = () => { isMouseDownRef.current = true; };
@@ -84,10 +86,11 @@ function App() {
            
            <PinFab />
            <ContextMenu />
-            <MiniMap />
-            <ShortcutsManager />
-          </>
-        ) : (
+           <MiniMap />
+           <ShortcutsManager />
+           {isSpotlightOpen && <Spotlight />}
+         </>
+       ) : (
          <TrashGrid />
        )}
        

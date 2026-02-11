@@ -59,7 +59,10 @@ export const Canvas: React.FC = () => {
                         active instanceof HTMLTextAreaElement || 
                         active?.getAttribute('contenteditable') === 'true';
         
-          if (!isInput) {
+        // Prevent pan if Spotlight is open or typing
+        const isSpotlightOpen = useStore.getState().isSpotlightOpen;
+
+          if (!isInput && !isSpotlightOpen) {
              e.preventDefault(); 
              
              // Only toggle on initial press (ignore repeat events)
