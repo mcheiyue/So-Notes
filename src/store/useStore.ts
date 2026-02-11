@@ -46,6 +46,7 @@ interface State {
   setEdgePush: (pushState: Partial<{ top: boolean; bottom: boolean; left: boolean; right: boolean }>) => void;
   panViewport: (dx: number, dy: number) => void; // Delta pan
   setViewportPosition: (x: number, y: number) => void; // Absolute pan
+  setIsDragging: (isDragging: boolean) => void; // Global drag state
   expandCanvas: (w: number, h: number) => void; // Expand world boundaries
 
   // Board Actions
@@ -129,6 +130,7 @@ export const useStore = create<State>()(
     canvas: { w: window.innerWidth, h: window.innerHeight },
     interaction: { 
         isPanMode: false,
+        isDragging: false,
         edgePush: { top: false, bottom: false, left: false, right: false }
     },
     
@@ -343,6 +345,18 @@ export const useStore = create<State>()(
     setPanMode: (isPan) => {
         set((state) => {
             state.interaction.isPanMode = isPan;
+        });
+    },
+
+    setIsDragging: (isDragging) => {
+        // Direct DOM manipulation for performance (avoids React re-renders)
+        if (isDragging) {
+            document.body.classList.add('is-dragging');
+        } else {
+            document.body.classList.remove('is-dragging');
+        }
+        set((state) => {
+            state.interaction.isDragging = isDragging;
         });
     },
 

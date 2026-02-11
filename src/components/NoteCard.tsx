@@ -1,6 +1,6 @@
 import React, { useRef, useState, useLayoutEffect } from "react";
 import Draggable, { DraggableData, DraggableEvent } from "react-draggable";
-import { X, GripHorizontal, Palette, RotateCcw, Trash2 } from "lucide-react";
+import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
 import { NOTE_COLORS } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { useStore } from "../store/useStore";
@@ -34,6 +34,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const setSelectedIds = useStore(state => state.setSelectedIds);
   const restoreNote = useStore(state => state.restoreNote);
   const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
+  const setIsDragging = useStore(state => state.setIsDragging);
   
   const isStickyDragging = useStore(state => state.stickyDrag.id === note.id);
   const isSelected = useStore(state => state.selectedIds.includes(note.id));
@@ -51,6 +52,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
   
   // Drag State (Hybrid Control)
   const isDragging = useRef(false);
@@ -83,6 +85,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
   const handleStart = (e: DraggableEvent, _data: DraggableData) => {
       isDragging.current = true;
+      setIsDragging(true);
       handleMouseDown(e);
 
       if (isSelected && isGroupSelection) {
@@ -153,6 +156,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const handleStop = (_e: DraggableEvent, data: DraggableData) => {
     isDragging.current = false;
     setDragPos(null); // Switch back to Store control
+    setIsDragging(false);
     
     // Cleanup Edge Push
     clearEdge();
@@ -286,6 +290,17 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       // Allow focus
   };
 
+  const handleCopy = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(note.title ? `${note.title}\n${note.content}` : note.content);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+      } catch (err) {
+        console.error('Failed to copy note:', err);
+      }
+  };
+
   return (
       <Draggable
         nodeRef={nodeRef}
@@ -325,7 +340,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       >
         <div 
             className={cn(
-                "drag-handle h-9 flex items-center justify-between px-3 pt-1 cursor-grab active:cursor-grabbing",
+                "drag-handle relative h-9 flex items-center justify-between px-2 pt-1 cursor-grab active:cursor-grabbing select-none",
                 "transition-opacity duration-200",
                 note.collapsed || isHovered || isEditing || note.title ? "opacity-100" : "opacity-0",
                 isStatic && "!cursor-default"
@@ -333,68 +348,92 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             onContextMenu={handleContextMenu}
             onDoubleClick={isStatic ? undefined : handleDoubleClick}
         >
-          {/* Left: Palette or Restore */}
-          {isStatic ? (
-              <Tooltip content="还原笔记">
-                  <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        restoreNote(note.id);
-                    }}
-                    className="p-1.5 rounded-md hover:bg-green-100 hover:text-green-600 transition-colors text-black/40 flex-shrink-0"
-                  >
-                      <RotateCcw className="w-4 h-4" />
-                  </button>
-              </Tooltip>
-          ) : (
-            <Tooltip content="切换颜色" disabled={isStickyDragging || !!dragPos}>
-                <button
-                onClick={cycleColor}
-                className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70 flex-shrink-0"
-                >
-                <Palette className="w-4 h-4" />
-                </button>
-            </Tooltip>
-          )}
-          
-          {/* Center: Title or Grip */}
-          <div className="flex-1 flex justify-center cursor-grab active:cursor-grabbing h-full items-center px-2 overflow-hidden">
-             {note.collapsed ? (
-                 <Tooltip content="双击展开" delay={500} disabled={isStickyDragging || isStatic || !!dragPos}>
-                    <span 
+          {/* Left Controls Group */}
+          <div className="flex items-center gap-0.5 z-20">
+            {/* Left: Palette or Restore */}
+            {isStatic ? (
+                <Tooltip content="还原笔记">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            restoreNote(note.id);
+                        }}
+                        className="p-1.5 rounded-md hover:bg-green-100 hover:text-green-600 transition-colors text-black/40 flex-shrink-0"
+                    >
+                        <RotateCcw className="w-4 h-4" />
+                    </button>
+                </Tooltip>
+            ) : (
+                <Tooltip content="切换颜色" disabled={isStickyDragging || !!dragPos}>
+                    <button
+                    onClick={cycleColor}
+                    className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70 flex-shrink-0"
+                    >
+                    <Palette className="w-4 h-4" />
+                    </button>
+                </Tooltip>
+            )}
+            
+            {/* Copy Button */}
+            {!isStatic && (
+                <Tooltip content={isCopied ? "已复制" : "复制内容"} disabled={isStickyDragging || !!dragPos}>
+                    <button
+                        onClick={handleCopy}
                         className={cn(
-                            "text-sm font-bold truncate select-none w-full text-center block",
-                            note.title ? "text-gray-800 opacity-90" : "text-gray-500 italic opacity-70"
+                            "p-1.5 rounded-md transition-all duration-200 flex-shrink-0",
+                            isCopied 
+                                ? "text-black/70" 
+                                : "hover:bg-black/5 text-black/40 hover:text-black/70"
                         )}
                     >
-                        {displayTitle}
-                    </span>
-                 </Tooltip>
-             ) : (
-                <Tooltip content="双击折叠 / 拖拽移动" delay={1000} disabled={isStickyDragging || isStatic || !!dragPos}>
-                    <GripHorizontal className={cn("w-4 h-4 text-black/20", isStatic && "opacity-0")} />
+                        {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    </button>
                 </Tooltip>
-             )}
+            )}
+          </div>
+
+          {/* Center: Title or Grip (Absolute Centered) */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+             <div className="pointer-events-auto px-2 max-w-[60%] flex justify-center">
+                 {note.collapsed ? (
+                     <Tooltip content="双击展开" delay={500} disabled={isStickyDragging || isStatic || !!dragPos}>
+                        <span 
+                            className={cn(
+                                "text-sm font-bold truncate select-none w-full text-center block",
+                                note.title ? "text-gray-800 opacity-90" : "text-gray-500 italic opacity-70"
+                            )}
+                        >
+                            {displayTitle}
+                        </span>
+                     </Tooltip>
+                 ) : (
+                    <Tooltip content="双击折叠 / 拖拽移动" delay={1000} disabled={isStickyDragging || isStatic || !!dragPos}>
+                        <GripHorizontal className={cn("w-4 h-4 text-black/20", isStatic && "opacity-0")} />
+                    </Tooltip>
+                 )}
+             </div>
           </div>
 
           {/* Right: Delete */}
-          <Tooltip content={isStatic ? "永久删除" : "删除便签"} disabled={isStickyDragging || !!dragPos}>
-            <button
-              onClick={(e) => {
-                  e.stopPropagation();
-                  if (isStatic) {
-                      if (window.confirm("确定要永久删除吗？无法找回。")) {
-                          deleteNotePermanently(note.id);
-                      }
-                  } else {
-                      deleteNote(note.id);
-                  }
-              }}
-              className="p-1.5 rounded-md hover:bg-red-100 hover:text-red-500 transition-colors text-black/40 flex-shrink-0"
-            >
-              {isStatic ? <Trash2 className="w-4 h-4" /> : <X className="w-4 h-4" />}
+          <div className="flex items-center gap-0.5 z-20">
+            <Tooltip content={isStatic ? "永久删除" : "删除便签"} disabled={isStickyDragging || !!dragPos}>
+                <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (isStatic) {
+                        if (window.confirm("确定要永久删除吗？无法找回。")) {
+                            deleteNotePermanently(note.id);
+                        }
+                    } else {
+                        deleteNote(note.id);
+                    }
+                }}
+                className="p-1.5 rounded-md hover:bg-red-100 hover:text-red-500 transition-colors text-black/40 flex-shrink-0"
+                >
+                {isStatic ? <Trash2 className="w-4 h-4" /> : <X className="w-4 h-4" />}
             </button>
           </Tooltip>
+          </div>
         </div>
 
         {/* Content */}

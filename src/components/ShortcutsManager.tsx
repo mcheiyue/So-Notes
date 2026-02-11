@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useStore } from '../store/useStore';
 import { invoke } from '@tauri-apps/api/core';
@@ -46,6 +47,45 @@ export default function ShortcutsManager() {
     // 同时通知 Tauri 重置窗口大小（如果有相关逻辑的话，这里暂时只重置画布视口）
     invoke('reset').catch(() => {}); 
   }, { enableOnFormTags: true }); // 视图操作允许在任何地方触发
+
+  // --- Native Behavior Guard (UX Protection) ---
+  
+  // 1. Block browser default shortcuts (Refresh, Find, Save, Zoom) - PROD ONLY
+  useHotkeys([
+    'f5', 'mod+r',         // Refresh
+    'mod+s',               // Save Page
+    'mod+f', 'mod+g',      // Find
+    'mod+shift+r',         // Hard Refresh
+    'mod+=', 'mod+-',      // Zoom In/Out
+    'mod+o'                // Open File
+  ], (e) => {
+    if (import.meta.env.PROD) {
+      e.preventDefault();
+    }
+  }, { enableOnFormTags: true });
+
+  // 2. Block Ctrl+Wheel Zoom & Default Context Menu - PROD ONLY
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (import.meta.env.PROD && e.ctrlKey) {
+        e.preventDefault();
+      }
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+        if (import.meta.env.PROD) {
+            e.preventDefault();
+        }
+    };
+
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('contextmenu', handleContextMenu);
+    
+    return () => {
+      window.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('contextmenu', handleContextMenu);
+    };
+  }, []);
 
   return null;
 }

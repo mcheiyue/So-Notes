@@ -63,6 +63,7 @@ export interface AppCanvasState {
 
 export interface InteractionState {
   isPanMode: boolean; // Space key pressed
+  isDragging: boolean; // Global drag state (for disabling tooltips etc)
   edgePush: {
     top: boolean;
     bottom: boolean;

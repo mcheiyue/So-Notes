@@ -25,6 +25,13 @@ body {
   overflow: hidden; 
 }
 
+/* Global Tooltip Suppression during Drag */
+body.is-dragging .tooltip-portal {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 /* Global Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

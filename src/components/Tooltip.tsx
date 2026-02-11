@@ -10,7 +10,7 @@ interface TooltipProps {
   disabled?: boolean;
 }
 
-export function Tooltip({ content, children, side = 'top', delay = 0, disabled = false }: TooltipProps) {
+export const Tooltip = React.memo(function Tooltip({ content, children, side = 'top', delay = 0, disabled = false }: TooltipProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -95,7 +95,7 @@ export function Tooltip({ content, children, side = 'top', delay = 0, disabled =
       {isVisible && createPortal(
           <div 
             className={cn(
-                "fixed z-[999999] px-2 py-1 bg-white/95 backdrop-blur text-slate-600 text-xs font-medium tracking-wide",
+                "tooltip-portal fixed z-[999999] px-2 py-1 bg-white/95 backdrop-blur text-slate-600 text-xs font-medium tracking-wide",
                 "rounded shadow-lg border border-slate-200 whitespace-nowrap pointer-events-none",
                 "transition-opacity duration-200 animate-in fade-in zoom-in-95",
                 // Positioning transforms to center the tooltip relative to the coordinate
@@ -115,4 +115,4 @@ export function Tooltip({ content, children, side = 'top', delay = 0, disabled =
       )}
     </div>
   );
-}
+});
