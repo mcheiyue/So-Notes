@@ -9,7 +9,7 @@ import { PinFab } from "./components/PinFab";
 import { ContextMenu } from "./components/ContextMenu";
 import { MiniMap } from "./components/MiniMap";
 import ShortcutsManager from "./components/ShortcutsManager";
-import Spotlight from "./components/Spotlight";
+import { Spotlight } from "./components/Spotlight";
 
 function App() {
   const isMouseDownRef = useRef(false);
@@ -46,24 +46,8 @@ function App() {
         useStore.getState().setViewportPosition(0, 0);
     });
 
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    
-    const handleChange = (e: MediaQueryListEvent | MediaQueryList) => {
-      if (e.matches) {
-        document.documentElement.classList.add('dark');
-        document.documentElement.classList.add('os-dark'); 
-      } else {
-        document.documentElement.classList.remove('dark');
-        document.documentElement.classList.remove('os-dark');
-      }
-    };
-
-    handleChange(mediaQuery);
-
-    mediaQuery.addEventListener('change', handleChange);
     return () => {
       unlistenReset.then(f => f());
-      mediaQuery.removeEventListener('change', handleChange);
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('blur', handleBlur);
@@ -105,7 +89,7 @@ const BoardBadge = () => {
     const board = boards.find(b => b.id === currentBoardId);
     
     return (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-black/5 dark:bg-white/5 rounded-lg text-xs font-medium text-black/30 dark:text-white/30 backdrop-blur-sm transition-all duration-300">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-secondary-bg/50 backdrop-blur-sm rounded-lg text-xs font-medium text-text-tertiary transition-all duration-300 border border-border-subtle/20">
             <span>{board?.icon || '📌'}</span>
             <span>{board?.name || 'Main'}</span>
         </div>

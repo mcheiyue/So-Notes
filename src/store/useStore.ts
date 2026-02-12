@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState } from './types';
+import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode } from './types';
 import { db } from './db';
 import { generateBoardExport, generateFullBackup, processImport } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
@@ -99,6 +99,9 @@ interface State {
   exportCurrentBoard: () => Promise<void>;
   exportAll: () => Promise<void>;
   importFromFile: () => Promise<void>;
+  
+  // Theme Action
+  setThemeMode: (mode: ThemeMode) => void;
 }
 
 // Helper to debounce disk saves
@@ -236,6 +239,18 @@ export const useStore = create<State>()(
         }
 
         state.isLoaded = true;
+
+        // Apply loaded theme
+        const theme = finalData.config.themeMode || 'system';
+        const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const shouldBeDark = theme === 'dark' || (theme === 'system' && isSystemDark);
+        
+        if (shouldBeDark) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+        localStorage.setItem('theme', theme);
       });
       
       // 4. Sync Sources
@@ -1004,6 +1019,27 @@ export const useStore = create<State>()(
             state.viewMode = 'BOARD';
             state.selectedIds = [];
         });
+        
+        get().saveToDisk();
+    },
+
+    setThemeMode: (mode) => {
+        set((state) => {
+            state.config.themeMode = mode;
+        });
+
+        // Apply theme immediately
+        const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const shouldBeDark = mode === 'dark' || (mode === 'system' && isSystemDark);
+
+        if (shouldBeDark) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+
+        // Persist to localStorage for index.html script
+        localStorage.setItem('theme', mode);
         
         get().saveToDisk();
     },

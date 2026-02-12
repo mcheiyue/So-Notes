@@ -95,8 +95,8 @@ export const Tooltip = React.memo(function Tooltip({ content, children, side = '
       {isVisible && createPortal(
           <div 
             className={cn(
-                "tooltip-portal fixed z-[999999] px-2 py-1 bg-white/95 backdrop-blur text-slate-600 text-xs font-medium tracking-wide",
-                "rounded shadow-lg border border-slate-200 whitespace-nowrap pointer-events-none",
+                "tooltip-portal fixed z-[999999] px-2 py-1 bg-tertiary-bg/95 backdrop-blur text-text-secondary text-xs font-medium tracking-wide",
+                "rounded shadow-lg border border-border-subtle whitespace-nowrap pointer-events-none",
                 "transition-opacity duration-200 animate-in fade-in zoom-in-95",
                 // Positioning transforms to center the tooltip relative to the coordinate
                 side === 'top' && "-translate-x-1/2 -translate-y-full",

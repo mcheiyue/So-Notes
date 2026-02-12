@@ -1,25 +1,25 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useStore } from "../store/useStore";
-import { Search, CornerDownLeft } from "lucide-react";
-import { Note } from "../store/types";
+import { Search, CornerDownLeft, Command, FileText } from "lucide-react";
 import { cn } from "../utils/cn";
+import { Note } from "../store/types";
 import { LAYOUT } from "../constants/layout";
 
-export default function Spotlight() {
+export const Spotlight = () => {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  
-  // Use shallow state access to prevent rerenders on drag
+  const resultsRef = useRef<HTMLDivElement>(null);
+
+  // Use granular state access to prevent rerenders on unrelated changes
   const notes = useStore((state) => state.notes);
   const boards = useStore((state) => state.boards);
   const currentBoardId = useStore((state) => state.currentBoardId);
   const isSpotlightOpen = useStore((state) => state.isSpotlightOpen);
   const setSpotlightOpen = useStore((state) => state.setSpotlightOpen);
-  const setViewport = useStore((state) => state.setViewportPosition);
+  const setViewportPosition = useStore((state) => state.setViewportPosition);
   const setSelectedIds = useStore((state) => state.setSelectedIds);
   const toggleCollapse = useStore((state) => state.toggleCollapse);
-  // FIX: Use switchBoard instead of setCurrentBoardId
   const switchBoard = useStore((state) => state.switchBoard);
   const clearSelection = useStore((state) => state.clearSelection);
   const bringToFront = useStore((state) => state.bringToFront);
@@ -39,13 +39,14 @@ export default function Spotlight() {
   // Close on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isSpotlightOpen) return;
       if (e.key === "Escape") {
         setSpotlightOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setSpotlightOpen]);
+  }, [isSpotlightOpen, setSpotlightOpen]);
 
   // Search Logic (Weighted)
   const results = useMemo(() => {
@@ -78,6 +79,16 @@ export default function Spotlight() {
       .map(item => item.note);
   }, [query, notes]);
 
+  // Scroll active item into view
+  useEffect(() => {
+      if (resultsRef.current) {
+          const activeItem = resultsRef.current.children[selectedIndex] as HTMLElement;
+          if (activeItem) {
+              activeItem.scrollIntoView({ block: 'nearest' });
+          }
+      }
+  }, [selectedIndex, results]);
+
   // Handle Selection / Navigation
   const handleSelect = (note: Note) => {
     // 1. Close Spotlight
@@ -85,11 +96,7 @@ export default function Spotlight() {
     
     // 2. Switch Board if needed
     if (note.boardId !== currentBoardId) {
-      // FIX: Use switchBoard to properly handle viewport saving/restoring
       switchBoard(note.boardId);
-      // We might need a small delay or use useEffect to wait for board switch
-      // But Zustand is synchronous, so state updates immediately. 
-      // Components might take a frame to render.
     }
 
     // 3. Expand if collapsed
@@ -101,12 +108,6 @@ export default function Spotlight() {
     const nWidth = LAYOUT.NOTE_WIDTH;
     const nHeight = note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : Math.max(LAYOUT.NOTE_MIN_HEIGHT, note.height || LAYOUT.NOTE_MIN_HEIGHT);
     
-    // Center viewport on note center
-    // Viewport (0,0) is top-left. We want note center to be screen center.
-    // Screen center = (winW/2, winH/2).
-    // Note center = (note.x + w/2, note.y + h/2).
-    // Target Viewport X = Note Center X - Screen Center X
-    
     const winW = window.innerWidth;
     const winH = window.innerHeight;
     
@@ -117,13 +118,13 @@ export default function Spotlight() {
     // Use timeout to allow board switch render cycle to complete if needed
     setTimeout(() => {
       clearSelection();
-      setViewport(targetX, targetY);
+      setViewportPosition(targetX, targetY);
       setSelectedIds([note.id]);
       bringToFront(note.id);
     }, 10);
   };
 
-  // Keyboard Navigation
+  // Keyboard Navigation inside Input
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -142,19 +143,19 @@ export default function Spotlight() {
   if (!isSpotlightOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-[15vh]">
+    <div className="fixed inset-0 z-[100000] flex items-start justify-center pt-[20vh] px-4">
       {/* Backdrop */}
       <div 
-        className="absolute inset-0 bg-black/20 backdrop-blur-sm transition-opacity"
+        className="absolute inset-0 bg-black/20 backdrop-blur-sm transition-opacity" 
         onClick={() => setSpotlightOpen(false)}
       />
 
-      {/* Container - Atmospheric Glass */}
-      <div className="relative w-full max-w-2xl flex flex-col overflow-hidden rounded-2xl bg-white/80 backdrop-blur-2xl shadow-2xl ring-1 ring-white/20 animate-in fade-in zoom-in-95 duration-200">
+      {/* Container - Styled with Semantic Colors */}
+      <div className="relative w-full max-w-2xl flex flex-col overflow-hidden rounded-2xl bg-secondary-bg/80 backdrop-blur-2xl shadow-2xl ring-1 ring-border-subtle animate-in fade-in zoom-in-95 duration-200">
         
         {/* Input Area */}
-        <div className="flex items-center px-4 border-b border-gray-200/50">
-          <Search className="w-5 h-5 text-gray-400 mr-3" />
+        <div className="flex items-center px-4 border-b border-border-subtle/50">
+          <Search className="w-5 h-5 text-text-tertiary mr-3" />
           <input
             ref={inputRef}
             type="text"
@@ -164,79 +165,94 @@ export default function Spotlight() {
               setSelectedIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            className="flex-1 h-14 bg-transparent border-none outline-none text-lg text-gray-800 placeholder:text-gray-400"
+            className="flex-1 h-14 bg-transparent border-none outline-none text-lg text-text-primary placeholder:text-text-tertiary"
             placeholder="搜索便签..."
           />
-          <div className="text-xs text-gray-400 font-medium px-2 py-1 bg-gray-100/50 rounded border border-gray-200/50">
+          <div className="text-xs text-text-tertiary font-medium px-2 py-1 bg-tertiary-bg/50 rounded border border-border-subtle/50">
             ESC
           </div>
         </div>
 
         {/* Results List */}
-        <div className="max-h-[60vh] overflow-y-auto py-2">
+        <div 
+            ref={resultsRef}
+            className="flex-1 overflow-y-auto max-h-[60vh] scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent p-2"
+        >
           {results.length > 0 ? (
-            results.map((note, index) => (
-              <div
-                key={note.id}
-                onClick={() => handleSelect(note)}
-                onMouseEnter={() => setSelectedIndex(index)}
-                className={cn(
-                  "mx-2 px-4 py-3 rounded-xl cursor-pointer transition-all duration-100 flex items-center justify-between group",
-                  index === selectedIndex ? "bg-indigo-50/80 shadow-sm translate-x-1" : "hover:bg-gray-50/50"
-                )}
-              >
-                <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-                  {/* Title */}
-                  <div className={cn(
-                    "text-sm font-medium truncate flex items-center gap-2",
-                    index === selectedIndex ? "text-indigo-700" : "text-gray-700"
-                  )}>
-                    {index === selectedIndex && (
-                      <div className="w-1 h-3 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
+            results.map((note, index) => {
+                const board = boards.find(b => b.id === note.boardId);
+                return (
+                  <div
+                    key={note.id}
+                    onClick={() => handleSelect(note)}
+                    onMouseEnter={() => setSelectedIndex(index)}
+                    className={cn(
+                      "group flex items-center p-3 rounded-xl cursor-pointer transition-all duration-200",
+                      index === selectedIndex 
+                        ? "bg-indigo-50/80 dark:bg-indigo-500/20 shadow-sm translate-x-1" 
+                        : "hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                     )}
-                    {typeof note.title === 'string' && note.title ? note.title : <span className="italic opacity-50">无标题</span>}
-                  </div>
-                  
-                  {/* Content Snippet */}
-                  <div className="text-xs text-gray-400 truncate max-w-[500px] pl-3">
-                    {typeof note.content === 'string' && note.content ? note.content : <span className="italic opacity-30">无内容</span>}
-                  </div>
-                </div>
+                  >
+                    <div className={cn(
+                        "flex items-center justify-center w-8 h-8 rounded-lg mr-4 transition-colors",
+                        index === selectedIndex 
+                            ? "bg-secondary-bg text-indigo-500 shadow-sm" 
+                            : "bg-tertiary-bg text-text-tertiary group-hover:bg-secondary-bg group-hover:text-text-secondary"
+                    )}>
+                        <FileText className="w-4 h-4" />
+                    </div>
 
-                {/* Board Info Badge (if different board) */}
-                {note.boardId !== currentBoardId && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 border border-gray-200 mr-2">
-                    {boards.find(b => b.id === note.boardId)?.name || "其他看板"}
-                  </span>
-                )}
-
-                {/* Enter Hint */}
-                {index === selectedIndex && (
-                  <CornerDownLeft className="w-4 h-4 text-indigo-400 opacity-50" />
-                )}
-              </div>
-            ))
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-0.5">
+                            <span className={cn(
+                                "font-medium truncate",
+                                index === selectedIndex ? "text-indigo-700 dark:text-indigo-300" : "text-text-secondary"
+                            )}>
+                                {note.title || <span className="italic opacity-50">无标题</span>}
+                            </span>
+                            {index === selectedIndex && (
+                                <CornerDownLeft className="w-3 h-3 text-indigo-400 dark:text-indigo-300 opacity-50" />
+                            )}
+                        </div>
+                        
+                        <div className="flex items-center">
+                            {/* Board Badge */}
+                            {note.boardId !== currentBoardId && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-tertiary-bg text-text-tertiary border border-border-subtle mr-2">
+                                {board?.name || "其他看板"}
+                              </span>
+                            )}
+                            <span className="text-xs text-text-tertiary truncate max-w-[500px] pl-3">
+                                {note.content ? note.content.replace(/\n/g, ' ') : <span className="italic opacity-30">无内容</span>}
+                            </span>
+                        </div>
+                    </div>
+                  </div>
+                );
+            })
           ) : query ? (
-            <div className="py-12 text-center text-gray-400 text-sm">
+            <div className="py-12 text-center text-text-tertiary text-sm">
               未找到与 "{query}" 相关的便签
             </div>
           ) : (
-            <div className="py-12 text-center text-gray-400 text-sm">
+            <div className="py-12 text-center text-text-tertiary text-sm">
               输入关键词以搜索...
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-2 bg-gray-50/50 border-t border-gray-200/50 flex items-center justify-between text-[10px] text-gray-400">
-          <div className="flex gap-4">
-            <span>↑↓ 选择</span>
-            <span>↵ 跳转</span>
-          </div>
-          <div>
-            {results.length} 个结果
-          </div>
+        <div className="px-4 py-2 bg-tertiary-bg/30 border-t border-border-subtle/50 flex items-center justify-between text-[10px] text-text-tertiary">
+            <div className="flex gap-4">
+                <span className="flex items-center"><Command className="w-3 h-3 mr-1" /> K 搜索</span>
+                <span className="flex items-center"><span className="mr-1">↑↓</span> 导航</span>
+                <span className="flex items-center"><CornerDownLeft className="w-3 h-3 mr-1" /> 打开</span>
+            </div>
+            <div>
+                {results.length} 个结果
+            </div>
         </div>
+
       </div>
     </div>
   );

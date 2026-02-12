@@ -37,10 +37,10 @@ export const PinFab = () => {
       className={cn(
         "absolute top-3 right-3 z-[9999]",
         "w-8 h-8 flex items-center justify-center rounded-full",
-        "bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md",
-        "text-zinc-500 hover:text-red-500 dark:text-zinc-400 dark:hover:text-red-400",
+        "bg-secondary-bg/80 backdrop-blur-md",
+        "text-text-tertiary hover:text-red-500 dark:hover:text-red-400",
         "shadow-sm hover:shadow-md transition-all duration-200",
-        "border border-black/5 dark:border-white/10",
+        "border border-border-subtle",
         "group cursor-pointer"
       )}
       title="取消钉住 (Unpin)"

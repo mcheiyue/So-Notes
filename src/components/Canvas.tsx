@@ -269,10 +269,13 @@ export const Canvas: React.FC = () => {
       });
   };
 
-  const handleGlobalDown = (e: React.MouseEvent) => {
+    const handleGlobalDown = (e: React.MouseEvent) => {
       // 0. Start Panning (Space Mode + Left Click on Background)
       const targetEl = e.target as HTMLElement;
-      const isInteractive = targetEl.closest('.note-card') || targetEl.closest('button') || targetEl.closest('.drag-handle-area');
+      const isInteractive = targetEl.closest('.note-card') || 
+                            targetEl.closest('button') || 
+                            targetEl.closest('.drag-handle-area') || 
+                            targetEl.closest('.minimap-interaction-area'); // Exclude MiniMap interaction
 
       if (interaction.isPanMode && e.button === 0 && !isInteractive) {
           isPanning.current = true;
@@ -399,8 +402,8 @@ export const Canvas: React.FC = () => {
       ref={containerRef}
       className={cn(
         "w-full h-full overflow-hidden relative select-none",
-        "bg-zinc-50/90 dark:bg-zinc-50/98 dark:brightness-[0.90] dark:contrast-[0.95] dark:grayscale-[0.05] transition-colors duration-300",
-        "border border-black/10 dark:border-white/10 rounded-lg",
+        "bg-primary-bg/90 transition-colors duration-300", // 使用语义化主背景色
+        "border border-border-subtle rounded-lg", // 使用语义化边框
         interaction.isPanMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
       )}
       onDoubleClick={handleDoubleClick}
@@ -424,7 +427,7 @@ export const Canvas: React.FC = () => {
     >
       <div className="absolute inset-0 pointer-events-none opacity-[0.08]" 
            style={{
-               backgroundImage: `radial-gradient(circle, #cbd5e1 1px, transparent 1px)`,
+               backgroundImage: `radial-gradient(circle, var(--color-border-subtle) 1px, transparent 1px)`, // 使用语义化边框颜色作为网格点
                backgroundSize: '20px 20px',
                backgroundPosition: `-${viewport.x}px -${viewport.y}px`
            }}
@@ -443,13 +446,13 @@ export const Canvas: React.FC = () => {
           className="drag-handle-area absolute top-0 left-0 w-full h-6 flex items-center justify-center group cursor-grab"
           style={{ zIndex: Z_INDEX.DRAG_HANDLE_AREA }}
       >
-          <div className="w-12 h-1 bg-black/10 rounded-full mt-2 transition-colors group-hover:bg-black/20" />
+          <div className="w-12 h-1 bg-text-tertiary/20 rounded-full mt-2 transition-colors group-hover:bg-text-tertiary/40" />
       </div>
       
       {/* Selection Box */}
       <div
         ref={selectionBoxRef}
-        className="absolute bg-blue-500/10 border border-blue-500/50 border-dashed pointer-events-none"
+        className="absolute bg-blue-500/10 border border-blue-500/50 border-dashed pointer-events-none dark:bg-blue-300/10 dark:border-blue-300/50" // 深色模式下调整选择框颜色
         style={{ display: 'none', zIndex: Z_INDEX.SELECTION_BOX }}
       />
       
@@ -461,10 +464,10 @@ export const Canvas: React.FC = () => {
       
       {notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
-          <p className="text-lg font-medium text-black/30">
+          <p className="text-lg font-medium text-text-tertiary">
             {currentBoardId === 'default' ? '双击空白处新建便签' : '当前看板为空'}
           </p>
-          <p className="text-xs text-black/20 mt-1">
+          <p className="text-xs text-text-tertiary mt-1">
             或右键点击 &rarr; 新建
           </p>
         </div>
@@ -472,7 +475,7 @@ export const Canvas: React.FC = () => {
       
       {interaction.isPanMode && (
         <div 
-            className="fixed top-6 left-1/2 -translate-x-1/2 px-4 py-2 bg-white/60 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-300 border border-white/20 dark:border-zinc-700/50 shadow-lg rounded-full text-xs font-medium backdrop-blur-xl pointer-events-none transition-all animate-in fade-in zoom-in-95 duration-300 select-none flex items-center gap-2"
+            className="fixed top-6 left-1/2 -translate-x-1/2 px-4 py-2 bg-secondary-bg/60 text-text-secondary border border-border-subtle shadow-lg rounded-full text-xs font-medium backdrop-blur-xl pointer-events-none transition-all animate-in fade-in zoom-in-95 duration-300 select-none flex items-center gap-2"
             style={{ zIndex: Z_INDEX.PAN_MODE_BADGE }}
         >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.5)]" />
@@ -485,7 +488,7 @@ export const Canvas: React.FC = () => {
             className="fixed bottom-10 left-0 w-full text-center pointer-events-none"
             style={{ zIndex: Z_INDEX.STICKY_DRAG_MSG }}
         >
-            <span className="bg-black/80 text-white text-xs px-4 py-1.5 rounded-full shadow-lg backdrop-blur-md">
+            <span className="bg-tertiary-bg/80 text-text-primary text-xs px-4 py-1.5 rounded-full shadow-lg backdrop-blur-md">
                 再次点击放置便签
             </span>
         </div>

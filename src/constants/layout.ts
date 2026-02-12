@@ -19,7 +19,7 @@ export const Z_INDEX = {
   NOTE_BASE: 1,
   
   // Overlay UI
-  MINIMAP: 999,
+  MINIMAP: 90000,
   SELECTION_BOX: 9999,
   
   // Interaction layers

@@ -3,6 +3,8 @@ import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
 import { LAYOUT, Z_INDEX } from '../constants/layout';
+import { getNoteColor } from '../store/types';
+import { useDarkMode } from '../hooks/useDarkMode';
 
 export const MiniMap: React.FC = () => {
     const { notes, viewport, interaction, setViewportPosition } = useStore(
@@ -16,6 +18,7 @@ export const MiniMap: React.FC = () => {
     const [isHovered, setIsHovered] = useState(false);
     const mapRef = useRef<HTMLDivElement>(null);
     const viewportRef = useRef<HTMLDivElement>(null);
+    const isDarkMode = useDarkMode();
 
     const visibleNotes = useMemo(() => notes.filter(n => !n.deletedAt), [notes]);
     
@@ -164,10 +167,11 @@ export const MiniMap: React.FC = () => {
         <div 
             ref={mapRef}
             className={cn(
+                "minimap-interaction-area", // Add marker class for interaction exclusion
                 "fixed bottom-8 right-8",
-                "bg-white/60 dark:bg-zinc-900/60 backdrop-blur-xl",
-                "border border-white/40 dark:border-zinc-700/50",
-                "rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.12)]",
+                "bg-secondary-bg backdrop-blur-xl",
+                "border border-border-subtle",
+                "rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
                 "overflow-hidden transition-all duration-300 ease-out transform",
                 isVisible ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-8 scale-95 pointer-events-none"
             )}
@@ -186,7 +190,7 @@ export const MiniMap: React.FC = () => {
                 style={{ 
                     backgroundImage: `radial-gradient(circle, currentColor 1px, transparent 1px)`,
                     backgroundSize: '16px 16px',
-                    color: '#a1a1aa' // zinc-400
+                    color: 'var(--color-border-subtle)'
                 }} 
             />
 
@@ -202,16 +206,16 @@ export const MiniMap: React.FC = () => {
             <div className="relative w-full h-full">
                 
                 {/* Notes Layer (Memoized) */}
-                <MiniMapNotes notes={visibleNotes} scale={scale} />
+                <MiniMapNotes notes={visibleNotes} scale={scale} isDarkMode={isDarkMode} />
 
                 {/* Viewport Indicator */}
                 <div 
                     ref={viewportRef}
                     className={cn(
                         "absolute rounded-lg shadow-sm transition-all duration-75 ease-linear cursor-grab active:cursor-grabbing",
-                        "border-2 border-indigo-500/60 dark:border-indigo-400/60",
-                        "bg-indigo-500/5 backdrop-brightness-110",
-                        "hover:bg-indigo-500/10 hover:border-indigo-500/80"
+                        "border-2 border-blue-500/60 dark:border-blue-300/60",
+                        "bg-blue-500/5 dark:bg-blue-300/5 backdrop-brightness-110",
+                        "hover:bg-blue-500/10 dark:hover:bg-blue-300/10 hover:border-blue-500/80 dark:hover:border-blue-300/80"
                     )}
                     style={{ 
                         left: vp.left, 
@@ -222,7 +226,7 @@ export const MiniMap: React.FC = () => {
                     onMouseDown={handleViewportDrag}
                 >
                     {/* Viewport label (optional, kept minimal) */}
-                    <div className="absolute -bottom-4 right-0 text-[8px] font-mono font-medium text-indigo-500/70 select-none">
+                    <div className="absolute -bottom-4 right-0 text-[8px] font-mono font-medium text-blue-500/70 dark:text-blue-300/70 select-none">
                         VIEW
                     </div>
                 </div>
@@ -230,8 +234,8 @@ export const MiniMap: React.FC = () => {
             </div>
 
             {/* Coordinates Badge (Bottom Left) */}
-            <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-white/50 dark:bg-black/30 backdrop-blur-sm border border-white/20 dark:border-white/10">
-                <span className="text-[9px] font-mono font-semibold text-zinc-500 dark:text-zinc-400">
+            <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-secondary-bg/50 backdrop-blur-sm border border-border-subtle">
+                <span className="text-[9px] font-mono font-semibold text-text-secondary">
                     {Math.round(viewport.x)}, {Math.round(viewport.y)}
                 </span>
             </div>
@@ -240,7 +244,7 @@ export const MiniMap: React.FC = () => {
 };
 
 // Optimized Sub-component for Individual Note Item
-const MiniMapNoteItem = React.memo(({ note, scale }: { note: any, scale: number }) => {
+const MiniMapNoteItem = React.memo(({ note, scale, isDarkMode }: { note: any, scale: number, isDarkMode: boolean }) => {
     const w = note.width || LAYOUT.NOTE_WIDTH;
     const h = note.height || LAYOUT.NOTE_MIN_HEIGHT;
     
@@ -259,32 +263,33 @@ const MiniMapNoteItem = React.memo(({ note, scale }: { note: any, scale: number 
         <div 
             className={cn(
                 "absolute rounded-[2px] shadow-sm transition-all duration-300",
-                "bg-rose-400/80 dark:bg-rose-500/80 hover:bg-rose-500"
+                "border border-border-subtle/50"
             )}
             style={{ 
                 left, 
                 top, 
                 width: Math.max(3, width), // Min size for visibility
-                height: Math.max(3, height) 
+                height: Math.max(3, height),
+                backgroundColor: getNoteColor(note.color, isDarkMode),
             }}
         />
     );
 }, (prev, next) => {
     // Only re-render if note reference changes (Immer ensures this only happens for the moved note)
     // or if scale changes (global zoom/pan affecting world bounds)
-    return prev.note === next.note && prev.scale === next.scale;
+    return prev.note === next.note && prev.scale === next.scale && prev.isDarkMode === next.isDarkMode;
 });
 
 // Optimized Container for Notes Layer
-const MiniMapNotes = React.memo(({ notes, scale }: { notes: any[], scale: number }) => {
+const MiniMapNotes = React.memo(({ notes, scale, isDarkMode }: { notes: any[], scale: number, isDarkMode: boolean }) => {
     return (
         <>
             {notes.map(note => (
-                <MiniMapNoteItem key={note.id} note={note} scale={scale} />
+                <MiniMapNoteItem key={note.id} note={note} scale={scale} isDarkMode={isDarkMode} />
             ))}
         </>
     );
 }, (prev, next) => {
     // Re-render only if the notes array reference changes or scale changes
-    return prev.notes === next.notes && prev.scale === next.scale;
+    return prev.notes === next.notes && prev.scale === next.scale && prev.isDarkMode === next.isDarkMode;
 });

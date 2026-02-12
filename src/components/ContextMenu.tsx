@@ -113,7 +113,7 @@ export const ContextMenu: React.FC = () => {
   return (
     <div
       ref={menuRef}
-      className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[160px] select-none"
+      className="fixed z-[9999] bg-secondary-bg text-text-primary rounded-lg shadow-xl border border-border-subtle py-1 min-w-[160px] select-none"
       style={{ left: menuX, top: menuY }}
       onMouseDown={(e) => e.stopPropagation()} // Prevent closing immediately or triggering canvas click
     >
@@ -123,7 +123,7 @@ export const ContextMenu: React.FC = () => {
           {selectedIds.length <= 1 && (
             <>
                <div
-                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
                 onClick={() => handleAction(() => {
                     setDockVisible(true);
                     // No need to set isOpen:false manually as handleAction does it
@@ -133,7 +133,7 @@ export const ContextMenu: React.FC = () => {
               </div>
               
               <div
-                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
                 onClick={() => handleAction(() => addNote(contextMenu.x + viewport.x, contextMenu.y + viewport.y))}
               >
                 <span>📝</span> 新建便签
@@ -141,7 +141,7 @@ export const ContextMenu: React.FC = () => {
               
               {hasClipboardText && (
                  <div
-                    className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                    className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
                     onClick={() => handleAction(async () => {
                         const text = await readText();
                         if (text) {
@@ -153,7 +153,7 @@ export const ContextMenu: React.FC = () => {
                   </div>
               )}
               
-               <div className="h-px bg-gray-200 my-1" />
+               <div className="h-px bg-border-subtle my-1" />
            </>
           )}
 
@@ -161,8 +161,8 @@ export const ContextMenu: React.FC = () => {
             className={cn(
                 "px-4 py-2 cursor-pointer text-sm flex items-center gap-2 transition-colors duration-200",
                 confirmArrange 
-                    ? "bg-red-50 text-red-600 font-medium hover:bg-red-100" 
-                    : "hover:bg-gray-100 text-gray-700"
+                    ? "bg-red-50 text-red-600 font-medium hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50" 
+                    : "hover:bg-secondary-bg/50 dark:hover:bg-white/5 text-text-secondary hover:text-text-primary"
             )}
             onClick={(e) => {
                 e.stopPropagation(); // Prevent menu close on first click
@@ -192,23 +192,23 @@ export const ContextMenu: React.FC = () => {
       {contextMenu.type === 'NOTE' && contextMenu.targetId && (
         <>
            <div
-            className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+            className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
             onClick={() => handleAction(() => {
                 setStickyDrag(contextMenu.targetId!, 0, 0); 
             })}
           >
             <span>🧲</span> {isGroupContext ? '群组吸附' : '吸附移动'}
           </div>
-          <div className="h-px bg-gray-200 my-1" />
+          <div className="h-px bg-border-subtle my-1" />
           
-          <div className="px-4 py-2 text-xs text-gray-500 font-semibold">
+          <div className="px-4 py-2 text-xs text-text-tertiary font-semibold">
             {isGroupContext ? '批量改色' : '颜色'}
           </div>
           <div className="px-4 py-1 flex gap-2 flex-wrap">
             {colors.map((c) => (
               <div
                 key={c.value}
-                className="w-5 h-5 rounded-full cursor-pointer border border-gray-300 hover:scale-110 transition-transform"
+                className="w-5 h-5 rounded-full cursor-pointer border border-border-subtle hover:scale-110 transition-transform"
                 style={{ backgroundColor: c.value }}
                 title={c.name}
                 onClick={() => handleAction(() => {
@@ -222,12 +222,12 @@ export const ContextMenu: React.FC = () => {
             ))}
           </div>
           
-          <div className="h-px bg-gray-200 my-1" />
+          <div className="h-px bg-border-subtle my-1" />
           
           {/* Duplicate */}
           {!isGroupContext && (
              <div
-                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
                 onClick={() => handleAction(() => duplicateNote(contextMenu.targetId!))}
             >
                 <span>📄</span> 创建副本
@@ -241,24 +241,24 @@ export const ContextMenu: React.FC = () => {
                 onMouseEnter={() => handleSubmenuEnter('MOVE')}
                 onMouseLeave={handleSubmenuLeave}
             >
-                <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center justify-between">
+                <div className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <span>➡️</span> {isGroupContext ? '批量移动到...' : '移动到...'}
                     </div>
-                    <ChevronRight className="w-4 h-4 text-gray-400" />
+                    <ChevronRight className="w-4 h-4 text-text-tertiary" />
                 </div>
                 
                 {/* Submenu */}
                 {activeSubmenu === 'MOVE' && (
                     <div 
-                        className="absolute left-full top-0 ml-2 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[140px] z-[10000]"
+                        className="absolute left-full top-0 ml-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px] z-[10000]"
                         onMouseEnter={() => handleSubmenuEnter('MOVE')}
                         onMouseLeave={handleSubmenuLeave}
                     >
                         {boards.filter(b => b.id !== currentBoardId).map(b => (
                             <div
                                 key={b.id}
-                                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                                className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
                                 onClick={() => handleAction(() => {
                                     if (isGroupContext) {
                                         moveSelectedNotesToBoard(b.id);
@@ -282,24 +282,24 @@ export const ContextMenu: React.FC = () => {
                 onMouseEnter={() => handleSubmenuEnter('COPY')}
                 onMouseLeave={handleSubmenuLeave}
             >
-                <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center justify-between">
+                <div className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <span>⤴️</span> {isGroupContext ? '批量复制到...' : '复制到...'}
                     </div>
-                    <ChevronRight className="w-4 h-4 text-gray-400" />
+                    <ChevronRight className="w-4 h-4 text-text-tertiary" />
                 </div>
                 
                 {/* Submenu */}
                 {activeSubmenu === 'COPY' && (
                     <div 
-                        className="absolute left-full top-0 ml-2 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[140px] z-[10000]"
+                        className="absolute left-full top-0 ml-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px] z-[10000]"
                         onMouseEnter={() => handleSubmenuEnter('COPY')}
                         onMouseLeave={handleSubmenuLeave}
                     >
                         {boards.filter(b => b.id !== currentBoardId).map(b => (
                             <div
                                 key={b.id}
-                                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+                                className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
                                 onClick={() => handleAction(() => {
                                     if (isGroupContext) {
                                         copySelectedNotesToBoard(b.id);
@@ -316,21 +316,21 @@ export const ContextMenu: React.FC = () => {
             </div>
           )}
 
-          <div className="h-px bg-gray-200 my-1" />
+          <div className="h-px bg-border-subtle my-1" />
           
           <div
-            className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm text-gray-700 flex items-center gap-2"
+            className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
             onClick={() => handleAction(() => bringToFront(contextMenu.targetId!))}
           >
             <span>🔝</span> 置顶
           </div>
           
-          <div className="h-px bg-gray-200 my-1" />
+          <div className="h-px bg-border-subtle my-1" />
 
           <div
             className={cn(
                 "px-4 py-2 cursor-pointer text-sm flex items-center gap-2 transition-colors",
-                (isGroupContext && confirmDeleteGroup) ? "bg-red-50 text-red-600 hover:bg-red-100 font-medium" : "hover:bg-red-50 text-red-600"
+                (isGroupContext && confirmDeleteGroup) ? "bg-red-50 text-red-600 hover:bg-red-100 font-medium dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50" : "text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
             )}
             onClick={(e) => {
                 if (isGroupContext) {

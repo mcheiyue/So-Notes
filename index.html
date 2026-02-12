@@ -5,6 +5,33 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tauri + React + Typescript</title>
+    <!-- Dark Mode Detection and Initialization Script -->
+    <script>
+      (function() {
+        const savedTheme = localStorage.getItem('theme');
+        const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        
+        const shouldBeDark = savedTheme === 'dark' || (!savedTheme && isSystemDark) || (savedTheme === 'system' && isSystemDark);
+        
+        if (shouldBeDark) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+
+        // Listen for system changes if mode is system (or not set)
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (event) => {
+          const currentTheme = localStorage.getItem('theme');
+          if (!currentTheme || currentTheme === 'system') {
+            if (event.matches) {
+              document.documentElement.classList.add('dark');
+            } else {
+              document.documentElement.classList.remove('dark');
+            }
+          }
+        });
+      })();
+    </script>
   </head>
 
   <body>

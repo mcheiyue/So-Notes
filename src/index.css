@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Semantic Colors - Light Mode */
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
@@ -15,6 +16,61 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  --color-bg-primary: 248 250 252; /* light: slate-50 */
+  --color-bg-secondary: 255 255 255; /* light: white */
+  --color-bg-tertiary: 255 255 255; /* light: white (for modals etc) */
+
+  --color-text-primary: 30 41 59; /* light: slate-900 */
+  --color-text-secondary: 71 85 105; /* light: slate-600 */
+  --color-text-tertiary: 148 163 184; /* light: slate-400 */
+
+  --color-border-subtle: 226 232 240; /* light: slate-200 */
+
+  /* Light mode note colors (from src/store/types.ts) */
+  --note-white-light: #FFFFFF;
+  --note-yellow-light: #fef9c3;
+  --note-green-light: #dcfce7;
+  --note-teal-light: #ccfbf1;
+  --note-blue-light: #dbeafe;
+  --note-purple-light: #f3e8ff;
+  --note-pink-light: #fce7f3;
+  --note-orange-light: #ffedd5;
+  --note-red-light: #fee2e2;
+  --note-slate-light: #f1f5f9;
+  --note-lime-light: #ecfccb;
+  --note-cyan-light: #cffafe;
+  --note-rose-light: #ffe4e6;
+}
+
+/* Semantic Colors - Dark Mode */
+.dark {
+  color-scheme: dark; /* Explicitly declare dark color scheme */
+  
+  --color-bg-primary: 24 26 29; /* dark: custom deep grey/blue */
+  --color-bg-secondary: 31 34 38; /* dark: custom secondary surface */
+  --color-bg-tertiary: 39 42 46; /* dark: custom tertiary surface (for modals etc) */
+
+  --color-text-primary: 226 232 240; /* dark: slate-200 */
+  --color-text-secondary: 148 163 184; /* dark: slate-400 */
+  --color-text-tertiary: 71 85 105; /* dark: slate-600 */
+
+  --color-border-subtle: 45 50 56; /* dark: custom subtle border */
+
+  /* Dark mode note colors - "Glassmorphism Strategy" */
+  --note-white-dark: rgba(255, 255, 255, 0.08);
+  --note-yellow-dark: rgba(234, 179, 8, 0.15);
+  --note-green-dark: rgba(34, 197, 94, 0.15);
+  --note-teal-dark: rgba(20, 184, 166, 0.15);
+  --note-blue-dark: rgba(59, 130, 246, 0.15);
+  --note-purple-dark: rgba(168, 85, 247, 0.15);
+  --note-pink-dark: rgba(236, 72, 153, 0.15);
+  --note-orange-dark: rgba(249, 115, 22, 0.15);
+  --note-red-dark: rgba(239, 68, 68, 0.15);
+  --note-slate-dark: rgba(148, 163, 184, 0.15);
+  --note-lime-dark: rgba(132, 204, 22, 0.15);
+  --note-cyan-dark: rgba(6, 182, 212, 0.15);
+  --note-rose-dark: rgba(244, 63, 94, 0.15);
 }
 
 body {
@@ -49,6 +105,19 @@ body.is-dragging .tooltip-portal {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.25);
+}
+
+/* Global Custom Scrollbar - Dark Mode Adaptation */
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.dark * {
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
 }
 
 /* Firefox support */

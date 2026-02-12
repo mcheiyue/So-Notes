@@ -1,10 +1,11 @@
 import React, { useRef, useState, useLayoutEffect } from "react";
 import Draggable, { DraggableData, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
-import { NOTE_COLORS } from "../store/types";
+import { NOTE_COLORS, getNoteColor } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { useStore } from "../store/useStore";
 import { useEdgePush } from "../hooks/useEdgePush";
+import { useDarkMode } from "../hooks/useDarkMode";
 import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
 
@@ -41,6 +42,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const isGroupSelection = useStore(state => state.selectedIds.length > 1);
   const viewport = useStore(state => state.viewport);
   const isPanMode = useStore(state => state.interaction.isPanMode);
+  const isDarkMode = useDarkMode();
   
   // Custom Hooks
   const { checkEdge, clearEdge } = useEdgePush();
@@ -320,18 +322,20 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           "note-card absolute flex flex-col",
           note.collapsed ? "overflow-hidden" : "h-auto",
           "rounded-xl transition-all duration-200 ease-out",
-          "shadow-sm hover:shadow-xl",
-          "border border-black/5",
+          "shadow-sm hover:shadow-xl dark:hover:bg-white/5",
+          "backdrop-blur-2xl backdrop-saturate-[1.8]",
+          "border border-border-subtle dark:border-white/10",
           "group",
           isStickyDragging && "shadow-2xl scale-[1.02] cursor-move",
-          isSelected && !isStickyDragging && (isGroupSelection ? "ring-2 ring-blue-500/50 border-blue-500/50" : "border-2 border-white/80 shadow-sm"),
-          isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto"
+          isSelected && !isStickyDragging && (isGroupSelection ? "ring-2 ring-blue-500/50 border-blue-500/50" : "border-2 border-border-subtle shadow-sm"),
+          isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto",
+          isPanMode && "pointer-events-none"
         )}
         style={{ 
             width: LAYOUT.NOTE_WIDTH,
             height: note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : 'auto',
             minHeight: note.collapsed ? undefined : LAYOUT.NOTE_MIN_HEIGHT,
-            backgroundColor: note.color,
+            backgroundColor: getNoteColor(note.color, isDarkMode),
             zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
         }}
         onMouseDownCapture={handleMouseDown}
@@ -358,7 +362,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                             e.stopPropagation();
                             restoreNote(note.id);
                         }}
-                        className="p-1.5 rounded-md hover:bg-green-100 hover:text-green-600 transition-colors text-black/40 flex-shrink-0"
+                        className="p-1.5 rounded-md hover:bg-green-100 dark:hover:bg-green-900/20 hover:text-green-600 transition-colors text-text-tertiary flex-shrink-0"
                     >
                         <RotateCcw className="w-4 h-4" />
                     </button>
@@ -367,7 +371,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 <Tooltip content="切换颜色" disabled={isStickyDragging || !!dragPos}>
                     <button
                     onClick={cycleColor}
-                    className="p-1.5 rounded-md hover:bg-black/5 transition-colors text-black/40 hover:text-black/70 flex-shrink-0"
+                    className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-text-tertiary hover:text-text-secondary flex-shrink-0"
                     >
                     <Palette className="w-4 h-4" />
                     </button>
@@ -382,8 +386,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                         className={cn(
                             "p-1.5 rounded-md transition-all duration-200 flex-shrink-0",
                             isCopied 
-                                ? "text-black/70" 
-                                : "hover:bg-black/5 text-black/40 hover:text-black/70"
+                                ? "text-text-secondary" 
+                                : "hover:bg-black/5 dark:hover:bg-white/5 text-text-tertiary hover:text-text-secondary"
                         )}
                     >
                         {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
@@ -400,7 +404,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                         <span 
                             className={cn(
                                 "text-sm font-bold truncate select-none w-full text-center block",
-                                note.title ? "text-gray-800 opacity-90" : "text-gray-500 italic opacity-70"
+                                note.title ? "text-text-primary opacity-90" : "text-text-secondary italic opacity-70"
                             )}
                         >
                             {displayTitle}
@@ -408,7 +412,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                      </Tooltip>
                  ) : (
                     <Tooltip content="双击折叠 / 拖拽移动" delay={1000} disabled={isStickyDragging || isStatic || !!dragPos}>
-                        <GripHorizontal className={cn("w-4 h-4 text-black/20", isStatic && "opacity-0")} />
+                        <GripHorizontal className={cn("w-4 h-4 text-text-tertiary", isStatic && "opacity-0")} />
                     </Tooltip>
                  )}
              </div>
@@ -428,7 +432,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                         deleteNote(note.id);
                     }
                 }}
-                className="p-1.5 rounded-md hover:bg-red-100 hover:text-red-500 transition-colors text-black/40 flex-shrink-0"
+                 className="p-1.5 rounded-md hover:bg-red-100 dark:hover:bg-red-900/20 hover:text-red-500 transition-colors text-text-tertiary flex-shrink-0"
                 >
                 {isStatic ? <Trash2 className="w-4 h-4" /> : <X className="w-4 h-4" />}
             </button>
@@ -445,8 +449,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                     type="text"
                     className={cn(
                         "w-full bg-transparent outline-none transition-all duration-200 flex-shrink-0",
-                        "text-gray-900 font-bold text-[16px]",
-                        "placeholder-gray-400/50",
+                        "text-text-primary font-bold text-[16px]",
+                        "placeholder-text-secondary/50",
                         (!note.title && !isHovered && !isEditing) ? "hidden" : "block",
                         isStatic && "pointer-events-none"
                     )}
@@ -464,10 +468,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 ref={textareaRef}
                 className={cn(
                     "w-full resize-none bg-transparent outline-none px-4",
-                    "text-gray-800",
-                    "placeholder-gray-400 font-normal text-[15px] leading-relaxed",
+                    "text-text-secondary",
+                    "placeholder-text-tertiary font-normal text-[15px] leading-relaxed",
                     "selection:bg-black/10",
-                    "scrollbar-thin scrollbar-thumb-black/10 scrollbar-track-transparent hover:scrollbar-thumb-black/20",
+                    "scrollbar-thin scrollbar-thumb-text-tertiary/20 scrollbar-track-transparent hover:scrollbar-thumb-text-secondary/20",
                     "transition-all duration-300 ease-in-out"
                 )}
                 style={{
