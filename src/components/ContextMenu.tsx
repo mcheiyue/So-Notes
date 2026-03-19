@@ -4,7 +4,7 @@ import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
 import { ChevronRight } from 'lucide-react';
 
-export const ContextMenu: React.FC = () => {
+const ContextMenuContent: React.FC = () => {
   const { 
     contextMenu, 
     setContextMenu, 
@@ -18,6 +18,7 @@ export const ContextMenu: React.FC = () => {
     deleteSelectedNotes, 
     selectedIds, 
     arrangeNotes,
+    finalizeLayoutChange,
     setDockVisible,
     boards,
     currentBoardId,
@@ -51,22 +52,15 @@ export const ContextMenu: React.FC = () => {
 
   // Check clipboard content when menu opens
   useEffect(() => {
-    if (contextMenu.isOpen) {
-      // Reset states on open
-      setConfirmArrange(false);
-      setConfirmDeleteGroup(false);
-      setActiveSubmenu(null);
-      
-      if (contextMenu.type === 'CANVAS') {
-        readText().then(text => {
-            setHasClipboardText(!!text && text.trim().length > 0);
-        }).catch(err => {
-            console.error('Clipboard read failed:', err);
-            setHasClipboardText(false);
-        });
-      }
+    if (contextMenu.type === 'CANVAS') {
+      readText().then(text => {
+          setHasClipboardText(!!text && text.trim().length > 0);
+      }).catch(err => {
+          console.error('Clipboard read failed:', err);
+          setHasClipboardText(false);
+      });
     }
-  }, [contextMenu.isOpen, contextMenu.type]);
+  }, [contextMenu.type]);
 
   const handleAction = (action: () => void) => {
     action();
@@ -87,8 +81,6 @@ export const ContextMenu: React.FC = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [contextMenu, setContextMenu]);
-
-  if (!contextMenu.isOpen) return null;
 
   // Adjust position to keep menu within viewport
   // Simple clamping logic (can be improved with measuring actual height)
@@ -320,7 +312,10 @@ export const ContextMenu: React.FC = () => {
           
           <div
             className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
-            onClick={() => handleAction(() => bringToFront(contextMenu.targetId!))}
+            onClick={() => handleAction(() => {
+                bringToFront(contextMenu.targetId!);
+                finalizeLayoutChange([contextMenu.targetId!]);
+            })}
           >
             <span>🔝</span> 置顶
           </div>
@@ -354,4 +349,12 @@ export const ContextMenu: React.FC = () => {
       )}
     </div>
   );
+};
+
+export const ContextMenu: React.FC = () => {
+  const isOpen = useStore(state => state.contextMenu.isOpen);
+
+  if (!isOpen) return null;
+
+  return <ContextMenuContent />;
 };

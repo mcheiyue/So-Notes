@@ -63,6 +63,7 @@ interface State {
   updateNote: (id: string, content: string) => void;
   moveNote: (id: string, x: number, y: number) => void;
   moveSelectedNotes: (dx: number, dy: number, excludeId?: string) => void;
+  finalizeLayoutChange: (noteIds: string[]) => void;
   arrangeNotes: (startX?: number, startY?: number) => void;
   bringToFront: (id: string) => void;
   deleteNote: (id: string) => void; // Soft delete
@@ -522,9 +523,6 @@ export const useStore = create<State>()(
           note.y = y;
         }
       });
-      
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
     moveSelectedNotes: (dx, dy, excludeId) => {
@@ -538,11 +536,37 @@ export const useStore = create<State>()(
                 }
             });
         });
-        if (saveTimeout) clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
+    },
+
+    finalizeLayoutChange: (noteIds) => {
+        const uniqueIds = [...new Set(noteIds)];
+        if (uniqueIds.length === 0) return;
+
+        if (saveTimeout) {
+            clearTimeout(saveTimeout);
+            saveTimeout = null;
+        }
+
+        const timestamp = Date.now();
+        let hasUpdatedNotes = false;
+
+        set((state) => {
+            uniqueIds.forEach((id) => {
+                const note = state.notes.find((n) => n.id === id);
+                if (note) {
+                    note.updatedAt = timestamp;
+                    hasUpdatedNotes = true;
+                }
+            });
+        });
+
+        if (hasUpdatedNotes) {
+            void get().saveToDisk();
+        }
     },
 
     arrangeNotes: (startX?: number, startY?: number) => {
+        const affectedIds: string[] = [];
         set((state) => {
             const viewport = state.viewport;
             const worldRightEdge = viewport.x + viewport.w;
@@ -567,6 +591,8 @@ export const useStore = create<State>()(
             }
 
             if (targetNotes.length === 0) return;
+
+            affectedIds.push(...targetNotes.map((note) => note.id));
 
             // 2. Sort by spatial position (Top-Left -> Bottom-Right)
             // Weight Y more than X to form "reading order"
@@ -624,7 +650,9 @@ export const useStore = create<State>()(
                 if (estimatedHeight > maxRowH) maxRowH = estimatedHeight;
             });
         });
-        get().saveToDisk();
+        if (affectedIds.length > 0) {
+            get().finalizeLayoutChange(affectedIds);
+        }
     },
 
     bringToFront: (id) => {
@@ -635,8 +663,6 @@ export const useStore = create<State>()(
           note.z = state.config.maxZ;
         }
       });
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
     deleteNote: (id) => {

@@ -18,14 +18,12 @@ interface NoteCardProps {
 export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = false, scale = 1 }) => {
   // Selectors
   const note = useStore(state => state.notes.find(n => n.id === id));
-  
-  // Guard: If note doesn't exist
-  if (!note) return null;
 
   const updateNote = useStore(state => state.updateNote);
   const updateTitle = useStore(state => state.updateTitle);
   const moveNote = useStore(state => state.moveNote);
   const moveSelectedNotes = useStore(state => state.moveSelectedNotes);
+  const finalizeLayoutChange = useStore(state => state.finalizeLayoutChange);
   const deleteNote = useStore(state => state.deleteNote);
   const bringToFront = useStore(state => state.bringToFront);
   const changeColor = useStore(state => state.changeColor);
@@ -37,8 +35,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
   const setIsDragging = useStore(state => state.setIsDragging);
   
-  const isStickyDragging = useStore(state => state.stickyDrag.id === note.id);
-  const isSelected = useStore(state => state.selectedIds.includes(note.id));
+  const isStickyDragging = useStore(state => state.stickyDrag.id === id);
+  const isSelected = useStore(state => state.selectedIds.includes(id));
   const isGroupSelection = useStore(state => state.selectedIds.length > 1);
   const viewport = useStore(state => state.viewport);
   const isPanMode = useStore(state => state.interaction.isPanMode);
@@ -59,36 +57,39 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   // Drag State (Hybrid Control)
   const isDragging = useRef(false);
   const groupBoundsRef = useRef<{ minX: number, minY: number, width: number, height: number } | null>(null);
+  const shouldFinalizeOnMouseUpRef = useRef(false);
 
   // We use dragPos to control position ONLY during drag to prevent jitter/re-renders
   // Initial value is null, meaning "use Store position"
   const [dragPos, setDragPos] = useState<{x: number, y: number} | null>(null);
 
   // Calculated Screen Position (from Store)
-  const screenX = note.x - viewport.x;
-  const screenY = note.y - viewport.y;
+  const screenX = note ? note.x - viewport.x : 0;
+  const screenY = note ? note.y - viewport.y : 0;
 
   // Determine Final Position for Draggable
   // If dragging, use local state (follows mouse, ignores viewport shift for stability)
   // If idle, use calculated screen position (follows viewport)
-  const finalX = (isDragging.current && dragPos) ? dragPos.x : screenX;
-  const finalY = (isDragging.current && dragPos) ? dragPos.y : screenY;
+  const finalX = dragPos ? dragPos.x : screenX;
+  const finalY = dragPos ? dragPos.y : screenY;
 
   // Derived Values
-  const displayTitle = note.title || "无标题";
+  const displayTitle = note?.title || "无标题";
 
   // Auto-resize textarea
   useLayoutEffect(() => {
-    if (textareaRef.current) {
+    if (note && textareaRef.current) {
         textareaRef.current.style.height = 'auto';
         textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  }, [note.content, note.collapsed, isEditing]);
+  }, [note, note?.content, note?.collapsed, isEditing]);
 
-  const handleStart = (e: DraggableEvent, _data: DraggableData) => {
+  if (!note) return null;
+
+  const handleStart = () => {
       isDragging.current = true;
       setIsDragging(true);
-      handleMouseDown(e);
+      shouldFinalizeOnMouseUpRef.current = false;
 
       if (isSelected && isGroupSelection) {
           const state = useStore.getState();
@@ -203,6 +204,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
     moveNote(note.id, worldX, worldY);
 
+    const affectedIds = (isSelected && isGroupSelection)
+      ? [...useStore.getState().selectedIds]
+      : [note.id];
+
     // 4. Group Distributed Clamp
     if (isSelected && isGroupSelection) {
         const state = useStore.getState();
@@ -244,6 +249,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             }
         });
     }
+
+    finalizeLayoutChange(affectedIds);
   };
 
   const handleMouseDown = (e: DraggableEvent) => {
@@ -261,6 +268,14 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     }
     
     bringToFront(note.id);
+    shouldFinalizeOnMouseUpRef.current = true;
+  };
+
+  const handleMouseUpCapture = () => {
+    if (!shouldFinalizeOnMouseUpRef.current) return;
+
+    shouldFinalizeOnMouseUpRef.current = false;
+    finalizeLayoutChange([note.id]);
   };
   
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -339,6 +354,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
         }}
         onMouseDownCapture={handleMouseDown}
+        onMouseUpCapture={handleMouseUpCapture}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >

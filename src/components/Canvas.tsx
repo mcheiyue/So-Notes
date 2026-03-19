@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useCallback } from "react";
 import { useStore } from "../store/useStore";
 import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
@@ -8,7 +8,7 @@ export const Canvas: React.FC = () => {
   const { 
     notes, currentBoardId, addNote, init, isLoaded, 
     stickyDrag, setStickyDrag, moveNote, setContextMenu, 
-    setSelectedIds, selectedIds, moveSelectedNotes, clearSelection,
+    setSelectedIds, selectedIds, moveSelectedNotes, clearSelection, finalizeLayoutChange,
     interaction, viewport, setPanMode, panViewport, setViewportPosition
   } = useStore();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -130,7 +130,7 @@ export const Canvas: React.FC = () => {
     return () => {
         if (edgePushFrameRef.current) cancelAnimationFrame(edgePushFrameRef.current);
     };
-  }, [interaction.edgePush, panViewport]);
+  }, [interaction.edgePush, moveSelectedNotes, panViewport, selectedIds.length]);
 
   const handleMouseMove = (e: React.MouseEvent) => {
       // Safety check: If no mouse button is pressed, stop any active drag
@@ -267,6 +267,10 @@ export const Canvas: React.FC = () => {
               }
           }
       });
+
+      if (idsToCheck.length > 0) {
+          finalizeLayoutChange(idsToCheck);
+      }
   };
 
     const handleGlobalDown = (e: React.MouseEvent) => {
@@ -317,7 +321,7 @@ export const Canvas: React.FC = () => {
       }
   };
 
-  const handleGlobalUp = (e: React.MouseEvent | MouseEvent) => {
+  const handleGlobalUp = useCallback((e: React.MouseEvent | MouseEvent) => {
       if (isPanning.current) {
           isPanning.current = false;
           return;
@@ -370,10 +374,10 @@ export const Canvas: React.FC = () => {
           });
           
           if (newSelectedIds.length > 0) {
-              setSelectedIds(newSelectedIds);
-          }
+               setSelectedIds(newSelectedIds);
+           }
       }
-  };
+  }, [setSelectedIds]);
 
   // Global Mouse Up & Blur Handler to prevent sticky drag
   useEffect(() => {
@@ -393,7 +397,7 @@ export const Canvas: React.FC = () => {
           window.removeEventListener('mouseup', handleWindowUp);
           window.removeEventListener('blur', handleWindowBlur);
       };
-  }, []);
+  }, [handleGlobalUp]);
 
   if (!isLoaded) return null;
 
