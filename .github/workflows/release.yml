@@ -1,19 +1,16 @@
 name: Release
+
 on:
   push:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   release:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [windows-latest]
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
 
     steps:
       - name: Checkout repository
@@ -30,21 +27,34 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build (No Bundle)
+      - name: Build release app
         run: npm run tauri build
 
-      # 新增：重命名步骤
-      - name: Rename Release Asset
+      - name: Rename release asset
+        shell: pwsh
         run: |
-          cd src-tauri/target/release
-          mv so-notes.exe "SoNotes-${{ github.ref_name }}.exe"
+          $tag = "${{ github.ref_name }}"
+          Rename-Item -Path "src-tauri/target/release/so-notes.exe" -NewName "SoNotes-$tag.exe"
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          # 修改：上传重命名后的文件
-          files: src-tauri/target/release/SoNotes-*.exe
-          draft: false
-          prerelease: false
-          body_path: RELEASE_TEMPLATE.md
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $content = Get-Content "CHANGELOG.md" -Raw
+          $pattern = "(?s)## \[$([regex]::Escape($tag))\](.*?)(?=## \[v|$)"
+
+          if ($content -match $pattern) {
+            $body = $matches[0].Trim()
+          } else {
+            Write-Error "CHANGELOG.md 中未找到 $tag 对应版本区块。"
+          }
+
+          if (gh release view $tag *> $null) {
+            gh release edit $tag --title $tag --notes $body
+          } else {
+            gh release create $tag --title $tag --notes $body
+          }
+
+          gh release upload $tag "src-tauri/target/release/SoNotes-$tag.exe" --clobber
