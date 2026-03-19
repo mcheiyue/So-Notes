@@ -86,13 +86,15 @@ SoNotes 是一款常驻于系统托盘的本地化便签工具。它追求零摩
 
 ## 📦 构建发布
 
-执行以下命令构建生产环境安装包：
+执行以下命令构建生产环境可执行文件：
 
 ```bash
 npm run tauri build
 ```
 
-构建产物将位于 `src-tauri/target/release/bundle` 目录下。
+本地构建完成后，主产物位于 `src-tauri/target/release/so-notes.exe`。
+
+如果通过 GitHub Release 发布，工作流会将该产物重命名为带版本号的 `SoNotes-<tag>.exe` 后再上传。
 
 ## 📄 开源许可
 
