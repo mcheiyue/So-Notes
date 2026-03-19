@@ -9,6 +9,7 @@ on:
       - 'src-tauri/**'
       - 'package.json'
       - 'package-lock.json'
+      - 'eslint.config.mjs'
       - 'tsconfig.json'
       - 'tsconfig.node.json'
       - 'vite.config.ts'
@@ -22,6 +23,7 @@ on:
       - 'src-tauri/**'
       - 'package.json'
       - 'package-lock.json'
+      - 'eslint.config.mjs'
       - 'tsconfig.json'
       - 'tsconfig.node.json'
       - 'vite.config.ts'
@@ -46,6 +48,12 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test
 
       - name: Run frontend build
         run: npm run build
