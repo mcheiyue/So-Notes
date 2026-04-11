@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
@@ -7,9 +7,10 @@ import { getNoteColor } from '../store/types';
 import { useDarkMode } from '../hooks/useDarkMode';
 
 export const MiniMap: React.FC = () => {
-    const { notes, viewport, interaction, setViewportPosition } = useStore(
+    const { notes, currentBoardId, viewport, interaction, setViewportPosition } = useStore(
         useShallow(state => ({
             notes: state.notes,
+            currentBoardId: state.currentBoardId,
             viewport: state.viewport,
             interaction: state.interaction,
             setViewportPosition: state.setViewportPosition,
@@ -17,10 +18,13 @@ export const MiniMap: React.FC = () => {
     );
     const [isHovered, setIsHovered] = useState(false);
     const mapRef = useRef<HTMLDivElement>(null);
-    const viewportRef = useRef<HTMLDivElement>(null);
+    const viewportRef = useRef<HTMLButtonElement>(null);
     const isDarkMode = useDarkMode();
 
-    const visibleNotes = useMemo(() => notes.filter(n => !n.deletedAt), [notes]);
+    const visibleNotes = useMemo(
+        () => notes.filter(note => note.boardId === currentBoardId && !note.deletedAt),
+        [currentBoardId, notes]
+    );
     
     // Calculate World Bounds (Always anchored at 0,0)
     const { scale } = useMemo(() => {
@@ -71,6 +75,37 @@ export const MiniMap: React.FC = () => {
 
     // Viewport Rect on Map
     const vp = toMap(viewport.x, viewport.y, viewport.w, viewport.h);
+
+    const nudgeViewport = (dx: number, dy: number) => {
+        setViewportPosition(viewport.x + dx, viewport.y + dy);
+    };
+
+    const handleMapKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+        const step = 120;
+
+        switch (e.key) {
+            case 'ArrowLeft':
+                e.preventDefault();
+                nudgeViewport(-step, 0);
+                break;
+            case 'ArrowRight':
+                e.preventDefault();
+                nudgeViewport(step, 0);
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                nudgeViewport(0, -step);
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                nudgeViewport(0, step);
+                break;
+            case 'Home':
+                e.preventDefault();
+                setViewportPosition(0, 0);
+                break;
+        }
+    };
 
     // --- Interaction Handlers ---
 
@@ -164,26 +199,35 @@ export const MiniMap: React.FC = () => {
     };
 
     return (
-        <div 
-            ref={mapRef}
-            className={cn(
-                "minimap-interaction-area", // Add marker class for interaction exclusion
-                "fixed bottom-8 right-8",
-                "bg-secondary-bg backdrop-blur-xl",
-                "border border-border-subtle",
-                "rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
-                "overflow-hidden transition-all duration-300 ease-out transform",
-                isVisible ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-8 scale-95 pointer-events-none"
+        <>
+            {!isVisible && (
+                <button
+                    type="button"
+                    className="fixed bottom-6 right-6 h-16 w-16 rounded-2xl bg-transparent"
+                    style={{ zIndex: Z_INDEX.MINIMAP }}
+                    aria-label="显示小地图"
+                    onMouseEnter={() => setIsHovered(true)}
+                    onFocus={() => setIsHovered(true)}
+                />
             )}
-            style={{ 
-                width: LAYOUT.MINIMAP_WIDTH,
-                height: LAYOUT.MINIMAP_HEIGHT,
-                zIndex: Z_INDEX.MINIMAP 
-            }}
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-            onMouseDown={handleMapDrag}
-        >
+
+            <div 
+                ref={mapRef}
+                className={cn(
+                    "minimap-interaction-area", // Add marker class for interaction exclusion
+                    "fixed bottom-8 right-8",
+                    "bg-secondary-bg backdrop-blur-xl",
+                    "border border-border-subtle",
+                    "rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
+                    "overflow-hidden transition-all duration-300 ease-out transform",
+                    isVisible ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-8 scale-95 pointer-events-none"
+                )}
+                style={{ 
+                    width: LAYOUT.MINIMAP_WIDTH,
+                    height: LAYOUT.MINIMAP_HEIGHT,
+                    zIndex: Z_INDEX.MINIMAP 
+                }}
+            >
             {/* Grid Pattern Background */}
             <div 
                 className="absolute inset-0 opacity-20 pointer-events-none"
@@ -204,18 +248,30 @@ export const MiniMap: React.FC = () => {
 
             {/* Content Container - Items are absolutely positioned relative to this */}
             <div className="relative w-full h-full">
+                <button
+                    type="button"
+                    className="absolute inset-0 z-0 cursor-pointer p-0"
+                    aria-label="小地图导航"
+                    onMouseEnter={() => setIsHovered(true)}
+                    onMouseLeave={() => setIsHovered(false)}
+                    onMouseDown={handleMapDrag}
+                    onKeyDown={handleMapKeyDown}
+                />
                 
                 {/* Notes Layer (Memoized) */}
                 <MiniMapNotes notes={visibleNotes} scale={scale} isDarkMode={isDarkMode} />
 
                 {/* Viewport Indicator */}
-                <div 
+                <button
+                    type="button"
                     ref={viewportRef}
                     className={cn(
+                        "minimap-viewport",
                         "absolute rounded-lg shadow-sm transition-all duration-75 ease-linear cursor-grab active:cursor-grabbing",
                         "border-2 border-blue-500/60 dark:border-blue-300/60",
                         "bg-blue-500/5 dark:bg-blue-300/5 backdrop-brightness-110",
-                        "hover:bg-blue-500/10 dark:hover:bg-blue-300/10 hover:border-blue-500/80 dark:hover:border-blue-300/80"
+                        "hover:bg-blue-500/10 dark:hover:bg-blue-300/10 hover:border-blue-500/80 dark:hover:border-blue-300/80",
+                        "p-0"
                     )}
                     style={{ 
                         left: vp.left, 
@@ -223,23 +279,28 @@ export const MiniMap: React.FC = () => {
                         width: Math.max(vp.width, 4), 
                         height: Math.max(vp.height, 4) 
                     }}
+                    aria-label="当前视口位置"
+                    onMouseEnter={() => setIsHovered(true)}
+                    onMouseLeave={() => setIsHovered(false)}
                     onMouseDown={handleViewportDrag}
+                    onKeyDown={handleMapKeyDown}
                 >
                     {/* Viewport label (optional, kept minimal) */}
                     <div className="absolute -bottom-4 right-0 text-[8px] font-mono font-medium text-blue-500/70 dark:text-blue-300/70 select-none">
                         VIEW
                     </div>
+                </button>
+
+            </div>
+
+                {/* Coordinates Badge (Bottom Left) */}
+                <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-secondary-bg/50 backdrop-blur-sm border border-border-subtle">
+                    <span className="text-[9px] font-mono font-semibold text-text-secondary">
+                        {Math.round(viewport.x)}, {Math.round(viewport.y)}
+                    </span>
                 </div>
-
             </div>
-
-            {/* Coordinates Badge (Bottom Left) */}
-            <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-secondary-bg/50 backdrop-blur-sm border border-border-subtle">
-                <span className="text-[9px] font-mono font-semibold text-text-secondary">
-                    {Math.round(viewport.x)}, {Math.round(viewport.y)}
-                </span>
-            </div>
-        </div>
+        </>
     );
 };
 
@@ -262,6 +323,7 @@ const MiniMapNoteItem = React.memo(({ note, scale, isDarkMode }: { note: any, sc
     return (
         <div 
             className={cn(
+                "minimap-note",
                 "absolute rounded-[2px] shadow-sm transition-all duration-300",
                 "border border-border-subtle/50"
             )}
