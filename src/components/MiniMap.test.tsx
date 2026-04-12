@@ -130,4 +130,5 @@ describe('MiniMap 看板隔离', () => {
     expect(Number.parseFloat(viewport?.style.width ?? '0')).toBeGreaterThan(0);
     expect(Number.parseFloat(viewport?.style.height ?? '0')).toBeGreaterThan(0);
   });
+
 });

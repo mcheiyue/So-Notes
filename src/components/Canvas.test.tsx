@@ -104,17 +104,17 @@ describe('Canvas 空白命中判定', () => {
     expect(addNote).toHaveBeenCalledWith(220, 280);
   });
 
-  it('双击 NoteCard 折叠区不会被误判为空白画布', async () => {
+  it('双击 NoteCard 头部不会被误判为空白画布', async () => {
     const addNote = vi.fn();
     useStore.setState({ addNote });
 
     await renderCanvas();
 
-    const collapseButton = container.querySelector('[aria-label="折叠便签"]') as HTMLButtonElement | null;
-    expect(collapseButton).not.toBeNull();
+    const noteHeader = container.querySelector('.drag-handle') as HTMLElement | null;
+    expect(noteHeader).not.toBeNull();
 
     await act(async () => {
-      collapseButton?.dispatchEvent(new MouseEvent('dblclick', {
+      noteHeader?.dispatchEvent(new MouseEvent('dblclick', {
         bubbles: true,
         clientX: 200,
         clientY: 160,
@@ -164,5 +164,41 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(clearSelection).toHaveBeenCalledTimes(1);
+  });
+
+  it('拖拽锁开启时忽略空白画布双击与清空选择', async () => {
+    const addNote = vi.fn();
+    const clearSelection = vi.fn();
+    useStore.setState({
+      addNote,
+      clearSelection,
+      interaction: {
+        isPanMode: false,
+        isDragging: true,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+    });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('dblclick', {
+        bubbles: true,
+        clientX: 180,
+        clientY: 220,
+      }));
+
+      canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 260,
+        clientY: 260,
+      }));
+    });
+
+    expect(addNote).not.toHaveBeenCalled();
+    expect(clearSelection).not.toHaveBeenCalled();
   });
 });

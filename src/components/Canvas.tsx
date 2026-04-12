@@ -222,6 +222,10 @@ export const Canvas: React.FC = () => {
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
+    if (interaction.isDragging) {
+      return;
+    }
+
     if (!isBlankCanvasTarget(e.target)) {
       return;
     }
@@ -307,6 +311,10 @@ export const Canvas: React.FC = () => {
       if (e.button !== 2 && stickyDrag.id) {
           applyBoundaryGuard(stickyDrag.id);
           setStickyDrag(null);
+          return;
+      }
+
+      if (interaction.isDragging) {
           return;
       }
 
@@ -411,8 +419,10 @@ export const Canvas: React.FC = () => {
   if (!isLoaded) return null;
 
   return (
-    <div
+    <section
       ref={containerRef}
+      role="application"
+      tabIndex={-1}
       className={cn(
         "w-full h-full overflow-hidden relative select-none",
         "bg-primary-bg/90 transition-colors duration-300", // 使用语义化主背景色
@@ -507,6 +517,6 @@ export const Canvas: React.FC = () => {
             </span>
         </div>
       )}
-    </div>
+    </section>
   );
 };

@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
 import { LAYOUT, Z_INDEX } from '../constants/layout';
-import { getNoteColor } from '../store/types';
+import { getNoteColor, Note } from '../store/types';
 import { useDarkMode } from '../hooks/useDarkMode';
 
 export const MiniMap: React.FC = () => {
@@ -39,8 +39,8 @@ export const MiniMap: React.FC = () => {
         // Check Notes bounds
         visibleNotes.forEach(note => {
             // Use note.width if available, otherwise default
-            const w = (note as any).width || LAYOUT.NOTE_WIDTH;
-            const h = (note as any).height || LAYOUT.NOTE_MIN_HEIGHT;
+            const w = note.width || LAYOUT.NOTE_WIDTH;
+            const h = note.height || LAYOUT.NOTE_MIN_HEIGHT;
             maxContentX = Math.max(maxContentX, note.x + w);
             maxContentY = Math.max(maxContentY, note.y + h);
         });
@@ -76,8 +76,16 @@ export const MiniMap: React.FC = () => {
     // Viewport Rect on Map
     const vp = toMap(viewport.x, viewport.y, viewport.w, viewport.h);
 
+    const applyViewportPosition = (nextX: number, nextY: number) => {
+        setViewportPosition(Math.max(0, nextX), Math.max(0, nextY));
+    };
+
+    const centerViewportOnWorldPoint = (worldX: number, worldY: number) => {
+        applyViewportPosition(worldX - viewport.w / 2, worldY - viewport.h / 2);
+    };
+
     const nudgeViewport = (dx: number, dy: number) => {
-        setViewportPosition(viewport.x + dx, viewport.y + dy);
+        applyViewportPosition(viewport.x + dx, viewport.y + dy);
     };
 
     const handleMapKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
@@ -102,7 +110,7 @@ export const MiniMap: React.FC = () => {
                 break;
             case 'Home':
                 e.preventDefault();
-                setViewportPosition(0, 0);
+                applyViewportPosition(0, 0);
                 break;
         }
     };
@@ -145,7 +153,7 @@ export const MiniMap: React.FC = () => {
                 const worldDx = dx / scale;
                 const worldDy = dy / scale;
                 
-                setViewportPosition(startVx + worldDx, startVy + worldDy);
+                applyViewportPosition(startVx + worldDx, startVy + worldDy);
                 frameId = null;
             });
         };
@@ -179,7 +187,7 @@ export const MiniMap: React.FC = () => {
             const worldY = mapY / scale;
             
             // Center viewport on this point
-            setViewportPosition(worldX - viewport.w / 2, worldY - viewport.h / 2);
+            centerViewportOnWorldPoint(worldX, worldY);
         };
 
         // Initial Jump
@@ -305,7 +313,7 @@ export const MiniMap: React.FC = () => {
 };
 
 // Optimized Sub-component for Individual Note Item
-const MiniMapNoteItem = React.memo(({ note, scale, isDarkMode }: { note: any, scale: number, isDarkMode: boolean }) => {
+const MiniMapNoteItem = React.memo(({ note, scale, isDarkMode }: { note: Note, scale: number, isDarkMode: boolean }) => {
     const w = note.width || LAYOUT.NOTE_WIDTH;
     const h = note.height || LAYOUT.NOTE_MIN_HEIGHT;
     
@@ -343,7 +351,7 @@ const MiniMapNoteItem = React.memo(({ note, scale, isDarkMode }: { note: any, sc
 });
 
 // Optimized Container for Notes Layer
-const MiniMapNotes = React.memo(({ notes, scale, isDarkMode }: { notes: any[], scale: number, isDarkMode: boolean }) => {
+const MiniMapNotes = React.memo(({ notes, scale, isDarkMode }: { notes: Note[], scale: number, isDarkMode: boolean }) => {
     return (
         <>
             {notes.map(note => (

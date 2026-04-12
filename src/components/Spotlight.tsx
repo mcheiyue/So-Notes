@@ -8,6 +8,7 @@ import { LAYOUT } from "../constants/layout";
 export const Spotlight = () => {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [pendingTargetId, setPendingTargetId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -30,11 +31,46 @@ export const Spotlight = () => {
       // Small delay to ensure render
       requestAnimationFrame(() => {
         inputRef.current?.focus();
+        setQuery("");
+        setSelectedIndex(0);
       });
-      setQuery("");
-      setSelectedIndex(0);
     }
   }, [isSpotlightOpen]);
+
+  useEffect(() => {
+    if (!pendingTargetId) return;
+
+    const targetNote = notes.find(note => note.id === pendingTargetId && !note.deletedAt);
+    if (!targetNote) {
+      requestAnimationFrame(() => {
+        setPendingTargetId(null);
+      });
+      return;
+    }
+
+    if (targetNote.boardId !== currentBoardId) {
+      return;
+    }
+
+    if (targetNote.collapsed) {
+      return;
+    }
+
+    const nWidth = LAYOUT.NOTE_WIDTH;
+    const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, targetNote.height || LAYOUT.NOTE_MIN_HEIGHT);
+    const targetX = (targetNote.x + nWidth / 2) - (window.innerWidth / 2);
+    const targetY = (targetNote.y + nHeight / 2) - (window.innerHeight / 2);
+
+    const frameId = requestAnimationFrame(() => {
+      clearSelection();
+      setViewportPosition(targetX, targetY);
+      setSelectedIds([targetNote.id]);
+      bringToFront(targetNote.id);
+      setPendingTargetId(null);
+    });
+
+    return () => cancelAnimationFrame(frameId);
+  }, [bringToFront, clearSelection, currentBoardId, notes, pendingTargetId, setSelectedIds, setViewportPosition]);
 
   // Close on Escape
   useEffect(() => {
@@ -87,41 +123,20 @@ export const Spotlight = () => {
               activeItem.scrollIntoView({ block: 'nearest' });
           }
       }
-  }, [selectedIndex, results]);
+  }, [selectedIndex]);
 
   // Handle Selection / Navigation
   const handleSelect = (note: Note) => {
-    // 1. Close Spotlight
     setSpotlightOpen(false);
-    
-    // 2. Switch Board if needed
+    setPendingTargetId(note.id);
+
     if (note.boardId !== currentBoardId) {
       switchBoard(note.boardId);
     }
 
-    // 3. Expand if collapsed
     if (note.collapsed) {
       toggleCollapse(note.id);
     }
-
-    // 4. Calculate Center Position
-    const nWidth = LAYOUT.NOTE_WIDTH;
-    const nHeight = note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : Math.max(LAYOUT.NOTE_MIN_HEIGHT, note.height || LAYOUT.NOTE_MIN_HEIGHT);
-    
-    const winW = window.innerWidth;
-    const winH = window.innerHeight;
-    
-    const targetX = (note.x + nWidth / 2) - (winW / 2);
-    const targetY = (note.y + nHeight / 2) - (winH / 2);
-
-    // 5. Jump & Select
-    // Use timeout to allow board switch render cycle to complete if needed
-    setTimeout(() => {
-      clearSelection();
-      setViewportPosition(targetX, targetY);
-      setSelectedIds([note.id]);
-      bringToFront(note.id);
-    }, 10);
   };
 
   // Keyboard Navigation inside Input
@@ -145,9 +160,11 @@ export const Spotlight = () => {
   return (
     <div className="fixed inset-0 z-[100000] flex items-start justify-center pt-[20vh] px-4">
       {/* Backdrop */}
-      <div 
+      <button 
+        type="button"
         className="absolute inset-0 bg-black/20 backdrop-blur-sm transition-opacity" 
         onClick={() => setSpotlightOpen(false)}
+        aria-label="关闭搜索"
       />
 
       {/* Container - Styled with Semantic Colors */}
@@ -182,12 +199,13 @@ export const Spotlight = () => {
             results.map((note, index) => {
                 const board = boards.find(b => b.id === note.boardId);
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={note.id}
                     onClick={() => handleSelect(note)}
                     onMouseEnter={() => setSelectedIndex(index)}
                     className={cn(
-                      "group flex items-center p-3 rounded-xl cursor-pointer transition-all duration-200",
+                      "group flex w-full items-center p-3 rounded-xl cursor-pointer transition-all duration-200 text-left",
                       index === selectedIndex 
                         ? "bg-indigo-50/80 dark:bg-indigo-500/20 shadow-sm translate-x-1" 
                         : "hover:bg-secondary-bg/50 dark:hover:bg-white/5"
@@ -227,7 +245,7 @@ export const Spotlight = () => {
                             </span>
                         </div>
                     </div>
-                  </div>
+                  </button>
                 );
             })
           ) : query ? (
