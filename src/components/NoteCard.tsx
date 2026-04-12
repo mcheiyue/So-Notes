@@ -1,6 +1,6 @@
 import React, { useRef, useState, useLayoutEffect } from "react";
 import Draggable, { DraggableData, DraggableEvent } from "react-draggable";
-import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
+import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check, ChevronsUpDown } from "lucide-react";
 import { NOTE_COLORS, getNoteColor } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { useStore } from "../store/useStore";
@@ -73,18 +73,23 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const finalX = dragPos ? dragPos.x : screenX;
   const finalY = dragPos ? dragPos.y : screenY;
 
-  // Derived Values
-  const displayTitle = note?.title || "无标题";
-
   // Auto-resize textarea
   useLayoutEffect(() => {
     if (note && textareaRef.current) {
         textareaRef.current.style.height = 'auto';
         textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  }, [note, note?.content, note?.collapsed, isEditing]);
+  }, [note, note?.content, note?.collapsed]);
 
   if (!note) return null;
+
+  // Derived Values
+  const displayTitle = note.title || "无标题";
+  const shouldShowHeaderChrome = note.collapsed || isHovered || isEditing || Boolean(note.title);
+  const shouldShowBodyTitle = !note.collapsed && shouldShowHeaderChrome;
+  const shouldRenderCopyButton = !isStatic && !note.collapsed;
+  const disableHeaderTooltips = isStickyDragging || !!dragPos;
+  const disableCollapseTooltip = disableHeaderTooltips || isStatic;
 
   const handleStart = () => {
       isDragging.current = true;
@@ -297,8 +302,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       changeColor(note.id, NOTE_COLORS[nextIndex]);
   };
 
-  const handleDoubleClick = (e: React.MouseEvent) => {
-      e.stopPropagation();
+  const handleCollapseToggle = () => {
       toggleCollapse(note.id);
   };
 
@@ -321,7 +325,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   return (
       <Draggable
         nodeRef={nodeRef}
-        handle=".drag-handle"
+        handle=".note-card-drag-handle"
         defaultPosition={undefined} // Controlled via position prop
         position={{ x: finalX, y: finalY }}
         scale={scale}
@@ -331,8 +335,11 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         disabled={isStickyDragging || isStatic}
       >
       <div
-        ref={nodeRef}
-        data-id={note.id}
+         ref={nodeRef}
+         role="presentation"
+         data-id={note.id}
+         data-canvas-hit="blocked"
+         data-note-card-region="root"
           className={cn(
           "note-card absolute flex flex-col",
           note.collapsed ? "overflow-hidden" : "h-auto",
@@ -359,21 +366,37 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         onMouseLeave={() => setIsHovered(false)}
       >
         <div 
+            role="presentation"
+            data-note-card-region="header"
             className={cn(
-                "drag-handle relative h-9 flex items-center justify-between px-2 pt-1 cursor-grab active:cursor-grabbing select-none",
+                "relative h-9 grid grid-cols-[auto_auto_1fr_auto] items-center gap-1 px-2 pt-1 select-none",
                 "transition-opacity duration-200",
-                note.collapsed || isHovered || isEditing || note.title ? "opacity-100" : "opacity-0",
-                isStatic && "!cursor-default"
+                shouldShowHeaderChrome ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
             )}
             onContextMenu={handleContextMenu}
-            onDoubleClick={isStatic ? undefined : handleDoubleClick}
         >
-          {/* Left Controls Group */}
-          <div className="flex items-center gap-0.5 z-20">
-            {/* Left: Palette or Restore */}
+          <Tooltip content="拖拽移动" delay={1000} disabled={disableHeaderTooltips || isStatic}>
+            <button
+              type="button"
+              data-note-card-region="drag-handle"
+              className={cn(
+                "note-card-drag-handle flex h-7 w-7 items-center justify-center rounded-md text-text-tertiary transition-colors",
+                isStatic
+                  ? "cursor-default opacity-0"
+                  : "cursor-grab active:cursor-grabbing hover:bg-black/5 dark:hover:bg-white/5 hover:text-text-secondary"
+              )}
+              aria-label="拖拽便签"
+            >
+              <GripHorizontal className="w-4 h-4" />
+            </button>
+          </Tooltip>
+
+          <div data-note-card-region="buttons-left" className="flex items-center gap-0.5 z-20">
             {isStatic ? (
                 <Tooltip content="还原笔记">
                     <button
+                        type="button"
+                        aria-label="还原笔记"
                         onClick={(e) => {
                             e.stopPropagation();
                             restoreNote(note.id);
@@ -384,20 +407,23 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                     </button>
                 </Tooltip>
             ) : (
-                <Tooltip content="切换颜色" disabled={isStickyDragging || !!dragPos}>
+                <Tooltip content="切换颜色" disabled={disableHeaderTooltips}>
                     <button
-                    onClick={cycleColor}
-                    className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-text-tertiary hover:text-text-secondary flex-shrink-0"
+                      type="button"
+                      aria-label="切换颜色"
+                      onClick={cycleColor}
+                      className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-text-tertiary hover:text-text-secondary flex-shrink-0"
                     >
-                    <Palette className="w-4 h-4" />
+                      <Palette className="w-4 h-4" />
                     </button>
                 </Tooltip>
             )}
-            
-            {/* Copy Button */}
-            {!isStatic && (
-                <Tooltip content={isCopied ? "已复制" : "复制内容"} disabled={isStickyDragging || !!dragPos}>
+
+            {shouldRenderCopyButton && (
+                <Tooltip content={isCopied ? "已复制" : "复制内容"} disabled={disableHeaderTooltips}>
                     <button
+                        type="button"
+                        aria-label="复制内容"
                         onClick={handleCopy}
                         className={cn(
                             "p-1.5 rounded-md transition-all duration-200 flex-shrink-0",
@@ -412,53 +438,76 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             )}
           </div>
 
-          {/* Center: Title or Grip (Absolute Centered) */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-             <div className="pointer-events-auto px-2 max-w-[60%] flex justify-center">
-                 {note.collapsed ? (
-                     <Tooltip content="双击展开" delay={500} disabled={isStickyDragging || isStatic || !!dragPos}>
-                        <span 
-                            className={cn(
-                                "text-sm font-bold truncate select-none w-full text-center block",
-                                note.title ? "text-text-primary opacity-90" : "text-text-secondary italic opacity-70"
-                            )}
-                        >
-                            {displayTitle}
-                        </span>
-                     </Tooltip>
-                 ) : (
-                    <Tooltip content="双击折叠 / 拖拽移动" delay={1000} disabled={isStickyDragging || isStatic || !!dragPos}>
-                        <GripHorizontal className={cn("w-4 h-4 text-text-tertiary", isStatic && "opacity-0")} />
-                    </Tooltip>
-                 )}
-             </div>
+          <div data-note-card-region="collapse" className="flex items-center justify-center px-2 min-w-0 z-10">
+            {isStatic ? (
+              <div className="px-2 max-w-full flex justify-center">
+                {note.collapsed ? (
+                  <span
+                    className={cn(
+                      "text-sm font-bold truncate select-none w-full text-center block",
+                      note.title ? "text-text-primary opacity-90" : "text-text-secondary italic opacity-70"
+                    )}
+                  >
+                    {displayTitle}
+                  </span>
+                ) : (
+                  <ChevronsUpDown className="w-4 h-4 text-text-tertiary opacity-0" />
+                )}
+              </div>
+            ) : (
+              <Tooltip content={note.collapsed ? "双击展开" : "双击折叠"} delay={500} disabled={disableCollapseTooltip}>
+                <button
+                  type="button"
+                  aria-label={note.collapsed ? "展开便签" : "折叠便签"}
+                  onDoubleClick={handleCollapseToggle}
+                  className={cn(
+                    "flex h-7 max-w-full items-center justify-center rounded-md px-2 transition-colors",
+                    "hover:bg-black/5 dark:hover:bg-white/5"
+                  )}
+                >
+                  {note.collapsed ? (
+                    <span 
+                      className={cn(
+                        "text-sm font-bold truncate select-none w-full text-center block",
+                        note.title ? "text-text-primary opacity-90" : "text-text-secondary italic opacity-70"
+                      )}
+                    >
+                      {displayTitle}
+                    </span>
+                  ) : (
+                    <ChevronsUpDown className="w-4 h-4 text-text-tertiary" />
+                  )}
+                </button>
+              </Tooltip>
+            )}
           </div>
 
-          {/* Right: Delete */}
-          <div className="flex items-center gap-0.5 z-20">
-            <Tooltip content={isStatic ? "永久删除" : "删除便签"} disabled={isStickyDragging || !!dragPos}>
+          <div data-note-card-region="buttons-right" className="flex items-center justify-end gap-0.5 z-20">
+            <Tooltip content={isStatic ? "永久删除" : "删除便签"} disabled={disableHeaderTooltips}>
                 <button
-                onClick={(e) => {
-                    e.stopPropagation();
-                    if (isStatic) {
-                        if (window.confirm("确定要永久删除吗？无法找回。")) {
-                            deleteNotePermanently(note.id);
-                        }
-                    } else {
-                        deleteNote(note.id);
-                    }
-                }}
-                 className="p-1.5 rounded-md hover:bg-red-100 dark:hover:bg-red-900/20 hover:text-red-500 transition-colors text-text-tertiary flex-shrink-0"
+                  type="button"
+                  aria-label={isStatic ? "永久删除" : "删除便签"}
+                  onClick={(e) => {
+                      e.stopPropagation();
+                      if (isStatic) {
+                          if (window.confirm("确定要永久删除吗？无法找回。")) {
+                              deleteNotePermanently(note.id);
+                          }
+                      } else {
+                          deleteNote(note.id);
+                      }
+                  }}
+                  className="p-1.5 rounded-md hover:bg-red-100 dark:hover:bg-red-900/20 hover:text-red-500 transition-colors text-text-tertiary flex-shrink-0"
                 >
-                {isStatic ? <Trash2 className="w-4 h-4" /> : <X className="w-4 h-4" />}
-            </button>
-          </Tooltip>
+                  {isStatic ? <Trash2 className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                </button>
+            </Tooltip>
           </div>
         </div>
 
         {/* Content */}
         {!note.collapsed && (
-            <div className="flex-1 pb-4 pt-0 flex flex-col gap-1 min-h-0 relative">
+            <div data-note-card-region="body" className="flex-1 pb-4 pt-0 flex flex-col gap-1 min-h-0 relative">
               <div className="px-4">
                   <input 
                     ref={titleRef}
@@ -467,9 +516,9 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                         "w-full bg-transparent outline-none transition-all duration-200 flex-shrink-0",
                         "text-text-primary font-bold text-[16px]",
                         "placeholder-text-secondary/50",
-                        (!note.title && !isHovered && !isEditing) ? "hidden" : "block",
+                        shouldShowBodyTitle ? "block" : "hidden",
                         isStatic && "pointer-events-none"
-                    )}
+                     )}
                     placeholder="标题"
                     value={note.title}
                     onChange={(e) => updateTitle(note.id, e.target.value)}
