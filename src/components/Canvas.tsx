@@ -476,7 +476,7 @@ export const Canvas: React.FC = () => {
       {/* Selection Box */}
       <div
         ref={selectionBoxRef}
-        className="absolute bg-blue-500/10 border border-blue-500/50 border-dashed pointer-events-none dark:bg-blue-300/10 dark:border-blue-300/50" // 深色模式下调整选择框颜色
+        className="absolute bg-blue-500/10 border border-blue-500/55 border-dashed shadow-[0_0_0_1px_rgba(59,130,246,0.12)] pointer-events-none dark:bg-blue-200/15 dark:border-blue-200/80 dark:shadow-[0_0_0_1px_rgba(191,219,254,0.3)]"
         style={{ display: 'none', zIndex: Z_INDEX.SELECTION_BOX }}
       />
       

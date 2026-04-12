@@ -25,7 +25,7 @@ vi.mock('react-draggable', () => ({
 
 import { NoteCard } from './NoteCard';
 import { useStore } from '../store/useStore';
-import { Note } from '../store/types';
+import { getNoteColor, Note } from '../store/types';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
@@ -140,5 +140,63 @@ describe('NoteCard 头部交互边界', () => {
 
     expect(hoveredHeader?.className).toContain('opacity-100');
     expect(hoveredTitleInput?.className).toContain('block');
+  });
+
+  it('深色模式下增强正文、占位符、选中文本与单选态可见性', async () => {
+    useStore.setState({
+      notes: [createNote({ color: '#fef9c3' })],
+      selectedIds: ['note-1'],
+      config: {
+        ...useStore.getState().config,
+        themeMode: 'dark',
+      },
+    });
+
+    await renderNoteCard();
+
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    const titleInput = container.querySelector('input[placeholder="标题"]') as HTMLInputElement | null;
+    const textarea = container.querySelector('textarea[placeholder="记点什么..."]') as HTMLTextAreaElement | null;
+
+    expect(rootRegion?.style.backgroundColor).toBe(getNoteColor('#fef9c3', true));
+    expect(rootRegion?.className).toContain('dark:ring-blue-300/45');
+    expect(rootRegion?.className).toContain('dark:border-blue-300/45');
+
+    expect(titleInput?.className).toContain('dark:placeholder-text-secondary/75');
+    expect(titleInput?.className).toContain('dark:selection:bg-blue-200/35');
+
+    expect(textarea?.className).toContain('dark:text-text-primary');
+    expect(textarea?.className).toContain('dark:placeholder-text-secondary/70');
+    expect(textarea?.className).toContain('dark:selection:bg-blue-200/35');
+    expect(textarea?.className).toContain('dark:selection:text-slate-950');
+  });
+
+  it('仅双击头部才折叠，正文双击不触发折叠', async () => {
+    await renderNoteCard();
+
+    const textarea = container.querySelector('textarea[placeholder="记点什么..."]') as HTMLTextAreaElement | null;
+    const header = container.querySelector('.drag-handle') as HTMLDivElement | null;
+
+    expect(useStore.getState().notes.find((note) => note.id === 'note-1')?.collapsed).toBe(false);
+
+    await act(async () => {
+      textarea?.dispatchEvent(new MouseEvent('dblclick', {
+        bubbles: true,
+        clientX: 240,
+        clientY: 260,
+      }));
+    });
+
+    expect(useStore.getState().notes.find((note) => note.id === 'note-1')?.collapsed).toBe(false);
+
+    await act(async () => {
+      header?.dispatchEvent(new MouseEvent('dblclick', {
+        bubbles: true,
+        clientX: 200,
+        clientY: 160,
+      }));
+    });
+
+    expect(useStore.getState().notes.find((note) => note.id === 'note-1')?.collapsed).toBe(true);
   });
 });

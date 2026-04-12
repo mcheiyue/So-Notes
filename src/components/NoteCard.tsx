@@ -325,6 +325,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const handleHeaderDoubleClick = (e: React.MouseEvent) => {
       if (isGlobalDragging) return;
       const targetElement = e.target instanceof Element ? e.target : null;
+      if (!targetElement?.closest('.drag-handle')) return;
       if (targetElement?.closest('.note-action')) return;
       handleCollapseToggle();
   };
@@ -372,7 +373,11 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           "border border-border-subtle dark:border-white/10",
           "group",
           isStickyDragging && "shadow-2xl scale-[1.02] cursor-move",
-          isSelected && !isStickyDragging && (isGroupSelection ? "ring-2 ring-blue-500/50 border-blue-500/50" : "border-2 border-border-subtle shadow-sm"),
+          isSelected && !isStickyDragging && (
+            isGroupSelection
+              ? "ring-2 ring-blue-500/55 dark:ring-blue-300/60 border-blue-500/60 dark:border-blue-300/55 shadow-[0_0_0_1px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_1px_rgba(191,219,254,0.18)]"
+              : "ring-2 ring-blue-500/30 dark:ring-blue-300/45 border-blue-500/40 dark:border-blue-300/45 shadow-[0_0_0_1px_rgba(59,130,246,0.08)] dark:shadow-[0_0_0_1px_rgba(191,219,254,0.14)]"
+          ),
           isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto",
           isPanMode && "pointer-events-none"
         )}
@@ -513,7 +518,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                     className={cn(
                         "w-full bg-transparent outline-none transition-all duration-200 flex-shrink-0",
                         "text-text-primary font-bold text-[16px]",
-                        "placeholder-text-secondary/50",
+                        "placeholder-text-secondary/50 dark:placeholder-text-secondary/75",
+                        "selection:bg-blue-500/20 dark:selection:bg-blue-200/35 selection:text-slate-900 dark:selection:text-slate-950",
                         shouldShowBodyTitle ? "block" : "hidden",
                         isStatic && "pointer-events-none"
                      )}
@@ -531,9 +537,9 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 ref={textareaRef}
                 className={cn(
                     "w-full resize-none bg-transparent outline-none px-4",
-                    "text-text-secondary",
-                    "placeholder-text-tertiary font-normal text-[15px] leading-relaxed",
-                    "selection:bg-black/10",
+                    "text-text-secondary dark:text-text-primary",
+                    "placeholder-text-tertiary dark:placeholder-text-secondary/70 font-normal text-[15px] leading-relaxed",
+                    "selection:bg-blue-500/20 dark:selection:bg-blue-200/35 selection:text-slate-900 dark:selection:text-slate-950",
                     "scrollbar-thin scrollbar-thumb-text-tertiary/20 scrollbar-track-transparent hover:scrollbar-thumb-text-secondary/20",
                     "transition-all duration-300 ease-in-out"
                 )}

@@ -201,4 +201,23 @@ describe('Canvas 空白命中判定', () => {
     expect(addNote).not.toHaveBeenCalled();
     expect(clearSelection).not.toHaveBeenCalled();
   });
+
+  it('深色模式下框选矩形使用更强的边框与填充可见性', async () => {
+    useStore.setState({
+      config: {
+        ...useStore.getState().config,
+        themeMode: 'dark',
+      },
+    });
+
+    await renderCanvas();
+
+    const selectionBox = container.querySelector('.border-dashed') as HTMLDivElement | null;
+
+    expect(selectionBox).not.toBeNull();
+    expect(selectionBox?.className).toContain('border-blue-500/55');
+    expect(selectionBox?.className).toContain('dark:bg-blue-200/15');
+    expect(selectionBox?.className).toContain('dark:border-blue-200/80');
+    expect(selectionBox?.className).toContain('dark:shadow-[0_0_0_1px_rgba(191,219,254,0.3)]');
+  });
 });

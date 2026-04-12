@@ -18,24 +18,22 @@ export const NOTE_COLORS: NoteColor[] = [
   "#ffe4e6", // Rose-100
 ];
 
-// NOTE_COLOR_MAP_DARK_MODE: 深色模式下的便签颜色映射 (亮色 -> 深色)
-// OPTION D: GLASSMORPHISM (Translucent, Modern) - The Single Source of Truth
-// Uses semi-transparent colors that blend with the dark background.
-// Requires 'backdrop-blur' on the component for full effect.
+// NOTE_COLOR_MAP_DARK_MODE: 深色模式下的便签颜色映射 (亮色 -> 深色增强可读性底色)
+// 使用更深的半透明染色底，避免浅色便签在深色主题下发灰、发白、正文对比不足。
 export const NOTE_COLOR_MAP_DARK_MODE: Record<NoteColor, string> = {
-  "#FFFFFF": "rgba(255, 255, 255, 0.08)", // White -> Glassy White
-  "#fef9c3": "rgba(234, 179, 8, 0.2)",   // Yellow -> Glassy Gold
-  "#dcfce7": "rgba(34, 197, 94, 0.2)",   // Green -> Glassy Emerald
-  "#ccfbf1": "rgba(20, 184, 166, 0.2)",  // Teal -> Glassy Teal
-  "#dbeafe": "rgba(59, 130, 246, 0.25)",  // Blue -> Glassy Blue
-  "#f3e8ff": "rgba(168, 85, 247, 0.25)",  // Purple -> Glassy Purple
-  "#fce7f3": "rgba(236, 72, 153, 0.2)",  // Pink -> Glassy Pink
-  "#ffedd5": "rgba(249, 115, 22, 0.2)",  // Orange -> Glassy Orange
-  "#fee2e2": "rgba(239, 68, 68, 0.2)",   // Red -> Glassy Red
-  "#f1f5f9": "rgba(148, 163, 184, 0.2)", // Slate -> Glassy Slate
-  "#ecfccb": "rgba(132, 204, 22, 0.2)",  // Lime -> Glassy Lime
-  "#cffafe": "rgba(6, 182, 212, 0.2)",   // Cyan -> Glassy Cyan
-  "#ffe4e6": "rgba(244, 63, 94, 0.2)",   // Rose -> Glassy Rose
+  "#FFFFFF": "rgba(71, 85, 105, 0.32)",   // White -> Slate-tinted neutral
+  "#fef9c3": "rgba(161, 98, 7, 0.34)",    // Yellow -> Dark amber
+  "#dcfce7": "rgba(21, 128, 61, 0.32)",   // Green -> Deep green
+  "#ccfbf1": "rgba(15, 118, 110, 0.32)",  // Teal -> Deep teal
+  "#dbeafe": "rgba(29, 78, 216, 0.34)",   // Blue -> Deep blue
+  "#f3e8ff": "rgba(126, 34, 206, 0.34)",  // Purple -> Deep purple
+  "#fce7f3": "rgba(190, 24, 93, 0.32)",   // Pink -> Deep pink
+  "#ffedd5": "rgba(194, 65, 12, 0.34)",   // Orange -> Deep orange
+  "#fee2e2": "rgba(185, 28, 28, 0.32)",   // Red -> Deep red
+  "#f1f5f9": "rgba(71, 85, 105, 0.34)",   // Slate -> Deep slate
+  "#ecfccb": "rgba(77, 124, 15, 0.32)",   // Lime -> Deep lime
+  "#cffafe": "rgba(14, 116, 144, 0.32)",  // Cyan -> Deep cyan
+  "#ffe4e6": "rgba(190, 18, 60, 0.32)",   // Rose -> Deep rose
 };
 
 // 根据当前主题获取便签颜色
@@ -54,9 +52,9 @@ export function getNoteColor(color: NoteColor, isDarkMode: boolean): string {
     return NOTE_COLOR_MAP_DARK_MODE[foundKey];
   }
 
-  // 3. Fallback for unknown/legacy colors (Fix for missing colors)
-  // Return a generic glass effect so it doesn't stay blindingly bright
-  return "rgba(255, 255, 255, 0.05)";
+  // 3. Fallback for unknown/legacy colors
+  // 保持为偏深的中性色，避免未知浅色在深色模式下刺眼。
+  return "rgba(71, 85, 105, 0.28)";
 }
 
 export interface Note {
