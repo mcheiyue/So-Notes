@@ -4,6 +4,29 @@ import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 
+const CANVAS_NON_BLANK_SELECTOR = [
+  '[data-canvas-hit="blocked"]',
+  '.drag-handle-area',
+  '.minimap-interaction-area',
+].join(', ');
+
+const getEventTargetElement = (target: EventTarget | null): Element | null => {
+  if (target instanceof Element) {
+    return target;
+  }
+
+  if (target instanceof Node) {
+    return target.parentElement;
+  }
+
+  return null;
+};
+
+const isBlankCanvasTarget = (target: EventTarget | null): boolean => {
+  const targetElement = getEventTargetElement(target);
+  return !targetElement || !targetElement.closest(CANVAS_NON_BLANK_SELECTOR);
+};
+
 export const Canvas: React.FC = () => {
   const { 
     notes, currentBoardId, addNote, init, isLoaded, 
@@ -199,19 +222,16 @@ export const Canvas: React.FC = () => {
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (
-        !target.closest('.note-card') && 
-        !target.closest('button') && 
-        !target.closest('.drag-handle-area')
-    ) {
-        // Fix: Convert Screen Coordinates to World Coordinates
-        // The click (e.clientX) is in screen space.
-        // The note needs to be placed in world space.
-        const x = e.clientX + viewport.x;
-        const y = e.clientY + viewport.y;
-        addNote(x, y);
+    if (!isBlankCanvasTarget(e.target)) {
+      return;
     }
+
+    // Fix: Convert Screen Coordinates to World Coordinates
+    // The click (e.clientX) is in screen space.
+    // The note needs to be placed in world space.
+    const x = e.clientX + viewport.x;
+    const y = e.clientY + viewport.y;
+    addNote(x, y);
   };
   
   const applyBoundaryGuard = (id: string) => {
@@ -274,14 +294,10 @@ export const Canvas: React.FC = () => {
   };
 
     const handleGlobalDown = (e: React.MouseEvent) => {
-      // 0. Start Panning (Space Mode + Left Click on Background)
-      const targetEl = e.target as HTMLElement;
-      const isInteractive = targetEl.closest('.note-card') || 
-                            targetEl.closest('button') || 
-                            targetEl.closest('.drag-handle-area') || 
-                            targetEl.closest('.minimap-interaction-area'); // Exclude MiniMap interaction
+      const isBlankTarget = isBlankCanvasTarget(e.target);
 
-      if (interaction.isPanMode && e.button === 0 && !isInteractive) {
+      // 0. Start Panning (Space Mode + Left Click on Background)
+      if (interaction.isPanMode && e.button === 0 && isBlankTarget) {
           isPanning.current = true;
           panStart.current = { x: e.clientX, y: e.clientY };
           return;
@@ -295,14 +311,7 @@ export const Canvas: React.FC = () => {
       }
 
       // 2. Start Marquee Selection (Left Click on Canvas)
-      const targetEl2 = e.target as HTMLElement;
-      if (
-          e.button === 0 && 
-          !stickyDrag.id &&
-          !targetEl2.closest('.note-card') && 
-          !targetEl2.closest('button') && 
-          !targetEl2.closest('.drag-handle-area')
-      ) {
+      if (e.button === 0 && !stickyDrag.id && isBlankTarget) {
           isSelecting.current = true;
           selectionStart.current = { x: e.clientX, y: e.clientY };
           
@@ -447,6 +456,7 @@ export const Canvas: React.FC = () => {
 
       <div 
           data-tauri-drag-region 
+          data-canvas-hit="blocked"
           className="drag-handle-area absolute top-0 left-0 w-full h-6 flex items-center justify-center group cursor-grab"
           style={{ zIndex: Z_INDEX.DRAG_HANDLE_AREA }}
       >
