@@ -3,7 +3,7 @@ import { useStore } from "../store/useStore";
 import { Search, CornerDownLeft, Command, FileText } from "lucide-react";
 import { cn } from "../utils/cn";
 import { Note } from "../store/types";
-import { LAYOUT } from "../constants/layout";
+import { LAYOUT, Z_INDEX } from "../constants/layout";
 
 export const Spotlight = () => {
   const [query, setQuery] = useState("");
@@ -158,7 +158,7 @@ export const Spotlight = () => {
   if (!isSpotlightOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100000] flex items-start justify-center pt-[20vh] px-4">
+    <div className="fixed inset-0 flex items-start justify-center pt-[20vh] px-4" style={{ zIndex: Z_INDEX.SPOTLIGHT }}>
       {/* Backdrop */}
       <button 
         type="button"

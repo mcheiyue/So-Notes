@@ -2,6 +2,22 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.2.4] - 2026-04-12
+
+### 🐛 问题修复 (Bug Fixes)
+*   **BoardDock 右键菜单锚点**
+    > 修复了看板 Dock 右键菜单依赖默认坐标导致的偏移问题，让菜单能够对齐到真实点击的看板项。
+    > *   **缩放态更稳定**：锚点改为基于 dock 容器内的局部布局坐标计算，避免 `scale-90` 等缩放场景下的坐标漂移。
+*   **浮层层级冲突**
+    > 修复了 Dock、ContextMenu、Tooltip、Spotlight 与 MiniMap 之间各自硬编码 z-index 造成的层级不一致问题。
+    > *   **遮挡关系更清晰**：右键菜单、提示层与 Spotlight 的前后顺序回到统一合同，不再依赖组件内各自堆高数值。
+
+### 🚀 优化 (Optimizations)
+*   **共享浮层层级合同**
+    > 在 `layout.ts` 中补齐 app-level overlay token，统一 `MINIMAP < DOCK_BACKDROP < DOCK < TOOLTIP < MENU < SPOTLIGHT` 的层级顺序。
+*   **Dock 菜单回归保障**
+    > 新增 BoardDock 锚点与层级顺序测试，覆盖真实点击项定位与缩放容器场景下的对齐行为。
+
 ## [v1.2.3] - 2026-04-12
 
 ### 🐛 问题修复 (Bug Fixes)

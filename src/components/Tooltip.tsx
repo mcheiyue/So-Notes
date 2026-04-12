@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from "../utils/cn";
+import { Z_INDEX } from '../constants/layout';
 
 interface TooltipProps {
   content: string;
@@ -95,7 +96,7 @@ export const Tooltip = React.memo(function Tooltip({ content, children, side = '
       {isVisible && createPortal(
           <div 
             className={cn(
-                "tooltip-portal fixed z-[999999] px-2 py-1 bg-tertiary-bg/95 backdrop-blur text-text-secondary text-xs font-medium tracking-wide",
+                "tooltip-portal fixed px-2 py-1 bg-tertiary-bg/95 backdrop-blur text-text-secondary text-xs font-medium tracking-wide",
                 "rounded shadow-lg border border-border-subtle whitespace-nowrap pointer-events-none",
                 "transition-opacity duration-200 animate-in fade-in zoom-in-95",
                 // Positioning transforms to center the tooltip relative to the coordinate
@@ -106,7 +107,8 @@ export const Tooltip = React.memo(function Tooltip({ content, children, side = '
             )}
             style={{ 
                 top: coords.top, 
-                left: coords.left 
+                left: coords.left,
+                zIndex: Z_INDEX.TOOLTIP,
             }}
           >
             {content}

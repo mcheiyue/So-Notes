@@ -17,14 +17,21 @@ export const Z_INDEX = {
   // Base layers
   BACKGROUND_GRID: 0,
   NOTE_BASE: 1,
-  
-  // Overlay UI
-  MINIMAP: 90000,
+
+  // Canvas selection
   SELECTION_BOX: 9999,
-  
+
   // Interaction layers
   NOTE_DRAGGING: 99999,
   DRAG_HANDLE_AREA: 100000,
   PAN_MODE_BADGE: 100000,
   STICKY_DRAG_MSG: 99999,
+
+  // App overlay contract
+  MINIMAP: 100010,
+  DOCK_BACKDROP: 100020,
+  DOCK: 100030,
+  TOOLTIP: 100040,
+  MENU: 100050,
+  SPOTLIGHT: 100060,
 };

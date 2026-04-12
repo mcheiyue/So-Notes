@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
 import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check } from "lucide-react";
+import { Z_INDEX } from "../constants/layout";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 
@@ -29,6 +30,7 @@ export const BoardDock = () => {
   const [editName, setEditName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const dockContainerRef = useRef<HTMLDivElement>(null);
 
   // Focus input when adding mode starts
   useEffect(() => {
@@ -150,19 +152,32 @@ export const BoardDock = () => {
       }
   };
 
+  const resolveBoardMenuAnchor = (boardElement: HTMLElement) => {
+      const localCenterX = boardElement.offsetLeft + boardElement.offsetWidth / 2;
+      const localTop = boardElement.offsetTop;
+
+      return {
+          x: localCenterX,
+          y: localTop,
+      };
+  };
+
   if (!isDockVisible && viewMode !== 'TRASH') return null;
 
   // Only show overlay when:
   // 1. In BOARD mode and dock is visible (to click-away close dock)
   // 2. OR any context menu/input is open (to click-away close menu)
-  const showOverlay = (isDockVisible && viewMode === 'BOARD') || contextMenuBoard || isInputMode || showSettings;
+  const hasDockPopoverOpen = Boolean(contextMenuBoard || isInputMode || showSettings);
+  const showOverlay = (isDockVisible && viewMode === 'BOARD') || hasDockPopoverOpen;
+  const dockLayerZIndex = hasDockPopoverOpen ? Z_INDEX.MENU : Z_INDEX.DOCK;
 
   return (
     <>
       {/* 1. Full-screen transparent overlay for "Click outside to close" */}
       {showOverlay && (
         <div 
-          className="fixed inset-0 z-[99998] bg-transparent"
+          className="fixed inset-0 bg-transparent"
+          style={{ zIndex: Z_INDEX.DOCK_BACKDROP }}
           onClick={() => { 
             if (contextMenuBoard || isInputMode || showSettings) {
               setContextMenuBoard(null);
@@ -181,14 +196,14 @@ export const BoardDock = () => {
       )}
 
       {/* 2. Dock Container - Centered using Flexbox to avoid transform conflicts */}
-      <div className="fixed bottom-8 left-0 w-full z-[99999] pointer-events-none flex justify-center">
-        <div className="pointer-events-auto flex flex-col items-center transform transition-transform duration-300 origin-bottom scale-90 md:scale-100">
+      <div className="fixed bottom-8 left-0 w-full pointer-events-none flex justify-center" style={{ zIndex: dockLayerZIndex }}>
+        <div ref={dockContainerRef} className="board-dock-container relative pointer-events-auto flex flex-col items-center transform transition-transform duration-300 origin-bottom scale-90 md:scale-100">
         
         {/* Context Menu for Deletion */}
         {contextMenuBoard && (
             <div 
-                className="absolute bottom-full mb-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom"
-                style={{ left: contextMenuBoard.x }}
+                className="board-dock-context-menu absolute bottom-full mb-2 -translate-x-1/2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom"
+                style={{ left: contextMenuBoard.x, zIndex: Z_INDEX.MENU }}
             >
                 <div className="px-3 py-2 text-xs text-text-secondary border-b border-border-subtle font-medium bg-secondary-bg/50">
                     {contextMenuBoard.name}
@@ -244,7 +259,8 @@ export const BoardDock = () => {
         {/* Settings Menu */}
         {showSettings && (
             <div 
-                className="absolute bottom-full mb-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom z-[100000] min-w-[200px]"
+                className="absolute bottom-full mb-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom min-w-[200px]"
+                style={{ zIndex: Z_INDEX.MENU }}
                 onClick={(e) => e.stopPropagation()}
             >
                 {settingsView === 'MAIN' && (
@@ -360,6 +376,7 @@ export const BoardDock = () => {
         {isInputMode && (
           <div 
             className="mb-3 p-1.5 bg-secondary-bg rounded-xl shadow-xl border border-border-subtle flex items-center gap-1 animate-in slide-in-from-bottom-2 fade-in duration-200 origin-bottom"
+            style={{ zIndex: Z_INDEX.MENU }}
             onClick={(e) => e.stopPropagation()}
           >
              <input
@@ -418,6 +435,7 @@ export const BoardDock = () => {
             return (
               <button
                 key={board.id}
+                data-board-id={board.id}
                 onClick={() => {
                    if (isReordering) {
                        setReorderId(null); // Click to confirm
@@ -437,7 +455,8 @@ export const BoardDock = () => {
                     e.stopPropagation();
                     if (isReordering) return;
                     if (board.id !== 'default') {
-                        setContextMenuBoard({ id: board.id, name: board.name, x: 0, y: 0 });
+                        const anchor = resolveBoardMenuAnchor(e.currentTarget);
+                        setContextMenuBoard({ id: board.id, name: board.name, ...anchor });
                     }
                 }}
                 className={cn(
@@ -450,9 +469,9 @@ export const BoardDock = () => {
               >
                 {/* Custom Tooltip */}
                 <div className={cn(
-                    "absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-tertiary-bg text-text-primary text-xs rounded transition-opacity pointer-events-none whitespace-nowrap shadow-sm z-[100000]",
+                    "absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-tertiary-bg text-text-primary text-xs rounded transition-opacity pointer-events-none whitespace-nowrap shadow-sm",
                     isReordering ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                )}>
+                )} style={{ zIndex: Z_INDEX.TOOLTIP }}>
                     {isReordering ? "⬅️ 移动 ➡️" : board.name}
                     {/* Tiny triangle */}
 <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-tertiary-bg" />
@@ -483,9 +502,9 @@ export const BoardDock = () => {
                   : "text-text-tertiary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary"
             )}
           >
-             {/* Tooltip for Add */}
+            {/* Tooltip for Add */}
             {!isInputMode && (
-             <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-tertiary-bg text-text-primary text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-sm z-[100000]">
+             <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-tertiary-bg text-text-primary text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-sm" style={{ zIndex: Z_INDEX.TOOLTIP }}>
                新建看板
                <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-tertiary-bg" />
              </div>
@@ -510,7 +529,7 @@ export const BoardDock = () => {
             )}
           >
             {/* Tooltip for Trash */}
-             <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-tertiary-bg text-text-primary text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-sm z-[100000]">
+             <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-tertiary-bg text-text-primary text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-sm" style={{ zIndex: Z_INDEX.TOOLTIP }}>
                废纸篓
                <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-tertiary-bg" />
              </div>
@@ -531,7 +550,7 @@ export const BoardDock = () => {
             )}
           >
             {/* Tooltip for Settings */}
-            <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-tertiary-bg text-text-primary text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-sm z-[100000]">
+            <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-tertiary-bg text-text-primary text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-sm" style={{ zIndex: Z_INDEX.TOOLTIP }}>
               设置
               <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-tertiary-bg" />
             </div>

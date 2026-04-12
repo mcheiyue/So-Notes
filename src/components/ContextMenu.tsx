@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
 import { ChevronRight } from 'lucide-react';
+import { Z_INDEX } from '../constants/layout';
 
 const ContextMenuContent: React.FC = () => {
   const { 
@@ -105,8 +106,8 @@ const ContextMenuContent: React.FC = () => {
   return (
     <div
       ref={menuRef}
-      className="fixed z-[9999] bg-secondary-bg text-text-primary rounded-lg shadow-xl border border-border-subtle py-1 min-w-[160px] select-none"
-      style={{ left: menuX, top: menuY }}
+      className="fixed bg-secondary-bg text-text-primary rounded-lg shadow-xl border border-border-subtle py-1 min-w-[160px] select-none"
+      style={{ left: menuX, top: menuY, zIndex: Z_INDEX.MENU }}
       onMouseDown={(e) => e.stopPropagation()} // Prevent closing immediately or triggering canvas click
     >
       {contextMenu.type === 'CANVAS' && (
@@ -243,7 +244,8 @@ const ContextMenuContent: React.FC = () => {
                 {/* Submenu */}
                 {activeSubmenu === 'MOVE' && (
                     <div 
-                        className="absolute left-full top-0 ml-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px] z-[10000]"
+                        className="absolute left-full top-0 ml-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px]"
+                        style={{ zIndex: Z_INDEX.MENU }}
                         onMouseEnter={() => handleSubmenuEnter('MOVE')}
                         onMouseLeave={handleSubmenuLeave}
                     >
@@ -284,7 +286,8 @@ const ContextMenuContent: React.FC = () => {
                 {/* Submenu */}
                 {activeSubmenu === 'COPY' && (
                     <div 
-                        className="absolute left-full top-0 ml-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px] z-[10000]"
+                        className="absolute left-full top-0 ml-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px]"
+                        style={{ zIndex: Z_INDEX.MENU }}
                         onMouseEnter={() => handleSubmenuEnter('COPY')}
                         onMouseLeave={handleSubmenuLeave}
                     >
