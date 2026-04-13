@@ -6,7 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('./db', () => ({
   db: {
-    saveWAL: vi.fn(async () => undefined),
+    saveWAL: vi.fn(async () => true),
     loadWAL: vi.fn(async () => undefined),
     clearWAL: vi.fn(async () => undefined),
   },
@@ -18,6 +18,8 @@ vi.mock('../utils/fileSystem', () => ({
 }));
 
 import { useStore } from './useStore';
+import { db } from './db';
+import { openFile } from '../utils/fileSystem';
 
 const flushMicrotasks = async () => {
   await Promise.resolve();
@@ -65,7 +67,7 @@ describe('useStore 布局持久化契约', () => {
   });
 
   it('moveNote 只更新位置，不刷新 updatedAt，也不调度持久化', () => {
-    const saveSpy = vi.fn(async () => undefined);
+    const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
     useStore.getState().moveNote('note-1', 110, 210);
@@ -79,7 +81,7 @@ describe('useStore 布局持久化契约', () => {
   });
 
   it('moveSelectedNotes 只更新选中便签位置，不刷新 updatedAt，也不调度持久化', () => {
-    const saveSpy = vi.fn(async () => undefined);
+    const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
     useStore.getState().moveSelectedNotes(15, -5, 'note-1');
@@ -98,7 +100,7 @@ describe('useStore 布局持久化契约', () => {
   });
 
   it('finalizeLayoutChange 只刷新受影响便签并立即持久化一次', async () => {
-    const saveSpy = vi.fn(async () => undefined);
+    const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
     vi.setSystemTime(new Date('2026-03-19T10:00:00.000Z'));
@@ -115,7 +117,7 @@ describe('useStore 布局持久化契约', () => {
   });
 
   it('显式置顶后通过最终提交点刷新 updatedAt 并持久化', async () => {
-    const saveSpy = vi.fn(async () => undefined);
+    const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
     vi.setSystemTime(new Date('2026-03-19T10:05:00.000Z'));
@@ -133,7 +135,7 @@ describe('useStore 布局持久化契约', () => {
   });
 
   it('arrangeNotes 会通过统一最终提交点刷新 updatedAt 并立即持久化', async () => {
-    const saveSpy = vi.fn(async () => undefined);
+    const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy, selectedIds: [] });
 
     vi.setSystemTime(new Date('2026-03-19T10:10:00.000Z'));
@@ -149,5 +151,317 @@ describe('useStore 布局持久化契约', () => {
     expect(first?.updatedAt).toBe(expectedTimestamp);
     expect(second?.updatedAt).toBe(expectedTimestamp);
     expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useStore 导入契约', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      notes: [],
+      currentBoardId: 'default',
+      viewMode: 'BOARD',
+      selectedIds: ['legacy-selection'],
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+  });
+
+  it('导入不支持版本时短路，不修改状态也不触发持久化', async () => {
+    vi.mocked(openFile).mockResolvedValue(JSON.stringify({
+      version: 999,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: { boards: [], notes: [] },
+    }));
+
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    const result = await useStore.getState().importFromFile();
+
+    expect(result.status).toBe('error');
+    expect(useStore.getState().boards).toHaveLength(1);
+    expect(useStore.getState().notes).toHaveLength(0);
+    expect(useStore.getState().currentBoardId).toBe('default');
+    expect(useStore.getState().selectedIds).toEqual(['legacy-selection']);
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it('全量导入采用附加式写入并切换到导入包主板', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('11111111-1111-4111-8111-111111111111')
+      .mockReturnValueOnce('22222222-2222-4222-8222-222222222222');
+
+    vi.mocked(openFile).mockResolvedValue(JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: {
+        boards: [{ id: 'backup-board', name: '主板', icon: '💼', createdAt: 10 }],
+        notes: [{
+          id: 'backup-note',
+          boardId: 'backup-board',
+          x: 10,
+          y: 20,
+          title: '备份标题',
+          content: '备份内容',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 11,
+          updatedAt: 12,
+        }],
+        currentBoardId: 'backup-board',
+      },
+    }));
+
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    const result = await useStore.getState().importFromFile();
+    const state = useStore.getState();
+
+    expect(result.status).toBe('success');
+    expect(state.boards).toHaveLength(2);
+    expect(state.boards[1].id).toBe('11111111-1111-4111-8111-111111111111');
+    expect(state.boards[1].name).toBe('主板（导入）');
+    expect(state.notes).toHaveLength(1);
+    expect(state.notes[0].id).toBe('22222222-2222-4222-8222-222222222222');
+    expect(state.notes[0].boardId).toBe('11111111-1111-4111-8111-111111111111');
+    expect(state.currentBoardId).toBe('11111111-1111-4111-8111-111111111111');
+    expect(state.selectedIds).toEqual([]);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(result.summary?.skippedNotesCount).toBe(0);
+  });
+
+  it('单板导入默认不抢占当前看板，但会附加写入并清空选择', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('33333333-3333-4333-8333-333333333333')
+      .mockReturnValueOnce('44444444-4444-4444-8444-444444444444');
+
+    vi.mocked(openFile).mockResolvedValue(JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'SINGLE_BOARD',
+      timestamp: 1,
+      payload: {
+        boards: [{ id: 'single-board', name: '灵感板', icon: '💡', createdAt: 10 }],
+        notes: [{
+          id: 'single-note',
+          boardId: 'single-board',
+          x: 30,
+          y: 40,
+          title: '灵感',
+          content: '内容',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 11,
+          updatedAt: 12,
+        }],
+        currentBoardId: 'single-board',
+      },
+    }));
+
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy, currentBoardId: 'default', selectedIds: ['note-x'] });
+
+    const result = await useStore.getState().importFromFile();
+    const state = useStore.getState();
+
+    expect(result.status).toBe('success');
+    expect(state.boards).toHaveLength(2);
+    expect(state.boards[1].id).toBe('33333333-3333-4333-8333-333333333333');
+    expect(state.currentBoardId).toBe('default');
+    expect(state.selectedIds).toEqual([]);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('导入时允许跳过异常便签，并在结果中返回部分成功摘要', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('55555555-aaaa-4555-8555-555555555555')
+      .mockReturnValueOnce('66666666-bbbb-4666-8666-666666666666');
+
+    vi.mocked(openFile).mockResolvedValue(JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: {
+        boards: [{ id: 'import-board', name: '导入板', icon: '📥', createdAt: 10 }],
+        notes: [
+          {
+            id: 'valid-note',
+            boardId: 'import-board',
+            x: 10,
+            y: 20,
+            title: '有效便签',
+            content: '有效内容',
+            color: '#FFFFFF',
+            z: 2,
+            createdAt: 11,
+            updatedAt: 12,
+          },
+          {
+            id: 'broken-note',
+            boardId: 'import-board',
+            title: '损坏便签',
+          },
+        ],
+        currentBoardId: 'import-board',
+      },
+    }));
+
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    const result = await useStore.getState().importFromFile();
+    const state = useStore.getState();
+
+    expect(result.status).toBe('success');
+    expect(result.message).toBe('导入完成，已跳过 1 条异常便签。');
+    expect(result.summary?.skippedNotesCount).toBe(1);
+    expect(result.summary?.issues[0].code).toBe('INVALID_NOTE');
+    expect(state.boards).toHaveLength(2);
+    expect(state.notes).toHaveLength(1);
+    expect(state.notes[0].id).toBe('66666666-bbbb-4666-8666-666666666666');
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('旧版备份导入会完成兼容迁移，并返回迁移摘要', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('12121212-1212-4121-8121-121212121212')
+      .mockReturnValueOnce('34343434-3434-4343-8343-343434343434');
+
+    vi.mocked(openFile).mockResolvedValue(JSON.stringify({
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      payload: {
+        notes: [
+          {
+            content: '旧版便签',
+            createdAt: 123,
+          },
+        ],
+      },
+    }));
+
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    const result = await useStore.getState().importFromFile();
+    const state = useStore.getState();
+
+    expect(result.status).toBe('success');
+    expect(result.message).toBe('已导入旧版备份，并按当前规则完成兼容处理。');
+    expect(result.summary).toMatchObject({
+      createdDefaultBoard: true,
+      migratedNotesCount: 1,
+      skippedNotesCount: 0,
+    });
+    expect(result.summary?.issues.map(issue => issue.code)).toEqual([
+      'CREATED_DEFAULT_BOARD',
+      'MIGRATED_NOTE',
+      'FALLBACK_CURRENT_BOARD',
+    ]);
+    expect(state.boards).toHaveLength(2);
+    expect(state.notes).toHaveLength(1);
+    expect(state.currentBoardId).toBe('12121212-1212-4121-8121-121212121212');
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('写入本地存储失败时回滚到导入前状态', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('77777777-cccc-4777-8777-777777777777')
+      .mockReturnValueOnce('88888888-dddd-4888-8888-888888888888');
+
+    vi.mocked(openFile).mockResolvedValue(JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: {
+        boards: [{ id: 'rollback-board', name: '回滚板', icon: '↩️', createdAt: 10 }],
+        notes: [{
+          id: 'rollback-note',
+          boardId: 'rollback-board',
+          x: 10,
+          y: 20,
+          title: '回滚',
+          content: '需要回滚',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 11,
+          updatedAt: 12,
+        }],
+        currentBoardId: 'rollback-board',
+      },
+    }));
+
+    const originalState = useStore.getState();
+    const saveSpy = vi.fn(async () => false);
+    useStore.setState({ saveToDisk: saveSpy, selectedIds: ['keep-me'] });
+
+    const result = await useStore.getState().importFromFile();
+    const state = useStore.getState();
+
+    expect(result.status).toBe('error');
+    expect(result.code).toBe('SAVE_FAILED');
+    expect(result.rolledBack).toBe(true);
+    expect(state.boards).toEqual(originalState.boards);
+    expect(state.notes).toEqual(originalState.notes);
+    expect(state.currentBoardId).toBe(originalState.currentBoardId);
+    expect(state.selectedIds).toEqual(['keep-me']);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('WAL 写入失败时也会回滚到导入前状态', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('99999999-eeee-4999-8999-999999999999')
+      .mockReturnValueOnce('aaaaaaaa-ffff-4aaa-8aaa-aaaaaaaaaaaa');
+
+    vi.mocked(openFile).mockResolvedValue(JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: {
+        boards: [{ id: 'wal-board', name: 'WAL板', icon: '💾', createdAt: 10 }],
+        notes: [{
+          id: 'wal-note',
+          boardId: 'wal-board',
+          x: 10,
+          y: 20,
+          title: 'WAL失败',
+          content: '需要回滚',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 11,
+          updatedAt: 12,
+        }],
+        currentBoardId: 'wal-board',
+      },
+    }));
+
+    vi.mocked(db.saveWAL)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    const originalState = useStore.getState();
+    useStore.setState({ selectedIds: ['keep-me'] });
+
+    const result = await useStore.getState().importFromFile();
+    const state = useStore.getState();
+
+    expect(result.status).toBe('error');
+    expect(result.code).toBe('SAVE_FAILED');
+    expect(result.rolledBack).toBe(true);
+    expect(state.boards).toEqual(originalState.boards);
+    expect(state.notes).toEqual(originalState.notes);
+    expect(state.currentBoardId).toBe(originalState.currentBoardId);
+    expect(state.selectedIds).toEqual(['keep-me']);
+    expect(db.saveWAL).toHaveBeenCalledTimes(2);
   });
 });

@@ -8,8 +8,10 @@ export const db = {
   saveWAL: async (data: StorageData) => {
     try {
       await set(DB_KEY, data);
+      return true;
     } catch (e) {
       console.error('WAL Save Error:', e);
+      return false;
     }
   },
 

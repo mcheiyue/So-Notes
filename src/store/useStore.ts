@@ -3,8 +3,16 @@ import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
 import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode } from './types';
 import { db } from './db';
-import { generateBoardExport, generateFullBackup, processImport } from '../utils/dataTransfer';
+import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
+
+interface ImportFromFileResult {
+  status: 'cancelled' | 'success' | 'error';
+  code?: ImportFailureCode | 'SAVE_FAILED';
+  message?: string;
+  summary?: ImportSummary;
+  rolledBack?: boolean;
+}
 
 interface State {
   notes: Note[];
@@ -93,13 +101,13 @@ interface State {
   selectAllNotes: () => void;
   setContextMenu: (menu: ContextMenuState) => void;
 
-  saveToDisk: () => Promise<void>;
+  saveToDisk: () => Promise<boolean>;
   
   // Data Transfer Actions
   exportBoard: (boardId: string) => Promise<void>;
   exportCurrentBoard: () => Promise<void>;
   exportAll: () => Promise<void>;
-  importFromFile: () => Promise<void>;
+  importFromFile: () => Promise<ImportFromFileResult>;
   
   // Theme Action
   setThemeMode: (mode: ThemeMode) => void;
@@ -986,13 +994,19 @@ export const useStore = create<State>()(
     saveToDisk: async () => {
       const { notes, config, boards, currentBoardId } = get();
       set({ isSaving: true });
-      await db.saveWAL({ notes, config, boards, currentBoardId });
 
-      const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
       try {
+        const walSaved = await db.saveWAL({ notes, config, boards, currentBoardId });
+        if (!walSaved) {
+          return false;
+        }
+
+        const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
         await invoke('save_content', { filename: 'data.json', content: jsonString });
+        return true;
       } catch (err) {
         console.error('Disk Save Failed:', err);
+        return false;
       } finally {
         set({ isSaving: false });
       }
@@ -1015,8 +1029,8 @@ export const useStore = create<State>()(
     },
 
     exportAll: async () => {
-        const { boards, notes, config } = get();
-        const json = generateFullBackup(boards, notes, config);
+        const { boards, notes, config, currentBoardId } = get();
+        const json = generateFullBackup(boards, notes, config, currentBoardId);
         const fileName = `SoNotes_Backup_${new Date().toISOString().split('T')[0]}.json`;
         
         await saveFile(json, fileName);
@@ -1024,29 +1038,86 @@ export const useStore = create<State>()(
 
     importFromFile: async () => {
         const jsonContent = await openFile();
-        if (!jsonContent) return;
-
-        const result = processImport(jsonContent);
-        if (!result) {
-            // TODO: Show error toast?
-            console.error("Import failed: Invalid format");
-            return;
+        if (!jsonContent) {
+            return { status: 'cancelled' };
         }
 
-        const { boards: newBoards, notes: newNotes } = result;
-        if (newBoards.length === 0) return;
+        const existingBoardNames = get().boards.map(board => board.name);
+        const result = processImport(jsonContent, existingBoardNames);
+        if (result.status === 'error') {
+            console.error(`Import failed: ${result.code} - ${result.message}`);
+            return {
+                status: 'error',
+                code: result.code,
+                message: result.message,
+            };
+        }
+
+        const previousState = get();
+        const snapshot = {
+            boards: previousState.boards,
+            notes: previousState.notes,
+            currentBoardId: previousState.currentBoardId,
+            viewMode: previousState.viewMode,
+            selectedIds: previousState.selectedIds,
+        };
+
+        const { boards: newBoards, notes: newNotes, suggestedCurrentBoardId, summary } = result.data;
+        if (newBoards.length === 0) {
+            return {
+                status: 'error',
+                code: 'INVALID_STRUCTURE',
+                message: '导入失败：备份文件中没有可导入的看板。',
+            };
+        }
 
         set((state) => {
             state.boards.push(...newBoards);
             state.notes.push(...newNotes);
             
-            // Switch to the first imported board so user sees the result
-            state.currentBoardId = newBoards[0].id;
-            state.viewMode = 'BOARD';
+            if (suggestedCurrentBoardId) {
+                state.currentBoardId = suggestedCurrentBoardId;
+                state.viewMode = 'BOARD';
+            }
             state.selectedIds = [];
         });
         
-        get().saveToDisk();
+        const saved = await get().saveToDisk();
+        if (!saved) {
+            set((state) => {
+                state.boards = snapshot.boards;
+                state.notes = snapshot.notes;
+                state.currentBoardId = snapshot.currentBoardId;
+                state.viewMode = snapshot.viewMode;
+                state.selectedIds = snapshot.selectedIds;
+            });
+            await db.saveWAL({
+                boards: snapshot.boards,
+                notes: snapshot.notes,
+                currentBoardId: snapshot.currentBoardId,
+                config: get().config,
+            });
+
+            return {
+                status: 'error',
+                code: 'SAVE_FAILED',
+                message: '导入失败：写入本地存储时出错，已回滚到导入前状态。',
+                summary,
+                rolledBack: true,
+            };
+        }
+
+        const summaryMessage = summary.skippedNotesCount > 0
+            ? `导入完成，已跳过 ${summary.skippedNotesCount} 条异常便签。`
+            : result.compatibility === 'LEGACY'
+                ? '已导入旧版备份，并按当前规则完成兼容处理。'
+                : '导入成功。';
+
+        return {
+            status: 'success',
+            message: summaryMessage,
+            summary,
+        };
     },
 
     setThemeMode: (mode) => {

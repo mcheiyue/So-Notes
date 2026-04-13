@@ -5,6 +5,43 @@ import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronL
 import { Z_INDEX } from "../constants/layout";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
+type StoreState = ReturnType<typeof useStore.getState>;
+type ImportFeedback = Awaited<ReturnType<StoreState['importFromFile']>>;
+
+const formatImportSummary = (summary: NonNullable<ImportFeedback['summary']>) => {
+  const parts = [
+    `导入 ${summary.importedBoardsCount} 个看板`,
+    `${summary.importedNotesCount} 条便签`,
+  ];
+
+  if (summary.skippedNotesCount > 0) {
+    parts.push(`跳过 ${summary.skippedNotesCount} 条异常便签`);
+  }
+
+  return parts.join(' · ');
+};
+
+const formatImportHighlights = (summary: NonNullable<ImportFeedback['summary']>) => {
+  const highlights: string[] = [];
+
+  if (summary.createdDefaultBoard) {
+    highlights.push('已自动补建默认看板。');
+  }
+
+  if (summary.migratedNotesCount > 0) {
+    highlights.push(`已兼容迁移 ${summary.migratedNotesCount} 条旧版便签。`);
+  }
+
+  if (summary.renamedBoardsCount > 0) {
+    highlights.push(`有 ${summary.renamedBoardsCount} 个同名看板已按规则重命名。`);
+  }
+
+  if (summary.usedFallbackCurrentBoard) {
+    highlights.push('导入主板无效，已回退到首个可用看板。');
+  }
+
+  return highlights;
+};
 
 export const BoardDock = () => {
   const store = useStore();
@@ -27,6 +64,7 @@ export const BoardDock = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; count: number } | null>(null);
   const [editingBoardId, setEditingBoardId] = useState<string | null>(null);
   const [reorderId, setReorderId] = useState<string | null>(null);
+  const [importFeedback, setImportFeedback] = useState<ImportFeedback | null>(null);
   const [editName, setEditName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -85,7 +123,7 @@ export const BoardDock = () => {
   // Reset settings view when closed
   useEffect(() => {
       if (!showSettings) {
-          // Small delay to allow animation to finish if we had one, but instant is fine
+          setImportFeedback(null);
           setSettingsView('MAIN');
       }
   }, [showSettings]);
@@ -96,9 +134,20 @@ export const BoardDock = () => {
   };
 
   const onImportClick = async () => {
-    await importFromFile();
-    setShowSettings(false);
+    setImportFeedback(null);
+    const result = await importFromFile();
+    setImportFeedback(result);
   };
+
+  const importSummaryText = importFeedback?.summary && !importFeedback.rolledBack
+    ? formatImportSummary(importFeedback.summary)
+    : null;
+  const importHighlightTexts = importFeedback?.summary && !importFeedback.rolledBack
+    ? formatImportHighlights(importFeedback.summary)
+    : [];
+  const importFeedbackClassName = importFeedback?.status === 'error'
+    ? 'mx-3 mt-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-600 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-400'
+    : 'mx-3 mt-2 rounded-md border border-border-subtle bg-secondary-bg/70 px-3 py-2 text-xs leading-5 text-text-secondary';
 
   const handleDeleteClick = () => {
       if (!contextMenuBoard) return;
@@ -367,6 +416,41 @@ export const BoardDock = () => {
                             <Upload className="w-4 h-4 text-text-tertiary" />
                             <span>恢复备份</span>
                         </button>
+
+                        {importFeedback && (
+                            <div
+                                data-testid="board-import-feedback"
+                                role={importFeedback.status === 'error' ? 'alert' : 'status'}
+                                aria-live="polite"
+                                className={importFeedbackClassName}
+                            >
+                                <p className={cn('font-medium', importFeedback.status === 'error' ? 'text-current' : 'text-text-primary')}>
+                                    {importFeedback.status === 'cancelled'
+                                        ? '已取消恢复备份。'
+                                        : importFeedback.message || '恢复已完成。'}
+                                </p>
+
+                                {importFeedback.rolledBack && (
+                                    <p className="mt-1 text-[11px] leading-4 opacity-90">
+                                        已回滚到导入前状态，当前数据未被改动。
+                                    </p>
+                                )}
+
+                                {importSummaryText && (
+                                    <p className={cn('mt-1 text-[11px] leading-4', importFeedback.status === 'error' ? 'text-current/90' : 'text-text-tertiary')}>
+                                        {importSummaryText}
+                                    </p>
+                                )}
+
+                                {importHighlightTexts.length > 0 && (
+                                    <div className={cn('mt-1 space-y-1 text-[11px] leading-4', importFeedback.status === 'error' ? 'text-current/90' : 'text-text-tertiary')}>
+                                        {importHighlightTexts.map((text) => (
+                                            <p key={text}>{text}</p>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -542,6 +626,7 @@ export const BoardDock = () => {
           {/* Settings Button */}
           <button
             onClick={() => setShowSettings(!showSettings)}
+            aria-label="打开设置"
             className={cn(
               "relative group flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200",
               showSettings

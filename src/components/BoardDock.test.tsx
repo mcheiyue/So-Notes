@@ -27,10 +27,31 @@ describe('BoardDock v1.2.4 最小修复', () => {
   let container: HTMLDivElement;
   let root: Root;
 
+  const clickElement = async (element: Element | null) => {
+    expect(element).not.toBeNull();
+
+    await act(async () => {
+      element?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+  };
+
+  const findButtonByText = (text: string) => Array.from(container.querySelectorAll('button')).find(
+    button => button.textContent?.includes(text),
+  ) ?? null;
+
+  const getSettingsButton = () => container.querySelector('button[aria-label="打开设置"]');
+  const getImportFeedback = () => container.querySelector('[data-testid="board-import-feedback"]');
+
   const renderBoardDock = async () => {
     await act(async () => {
       root.render(<BoardDock />);
     });
+  };
+
+  const openDataSettings = async () => {
+    await renderBoardDock();
+    await clickElement(getSettingsButton());
+    await clickElement(findButtonByText('数据管理'));
   };
 
   beforeEach(() => {
@@ -54,7 +75,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
       setViewMode: vi.fn(),
       clearSelection: vi.fn(),
       exportAll: vi.fn(async () => undefined),
-      importFromFile: vi.fn(async () => undefined),
+      importFromFile: vi.fn(async () => ({ status: 'cancelled' as const })),
       exportCurrentBoard: vi.fn(async () => undefined),
       setThemeMode: vi.fn(),
     });
@@ -132,5 +153,143 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     expect(menu).not.toBeNull();
     expect(menu?.style.left).toBe('200px');
+  });
+
+  it('恢复成功后在数据管理区保留局部反馈', async () => {
+    const importFromFile = vi.fn(async () => ({
+      status: 'success' as const,
+      message: '导入成功。',
+      summary: {
+        importedBoardsCount: 1,
+        importedNotesCount: 3,
+        skippedNotesCount: 0,
+        migratedNotesCount: 0,
+        renamedBoardsCount: 0,
+        usedFallbackCurrentBoard: false,
+        createdDefaultBoard: false,
+        issues: [],
+      },
+    }));
+
+    useStore.setState({ importFromFile });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('恢复备份'));
+
+    const feedback = getImportFeedback();
+
+    expect(importFromFile).toHaveBeenCalledTimes(1);
+    expect(findButtonByText('恢复备份')).not.toBeNull();
+    expect(feedback?.textContent).toContain('导入成功。');
+  });
+
+  it('取消恢复时显示取消反馈', async () => {
+    const importFromFile = vi.fn(async () => ({ status: 'cancelled' as const }));
+
+    useStore.setState({ importFromFile });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('恢复备份'));
+
+    expect(importFromFile).toHaveBeenCalledTimes(1);
+    expect(getImportFeedback()?.textContent).toContain('已取消恢复备份。');
+  });
+
+  it('恢复失败时显示错误反馈', async () => {
+    const importFromFile = vi.fn(async () => ({
+      status: 'error' as const,
+      message: '导入失败：备份文件损坏。',
+    }));
+
+    useStore.setState({ importFromFile });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('恢复备份'));
+
+    expect(importFromFile).toHaveBeenCalledTimes(1);
+    expect(getImportFeedback()?.textContent).toContain('导入失败：备份文件损坏。');
+  });
+
+  it('写入失败回滚时额外提示已回滚', async () => {
+    const importFromFile = vi.fn(async () => ({
+      status: 'error' as const,
+      message: '导入失败：写入本地存储时出错，已回滚到导入前状态。',
+      rolledBack: true,
+      summary: {
+        importedBoardsCount: 2,
+        importedNotesCount: 5,
+        skippedNotesCount: 1,
+        migratedNotesCount: 0,
+        renamedBoardsCount: 0,
+        usedFallbackCurrentBoard: false,
+        createdDefaultBoard: false,
+        issues: [],
+      },
+    }));
+
+    useStore.setState({ importFromFile });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('恢复备份'));
+
+    expect(importFromFile).toHaveBeenCalledTimes(1);
+    expect(getImportFeedback()?.textContent).toContain('已回滚到导入前状态，当前数据未被改动。');
+    expect(getImportFeedback()?.textContent).not.toContain('导入 2 个看板');
+  });
+
+  it('存在摘要时显示导入计数', async () => {
+    const importFromFile = vi.fn(async () => ({
+      status: 'success' as const,
+      message: '导入完成，已跳过 2 条异常便签。',
+      summary: {
+        importedBoardsCount: 2,
+        importedNotesCount: 5,
+        skippedNotesCount: 2,
+        migratedNotesCount: 0,
+        renamedBoardsCount: 0,
+        usedFallbackCurrentBoard: false,
+        createdDefaultBoard: false,
+        issues: [
+          { code: 'INVALID_NOTE' as const, severity: 'error' as const, message: 'bad note', noteIndex: 1 },
+          { code: 'ORPHAN_NOTE' as const, severity: 'error' as const, message: 'orphan note', noteIndex: 2 },
+        ],
+      },
+    }));
+
+    useStore.setState({ importFromFile });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('恢复备份'));
+
+    expect(importFromFile).toHaveBeenCalledTimes(1);
+    expect(getImportFeedback()?.textContent).toContain('导入 2 个看板 · 5 条便签 · 跳过 2 条异常便签');
+  });
+
+  it('存在迁移与回退摘要时显示额外说明', async () => {
+    const importFromFile = vi.fn(async () => ({
+      status: 'success' as const,
+      message: '已导入旧版备份，并按当前规则完成兼容处理。',
+      summary: {
+        importedBoardsCount: 1,
+        importedNotesCount: 1,
+        skippedNotesCount: 0,
+        migratedNotesCount: 1,
+        renamedBoardsCount: 1,
+        usedFallbackCurrentBoard: true,
+        createdDefaultBoard: true,
+        issues: [],
+      },
+    }));
+
+    useStore.setState({ importFromFile });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('恢复备份'));
+
+    expect(importFromFile).toHaveBeenCalledTimes(1);
+    expect(getImportFeedback()?.textContent).toContain('已自动补建默认看板。');
+    expect(getImportFeedback()?.textContent).toContain('已兼容迁移 1 条旧版便签。');
+    expect(getImportFeedback()?.textContent).toContain('有 1 个同名看板已按规则重命名。');
+    expect(getImportFeedback()?.textContent).toContain('导入主板无效，已回退到首个可用看板。');
   });
 });
