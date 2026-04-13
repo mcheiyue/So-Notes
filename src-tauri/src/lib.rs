@@ -6,6 +6,13 @@ use tauri::{
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
+// Windows-specific imports for rounded corners
+#[cfg(windows)]
+use windows::Win32::{
+    Foundation::HWND,
+    Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE},
+};
+
 // Define AppState to hold "pinned" and "throttle" status
 struct AppState {
     is_pinned: Mutex<bool>,
@@ -282,6 +289,13 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // Apply Windows 11 rounded corners (Windows 10 will silently ignore)
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                apply_window_corner_preference(&window);
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -309,4 +323,36 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Apply Windows 11 rounded corner preference to the window.
+///
+/// Platform behavior:
+/// - Windows 11: Applies system-level rounded corners to the window frame
+/// - Windows 10: API call is silently ignored (no error, no effect)
+/// - Other platforms: Not compiled (Windows-only code)
+///
+/// Note: This provides visual rounded corners at the OS compositor level.
+/// Due to transparent window limitations, the four corner areas will still
+/// have click regions (this is a Windows platform limitation that cannot
+/// be fully resolved without losing the Mica glass effect).
+#[cfg(windows)]
+fn apply_window_corner_preference(window: &tauri::WebviewWindow) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    if let Ok(handle) = window.window_handle() {
+        if let RawWindowHandle::Win32(win_handle) = handle.as_raw() {
+            unsafe {
+                let hwnd = HWND(win_handle.hwnd.get() as *mut core::ffi::c_void);
+                // DWMWCP_ROUND = 2 (rounded corners)
+                let preference: u32 = 2;
+                let _ = DwmSetWindowAttribute(
+                    hwnd,
+                    DWMWA_WINDOW_CORNER_PREFERENCE,
+                    &preference as *const _ as *const _,
+                    std::mem::size_of::<u32>() as u32,
+                );
+            }
+        }
+    }
 }
