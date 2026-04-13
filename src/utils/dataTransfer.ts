@@ -518,6 +518,7 @@ export const processImport = (jsonContent: string, existingBoardNames: string[] 
     issues.push(buildImportIssue('CREATED_DEFAULT_BOARD', '导入数据缺少有效看板，已自动创建默认看板承接旧数据。', 'warning'));
   }
 
+  // v1.2.7 约定：保留导入包中的看板相对顺序；与本地合并时由 store 整批追加到末尾。
   data.payload.boards.forEach(oldBoard => {
     const newId = crypto.randomUUID();
     boardIdMap.set(oldBoard.id, newId);

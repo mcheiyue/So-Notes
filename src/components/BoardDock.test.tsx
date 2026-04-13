@@ -100,16 +100,42 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(Z_INDEX.MENU).toBeLessThan(Z_INDEX.SPOTLIGHT);
   });
 
-  it('右键看板时菜单锚点对齐真实 board item，而不是默认 0 坐标', async () => {
+  it('右键看板时菜单锚点按容器内真实中心点定位', async () => {
     await renderBoardDock();
 
+    const dockContainer = container.querySelector('.board-dock-container') as HTMLDivElement | null;
     const boardButton = container.querySelector('[data-board-id="board-2"]') as HTMLButtonElement | null;
 
+    expect(dockContainer).not.toBeNull();
     expect(boardButton).not.toBeNull();
+
+    Object.defineProperty(dockContainer!, 'offsetWidth', { configurable: true, value: 300 });
+    dockContainer!.getBoundingClientRect = vi.fn(() => ({
+      x: 40,
+      y: 500,
+      left: 40,
+      top: 500,
+      width: 300,
+      height: 60,
+      right: 340,
+      bottom: 560,
+      toJSON: () => ({}),
+    } as DOMRect));
 
     Object.defineProperty(boardButton!, 'offsetLeft', { configurable: true, value: 120 });
     Object.defineProperty(boardButton!, 'offsetWidth', { configurable: true, value: 36 });
     Object.defineProperty(boardButton!, 'offsetTop', { configurable: true, value: 12 });
+    boardButton!.getBoundingClientRect = vi.fn(() => ({
+      x: 146,
+      y: 514,
+      left: 146,
+      top: 514,
+      width: 28,
+      height: 36,
+      right: 174,
+      bottom: 550,
+      toJSON: () => ({}),
+    } as DOMRect));
 
     await act(async () => {
       boardButton?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
@@ -119,16 +145,31 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     expect(menu).not.toBeNull();
     expect(menu?.textContent).toContain('实验板');
-    expect(menu?.style.left).toBe('138px');
+    expect(menu?.style.left).toBe('120px');
     expect(menu?.style.left).not.toBe('0px');
   });
 
   it('锚点计算不依赖 transform 后的屏幕坐标', async () => {
     await renderBoardDock();
 
+    const dockContainer = container.querySelector('.board-dock-container') as HTMLDivElement | null;
     const boardButton = container.querySelector('[data-board-id="board-2"]') as HTMLButtonElement | null;
 
+    expect(dockContainer).not.toBeNull();
     expect(boardButton).not.toBeNull();
+
+    Object.defineProperty(dockContainer!, 'offsetWidth', { configurable: true, value: 400 });
+    dockContainer!.getBoundingClientRect = vi.fn(() => ({
+      x: 100,
+      y: 420,
+      left: 100,
+      top: 420,
+      width: 360,
+      height: 72,
+      right: 460,
+      bottom: 492,
+      toJSON: () => ({}),
+    } as DOMRect));
 
     Object.defineProperty(boardButton!, 'offsetLeft', { configurable: true, value: 180 });
     Object.defineProperty(boardButton!, 'offsetWidth', { configurable: true, value: 40 });
@@ -291,5 +332,35 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(getImportFeedback()?.textContent).toContain('已兼容迁移 1 条旧版便签。');
     expect(getImportFeedback()?.textContent).toContain('有 1 个同名看板已按规则重命名。');
     expect(getImportFeedback()?.textContent).toContain('导入主板无效，已回退到首个可用看板。');
+  });
+
+  it('关闭设置面板后重新打开数据管理时不会残留旧导入反馈', async () => {
+    const importFromFile = vi.fn(async () => ({
+      status: 'success' as const,
+      message: '导入成功。',
+      summary: {
+        importedBoardsCount: 1,
+        importedNotesCount: 1,
+        skippedNotesCount: 0,
+        migratedNotesCount: 0,
+        renamedBoardsCount: 0,
+        usedFallbackCurrentBoard: false,
+        createdDefaultBoard: false,
+        issues: [],
+      },
+    }));
+
+    useStore.setState({ importFromFile });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('恢复备份'));
+    expect(getImportFeedback()?.textContent).toContain('导入成功。');
+
+    await clickElement(getSettingsButton());
+    expect(getImportFeedback()).toBeNull();
+
+    await clickElement(getSettingsButton());
+    await clickElement(findButtonByText('数据管理'));
+    expect(getImportFeedback()).toBeNull();
   });
 });

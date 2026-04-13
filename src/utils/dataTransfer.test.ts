@@ -114,6 +114,48 @@ describe('dataTransfer 导入契约', () => {
     }
   });
 
+  it('多看板导入时保留导入批次相对顺序', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(334455);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('10101010-1010-4010-8010-101010101010')
+      .mockReturnValueOnce('20202020-2020-4020-8020-202020202020')
+      .mockReturnValueOnce('30303030-3030-4030-8030-303030303030');
+
+    const json = JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: {
+        boards: [
+          makeBoard({ id: 'board-a', name: '工作台', icon: '💼' }),
+          makeBoard({ id: 'board-b', name: '灵感板', icon: '💡', createdAt: 2 }),
+          makeBoard({ id: 'board-c', name: '归档区', icon: '🗂️', createdAt: 3 }),
+        ],
+        notes: [],
+        currentBoardId: 'board-b',
+      },
+    });
+
+    const result = processImport(json, ['灵感板']);
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.data.boards.map(board => board.id)).toEqual([
+        '10101010-1010-4010-8010-101010101010',
+        '20202020-2020-4020-8020-202020202020',
+        '30303030-3030-4030-8030-303030303030',
+      ]);
+      expect(result.data.boards.map(board => board.name)).toEqual([
+        '工作台',
+        '灵感板（导入）',
+        '归档区',
+      ]);
+      expect(result.data.suggestedCurrentBoardId).toBe('20202020-2020-4020-8020-202020202020');
+      expect(result.data.summary.renamedBoardsCount).toBe(1);
+    }
+  });
+
   it('结构有效时允许跳过异常便签，并输出部分成功摘要', () => {
     vi.spyOn(Date, 'now').mockReturnValue(556677);
     vi.spyOn(globalThis.crypto, 'randomUUID')
@@ -206,6 +248,28 @@ describe('dataTransfer 导入契约', () => {
         'MIGRATED_NOTE',
         'FALLBACK_CURRENT_BOARD',
       ]);
+    }
+  });
+
+  it('旧版迁移自动补建默认看板时，该看板保持在导入批次首位', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(778899);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('dddddddd-dddd-4ddd-8ddd-dddddddddddd')
+      .mockReturnValueOnce('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee');
+
+    const result = processImport(JSON.stringify({
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      payload: {
+        notes: [{ content: '旧版内容', createdAt: 12 }],
+      },
+    }));
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.data.boards).toHaveLength(1);
+      expect(result.data.boards[0].id).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+      expect(result.data.summary.createdDefaultBoard).toBe(true);
     }
   });
 });

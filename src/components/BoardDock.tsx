@@ -202,11 +202,33 @@ export const BoardDock = () => {
   };
 
   const resolveBoardMenuAnchor = (boardElement: HTMLElement) => {
-      const localCenterX = boardElement.offsetLeft + boardElement.offsetWidth / 2;
+      const fallbackCenterX = boardElement.offsetLeft + boardElement.offsetWidth / 2;
       const localTop = boardElement.offsetTop;
+      const dockContainer = dockContainerRef.current;
+
+      if (!dockContainer) {
+          return {
+              x: fallbackCenterX,
+              y: localTop,
+          };
+      }
+
+      const boardRect = boardElement.getBoundingClientRect();
+      const dockRect = dockContainer.getBoundingClientRect();
+      const layoutWidth = dockContainer.offsetWidth;
+
+      if (layoutWidth <= 0 || dockRect.width <= 0 || boardRect.width <= 0) {
+          return {
+              x: fallbackCenterX,
+              y: localTop,
+          };
+      }
+
+      const scaleX = dockRect.width / layoutWidth;
+      const renderedCenterX = boardRect.left - dockRect.left + boardRect.width / 2;
 
       return {
-          x: localCenterX,
+          x: renderedCenterX / scaleX,
           y: localTop,
       };
   };
@@ -224,7 +246,9 @@ export const BoardDock = () => {
     <>
       {/* 1. Full-screen transparent overlay for "Click outside to close" */}
       {showOverlay && (
-        <div 
+        <button
+          type="button"
+          aria-label="关闭浮层"
           className="fixed inset-0 bg-transparent"
           style={{ zIndex: Z_INDEX.DOCK_BACKDROP }}
           onClick={() => { 
@@ -259,6 +283,7 @@ export const BoardDock = () => {
                 </div>
                 
                 <button
+                    type="button"
                     onClick={() => {
                         setEditingBoardId(contextMenuBoard.id);
                         setEditName(contextMenuBoard.name);
@@ -270,6 +295,7 @@ export const BoardDock = () => {
                 </button>
 
                 <button
+                    type="button"
                     onClick={() => {
                       // Export this specific board (using current logic, we need to temporarily switch or just export by ID)
                       // Since store only has exportCurrentBoard, we might need to rely on that or add exportBoard(id).
@@ -289,6 +315,7 @@ export const BoardDock = () => {
                 </button>
 
                 <button
+                    type="button"
                     onClick={handleDeleteClick}
                     className={cn(
                         "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors rounded-b-lg",
@@ -310,7 +337,6 @@ export const BoardDock = () => {
             <div 
                 className="absolute bottom-full mb-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom min-w-[200px]"
                 style={{ zIndex: Z_INDEX.MENU }}
-                onClick={(e) => e.stopPropagation()}
             >
                 {settingsView === 'MAIN' && (
                     <div className="py-1">
@@ -318,6 +344,7 @@ export const BoardDock = () => {
                             设置
                         </div>
                         <button
+                            type="button"
                             onClick={() => setSettingsView('THEME')}
                             className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
                         >
@@ -333,6 +360,7 @@ export const BoardDock = () => {
                             </div>
                         </button>
                         <button
+                            type="button"
                             onClick={() => setSettingsView('DATA')}
                             className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
                         >
@@ -349,6 +377,7 @@ export const BoardDock = () => {
                     <div className="py-1">
                         <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border-subtle mb-1">
                             <button 
+                                type="button"
                                 onClick={() => setSettingsView('MAIN')}
                                 className="p-1 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded text-text-secondary hover:text-text-primary transition-colors"
                             >
@@ -363,7 +392,8 @@ export const BoardDock = () => {
                         ].map((item) => (
                             <button
                                 key={item.id}
-                                onClick={() => setThemeMode(item.id as any)}
+                                type="button"
+                                onClick={() => setThemeMode(item.id as StoreState['config']['themeMode'])}
                                 className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
                             >
                                 <div className="flex items-center gap-2">
@@ -380,6 +410,7 @@ export const BoardDock = () => {
                     <div className="py-1">
                         <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border-subtle mb-1">
                             <button 
+                                type="button"
                                 onClick={() => setSettingsView('MAIN')}
                                 className="p-1 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded text-text-secondary hover:text-text-primary transition-colors"
                             >
@@ -389,6 +420,7 @@ export const BoardDock = () => {
                         </div>
                         
                         <button
+                            type="button"
                             onClick={onExportClick}
                             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
                         >
@@ -398,6 +430,7 @@ export const BoardDock = () => {
 
                         {viewMode === 'BOARD' && (
                         <button
+                            type="button"
                             onClick={async () => {
                             await store.exportCurrentBoard();
                             setShowSettings(false);
@@ -410,6 +443,7 @@ export const BoardDock = () => {
                         )}
 
                         <button
+                            type="button"
                             onClick={onImportClick}
                             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
                         >
@@ -461,7 +495,6 @@ export const BoardDock = () => {
           <div 
             className="mb-3 p-1.5 bg-secondary-bg rounded-xl shadow-xl border border-border-subtle flex items-center gap-1 animate-in slide-in-from-bottom-2 fade-in duration-200 origin-bottom"
             style={{ zIndex: Z_INDEX.MENU }}
-            onClick={(e) => e.stopPropagation()}
           >
              <input
                 ref={inputRef}
@@ -473,6 +506,7 @@ export const BoardDock = () => {
                 onKeyDown={handleKeyDown}
              />
              <button 
+               type="button"
                onClick={handleCreate} 
                className="p-1.5 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded-lg text-text-secondary hover:text-text-primary transition-colors"
              >
@@ -490,7 +524,6 @@ export const BoardDock = () => {
             "shadow-[0_8px_30px_rgb(0,0,0,0.12)]", // Slightly deeper shadow
             "animate-dock-slide-up" // Hand-written CSS animation
           )}
-          onClick={(e) => e.stopPropagation()} // Prevent closing when interacting with dock
         >
           {boards.map((board) => {
             const isActive = currentBoardId === board.id;
@@ -502,7 +535,6 @@ export const BoardDock = () => {
                     <div 
                         key={board.id}
                         className="w-24 px-1 flex items-center justify-center"
-                        onClick={(e) => e.stopPropagation()}
                     >
                         <input
                             ref={editInputRef}
@@ -518,6 +550,7 @@ export const BoardDock = () => {
 
             return (
               <button
+                type="button"
                 key={board.id}
                 data-board-id={board.id}
                 onClick={() => {
@@ -578,6 +611,7 @@ export const BoardDock = () => {
 
           {/* Add Button */}
           <button
+            type="button"
             onClick={() => setIsInputMode(!isInputMode)}
             className={cn(
                 "relative group flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200",
@@ -601,6 +635,7 @@ export const BoardDock = () => {
 
           {/* Trash Button */}
           <button
+            type="button"
             onClick={() => {
               clearSelection();
               setViewMode(viewMode === 'TRASH' ? 'BOARD' : 'TRASH');
@@ -625,6 +660,7 @@ export const BoardDock = () => {
 
           {/* Settings Button */}
           <button
+            type="button"
             onClick={() => setShowSettings(!showSettings)}
             aria-label="打开设置"
             className={cn(

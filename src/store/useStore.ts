@@ -1072,6 +1072,7 @@ export const useStore = create<State>()(
         }
 
         set((state) => {
+            // v1.2.7 约定：导入批次保留内部相对顺序，并整体追加到本地看板末尾。
             state.boards.push(...newBoards);
             state.notes.push(...newNotes);
             

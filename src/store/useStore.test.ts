@@ -279,6 +279,46 @@ describe('useStore 导入契约', () => {
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('多看板导入时保持导入相对顺序，并整体追加到本地末尾', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('abababab-abab-4bab-8bab-abababababab')
+      .mockReturnValueOnce('cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd');
+
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'local-2', name: '本地二号', icon: '📚', createdAt: 1 },
+      ],
+      currentBoardId: 'default',
+    });
+
+    vi.mocked(openFile).mockResolvedValue(JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: {
+        boards: [
+          { id: 'import-a', name: '导入甲', icon: '🅰️', createdAt: 10 },
+          { id: 'import-b', name: '导入乙', icon: '🅱️', createdAt: 11 },
+        ],
+        notes: [],
+        currentBoardId: 'import-a',
+      },
+    }));
+
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    const result = await useStore.getState().importFromFile();
+    const state = useStore.getState();
+
+    expect(result.status).toBe('success');
+    expect(state.boards.map(board => board.name)).toEqual(['主板', '本地二号', '导入甲', '导入乙']);
+    expect(state.currentBoardId).toBe('abababab-abab-4bab-8bab-abababababab');
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('导入时允许跳过异常便签，并在结果中返回部分成功摘要', async () => {
     vi.spyOn(globalThis.crypto, 'randomUUID')
       .mockReturnValueOnce('55555555-aaaa-4555-8555-555555555555')
@@ -369,6 +409,45 @@ describe('useStore 导入契约', () => {
     expect(state.boards).toHaveLength(2);
     expect(state.notes).toHaveLength(1);
     expect(state.currentBoardId).toBe('12121212-1212-4121-8121-121212121212');
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('旧版迁移自动补建默认看板时，该看板作为导入批次整体追加到本地末尾', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('56565656-5656-4565-8565-565656565656')
+      .mockReturnValueOnce('78787878-7878-4787-8787-787878787878');
+
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'local-2', name: '本地二号', icon: '📚', createdAt: 1 },
+      ],
+      currentBoardId: 'default',
+    });
+
+    vi.mocked(openFile).mockResolvedValue(JSON.stringify({
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      payload: {
+        notes: [
+          {
+            content: '旧版便签',
+            createdAt: 123,
+          },
+        ],
+      },
+    }));
+
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    const result = await useStore.getState().importFromFile();
+    const state = useStore.getState();
+
+    expect(result.status).toBe('success');
+    expect(state.boards.map(board => board.name)).toEqual(['主板', '本地二号', '主板 (Main)']);
+    expect(state.currentBoardId).toBe('56565656-5656-4565-8565-565656565656');
+    expect(result.summary?.createdDefaultBoard).toBe(true);
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 
