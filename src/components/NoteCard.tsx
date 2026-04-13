@@ -459,7 +459,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                   <span
                     className={cn(
                       "pointer-events-auto block max-w-full truncate rounded-md px-2 py-1 text-center text-sm font-bold select-none",
-                      note.title ? "text-text-primary opacity-90" : "text-text-secondary italic opacity-70"
+                      note.title ? "text-text-primary" : "text-text-secondary italic opacity-70"
                     )}
                   >
                     {displayTitle}
@@ -519,7 +519,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                         "w-full bg-transparent outline-none transition-all duration-200 flex-shrink-0",
                         "text-text-primary font-bold text-[16px]",
                         "placeholder-text-secondary/50 dark:placeholder-text-secondary/75",
-                        "selection:bg-blue-500/20 dark:selection:bg-blue-200/35 selection:text-slate-900 dark:selection:text-slate-950",
+                        "selection:bg-blue-500/20 dark:selection:bg-blue-200/35",
                         shouldShowBodyTitle ? "block" : "hidden",
                         isStatic && "pointer-events-none"
                      )}
@@ -538,8 +538,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 className={cn(
                     "w-full resize-none bg-transparent outline-none px-4",
                     "text-text-secondary dark:text-text-primary",
-                    "placeholder-text-tertiary dark:placeholder-text-secondary/70 font-normal text-[15px] leading-relaxed",
-                    "selection:bg-blue-500/20 dark:selection:bg-blue-200/35 selection:text-slate-900 dark:selection:text-slate-950",
+                    "placeholder-text-tertiary dark:placeholder-text-secondary/75 font-normal text-[15px] leading-relaxed",
+                    "selection:bg-blue-500/20 dark:selection:bg-blue-200/35",
                     "scrollbar-thin scrollbar-thumb-text-tertiary/20 scrollbar-track-transparent hover:scrollbar-thumb-text-secondary/20",
                     "transition-all duration-300 ease-in-out"
                 )}

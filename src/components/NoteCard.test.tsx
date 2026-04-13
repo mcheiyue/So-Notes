@@ -164,11 +164,34 @@ describe('NoteCard 头部交互边界', () => {
 
     expect(titleInput?.className).toContain('dark:placeholder-text-secondary/75');
     expect(titleInput?.className).toContain('dark:selection:bg-blue-200/35');
+    expect(titleInput?.className).not.toContain('selection:text-slate-900');
+    expect(titleInput?.className).not.toContain('dark:selection:text-slate-950');
 
     expect(textarea?.className).toContain('dark:text-text-primary');
-    expect(textarea?.className).toContain('dark:placeholder-text-secondary/70');
+    expect(textarea?.className).toContain('dark:placeholder-text-secondary/75');
     expect(textarea?.className).toContain('dark:selection:bg-blue-200/35');
-    expect(textarea?.className).toContain('dark:selection:text-slate-950');
+    expect(textarea?.className).not.toContain('selection:text-slate-900');
+    expect(textarea?.className).not.toContain('dark:selection:text-slate-950');
+  });
+
+  it('折叠态标题与展开态标题保持同一主文本层级', async () => {
+    useStore.setState({
+      notes: [createNote({ title: '折叠标题', collapsed: true })],
+      config: {
+        ...useStore.getState().config,
+        themeMode: 'dark',
+      },
+    });
+
+    await renderNoteCard();
+
+    const collapsedTitle = Array.from(container.querySelectorAll('span')).find(
+      (element) => element.textContent === '折叠标题',
+    ) as HTMLSpanElement | null;
+
+    expect(collapsedTitle).not.toBeNull();
+    expect(collapsedTitle?.className).toContain('text-text-primary');
+    expect(collapsedTitle?.className).not.toContain('opacity-90');
   });
 
   it('仅双击头部才折叠，正文双击不触发折叠', async () => {
