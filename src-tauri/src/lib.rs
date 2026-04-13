@@ -10,7 +10,7 @@ use tauri_plugin_positioner::{Position, WindowExt};
 #[cfg(windows)]
 use windows::Win32::{
     Foundation::HWND,
-    Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE},
+    Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND},
 };
 
 // Define AppState to hold "pinned" and "throttle" status
@@ -290,10 +290,12 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Apply Windows 11 rounded corners (Windows 10 will silently ignore)
+            // 在支持的 Windows 环境下尽力申请系统圆角；失败只记录，不中断启动。
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
-                apply_window_corner_preference(&window);
+                if let Err(error) = apply_window_corner_preference(&window) {
+                    eprintln!("[windows] 申请系统圆角失败: {error}");
+                }
             }
 
             Ok(())
@@ -325,34 +327,38 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// Apply Windows 11 rounded corner preference to the window.
+/// 为窗口尽力申请系统圆角。
 ///
-/// Platform behavior:
-/// - Windows 11: Applies system-level rounded corners to the window frame
-/// - Windows 10: API call is silently ignored (no error, no effect)
-/// - Other platforms: Not compiled (Windows-only code)
+/// 这是一个 best-effort 的 DWM 提示：在支持的 Windows 版本上可能生效，
+/// 在不支持的系统或当前窗口模型下也可能被忽略或直接返回错误。
+/// 失败只记录，不作为启动失败处理。
 ///
-/// Note: This provides visual rounded corners at the OS compositor level.
-/// Due to transparent window limitations, the four corner areas will still
-/// have click regions (this is a Windows platform limitation that cannot
-/// be fully resolved without losing the Mica glass effect).
+/// 注意：即便视觉上出现圆角，透明窗口四角的点击区域仍可能存在；
+/// 这是当前窗口模型下的已知平台限制。
 #[cfg(windows)]
-fn apply_window_corner_preference(window: &tauri::WebviewWindow) {
+fn apply_window_corner_preference(window: &tauri::WebviewWindow) -> Result<(), String> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-    if let Ok(handle) = window.window_handle() {
-        if let RawWindowHandle::Win32(win_handle) = handle.as_raw() {
-            unsafe {
-                let hwnd = HWND(win_handle.hwnd.get() as *mut core::ffi::c_void);
-                // DWMWCP_ROUND = 2 (rounded corners)
-                let preference: u32 = 2;
-                let _ = DwmSetWindowAttribute(
-                    hwnd,
-                    DWMWA_WINDOW_CORNER_PREFERENCE,
-                    &preference as *const _ as *const _,
-                    std::mem::size_of::<u32>() as u32,
-                );
-            }
-        }
+    let handle = window
+        .window_handle()
+        .map_err(|error| format!("无法获取窗口句柄: {error}"))?;
+
+    let RawWindowHandle::Win32(win_handle) = handle.as_raw() else {
+        return Err("当前窗口不是 Win32 原生句柄".to_string());
+    };
+
+    let hwnd = HWND(win_handle.hwnd.get() as *mut core::ffi::c_void);
+    let preference = DWMWCP_ROUND;
+
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &preference as *const _ as *const _,
+            std::mem::size_of_val(&preference) as u32,
+        )
+        .map_err(|error| format!("DwmSetWindowAttribute 调用失败: {error}"))?;
     }
+
+    Ok(())
 }
