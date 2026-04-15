@@ -6,13 +6,6 @@ use tauri::{
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
-// Windows-specific imports for rounded corners
-#[cfg(windows)]
-use windows::Win32::{
-    Foundation::HWND,
-    Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND},
-};
-
 // Define AppState to hold "pinned" and "throttle" status
 struct AppState {
     is_pinned: Mutex<bool>,
@@ -290,14 +283,6 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // 在支持的 Windows 环境下尽力申请系统圆角；失败只记录，不中断启动。
-            #[cfg(windows)]
-            if let Some(window) = app.get_webview_window("main") {
-                if let Err(error) = apply_window_corner_preference(&window) {
-                    eprintln!("[windows] 申请系统圆角失败: {error}");
-                }
-            }
-
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -327,38 +312,3 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// 为窗口尽力申请系统圆角。
-///
-/// 这是一个 best-effort 的 DWM 提示：在支持的 Windows 版本上可能生效，
-/// 在不支持的系统或当前窗口模型下也可能被忽略或直接返回错误。
-/// 失败只记录，不作为启动失败处理。
-///
-/// 注意：即便视觉上出现圆角，透明窗口四角的点击区域仍可能存在；
-/// 这是当前窗口模型下的已知平台限制。
-#[cfg(windows)]
-fn apply_window_corner_preference(window: &tauri::WebviewWindow) -> Result<(), String> {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-    let handle = window
-        .window_handle()
-        .map_err(|error| format!("无法获取窗口句柄: {error}"))?;
-
-    let RawWindowHandle::Win32(win_handle) = handle.as_raw() else {
-        return Err("当前窗口不是 Win32 原生句柄".to_string());
-    };
-
-    let hwnd = HWND(win_handle.hwnd.get() as *mut core::ffi::c_void);
-    let preference = DWMWCP_ROUND;
-
-    unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            &preference as *const _ as *const _,
-            std::mem::size_of_val(&preference) as u32,
-        )
-        .map_err(|error| format!("DwmSetWindowAttribute 调用失败: {error}"))?;
-    }
-
-    Ok(())
-}

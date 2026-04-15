@@ -23,13 +23,14 @@ export const TrashGrid: React.FC = () => {
 
     if (deletedNotes.length === 0) {
         return (
-            <div className="w-full h-screen flex flex-col items-center justify-center bg-primary-bg/90 backdrop-blur-sm animate-in fade-in duration-300">
+            <div className="w-full h-full flex flex-col items-center justify-center animate-in fade-in duration-300">
                 <div className="text-text-tertiary mb-4">
                     <Trash2 size={64} strokeWidth={1} />
                 </div>
                 <h2 className="text-xl font-medium text-text-secondary">废纸篓是空的</h2>
                 <p className="text-sm text-text-tertiary mt-2">这里没有已删除的便签</p>
                 <button
+                    type="button"
                     onClick={() => setViewMode('BOARD')}
                     className="mt-6 px-6 py-2.5 bg-secondary-bg border border-border-subtle text-text-primary rounded-lg hover:bg-secondary-bg/80 transition-colors text-sm font-medium shadow-sm"
                 >
@@ -40,11 +41,10 @@ export const TrashGrid: React.FC = () => {
     }
 
     return (
-        <div className="w-full h-screen bg-primary-bg/95 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-300 z-40 relative">
+        <div className="w-full h-full overflow-y-auto animate-in fade-in duration-300 relative">
             
-            {/* Header with Drag Region */}
+            {/* Header */}
             <div 
-                data-tauri-drag-region 
                 className="sticky top-0 z-50 bg-secondary-bg/80 backdrop-blur-md border-b border-border-subtle px-8 py-4 flex items-center justify-between"
             >
                 <div className="flex items-center gap-3">
@@ -59,6 +59,7 @@ export const TrashGrid: React.FC = () => {
 
                 <div className="flex items-center gap-3">
                     <button 
+                        type="button"
                         onClick={() => {
                             if (window.confirm('确认还原所有便签吗?')) restoreAllTrash();
                         }}
@@ -68,6 +69,7 @@ export const TrashGrid: React.FC = () => {
                         全部还原
                     </button>
                     <button 
+                        type="button"
                         onClick={() => {
                             if (window.confirm('确认清空废纸篓吗? 此操作无法撤销。')) emptyTrash();
                         }}
@@ -78,6 +80,7 @@ export const TrashGrid: React.FC = () => {
                     </button>
                     <div className="w-px h-6 bg-border-subtle"></div>
                     <button 
+                        type="button"
                         onClick={() => setViewMode('BOARD')}
                         className="p-2 bg-secondary-bg border border-border-subtle text-text-secondary rounded-lg hover:bg-secondary-bg/80 transition-colors shadow-sm"
                         title="返回看板"
@@ -115,6 +118,7 @@ export const TrashGrid: React.FC = () => {
 
                             <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button
+                                    type="button"
                                     onClick={() => restoreNote(note.id)}
                                     className="p-1.5 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 transition-colors"
                                     title="还原"
@@ -122,6 +126,7 @@ export const TrashGrid: React.FC = () => {
                                     <RotateCcw size={14} />
                                 </button>
                                 <button
+                                    type="button"
                                     onClick={() => {
                                         if (window.confirm('确认永久删除此便签?')) deleteNotePermanently(note.id);
                                     }}

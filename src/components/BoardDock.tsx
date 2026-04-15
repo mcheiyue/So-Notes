@@ -249,7 +249,7 @@ export const BoardDock = () => {
         <button
           type="button"
           aria-label="关闭浮层"
-          className="fixed inset-0 bg-transparent"
+          className="absolute inset-0 bg-transparent"
           style={{ zIndex: Z_INDEX.DOCK_BACKDROP }}
           onClick={() => { 
             if (contextMenuBoard || isInputMode || showSettings) {
@@ -269,7 +269,7 @@ export const BoardDock = () => {
       )}
 
       {/* 2. Dock Container - Centered using Flexbox to avoid transform conflicts */}
-      <div className="fixed bottom-8 left-0 w-full pointer-events-none flex justify-center" style={{ zIndex: dockLayerZIndex }}>
+      <div className="absolute inset-x-0 bottom-8 pointer-events-none flex justify-center" style={{ zIndex: dockLayerZIndex }}>
         <div ref={dockContainerRef} className="board-dock-container relative pointer-events-auto flex flex-col items-center transform transition-transform duration-300 origin-bottom scale-90 md:scale-100">
         
         {/* Context Menu for Deletion */}

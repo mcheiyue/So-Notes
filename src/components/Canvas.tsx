@@ -6,7 +6,6 @@ import { LAYOUT, Z_INDEX } from "../constants/layout";
 
 const CANVAS_NON_BLANK_SELECTOR = [
   '[data-canvas-hit="blocked"]',
-  '.drag-handle-area',
   '.minimap-interaction-area',
 ].join(', ');
 
@@ -425,8 +424,6 @@ export const Canvas: React.FC = () => {
       tabIndex={-1}
       className={cn(
         "w-full h-full overflow-hidden relative select-none",
-        "bg-primary-bg/90 transition-colors duration-300", // 使用语义化主背景色
-        "border border-border-subtle rounded-lg", // 使用语义化边框
         interaction.isPanMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
       )}
       onDoubleClick={handleDoubleClick}
@@ -464,15 +461,6 @@ export const Canvas: React.FC = () => {
       
       {/* Board Badge moved to App.tsx for better reactivity */}
 
-      <div 
-          data-tauri-drag-region 
-          data-canvas-hit="blocked"
-          className="drag-handle-area absolute top-0 left-0 w-full h-6 flex items-center justify-center group cursor-grab"
-          style={{ zIndex: Z_INDEX.DRAG_HANDLE_AREA }}
-      >
-          <div className="w-12 h-1 bg-text-tertiary/20 rounded-full mt-2 transition-colors group-hover:bg-text-tertiary/40" />
-      </div>
-      
       {/* Selection Box */}
       <div
         ref={selectionBoxRef}

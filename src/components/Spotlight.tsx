@@ -158,7 +158,7 @@ export const Spotlight = () => {
   if (!isSpotlightOpen) return null;
 
   return (
-    <div className="fixed inset-0 flex items-start justify-center pt-[20vh] px-4" style={{ zIndex: Z_INDEX.SPOTLIGHT }}>
+    <div className="absolute inset-0 flex items-start justify-center pt-[20vh] px-4" style={{ zIndex: Z_INDEX.SPOTLIGHT }}>
       {/* Backdrop */}
       <button 
         type="button"

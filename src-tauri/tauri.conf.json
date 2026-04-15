@@ -20,7 +20,6 @@
         "resizable": true,
         "decorations": false,
         "transparent": true,
-        "windowEffects": { "effects": ["mica"], "state": "active" },
         "visible": false,
         "skipTaskbar": true,
         "shadow": false

@@ -211,7 +211,7 @@ export const MiniMap: React.FC = () => {
             {!isVisible && (
                 <button
                     type="button"
-                    className="fixed bottom-6 right-6 h-16 w-16 rounded-2xl bg-transparent"
+                    className="absolute bottom-6 right-6 h-16 w-16 rounded-2xl bg-transparent"
                     style={{ zIndex: Z_INDEX.MINIMAP }}
                     aria-label="显示小地图"
                     onMouseEnter={() => setIsHovered(true)}
@@ -223,7 +223,7 @@ export const MiniMap: React.FC = () => {
                 ref={mapRef}
                 className={cn(
                     "minimap-interaction-area", // Add marker class for interaction exclusion
-                    "fixed bottom-8 right-8",
+                    "absolute bottom-8 right-8",
                     "bg-secondary-bg backdrop-blur-xl",
                     "border border-border-subtle",
                     "rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]",

@@ -10,6 +10,7 @@ import { ContextMenu } from "./components/ContextMenu";
 import { MiniMap } from "./components/MiniMap";
 import ShortcutsManager from "./components/ShortcutsManager";
 import { Spotlight } from "./components/Spotlight";
+import { WindowShell } from "./components/WindowShell";
 
 function App() {
   const isMouseDownRef = useRef(false);
@@ -56,30 +57,33 @@ function App() {
     };
   }, []);
 
+  const shellOverlay = (
+    <>
+      {viewMode === 'BOARD' && (
+        <>
+          <div className="pointer-events-none absolute top-8 left-4 z-[50]">
+            <BoardBadge />
+          </div>
+
+          <PinFab />
+          <MiniMap />
+          {isSpotlightOpen && <Spotlight />}
+        </>
+      )}
+
+      <BoardDock />
+    </>
+  );
+
   return (
-    <div className="w-full h-screen fixed inset-0 overflow-hidden">
-       {viewMode === 'BOARD' ? (
-         <>
-           <Canvas />
-           {/* UI Overlay Components - Moved out of Canvas to avoid filter/transform issues */}
-           
-           {/* Board Indicator (Top Left) */}
-           <div className="fixed top-8 left-4 pointer-events-none z-[50]">
-              <BoardBadge />
-           </div>
-           
-           <PinFab />
-           <ContextMenu />
-           <MiniMap />
-           <ShortcutsManager />
-           {isSpotlightOpen && <Spotlight />}
-         </>
-       ) : (
-         <TrashGrid />
-       )}
-       
-       <BoardDock />
-    </div>
+    <>
+      <WindowShell overlay={shellOverlay}>
+        {viewMode === 'BOARD' ? <Canvas /> : <TrashGrid />}
+      </WindowShell>
+
+      <ContextMenu />
+      <ShortcutsManager />
+    </>
   );
 }
 
