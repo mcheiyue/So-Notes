@@ -131,4 +131,16 @@ describe('MiniMap 看板隔离', () => {
     expect(Number.parseFloat(viewport?.style.height ?? '0')).toBeGreaterThan(0);
   });
 
+  it('隐藏态 reveal hotspot 显式恢复 pointer-events，同时不阻塞背景画布', async () => {
+    await renderMiniMap();
+
+    const revealButton = container.querySelector('button[aria-label="显示小地图"]') as HTMLButtonElement | null;
+    const mapContainer = container.querySelector('.minimap-interaction-area') as HTMLDivElement | null;
+
+    expect(revealButton).not.toBeNull();
+    expect(revealButton?.className).toContain('pointer-events-auto');
+    expect(mapContainer).not.toBeNull();
+    expect(mapContainer?.className).toContain('pointer-events-none');
+  });
+
 });

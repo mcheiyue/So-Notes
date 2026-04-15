@@ -249,7 +249,7 @@ export const BoardDock = () => {
         <button
           type="button"
           aria-label="关闭浮层"
-          className="absolute inset-0 bg-transparent"
+          className="pointer-events-auto absolute inset-0 bg-transparent"
           style={{ zIndex: Z_INDEX.DOCK_BACKDROP }}
           onClick={() => { 
             if (contextMenuBoard || isInputMode || showSettings) {

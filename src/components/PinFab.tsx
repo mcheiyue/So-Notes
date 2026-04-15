@@ -36,7 +36,7 @@ export const PinFab = () => {
       onClick={handleUnpin}
       onDoubleClick={(e) => e.stopPropagation()} // Prevent creating note on double click
       className={cn(
-        "absolute top-4 right-4 z-[9999]",
+        "pointer-events-auto absolute top-4 right-4 z-[9999]",
         "w-8 h-8 flex items-center justify-center rounded-full",
         "bg-secondary-bg/80 backdrop-blur-md",
         "text-text-tertiary hover:text-red-500 dark:hover:text-red-400",

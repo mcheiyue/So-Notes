@@ -158,17 +158,17 @@ export const Spotlight = () => {
   if (!isSpotlightOpen) return null;
 
   return (
-    <div className="absolute inset-0 flex items-start justify-center pt-[20vh] px-4" style={{ zIndex: Z_INDEX.SPOTLIGHT }}>
+    <div className="pointer-events-auto absolute inset-0 flex items-start justify-center pt-[20vh] px-4" style={{ zIndex: Z_INDEX.SPOTLIGHT }}>
       {/* Backdrop */}
       <button 
         type="button"
-        className="absolute inset-0 bg-black/20 backdrop-blur-sm transition-opacity" 
+        className="pointer-events-auto absolute inset-0 bg-black/20 backdrop-blur-sm transition-opacity" 
         onClick={() => setSpotlightOpen(false)}
         aria-label="关闭搜索"
       />
 
       {/* Container - Styled with Semantic Colors */}
-      <div className="relative w-full max-w-2xl flex flex-col overflow-hidden rounded-2xl bg-secondary-bg/80 backdrop-blur-2xl shadow-2xl ring-1 ring-border-subtle animate-in fade-in zoom-in-95 duration-200">
+      <div className="pointer-events-auto relative w-full max-w-2xl flex flex-col overflow-hidden rounded-2xl bg-secondary-bg/80 backdrop-blur-2xl shadow-2xl ring-1 ring-border-subtle animate-in fade-in zoom-in-95 duration-200">
         
         {/* Input Area */}
         <div className="flex items-center px-4 border-b border-border-subtle/50">

@@ -211,7 +211,7 @@ export const MiniMap: React.FC = () => {
             {!isVisible && (
                 <button
                     type="button"
-                    className="absolute bottom-6 right-6 h-16 w-16 rounded-2xl bg-transparent"
+                    className="pointer-events-auto absolute bottom-6 right-6 h-16 w-16 rounded-2xl bg-transparent"
                     style={{ zIndex: Z_INDEX.MINIMAP }}
                     aria-label="显示小地图"
                     onMouseEnter={() => setIsHovered(true)}

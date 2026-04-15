@@ -100,6 +100,19 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(Z_INDEX.MENU).toBeLessThan(Z_INDEX.SPOTLIGHT);
   });
 
+  it('click-away backdrop 显式恢复 pointer-events，并继续关闭 dock', async () => {
+    await renderBoardDock();
+
+    const backdrop = container.querySelector('button[aria-label="关闭浮层"]') as HTMLButtonElement | null;
+
+    expect(backdrop).not.toBeNull();
+    expect(backdrop?.className).toContain('pointer-events-auto');
+
+    await clickElement(backdrop);
+
+    expect(useStore.getState().setDockVisible).toHaveBeenCalledWith(false);
+  });
+
   it('右键看板时菜单锚点按容器内真实中心点定位', async () => {
     await renderBoardDock();
 
