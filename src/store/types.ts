@@ -94,8 +94,15 @@ export interface AppConfig {
 export interface ViewportState {
   x: number; // World x of top-left viewport
   y: number; // World y of top-left viewport
-  w: number; // Width of viewport (window.innerWidth)
-  h: number; // Height of viewport (window.innerHeight)
+  w: number; // Width of viewport (shell content area)
+  h: number; // Height of viewport (shell content area)
+}
+
+export interface ShellRectState {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 }
 
 export interface AppCanvasState {

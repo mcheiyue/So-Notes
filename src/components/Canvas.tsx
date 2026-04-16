@@ -36,6 +36,18 @@ export const Canvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const scale = 1;
 
+  const getCanvasBounds = () => {
+    return containerRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
+  };
+
+  const toCanvasLocalPoint = (clientX: number, clientY: number) => {
+    const bounds = getCanvasBounds();
+    return {
+      x: clientX - bounds.left,
+      y: clientY - bounds.top,
+    };
+  };
+
   // Selection Logic Refs
   const isSelecting = useRef(false);
   const selectionStart = useRef({ x: 0, y: 0 });
@@ -180,8 +192,9 @@ export const Canvas: React.FC = () => {
 
       // 1. Sticky Drag Logic
       if (stickyDrag.id) {
-          const newX = (e.clientX - stickyDrag.offsetX) / scale + viewport.x;
-          const newY = (e.clientY - stickyDrag.offsetY) / scale + viewport.y;
+          const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
+          const newX = (localPoint.x - stickyDrag.offsetX) / scale + viewport.x;
+          const newY = (localPoint.y - stickyDrag.offsetY) / scale + viewport.y;
           
           const currentNote = useStore.getState().notes.find(n => n.id === stickyDrag.id);
           const isSelected = selectedIds.includes(stickyDrag.id);
@@ -198,11 +211,12 @@ export const Canvas: React.FC = () => {
       
       // 2. Marquee Selection Logic
       if (isSelecting.current && selectionBoxRef.current) {
-          const currentX = e.clientX;
-          const currentY = e.clientY;
-          
-          const startX = selectionStart.current.x;
-          const startY = selectionStart.current.y;
+           const currentPoint = toCanvasLocalPoint(e.clientX, e.clientY);
+           const startPoint = toCanvasLocalPoint(selectionStart.current.x, selectionStart.current.y);
+           const currentX = currentPoint.x;
+           const currentY = currentPoint.y;
+           const startX = startPoint.x;
+           const startY = startPoint.y;
           
           const left = Math.min(startX, currentX);
           const top = Math.min(startY, currentY);
@@ -232,8 +246,9 @@ export const Canvas: React.FC = () => {
     // Fix: Convert Screen Coordinates to World Coordinates
     // The click (e.clientX) is in screen space.
     // The note needs to be placed in world space.
-    const x = e.clientX + viewport.x;
-    const y = e.clientY + viewport.y;
+    const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
+    const x = localPoint.x + viewport.x;
+    const y = localPoint.y + viewport.y;
     addNote(x, y);
   };
   
@@ -321,10 +336,11 @@ export const Canvas: React.FC = () => {
       if (e.button === 0 && !stickyDrag.id && isBlankTarget) {
           isSelecting.current = true;
           selectionStart.current = { x: e.clientX, y: e.clientY };
+          const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
           
           if (selectionBoxRef.current) {
-              selectionBoxRef.current.style.left = `${e.clientX}px`;
-              selectionBoxRef.current.style.top = `${e.clientY}px`;
+              selectionBoxRef.current.style.left = `${localPoint.x}px`;
+              selectionBoxRef.current.style.top = `${localPoint.y}px`;
               selectionBoxRef.current.style.width = '0px';
               selectionBoxRef.current.style.height = '0px';
               selectionBoxRef.current.style.display = 'block';

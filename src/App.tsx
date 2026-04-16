@@ -10,19 +10,33 @@ import { ContextMenu } from "./components/ContextMenu";
 import { MiniMap } from "./components/MiniMap";
 import ShortcutsManager from "./components/ShortcutsManager";
 import { Spotlight } from "./components/Spotlight";
-import { WindowShell } from "./components/WindowShell";
+import { WindowShell, WindowShellContentRect } from "./components/WindowShell";
 
 function App() {
   const isMouseDownRef = useRef(false);
   const viewMode = useStore(state => state.viewMode);
   const isSpotlightOpen = useStore(state => state.isSpotlightOpen);
-  const syncViewportToShell = useCallback((rect: { width: number; height: number }) => {
+  const syncViewportToShell = useCallback((rect: WindowShellContentRect) => {
     const nextWidth = Math.max(0, rect.width);
     const nextHeight = Math.max(0, rect.height);
-    const { viewport, setViewportSize } = useStore.getState();
+    const { viewport, shellRect, setViewportSize, setShellRect } = useStore.getState();
 
     if (viewport.w !== nextWidth || viewport.h !== nextHeight) {
       setViewportSize(nextWidth, nextHeight);
+    }
+
+    if (
+      shellRect.left !== rect.left ||
+      shellRect.top !== rect.top ||
+      shellRect.right !== rect.right ||
+      shellRect.bottom !== rect.bottom
+    ) {
+      setShellRect({
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+      });
     }
   }, []);
 

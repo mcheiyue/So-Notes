@@ -24,6 +24,7 @@ export const Spotlight = () => {
   const switchBoard = useStore((state) => state.switchBoard);
   const clearSelection = useStore((state) => state.clearSelection);
   const bringToFront = useStore((state) => state.bringToFront);
+  const viewport = useStore((state) => state.viewport);
 
   // Auto-focus input on open
   useEffect(() => {
@@ -58,8 +59,8 @@ export const Spotlight = () => {
 
     const nWidth = LAYOUT.NOTE_WIDTH;
     const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, targetNote.height || LAYOUT.NOTE_MIN_HEIGHT);
-    const targetX = (targetNote.x + nWidth / 2) - (window.innerWidth / 2);
-    const targetY = (targetNote.y + nHeight / 2) - (window.innerHeight / 2);
+    const targetX = (targetNote.x + nWidth / 2) - (viewport.w / 2);
+    const targetY = (targetNote.y + nHeight / 2) - (viewport.h / 2);
 
     const frameId = requestAnimationFrame(() => {
       clearSelection();
@@ -70,7 +71,7 @@ export const Spotlight = () => {
     });
 
     return () => cancelAnimationFrame(frameId);
-  }, [bringToFront, clearSelection, currentBoardId, notes, pendingTargetId, setSelectedIds, setViewportPosition]);
+  }, [bringToFront, clearSelection, currentBoardId, notes, pendingTargetId, setSelectedIds, setViewportPosition, viewport.h, viewport.w]);
 
   // Close on Escape
   useEffect(() => {

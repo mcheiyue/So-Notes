@@ -24,6 +24,7 @@ vi.mock('../utils/fileSystem', () => ({
 import { Spotlight } from './Spotlight';
 import { useStore } from '../store/useStore';
 import { Note } from '../store/types';
+import { LAYOUT } from '../constants/layout';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
@@ -52,12 +53,18 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
 
   beforeEach(() => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', vi.fn((cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
       currentBoardId: 'default',
       notes: [createNote()],
       isSpotlightOpen: true,
+      viewport: { x: 0, y: 0, w: 320, h: 240 },
     });
 
     container = document.createElement('div');
@@ -70,6 +77,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
       root.unmount();
     });
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it('为 overlay 根层、backdrop 与面板显式恢复 pointer-events，并保持点击 backdrop 关闭', async () => {
@@ -93,5 +101,47 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
 
     expect(useStore.getState().isSpotlightOpen).toBe(false);
     expect(container.querySelector('button[aria-label="关闭搜索"]')).toBeNull();
+  });
+
+  it('选择搜索结果后按 viewport 尺寸而不是 window 尺寸居中', async () => {
+    const setViewportPosition = vi.fn();
+    const clearSelection = vi.fn();
+    const setSelectedIds = vi.fn();
+    const bringToFront = vi.fn();
+
+    useStore.setState({
+      setViewportPosition,
+      clearSelection,
+      setSelectedIds,
+      bringToFront,
+    });
+
+    await renderSpotlight();
+
+    const input = container.querySelector('input[placeholder="搜索便签..."]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+
+    await act(async () => {
+      const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setInputValue?.call(input, '恢复');
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => undefined);
+
+    const resultButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('恢复交互')) as HTMLButtonElement | undefined;
+    expect(resultButton).toBeDefined();
+
+    await act(async () => {
+      resultButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(setViewportPosition).toHaveBeenCalledWith(
+      (120 + LAYOUT.NOTE_WIDTH / 2) - 160,
+      (160 + LAYOUT.NOTE_MIN_HEIGHT / 2) - 120,
+    );
+    expect(setSelectedIds).toHaveBeenCalledWith(['note-1']);
+    expect(bringToFront).toHaveBeenCalledWith('note-1');
+    expect(clearSelection).toHaveBeenCalled();
   });
 });

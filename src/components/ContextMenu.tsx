@@ -5,6 +5,19 @@ import { cn } from '../utils/cn';
 import { ChevronRight } from 'lucide-react';
 import { Z_INDEX } from '../constants/layout';
 
+type MenuItemButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement>;
+
+const MenuItemButton: React.FC<MenuItemButtonProps> = ({ className, type, ...props }) => (
+  <button
+    type={type ?? 'button'}
+    className={cn(
+      'w-full px-4 py-2 text-left text-sm flex items-center gap-2 transition-colors duration-200',
+      className,
+    )}
+    {...props}
+  />
+);
+
 const ContextMenuContent: React.FC = () => {
   const { 
     contextMenu, 
@@ -28,7 +41,8 @@ const ContextMenuContent: React.FC = () => {
     copyNoteToBoard,
     moveSelectedNotesToBoard,
     copySelectedNotesToBoard,
-    viewport // Add viewport
+    viewport,
+    shellRect,
   } = useStore();
   const menuRef = useRef<HTMLDivElement>(null);
   const [hasClipboardText, setHasClipboardText] = useState(false);
@@ -83,10 +97,15 @@ const ContextMenuContent: React.FC = () => {
     };
   }, [contextMenu, setContextMenu]);
 
-  // Adjust position to keep menu within viewport
-  // Simple clamping logic (can be improved with measuring actual height)
-  const menuX = Math.min(contextMenu.x, window.innerWidth - 160);
-  const menuY = Math.min(contextMenu.y, window.innerHeight - 200);
+  const MENU_WIDTH = 160;
+  const MENU_HEIGHT = 200;
+  const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+  const maxMenuX = Math.max(shellRect.left, shellRect.right - MENU_WIDTH);
+  const maxMenuY = Math.max(shellRect.top, shellRect.bottom - MENU_HEIGHT);
+  const menuX = clamp(contextMenu.x, shellRect.left, maxMenuX);
+  const menuY = clamp(contextMenu.y, shellRect.top, maxMenuY);
+  const toWorldX = (clientX: number) => clientX - shellRect.left + viewport.x;
+  const toWorldY = (clientY: number) => clientY - shellRect.top + viewport.y;
 
   const colors = [
     { name: 'Yellow', value: '#FEF3C7' },
@@ -106,6 +125,8 @@ const ContextMenuContent: React.FC = () => {
   return (
     <div
       ref={menuRef}
+      role="menu"
+      aria-label="上下文菜单"
       className="fixed bg-secondary-bg text-text-primary rounded-lg shadow-xl border border-border-subtle py-1 min-w-[160px] select-none"
       style={{ left: menuX, top: menuY, zIndex: Z_INDEX.MENU }}
       onMouseDown={(e) => e.stopPropagation()} // Prevent closing immediately or triggering canvas click
@@ -115,44 +136,48 @@ const ContextMenuContent: React.FC = () => {
           {/* Global Mode: No selection OR Single Selection (treat as global for canvas actions) */}
           {selectedIds.length <= 1 && (
             <>
-               <div
-                className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
-                onClick={() => handleAction(() => {
-                    setDockVisible(true);
-                    // No need to set isOpen:false manually as handleAction does it
-                })}
-              >
-                <span>📑</span> 显示菜单
-              </div>
-              
-              <div
-                className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
-                onClick={() => handleAction(() => addNote(contextMenu.x + viewport.x, contextMenu.y + viewport.y))}
-              >
-                <span>📝</span> 新建便签
-              </div>
-              
-              {hasClipboardText && (
-                 <div
-                    className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
-                    onClick={() => handleAction(async () => {
-                        const text = await readText();
-                        if (text) {
-                            addNoteWithContent(contextMenu.x + viewport.x, contextMenu.y + viewport.y, text);
-                        }
-                    })}
+               <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                 onClick={() => handleAction(() => {
+                     setDockVisible(true);
+                     // No need to set isOpen:false manually as handleAction does it
+                 })}
+               >
+                 <span>📑</span> 显示菜单
+               </MenuItemButton>
+               
+               <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                 onClick={() => handleAction(() => addNote(toWorldX(contextMenu.x), toWorldY(contextMenu.y)))}
+               >
+                 <span>📝</span> 新建便签
+               </MenuItemButton>
+               
+               {hasClipboardText && (
+                  <MenuItemButton
+                    role="menuitem"
+                    className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                     onClick={() => handleAction(async () => {
+                         const text = await readText();
+                         if (text) {
+                             addNoteWithContent(toWorldX(contextMenu.x), toWorldY(contextMenu.y), text);
+                         }
+                     })}
                   >
-                    <span>📋</span> 粘贴并新建
-                  </div>
-              )}
+                     <span>📋</span> 粘贴并新建
+                  </MenuItemButton>
+               )}
               
                <div className="h-px bg-border-subtle my-1" />
            </>
           )}
 
-           <div
+           <MenuItemButton
+            role="menuitem"
             className={cn(
-                "px-4 py-2 cursor-pointer text-sm flex items-center gap-2 transition-colors duration-200",
+                "",
                 confirmArrange 
                     ? "bg-red-50 text-red-600 font-medium hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50" 
                     : "hover:bg-secondary-bg/50 dark:hover:bg-white/5 text-text-secondary hover:text-text-primary"
@@ -162,13 +187,13 @@ const ContextMenuContent: React.FC = () => {
                 // Only treat as Group Mode if > 1 items selected
                 if (selectedIds.length > 1) {
                     // Group arrange: No confirmation needed (safe operation)
-                    handleAction(() => arrangeNotes(contextMenu.x + viewport.x, contextMenu.y + viewport.y));
+                    handleAction(() => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y)));
                 } else {
                     // Global arrange: Require confirmation
                     if (!confirmArrange) {
                         setConfirmArrange(true);
                     } else {
-                        handleAction(() => arrangeNotes(contextMenu.x + viewport.x, contextMenu.y + viewport.y));
+                        handleAction(() => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y)));
                     }
                 }
             }}
@@ -178,20 +203,21 @@ const ContextMenuContent: React.FC = () => {
                 ? '整理选中 (Arrange)' 
                 : (confirmArrange ? '确认归拢? (Click Again)' : '一键归拢 (Smart Arrange)')
             }
-          </div>
+          </MenuItemButton>
         </>
       )}
 
       {contextMenu.type === 'NOTE' && contextMenu.targetId && (
         <>
-           <div
-            className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
+           <MenuItemButton
+            role="menuitem"
+            className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
             onClick={() => handleAction(() => {
                 setStickyDrag(contextMenu.targetId!, 0, 0); 
             })}
           >
             <span>🧲</span> {isGroupContext ? '群组吸附' : '吸附移动'}
-          </div>
+          </MenuItemButton>
           <div className="h-px bg-border-subtle my-1" />
           
           <div className="px-4 py-2 text-xs text-text-tertiary font-semibold">
@@ -199,8 +225,10 @@ const ContextMenuContent: React.FC = () => {
           </div>
           <div className="px-4 py-1 flex gap-2 flex-wrap">
             {colors.map((c) => (
-              <div
+              <button
                 key={c.value}
+                type="button"
+                role="menuitem"
                 className="w-5 h-5 rounded-full cursor-pointer border border-border-subtle hover:scale-110 transition-transform"
                 style={{ backgroundColor: c.value }}
                 title={c.name}
@@ -219,40 +247,45 @@ const ContextMenuContent: React.FC = () => {
           
           {/* Duplicate */}
           {!isGroupContext && (
-             <div
-                className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
+             <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                 onClick={() => handleAction(() => duplicateNote(contextMenu.targetId!))}
             >
                 <span>📄</span> 创建副本
-            </div>
+            </MenuItemButton>
           )}
 
           {/* Move To Board */}
           {boards.length > 1 && (
-            <div 
-                className="relative"
-                onMouseEnter={() => handleSubmenuEnter('MOVE')}
-                onMouseLeave={handleSubmenuLeave}
-            >
-                <div className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center justify-between">
+            <div className="relative">
+                <MenuItemButton
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    className="justify-between text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                    onMouseEnter={() => handleSubmenuEnter('MOVE')}
+                    onMouseLeave={handleSubmenuLeave}
+                >
                     <div className="flex items-center gap-2">
                         <span>➡️</span> {isGroupContext ? '批量移动到...' : '移动到...'}
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
-                </div>
+                </MenuItemButton>
                 
                 {/* Submenu */}
                 {activeSubmenu === 'MOVE' && (
                     <div 
+                        role="menu"
                         className="absolute left-full top-0 ml-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px]"
                         style={{ zIndex: Z_INDEX.MENU }}
                         onMouseEnter={() => handleSubmenuEnter('MOVE')}
                         onMouseLeave={handleSubmenuLeave}
                     >
                         {boards.filter(b => b.id !== currentBoardId).map(b => (
-                            <div
+                            <MenuItemButton
                                 key={b.id}
-                                className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
+                                role="menuitem"
+                                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                                 onClick={() => handleAction(() => {
                                     if (isGroupContext) {
                                         moveSelectedNotesToBoard(b.id);
@@ -262,7 +295,7 @@ const ContextMenuContent: React.FC = () => {
                                 })}
                             >
                                 <span className="text-xs">{b.icon}</span> {b.name}
-                            </div>
+                            </MenuItemButton>
                         ))}
                     </div>
                 )}
@@ -271,30 +304,34 @@ const ContextMenuContent: React.FC = () => {
 
           {/* Copy To Board */}
           {boards.length > 1 && (
-            <div 
-                className="relative"
-                onMouseEnter={() => handleSubmenuEnter('COPY')}
-                onMouseLeave={handleSubmenuLeave}
-            >
-                <div className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center justify-between">
+            <div className="relative">
+                <MenuItemButton
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    className="justify-between text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                    onMouseEnter={() => handleSubmenuEnter('COPY')}
+                    onMouseLeave={handleSubmenuLeave}
+                >
                     <div className="flex items-center gap-2">
                         <span>⤴️</span> {isGroupContext ? '批量复制到...' : '复制到...'}
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
-                </div>
+                </MenuItemButton>
                 
                 {/* Submenu */}
                 {activeSubmenu === 'COPY' && (
                     <div 
+                        role="menu"
                         className="absolute left-full top-0 ml-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px]"
                         style={{ zIndex: Z_INDEX.MENU }}
                         onMouseEnter={() => handleSubmenuEnter('COPY')}
                         onMouseLeave={handleSubmenuLeave}
                     >
                         {boards.filter(b => b.id !== currentBoardId).map(b => (
-                            <div
+                            <MenuItemButton
                                 key={b.id}
-                                className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
+                                role="menuitem"
+                                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                                 onClick={() => handleAction(() => {
                                     if (isGroupContext) {
                                         copySelectedNotesToBoard(b.id);
@@ -304,7 +341,7 @@ const ContextMenuContent: React.FC = () => {
                                 })}
                             >
                                 <span className="text-xs">{b.icon}</span> {b.name}
-                            </div>
+                            </MenuItemButton>
                         ))}
                     </div>
                 )}
@@ -313,21 +350,23 @@ const ContextMenuContent: React.FC = () => {
 
           <div className="h-px bg-border-subtle my-1" />
           
-          <div
-            className="px-4 py-2 hover:bg-secondary-bg/50 dark:hover:bg-white/5 cursor-pointer text-sm text-text-secondary hover:text-text-primary flex items-center gap-2"
+          <MenuItemButton
+            role="menuitem"
+            className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
             onClick={() => handleAction(() => {
                 bringToFront(contextMenu.targetId!);
                 finalizeLayoutChange([contextMenu.targetId!]);
             })}
           >
             <span>🔝</span> 置顶
-          </div>
+          </MenuItemButton>
           
           <div className="h-px bg-border-subtle my-1" />
 
-          <div
+          <MenuItemButton
+            role="menuitem"
             className={cn(
-                "px-4 py-2 cursor-pointer text-sm flex items-center gap-2 transition-colors",
+                "",
                 (isGroupContext && confirmDeleteGroup) ? "bg-red-50 text-red-600 hover:bg-red-100 font-medium dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50" : "text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
             )}
             onClick={(e) => {
@@ -347,7 +386,7 @@ const ContextMenuContent: React.FC = () => {
             {isGroupContext 
                 ? (confirmDeleteGroup ? `确认删除 ${selectedIds.length} 个便签?` : `批量删除 (${selectedIds.length})`)
                 : '删除'}
-          </div>
+          </MenuItemButton>
         </>
       )}
     </div>

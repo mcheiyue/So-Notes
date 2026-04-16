@@ -91,6 +91,17 @@ describe('Canvas 空白命中判定', () => {
     await renderCanvas();
 
     const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 10,
+      top: 20,
+      right: 1290,
+      bottom: 740,
+      width: 1280,
+      height: 720,
+      x: 10,
+      y: 20,
+      toJSON: () => ({}),
+    } as DOMRect));
 
     await act(async () => {
       canvasRoot?.dispatchEvent(new MouseEvent('dblclick', {
@@ -101,7 +112,7 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(addNote).toHaveBeenCalledTimes(1);
-    expect(addNote).toHaveBeenCalledWith(220, 280);
+    expect(addNote).toHaveBeenCalledWith(210, 260);
   });
 
   it('双击 NoteCard 头部不会被误判为空白画布', async () => {

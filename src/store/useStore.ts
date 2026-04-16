@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode } from './types';
+import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState } from './types';
 import { db } from './db';
 import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
@@ -37,6 +37,7 @@ interface State {
   
   // Viewport & Canvas State (v1.1.5)
   viewport: ViewportState;
+  shellRect: ShellRectState;
   canvas: AppCanvasState;
   interaction: InteractionState;
   
@@ -50,6 +51,7 @@ interface State {
   // Viewport Actions
   setSpotlightOpen: (isOpen: boolean) => void;
   setViewportSize: (w: number, h: number) => void;
+  setShellRect: (rect: ShellRectState) => void;
   setPanMode: (isPan: boolean) => void;
   setEdgePush: (pushState: Partial<{ top: boolean; bottom: boolean; left: boolean; right: boolean }>) => void;
   panViewport: (dx: number, dy: number) => void; // Delta pan
@@ -139,6 +141,7 @@ export const useStore = create<State>()(
     
     // v1.1.5 Init
     viewport: { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight },
+    shellRect: { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight },
     canvas: { w: window.innerWidth, h: window.innerHeight },
     interaction: { 
         isPanMode: false,
@@ -363,6 +366,12 @@ export const useStore = create<State>()(
             // Ensure canvas is at least viewport size
             state.canvas.w = Math.max(state.canvas.w, state.viewport.x + w);
             state.canvas.h = Math.max(state.canvas.h, state.viewport.y + h);
+        });
+    },
+
+    setShellRect: (rect) => {
+        set((state) => {
+            state.shellRect = rect;
         });
     },
 
