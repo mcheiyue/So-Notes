@@ -99,6 +99,8 @@ const ContextMenuContent: React.FC = () => {
 
   const MENU_WIDTH = 160;
   const MENU_HEIGHT = 200;
+  const SUBMENU_WIDTH = 140;
+  const SUBMENU_GAP = 8;
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
   const maxMenuX = Math.max(shellRect.left, shellRect.right - MENU_WIDTH);
   const maxMenuY = Math.max(shellRect.top, shellRect.bottom - MENU_HEIGHT);
@@ -106,6 +108,9 @@ const ContextMenuContent: React.FC = () => {
   const menuY = clamp(contextMenu.y, shellRect.top, maxMenuY);
   const toWorldX = (clientX: number) => clientX - shellRect.left + viewport.x;
   const toWorldY = (clientY: number) => clientY - shellRect.top + viewport.y;
+  const shouldFlipSubmenuLeft = menuX + MENU_WIDTH + SUBMENU_GAP + SUBMENU_WIDTH > shellRect.right;
+  const submenuOffsetClass = shouldFlipSubmenuLeft ? 'right-full mr-2' : 'left-full ml-2';
+  const submenuMaxHeight = Math.max(120, shellRect.bottom - menuY - 8);
 
   const colors = [
     { name: 'Yellow', value: '#FEF3C7' },
@@ -276,8 +281,11 @@ const ContextMenuContent: React.FC = () => {
                 {activeSubmenu === 'MOVE' && (
                     <div 
                         role="menu"
-                        className="absolute left-full top-0 ml-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px]"
-                        style={{ zIndex: Z_INDEX.MENU }}
+                        className={cn(
+                          'absolute top-0 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px] overflow-y-auto',
+                          submenuOffsetClass,
+                        )}
+                        style={{ zIndex: Z_INDEX.MENU, maxHeight: `${submenuMaxHeight}px` }}
                         onMouseEnter={() => handleSubmenuEnter('MOVE')}
                         onMouseLeave={handleSubmenuLeave}
                     >
@@ -322,8 +330,11 @@ const ContextMenuContent: React.FC = () => {
                 {activeSubmenu === 'COPY' && (
                     <div 
                         role="menu"
-                        className="absolute left-full top-0 ml-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px]"
-                        style={{ zIndex: Z_INDEX.MENU }}
+                        className={cn(
+                          'absolute top-0 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-1 min-w-[140px] overflow-y-auto',
+                          submenuOffsetClass,
+                        )}
+                        style={{ zIndex: Z_INDEX.MENU, maxHeight: `${submenuMaxHeight}px` }}
                         onMouseEnter={() => handleSubmenuEnter('COPY')}
                         onMouseLeave={handleSubmenuLeave}
                     >

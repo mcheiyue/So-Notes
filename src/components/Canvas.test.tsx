@@ -53,6 +53,7 @@ describe('Canvas 空白命中判定', () => {
   };
 
   beforeEach(() => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
@@ -186,6 +187,53 @@ describe('Canvas 空白命中判定', () => {
     expect(canvasRoot?.getAttribute('tabindex')).toBeNull();
     expect(canvasRoot?.className).toContain('outline-none');
     expect(canvasRoot?.className).toContain('focus:outline-none');
+  });
+
+  it('非零 shell 偏移下框选框仍按画布局部坐标定位', async () => {
+    const clearSelection = vi.fn();
+    useStore.setState({ clearSelection });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 10,
+      top: 20,
+      right: 1290,
+      bottom: 740,
+      width: 1280,
+      height: 720,
+      x: 10,
+      y: 20,
+      toJSON: () => ({}),
+    } as DOMRect));
+
+    const selectionBox = container.querySelector('.border-dashed') as HTMLDivElement | null;
+    expect(selectionBox).not.toBeNull();
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 110,
+        clientY: 140,
+      }));
+
+      canvasRoot?.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        buttons: 1,
+        clientX: 170,
+        clientY: 200,
+      }));
+    });
+
+    const updatedSelectionBox = container.querySelector('.border-dashed') as HTMLDivElement | null;
+
+    expect(clearSelection).toHaveBeenCalledTimes(1);
+    expect(updatedSelectionBox?.style.left).toBe('100px');
+    expect(updatedSelectionBox?.style.top).toBe('120px');
+    expect(updatedSelectionBox?.style.width).toBe('60px');
+    expect(updatedSelectionBox?.style.height).toBe('60px');
   });
 
   it('拖拽锁开启时忽略空白画布双击与清空选择', async () => {

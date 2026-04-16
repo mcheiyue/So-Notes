@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
+vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
   readText: vi.fn(async () => ''),
 }));
@@ -74,5 +76,45 @@ describe('ContextMenu shell 坐标合同', () => {
     });
 
     expect(addNote).toHaveBeenCalledWith(518, 434);
+  });
+
+  it('贴近壳右边界时子菜单翻到左侧并限制高度', async () => {
+    useStore.setState({
+      currentBoardId: 'default',
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } },
+        { id: 'archive', name: '归档', icon: '🗂️', createdAt: 1, viewport: { x: 0, y: 0 } },
+      ],
+      selectedIds: [],
+      shellRect: { left: 12, top: 16, right: 260, bottom: 316 },
+      contextMenu: {
+        isOpen: true,
+        x: 240,
+        y: 96,
+        type: 'NOTE',
+        targetId: 'note-1',
+      },
+    });
+
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const moveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('移动到')) as HTMLButtonElement | undefined;
+    expect(moveButton).toBeDefined();
+
+    await act(async () => {
+      moveButton?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    });
+
+    await act(async () => undefined);
+
+    const submenus = Array.from(container.querySelectorAll('[role="menu"]')) as HTMLDivElement[];
+    const moveSubmenu = submenus.find((menu) => menu.className.includes('overflow-y-auto') && menu.textContent?.includes('归档'));
+
+    expect(moveSubmenu).toBeDefined();
+    expect(moveSubmenu?.className).toContain('right-full');
+    expect(moveSubmenu?.className).toContain('overflow-y-auto');
+    expect(moveSubmenu?.style.maxHeight).toBe('212px');
   });
 });
