@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store/useStore";
@@ -16,6 +16,15 @@ function App() {
   const isMouseDownRef = useRef(false);
   const viewMode = useStore(state => state.viewMode);
   const isSpotlightOpen = useStore(state => state.isSpotlightOpen);
+  const syncViewportToShell = useCallback((rect: { width: number; height: number }) => {
+    const nextWidth = Math.max(0, rect.width);
+    const nextHeight = Math.max(0, rect.height);
+    const { viewport, setViewportSize } = useStore.getState();
+
+    if (viewport.w !== nextWidth || viewport.h !== nextHeight) {
+      setViewportSize(nextWidth, nextHeight);
+    }
+  }, []);
 
   useEffect(() => {
     const handleMouseDown = () => { isMouseDownRef.current = true; };
@@ -31,16 +40,10 @@ function App() {
        invoke('check_hide_on_leave');
     };
 
-    const handleResize = () => {
-        const setViewportSize = useStore.getState().setViewportSize;
-        setViewportSize(window.innerWidth, window.innerHeight);
-    };
-
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mouseup', handleMouseUp);
     window.addEventListener('blur', handleBlur);
     document.addEventListener('mouseleave', handleMouseLeave);
-    window.addEventListener('resize', handleResize);
 
     // Listen for reset-viewport event from backend tray menu
     const unlistenReset = listen('reset-viewport', () => {
@@ -53,7 +56,6 @@ function App() {
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('blur', handleBlur);
       document.removeEventListener('mouseleave', handleMouseLeave);
-      window.removeEventListener('resize', handleResize);
     };
   }, []);
 
@@ -77,7 +79,7 @@ function App() {
 
   return (
     <>
-      <WindowShell overlay={shellOverlay}>
+      <WindowShell overlay={shellOverlay} onContentRectChange={syncViewportToShell}>
         {viewMode === 'BOARD' ? <Canvas /> : <TrashGrid />}
       </WindowShell>
 

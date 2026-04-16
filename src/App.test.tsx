@@ -69,6 +69,12 @@ describe('App WindowShell 组合契约', () => {
   };
 
   beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    });
+
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
       viewMode: 'BOARD',
@@ -85,6 +91,7 @@ describe('App WindowShell 组合契约', () => {
       root.unmount();
     });
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it('BOARD 模式下将壳内内容与壳外浮层分离', async () => {

@@ -166,6 +166,17 @@ describe('Canvas 空白命中判定', () => {
     expect(clearSelection).toHaveBeenCalledTimes(1);
   });
 
+  it('画布根层不再暴露默认焦点外框', async () => {
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+
+    expect(canvasRoot).not.toBeNull();
+    expect(canvasRoot?.getAttribute('tabindex')).toBeNull();
+    expect(canvasRoot?.className).toContain('outline-none');
+    expect(canvasRoot?.className).toContain('focus:outline-none');
+  });
+
   it('拖拽锁开启时忽略空白画布双击与清空选择', async () => {
     const addNote = vi.fn();
     const clearSelection = vi.fn();

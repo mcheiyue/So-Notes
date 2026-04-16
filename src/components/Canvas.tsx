@@ -421,9 +421,8 @@ export const Canvas: React.FC = () => {
     <section
       ref={containerRef}
       role="application"
-      tabIndex={-1}
       className={cn(
-        "w-full h-full overflow-hidden relative select-none",
+        "w-full h-full overflow-hidden relative select-none outline-none focus:outline-none focus-visible:outline-none",
         interaction.isPanMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
       )}
       onDoubleClick={handleDoubleClick}

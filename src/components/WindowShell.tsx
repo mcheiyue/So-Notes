@@ -1,18 +1,88 @@
-import React from "react";
+import React, { useLayoutEffect, useRef } from "react";
 import { Z_INDEX } from "../constants/layout";
+
+export interface WindowShellContentRect {
+  width: number;
+  height: number;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
 
 interface WindowShellProps {
   children: React.ReactNode;
   overlay?: React.ReactNode;
+  onContentRectChange?: (rect: WindowShellContentRect) => void;
 }
 
-export const WindowShell: React.FC<WindowShellProps> = ({ children, overlay }) => {
+export const WindowShell: React.FC<WindowShellProps> = ({ children, overlay, onContentRectChange }) => {
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!onContentRectChange || !contentRef.current) {
+      return;
+    }
+
+    const target = contentRef.current;
+    let frameId = 0;
+
+    const report = (overrideSize?: { width: number; height: number }) => {
+      const rect = target.getBoundingClientRect();
+      onContentRectChange({
+        width: Math.round(overrideSize?.width ?? target.clientWidth),
+        height: Math.round(overrideSize?.height ?? target.clientHeight),
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+      });
+    };
+
+    report();
+
+    if (typeof ResizeObserver === "undefined") {
+      const handleResize = () => report();
+      window.addEventListener("resize", handleResize);
+
+      return () => {
+        window.removeEventListener("resize", handleResize);
+      };
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        report({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
+        });
+      });
+    });
+
+    observer.observe(target);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
+  }, [onContentRectChange]);
+
   return (
     <section
       data-testid="window-shell"
       className="fixed inset-0 h-screen w-full overflow-hidden rounded-lg border border-border-subtle bg-primary-bg/90 transition-colors duration-300"
     >
-      <div className="absolute inset-0 overflow-hidden rounded-[inherit]">
+      <div
+        ref={contentRef}
+        data-testid="window-shell-content"
+        className="absolute inset-0 overflow-hidden rounded-[inherit]"
+      >
         {children}
       </div>
 
