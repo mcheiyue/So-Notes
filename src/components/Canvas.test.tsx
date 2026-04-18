@@ -45,6 +45,8 @@ const createNote = (overrides: Partial<Note> = {}): Note => ({
 describe('Canvas 空白命中判定', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let rafMock: ReturnType<typeof vi.fn>;
+  let cancelRafMock: ReturnType<typeof vi.fn>;
 
   const renderCanvas = async () => {
     await act(async () => {
@@ -54,8 +56,10 @@ describe('Canvas 空白命中判定', () => {
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
-    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    rafMock = vi.fn(() => 1);
+    cancelRafMock = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', rafMock);
+    vi.stubGlobal('cancelAnimationFrame', cancelRafMock);
 
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
@@ -289,5 +293,44 @@ describe('Canvas 空白命中判定', () => {
     expect(selectionBox?.className).toContain('dark:bg-blue-200/15');
     expect(selectionBox?.className).toContain('dark:border-blue-200/80');
     expect(selectionBox?.className).toContain('dark:shadow-[0_0_0_1px_rgba(191,219,254,0.3)]');
+  });
+
+  it('背景平移采用事件驱动 rAF，静止不空转且失焦停机', async () => {
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        isPanMode: true,
+      },
+    });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    expect(canvasRoot).not.toBeNull();
+    expect(rafMock).toHaveBeenCalledTimes(0);
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 220,
+        clientY: 240,
+      }));
+
+      canvasRoot?.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        buttons: 1,
+        clientX: 250,
+        clientY: 265,
+      }));
+    });
+
+    expect(rafMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    expect(cancelRafMock).toHaveBeenCalledWith(1);
   });
 });

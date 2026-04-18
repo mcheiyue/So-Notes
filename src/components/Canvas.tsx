@@ -31,7 +31,7 @@ export const Canvas: React.FC = () => {
     notes, currentBoardId, addNote, init, isLoaded, 
     stickyDrag, setStickyDrag, moveNote, setContextMenu, 
     setSelectedIds, selectedIds, moveSelectedNotes, clearSelection, finalizeLayoutChange,
-    interaction, viewport, setPanMode, panViewport, setViewportPosition
+    interaction, viewport, setPanMode, panViewport, setViewportPosition, setEdgePush
   } = useStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const scale = 1;
@@ -57,23 +57,44 @@ export const Canvas: React.FC = () => {
   const isPanning = useRef(false);
   const panStart = useRef({ x: 0, y: 0 });
   const panDeltaRef = useRef({ dx: 0, dy: 0 });
+  const panFlushFrameRef = useRef<number>(0);
   const lastSpacePressTime = useRef<number>(0);
   
   // Edge Push Loop
   const edgePushFrameRef = useRef<number>(0);
 
-  useEffect(() => {
-    let frameId: number;
-    const updateLoop = () => {
-      if (panDeltaRef.current.dx !== 0 || panDeltaRef.current.dy !== 0) {
-        panViewport(panDeltaRef.current.dx, panDeltaRef.current.dy);
-        panDeltaRef.current = { dx: 0, dy: 0 };
+  const stopPanFlushLoop = useCallback(() => {
+    if (panFlushFrameRef.current) {
+      cancelAnimationFrame(panFlushFrameRef.current);
+      panFlushFrameRef.current = 0;
+    }
+  }, []);
+
+  const schedulePanFlushLoop = useCallback(() => {
+    if (panFlushFrameRef.current) {
+      return;
+    }
+
+    const flushPanDelta = () => {
+      panFlushFrameRef.current = 0;
+
+      const { dx, dy } = panDeltaRef.current;
+      if (dx === 0 && dy === 0) {
+        return;
       }
-      frameId = requestAnimationFrame(updateLoop);
+
+      panViewport(dx, dy);
+      panDeltaRef.current = { dx: 0, dy: 0 };
     };
-    frameId = requestAnimationFrame(updateLoop);
-    return () => cancelAnimationFrame(frameId);
+
+    panFlushFrameRef.current = requestAnimationFrame(flushPanDelta);
   }, [panViewport]);
+
+  useEffect(() => {
+    return () => {
+      stopPanFlushLoop();
+    };
+  }, [stopPanFlushLoop]);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -187,6 +208,7 @@ export const Canvas: React.FC = () => {
           panDeltaRef.current.dx -= dx;
           panDeltaRef.current.dy -= dy;
           panStart.current = { x: e.clientX, y: e.clientY };
+          schedulePanFlushLoop();
           return;
       }
 
@@ -356,6 +378,9 @@ export const Canvas: React.FC = () => {
   const handleGlobalUp = useCallback((e: React.MouseEvent | MouseEvent) => {
       if (isPanning.current) {
           isPanning.current = false;
+          if (panDeltaRef.current.dx === 0 && panDeltaRef.current.dy === 0) {
+            stopPanFlushLoop();
+          }
           return;
       }
 
@@ -409,7 +434,7 @@ export const Canvas: React.FC = () => {
                setSelectedIds(newSelectedIds);
            }
       }
-  }, [setSelectedIds]);
+  }, [setSelectedIds, stopPanFlushLoop]);
 
   // Global Mouse Up & Blur Handler to prevent sticky drag
   useEffect(() => {
@@ -417,6 +442,9 @@ export const Canvas: React.FC = () => {
       const handleWindowBlur = () => {
           isPanning.current = false;
           isSelecting.current = false;
+          panDeltaRef.current = { dx: 0, dy: 0 };
+          stopPanFlushLoop();
+          setEdgePush({ top: false, bottom: false, left: false, right: false });
           if (selectionBoxRef.current) {
               selectionBoxRef.current.style.display = 'none';
           }
@@ -429,7 +457,7 @@ export const Canvas: React.FC = () => {
           window.removeEventListener('mouseup', handleWindowUp);
           window.removeEventListener('blur', handleWindowBlur);
       };
-  }, [handleGlobalUp]);
+  }, [handleGlobalUp, setEdgePush, stopPanFlushLoop]);
 
   if (!isLoaded) return null;
 
