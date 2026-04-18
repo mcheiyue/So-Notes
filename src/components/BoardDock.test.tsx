@@ -41,6 +41,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
   const getSettingsButton = () => container.querySelector('button[aria-label="打开设置"]');
   const getImportFeedback = () => container.querySelector('[data-testid="board-import-feedback"]');
+  const getSaveFeedback = () => container.querySelector('[data-testid="board-save-feedback"]');
 
   const renderBoardDock = async () => {
     await act(async () => {
@@ -66,6 +67,10 @@ describe('BoardDock v1.2.4 最小修复', () => {
       isDockVisible: true,
       viewMode: 'BOARD',
       config: { ...useStore.getState().config, themeMode: 'system' },
+      saveStatus: 'idle',
+      saveError: null,
+      isSaving: false,
+      lastSavedAt: null,
       switchBoard: vi.fn(),
       createBoard: vi.fn(),
       deleteBoard: vi.fn(),
@@ -93,6 +98,9 @@ describe('BoardDock v1.2.4 最小修复', () => {
   });
 
   it('保持共享浮层层级合同顺序稳定', () => {
+    expect(Z_INDEX.NOTE_DRAGGING).toBeLessThan(Z_INDEX.BOARD_BADGE);
+    expect(Z_INDEX.BOARD_BADGE).toBeLessThan(Z_INDEX.PIN_FAB);
+    expect(Z_INDEX.PIN_FAB).toBeLessThan(Z_INDEX.MINIMAP);
     expect(Z_INDEX.MINIMAP).toBeLessThan(Z_INDEX.DOCK_BACKDROP);
     expect(Z_INDEX.DOCK_BACKDROP).toBeLessThan(Z_INDEX.DOCK);
     expect(Z_INDEX.DOCK).toBeLessThan(Z_INDEX.TOOLTIP);
@@ -235,6 +243,24 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(importFromFile).toHaveBeenCalledTimes(1);
     expect(findButtonByText('恢复备份')).not.toBeNull();
     expect(feedback?.textContent).toContain('导入成功。');
+    expect(getSaveFeedback()?.textContent).toContain('等待保存');
+  });
+
+  it('保存中状态显示为保存中', async () => {
+    useStore.setState({ saveStatus: 'saving', isSaving: true });
+
+    await openDataSettings();
+
+    expect(getSaveFeedback()?.textContent).toContain('保存中...');
+  });
+
+  it('保存失败状态显示失败文案与错误详情', async () => {
+    useStore.setState({ saveStatus: 'error', isSaving: false, saveError: '磁盘权限不足' });
+
+    await openDataSettings();
+
+    expect(getSaveFeedback()?.textContent).toContain('保存失败');
+    expect(getSaveFeedback()?.textContent).toContain('磁盘权限不足');
   });
 
   it('取消恢复时显示取消反馈', async () => {

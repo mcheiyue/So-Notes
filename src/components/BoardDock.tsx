@@ -52,7 +52,8 @@ export const BoardDock = () => {
     viewMode, setViewMode, 
     clearSelection,
     exportAll, importFromFile,
-    config, setThemeMode
+    config, setThemeMode,
+    saveStatus, isSaving, saveError, lastSavedAt
   } = store;
   const [isInputMode, setIsInputMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -146,6 +147,16 @@ export const BoardDock = () => {
     ? formatImportHighlights(importFeedback.summary)
     : [];
   const importFeedbackClassName = importFeedback?.status === 'error'
+    ? 'mx-3 mt-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-600 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-400'
+    : 'mx-3 mt-2 rounded-md border border-border-subtle bg-secondary-bg/70 px-3 py-2 text-xs leading-5 text-text-secondary';
+  const saveStatusText = isSaving || saveStatus === 'saving'
+    ? '保存中...'
+    : saveStatus === 'error'
+      ? '保存失败'
+      : saveStatus === 'saved'
+        ? `已保存 ${lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString('zh-CN', { hour12: false }) : ''}`.trim()
+        : '等待保存';
+  const saveStatusClassName = saveStatus === 'error'
     ? 'mx-3 mt-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-600 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-400'
     : 'mx-3 mt-2 rounded-md border border-border-subtle bg-secondary-bg/70 px-3 py-2 text-xs leading-5 text-text-secondary';
 
@@ -485,6 +496,20 @@ export const BoardDock = () => {
                                 )}
                             </div>
                         )}
+
+                        <div
+                            data-testid="board-save-feedback"
+                            role={saveStatus === 'error' ? 'alert' : 'status'}
+                            aria-live="polite"
+                            className={saveStatusClassName}
+                        >
+                            <p className={cn('font-medium', saveStatus === 'error' ? 'text-current' : 'text-text-primary')}>
+                                {saveStatusText}
+                            </p>
+                            {saveStatus === 'error' && saveError && (
+                                <p className="mt-1 text-[11px] leading-4 opacity-90">{saveError}</p>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>
