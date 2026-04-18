@@ -11,6 +11,7 @@ import { MiniMap } from "./components/MiniMap";
 import ShortcutsManager from "./components/ShortcutsManager";
 import { Spotlight } from "./components/Spotlight";
 import { WindowShell, WindowShellContentRect } from "./components/WindowShell";
+import { Z_INDEX } from "./constants/layout";
 
 function App() {
   const isMouseDownRef = useRef(false);
@@ -64,8 +65,21 @@ function App() {
         useStore.getState().setViewportPosition(0, 0);
     });
 
+    const unlistenPin = listen<boolean>('pin-state-changed', (event) => {
+      useStore.getState().setPinned(event.payload);
+    });
+
+    invoke<boolean>('get_pin_mode')
+      .then((pinned) => {
+        useStore.getState().setPinned(pinned);
+      })
+      .catch((error) => {
+        console.warn('Failed to sync pin mode on startup:', error);
+      });
+
     return () => {
       unlistenReset.then(f => f());
+      unlistenPin.then(f => f());
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('blur', handleBlur);
@@ -77,7 +91,7 @@ function App() {
     <>
       {viewMode === 'BOARD' && (
         <>
-          <div className="pointer-events-none absolute top-8 left-4 z-[50]">
+          <div className="pointer-events-none absolute top-8 left-4" style={{ zIndex: Z_INDEX.BOARD_BADGE }}>
             <BoardBadge />
           </div>
 

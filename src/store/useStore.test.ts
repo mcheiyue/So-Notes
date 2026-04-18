@@ -20,6 +20,7 @@ vi.mock('../utils/fileSystem', () => ({
 import { useStore } from './useStore';
 import { db } from './db';
 import { openFile } from '../utils/fileSystem';
+import { invoke } from '@tauri-apps/api/core';
 
 const flushMicrotasks = async () => {
   await Promise.resolve();
@@ -542,5 +543,57 @@ describe('useStore 导入契约', () => {
     expect(state.currentBoardId).toBe(originalState.currentBoardId);
     expect(state.selectedIds).toEqual(['keep-me']);
     expect(db.saveWAL).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('useStore 保存状态可见性契约', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      notes: [],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+  });
+
+  it('保存成功后写入 saved 状态并记录 lastSavedAt', async () => {
+    vi.mocked(db.saveWAL).mockResolvedValueOnce(true);
+    vi.mocked(invoke).mockResolvedValueOnce(null);
+
+    const saved = await useStore.getState().saveToDisk();
+    const state = useStore.getState();
+
+    expect(saved).toBe(true);
+    expect(state.isSaving).toBe(false);
+    expect(state.saveStatus).toBe('saved');
+    expect(state.saveError).toBeNull();
+    expect(typeof state.lastSavedAt).toBe('number');
+  });
+
+  it('WAL 保存失败时写入 error 状态与错误文案', async () => {
+    vi.mocked(db.saveWAL).mockResolvedValueOnce(false);
+
+    const saved = await useStore.getState().saveToDisk();
+    const state = useStore.getState();
+
+    expect(saved).toBe(false);
+    expect(state.isSaving).toBe(false);
+    expect(state.saveStatus).toBe('error');
+    expect(state.saveError).toBe('写入本地缓存失败，未保存到磁盘。');
+  });
+
+  it('磁盘写入异常时写入 error 状态并透传错误消息', async () => {
+    vi.mocked(db.saveWAL).mockResolvedValueOnce(true);
+    vi.mocked(invoke).mockRejectedValueOnce(new Error('磁盘写入失败'));
+
+    const saved = await useStore.getState().saveToDisk();
+    const state = useStore.getState();
+
+    expect(saved).toBe(false);
+    expect(state.isSaving).toBe(false);
+    expect(state.saveStatus).toBe('error');
+    expect(state.saveError).toBe('磁盘写入失败');
   });
 });

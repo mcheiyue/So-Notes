@@ -2,23 +2,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import type React from 'react';
+import { useStore } from '../store/useStore';
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
-const { invokeMock, listenMock } = vi.hoisted(() => ({
+const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(async () => null),
-  listenMock: vi.fn(async (_event: string, handler: (event: { payload: boolean }) => void) => {
-    handler({ payload: true });
-    return vi.fn();
-  }),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }));
 
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: listenMock,
+vi.mock('../store/db', () => ({
+  db: {
+    saveWAL: vi.fn(async () => undefined),
+    loadWAL: vi.fn(async () => undefined),
+    clearWAL: vi.fn(async () => undefined),
+  },
+}));
+
+vi.mock('../utils/fileSystem', () => ({
+  saveFile: vi.fn(async () => true),
+  openFile: vi.fn(async () => null),
 }));
 
 describe('PinFab WindowShell 浮层交互合同', () => {
@@ -34,7 +40,8 @@ describe('PinFab WindowShell 浮层交互合同', () => {
 
   beforeEach(() => {
     invokeMock.mockClear();
-    listenMock.mockClear();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({ isPinned: true });
 
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -55,9 +62,18 @@ describe('PinFab WindowShell 浮层交互合同', () => {
 
     const button = container.querySelector('button[title="取消钉住 (Unpin)"]') as HTMLButtonElement | null;
 
-    expect(listenMock).toHaveBeenCalledWith('pin-state-changed', expect.any(Function));
     expect(button).not.toBeNull();
     expect(button?.className).toContain('pointer-events-auto');
+  });
+
+  it('未钉住时不渲染按钮', async () => {
+    const { PinFab } = await import('./PinFab');
+    useStore.setState({ isPinned: false });
+
+    await renderPinFab(<PinFab />);
+
+    const button = container.querySelector('button[title="取消钉住 (Unpin)"]') as HTMLButtonElement | null;
+    expect(button).toBeNull();
   });
 
   it('保持点击与双击的传播保护，并继续调用前端 unpin', async () => {

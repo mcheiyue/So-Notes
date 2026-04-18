@@ -20,6 +20,11 @@ fn set_pin_mode(state: tauri::State<AppState>, pinned: bool) {
     }
 }
 
+#[tauri::command]
+fn get_pin_mode(state: tauri::State<AppState>) -> bool {
+    state.is_pinned.lock().map(|p| *p).unwrap_or(false)
+}
+
 // Helper to get current millis
 fn now_millis() -> u128 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -303,6 +308,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             set_pin_mode,
+            get_pin_mode,
             save_content,
             load_content,
             check_hide_on_leave,

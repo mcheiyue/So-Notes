@@ -2,12 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
+const { invokeMock, listenMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn(async (command: string) => {
+    if (command === 'get_pin_mode') {
+      return false;
+    }
+    return null;
+  }),
+  listenMock: vi.fn(async (..._args: unknown[]) => vi.fn()),
+}));
+
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(async () => null),
+  invoke: invokeMock,
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn(async () => vi.fn()),
+  listen: listenMock,
 }));
 
 vi.mock('./store/db', () => ({
@@ -61,6 +71,7 @@ import { useStore } from './store/useStore';
 describe('App WindowShell 组合契约', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let resizeObserverCallback: ResizeObserverCallback | null = null;
 
   const renderApp = async () => {
     await act(async () => {
@@ -69,7 +80,20 @@ describe('App WindowShell 组合契约', () => {
   };
 
   beforeEach(() => {
+    invokeMock.mockClear();
+    listenMock.mockClear();
+
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('requestAnimationFrame', vi.fn((cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+
     vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObserverCallback = callback;
+      }
       observe() {}
       disconnect() {}
       unobserve() {}
@@ -79,6 +103,7 @@ describe('App WindowShell 组合契约', () => {
     useStore.setState({
       viewMode: 'BOARD',
       isSpotlightOpen: false,
+      isPinned: false,
     });
 
     container = document.createElement('div');
@@ -91,6 +116,7 @@ describe('App WindowShell 组合契约', () => {
       root.unmount();
     });
     container.remove();
+    resizeObserverCallback = null;
     vi.unstubAllGlobals();
   });
 
@@ -124,6 +150,9 @@ describe('App WindowShell 组合契约', () => {
     expect(shell?.contains(spotlight)).toBe(true);
     expect(shell?.contains(contextMenu)).toBe(false);
     expect(shellOverlay?.className).toContain('pointer-events-none');
+    expect(listenMock).toHaveBeenCalledWith('reset-viewport', expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith('pin-state-changed', expect.any(Function));
+    expect(invokeMock).toHaveBeenCalledWith('get_pin_mode');
   });
 
   it('切换到 TRASH 时保留同一个 WindowShell，只替换内容槽', async () => {
@@ -151,5 +180,81 @@ describe('App WindowShell 组合契约', () => {
     expect(shellAfter?.querySelector('[data-testid="pin-fab"]')).toBeNull();
     expect(shellAfter?.contains(boardDock)).toBe(true);
     expect(shellAfter?.contains(container.querySelector('[data-testid="context-menu"]'))).toBe(false);
+  });
+
+  it('收到 pin-state-changed 事件后写入全局 pinned 状态', async () => {
+    let pinChangedHandler: ((event: { payload: boolean }) => void) | null = null;
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      const [eventName, handler] = args as [string, (event: { payload: boolean }) => void];
+      if (eventName === 'pin-state-changed') {
+        pinChangedHandler = handler;
+      }
+      return vi.fn();
+    });
+
+    await renderApp();
+
+    expect(useStore.getState().isPinned).toBe(false);
+
+    await act(async () => {
+      pinChangedHandler?.({ payload: true });
+    });
+
+    expect(useStore.getState().isPinned).toBe(true);
+  });
+
+  it('WindowShell 内容矩形变化时同步更新 viewport 与 shellRect', async () => {
+    await renderApp();
+
+    const shellContent = container.querySelector('[data-testid="window-shell-content"]') as HTMLDivElement | null;
+    const emptyBoxSizes: ResizeObserverSize[] = [];
+
+    expect(shellContent).not.toBeNull();
+
+    Object.defineProperty(shellContent, 'clientWidth', { configurable: true, value: 360 });
+    Object.defineProperty(shellContent, 'clientHeight', { configurable: true, value: 540 });
+    shellContent!.getBoundingClientRect = vi.fn(() => ({
+      left: 20,
+      top: 30,
+      right: 380,
+      bottom: 570,
+      width: 360,
+      height: 540,
+      x: 20,
+      y: 30,
+      toJSON: () => ({}),
+    } as DOMRect));
+
+    await act(async () => {
+      resizeObserverCallback?.([
+        {
+          contentRect: {
+            width: 360,
+            height: 540,
+            x: 0,
+            y: 0,
+            top: 0,
+            left: 0,
+            right: 360,
+            bottom: 540,
+            toJSON: () => ({}),
+          } as DOMRectReadOnly,
+          target: shellContent!,
+          borderBoxSize: emptyBoxSizes,
+          contentBoxSize: emptyBoxSizes,
+          devicePixelContentBoxSize: emptyBoxSizes,
+        },
+      ], {} as ResizeObserver);
+    });
+
+    const { viewport, shellRect } = useStore.getState();
+    expect(viewport.w).toBe(360);
+    expect(viewport.h).toBe(540);
+    expect(shellRect).toEqual({
+      left: 20,
+      top: 30,
+      right: 380,
+      bottom: 570,
+    });
   });
 });

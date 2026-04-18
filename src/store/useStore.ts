@@ -14,6 +14,8 @@ interface ImportFromFileResult {
   rolledBack?: boolean;
 }
 
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
 interface State {
   notes: Note[];
 
@@ -23,6 +25,10 @@ interface State {
   config: AppConfig;
   isLoaded: boolean;
   isSaving: boolean;
+  saveStatus: SaveStatus;
+  saveError: string | null;
+  lastSavedAt: number | null;
+  isPinned: boolean;
   
   // Sticky Drag State
   stickyDrag: {
@@ -50,6 +56,7 @@ interface State {
   
   // Viewport Actions
   setSpotlightOpen: (isOpen: boolean) => void;
+  setPinned: (pinned: boolean) => void;
   setViewportSize: (w: number, h: number) => void;
   setShellRect: (rect: ShellRectState) => void;
   setPanMode: (isPan: boolean) => void;
@@ -123,12 +130,26 @@ const WAL_THROTTLE = 100;    // 100ms throttle for IndexedDB
 
 let lastWALSave = 0;
 
+const resolveSaveErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return '写入本地存储时发生未知错误。';
+};
+
 export const useStore = create<State>()(
   immer((set, get) => ({
     notes: [],
     config: DEFAULT_CONFIG,
     isLoaded: false,
     isSaving: false,
+    saveStatus: 'idle',
+    saveError: null,
+    lastSavedAt: null,
+    isPinned: false,
     
     stickyDrag: {
         id: null,
@@ -446,6 +467,8 @@ export const useStore = create<State>()(
     setDockVisible: (visible) => set({ isDockVisible: visible }),
 
     setSpotlightOpen: (isOpen) => set({ isSpotlightOpen: isOpen }),
+
+    setPinned: (pinned) => set({ isPinned: pinned }),
 
     addNote: (x, y) => {
       const newNote: Note = {
@@ -1002,19 +1025,22 @@ export const useStore = create<State>()(
 
     saveToDisk: async () => {
       const { notes, config, boards, currentBoardId } = get();
-      set({ isSaving: true });
+      set({ isSaving: true, saveStatus: 'saving', saveError: null });
 
       try {
         const walSaved = await db.saveWAL({ notes, config, boards, currentBoardId });
         if (!walSaved) {
+          set({ saveStatus: 'error', saveError: '写入本地缓存失败，未保存到磁盘。' });
           return false;
         }
 
         const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
         await invoke('save_content', { filename: 'data.json', content: jsonString });
+        set({ saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });
         return true;
       } catch (err) {
         console.error('Disk Save Failed:', err);
+        set({ saveStatus: 'error', saveError: resolveSaveErrorMessage(err) });
         return false;
       } finally {
         set({ isSaving: false });
