@@ -98,4 +98,22 @@ describe('WindowShell 内容区测量契约', () => {
       bottom: 240,
     });
   });
+
+  it('壳层启用 isolate 并固定 content/overlay 分层', async () => {
+    await act(async () => {
+      root.render(
+        <WindowShell overlay={<div data-testid="overlay-child" />}>
+          <div>content</div>
+        </WindowShell>
+      );
+    });
+
+    const shell = container.querySelector('[data-testid="window-shell"]') as HTMLElement | null;
+    const content = container.querySelector('[data-testid="window-shell-content"]') as HTMLElement | null;
+    const overlay = container.querySelector('[data-testid="window-shell-overlay"]') as HTMLElement | null;
+
+    expect(shell?.className).toContain('isolate');
+    expect(content?.className).toContain('z-0');
+    expect(overlay?.className).toContain('z-10');
+  });
 });

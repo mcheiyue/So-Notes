@@ -76,12 +76,12 @@ export const WindowShell: React.FC<WindowShellProps> = ({ children, overlay, onC
   return (
     <section
       data-testid="window-shell"
-      className="fixed inset-0 h-screen w-full overflow-hidden rounded-lg border border-border-subtle bg-primary-bg/90 transition-colors duration-300"
+      className="fixed inset-0 h-screen w-full overflow-hidden rounded-lg border border-border-subtle bg-primary-bg/90 transition-colors duration-300 isolate"
     >
       <div
         ref={contentRef}
         data-testid="window-shell-content"
-        className="absolute inset-0 overflow-hidden rounded-[inherit]"
+        className="absolute inset-0 overflow-hidden rounded-[inherit] z-0"
       >
         {children}
       </div>
@@ -89,7 +89,7 @@ export const WindowShell: React.FC<WindowShellProps> = ({ children, overlay, onC
       {overlay ? (
         <div
           data-testid="window-shell-overlay"
-          className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]"
+          className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit] z-10"
         >
           {overlay}
         </div>

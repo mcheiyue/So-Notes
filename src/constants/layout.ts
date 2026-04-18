@@ -28,6 +28,8 @@ export const Z_INDEX = {
   STICKY_DRAG_MSG: 99999,
 
   // App overlay contract
+  BOARD_BADGE: 100005,
+  PIN_FAB: 100006,
   MINIMAP: 100010,
   DOCK_BACKDROP: 100020,
   DOCK: 100030,
