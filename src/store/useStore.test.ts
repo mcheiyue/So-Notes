@@ -597,3 +597,69 @@ describe('useStore 保存状态可见性契约', () => {
     expect(state.saveError).toBe('磁盘写入失败');
   });
 });
+
+describe('v1.3.0 并发与代际契约', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      notes: [],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+  });
+
+  it('旧 generationId ACK 不得覆盖最新 UI 状态', async () => {
+    vi.mocked(db.saveWAL).mockResolvedValue(true);
+
+    let resolveGen1: () => void;
+    const gen1Promise = new Promise<void>((res) => { resolveGen1 = res; });
+    
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) => {
+      if (args?.generationId === 1) {
+        await gen1Promise;
+      }
+      return null;
+    });
+
+    useStore.getState().saveToDisk(); 
+    await flushMicrotasks(); 
+    
+    const stateAfterGen1 = useStore.getState();
+    expect(stateAfterGen1.saveStatus).toBe('saving');
+    expect(stateAfterGen1.saveGenerationId).toBe(1);
+
+    useStore.getState().saveToDisk(); 
+    await flushMicrotasks();
+    
+    const stateAfterGen2Sent = useStore.getState();
+    expect(stateAfterGen2Sent.saveGenerationId).toBe(2);
+    
+    resolveGen1!();
+    await flushMicrotasks();
+    
+    const finalState = useStore.getState();
+    expect(finalState.saveStatus).toBe('saved');
+    expect(finalState.saveGenerationId).toBe(2);
+  });
+
+  it('高频保存下内存与状态不崩溃', async () => {
+    vi.mocked(db.saveWAL).mockResolvedValue(true);
+    vi.mocked(invoke).mockResolvedValue(null);
+
+    const promises = [];
+    for (let i = 0; i < 20; i++) {
+      promises.push(useStore.getState().saveToDisk());
+    }
+    
+    await Promise.all(promises);
+    await flushMicrotasks();
+
+    const state = useStore.getState();
+    expect(state.saveStatus).toBe('saved');
+    expect(state.isSaving).toBe(false);
+    expect(state.saveGenerationId).toBe(20);
+  });
+});

@@ -28,6 +28,7 @@ interface State {
   saveStatus: SaveStatus;
   saveError: string | null;
   lastSavedAt: number | null;
+  saveGenerationId: number;
   isPinned: boolean;
   
   // Sticky Drag State
@@ -149,6 +150,7 @@ export const useStore = create<State>()(
     saveStatus: 'idle',
     saveError: null,
     lastSavedAt: null,
+    saveGenerationId: 0,
     isPinned: false,
     
     stickyDrag: {
@@ -1024,23 +1026,33 @@ export const useStore = create<State>()(
     },
 
     saveToDisk: async () => {
-      const { notes, config, boards, currentBoardId } = get();
-      set({ isSaving: true, saveStatus: 'saving', saveError: null });
+      const { notes, config, boards, currentBoardId, saveGenerationId } = get();
+      const currentGen = saveGenerationId + 1;
+      set({ isSaving: true, saveStatus: 'saving', saveError: null, saveGenerationId: currentGen });
 
       try {
         const walSaved = await db.saveWAL({ notes, config, boards, currentBoardId });
         if (!walSaved) {
-          set({ saveStatus: 'error', saveError: '写入本地缓存失败，未保存到磁盘。' });
+          // Only update state if this is still the latest generation
+          if (get().saveGenerationId === currentGen) {
+             set({ saveStatus: 'error', saveError: '写入本地缓存失败，未保存到磁盘。' });
+          }
           return false;
         }
 
         const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
-        await invoke('save_content', { filename: 'data.json', content: jsonString });
-        set({ saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });
+        await invoke('save_content', { filename: 'data.json', content: jsonString, generationId: currentGen });
+        
+        // ACK only valid if generation matches
+        if (get().saveGenerationId === currentGen) {
+           set({ saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });
+        }
         return true;
       } catch (err) {
         console.error('Disk Save Failed:', err);
-        set({ saveStatus: 'error', saveError: resolveSaveErrorMessage(err) });
+        if (get().saveGenerationId === currentGen) {
+           set({ saveStatus: 'error', saveError: resolveSaveErrorMessage(err) });
+        }
         return false;
       } finally {
         set({ isSaving: false });

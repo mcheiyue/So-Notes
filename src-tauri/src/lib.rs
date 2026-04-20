@@ -1,16 +1,20 @@
-use std::{fs, sync::Mutex, thread, time::Duration};
+use std::{fs, sync::{Mutex, Arc}};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
+use tokio::sync;
 
-// Define AppState to hold "pinned" and "throttle" status
+mod persistence;
+
 struct AppState {
     is_pinned: Mutex<bool>,
-    last_toggle_time: Mutex<u128>, // SystemTime as u128 millis
-    pin_menu_item: Mutex<Option<MenuItem<tauri::Wry>>>, // Store the menu item
+    last_toggle_time: Mutex<u128>,
+    pin_menu_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    queue: persistence::IntentQueue,
+    rx: Arc<sync::Mutex<sync::mpsc::UnboundedReceiver<persistence::WriteIntent>>>,
 }
 
 #[tauri::command]
@@ -54,62 +58,18 @@ async fn load_content(app: tauri::AppHandle, filename: String) -> Result<String,
 #[tauri::command]
 async fn save_content(
     app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
     filename: String,
     content: String,
+    generation_id: u64,
 ) -> Result<(), String> {
     let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
     let app_dir = doc_dir.join("SoNotes");
-
-    // Ensure directory exists
     if !app_dir.exists() {
         fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
     }
-
     let file_path = app_dir.join(&filename);
-    let tmp_path = app_dir.join(format!("{}.tmp", filename));
-
-    // 1. Try Atomic Write (Write Tmp -> Rename)
-    if let Err(e) = fs::write(&tmp_path, &content) {
-        return fs::write(&file_path, &content)
-            .map_err(|e2| format!("Failed to write tmp: {}. Direct write failed: {}", e, e2));
-    }
-
-    // 2. Retry Rename Logic
-    let max_retries = 5;
-    let mut last_rename_err = String::new();
-    let mut rename_success = false;
-
-    for i in 0..max_retries {
-        match fs::rename(&tmp_path, &file_path) {
-            Ok(_) => {
-                rename_success = true;
-                break;
-            }
-            Err(e) => {
-                last_rename_err = e.to_string();
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(100 * (i + 1) as u64));
-            }
-        }
-    }
-
-    if rename_success {
-        return Ok(());
-    }
-
-    // 3. Fallback: Direct Write
-    match fs::write(&file_path, &content) {
-        Ok(_) => {
-            let _ = fs::remove_file(&tmp_path);
-            Ok(())
-        }
-        Err(e) => Err(format!(
-            "Atomic save failed ({}). Direct save failed: {}",
-            last_rename_err, e
-        )),
-    }
+    state.queue.submit_save(content, file_path, generation_id).await
 }
 
 #[tauri::command]
@@ -153,12 +113,23 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_positioner::init())
-        .manage(AppState {
-            is_pinned: Mutex::new(false),
-            last_toggle_time: Mutex::new(0),
-            pin_menu_item: Mutex::new(None),
-        })
         .setup(|app| {
+            let (queue, rx) = persistence::IntentQueue::new();
+            app.manage(AppState {
+                is_pinned: Mutex::new(false),
+                last_toggle_time: Mutex::new(0),
+                pin_menu_item: Mutex::new(None),
+                queue,
+                rx,
+            });
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = handle.state::<AppState>();
+                let rx = state.rx.clone();
+                persistence::IntentQueue::consumer_loop(rx).await;
+            });
+
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let pin_i = MenuItem::with_id(app, "pin", "钉住窗口", true, None::<&str>)?;
             
