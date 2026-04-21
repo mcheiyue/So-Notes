@@ -560,7 +560,7 @@ describe('useStore 保存状态可见性契约', () => {
 
   it('保存成功后写入 saved 状态并记录 lastSavedAt', async () => {
     vi.mocked(db.saveWAL).mockResolvedValueOnce(true);
-    vi.mocked(invoke).mockResolvedValueOnce(null);
+    vi.mocked(invoke).mockResolvedValueOnce({ success: true, io_duration_ms: 0, retries: 0 });
 
     const saved = await useStore.getState().saveToDisk();
     const state = useStore.getState();
@@ -596,6 +596,19 @@ describe('useStore 保存状态可见性契约', () => {
     expect(state.saveStatus).toBe('error');
     expect(state.saveError).toBe('磁盘写入失败');
   });
+
+  it('Rust 侧返回 success:false 时写入 error 状态', async () => {
+    vi.mocked(db.saveWAL).mockResolvedValueOnce(true);
+    vi.mocked(invoke).mockResolvedValueOnce({ success: false, error: 'File locked by another process', io_duration_ms: 0, retries: 3 });
+
+    const saved = await useStore.getState().saveToDisk();
+    const state = useStore.getState();
+
+    expect(saved).toBe(false);
+    expect(state.isSaving).toBe(false);
+    expect(state.saveStatus).toBe('error');
+    expect(state.saveError).toBe('File locked by another process');
+  });
 });
 
 describe('v1.3.0 并发与代际契约', () => {
@@ -621,7 +634,7 @@ describe('v1.3.0 并发与代际契约', () => {
       if (args?.generationId === 1) {
         await gen1Promise;
       }
-      return null;
+      return { success: true, io_duration_ms: 0, retries: 0 };
     });
 
     useStore.getState().saveToDisk(); 
@@ -647,7 +660,7 @@ describe('v1.3.0 并发与代际契约', () => {
 
   it('高频保存下内存与状态不崩溃', async () => {
     vi.mocked(db.saveWAL).mockResolvedValue(true);
-    vi.mocked(invoke).mockResolvedValue(null);
+    vi.mocked(invoke).mockResolvedValue({ success: true, io_duration_ms: 0, retries: 0 });
 
     const promises = [];
     for (let i = 0; i < 20; i++) {
