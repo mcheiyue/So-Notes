@@ -1032,67 +1032,68 @@ export const useStore = create<State>()(
       set({ isSaving: true, saveStatus: 'saving', saveError: null, saveGenerationId: currentGen });
 
       try {
-        performance.mark('save-serialization-start');
-        const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
-        performance.mark('save-serialization-end');
-        performance.measure('save-serialization', 'save-serialization-start', 'save-serialization-end');
+        // 使用 try-catch-finally 确保 Performance API 清理
+        let serializationDuration = 0;
+        let ipcDuration = 0;
 
-        performance.mark('save-ipc-start');
-        
-        const walSaved = await db.saveWAL({ notes, config, boards, currentBoardId });
-        if (!walSaved) {
-          if (get().saveGenerationId === currentGen) {
-             set({ saveStatus: 'error', saveError: '写入本地缓存失败，未保存到磁盘。' });
+        try {
+          const serializationStart = performance.now();
+          const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
+          serializationDuration = performance.now() - serializationStart;
+
+          const ipcStart = performance.now();
+          const walSaved = await db.saveWAL({ notes, config, boards, currentBoardId });
+          if (!walSaved) {
+            if (get().saveGenerationId === currentGen) {
+               set({ saveStatus: 'error', saveError: '写入本地缓存失败，未保存到磁盘。' });
+            }
+            return false;
           }
-          performance.clearMarks('save-serialization-start');
-          performance.clearMarks('save-serialization-end');
-          performance.clearMeasures('save-serialization');
-          performance.clearMarks('save-ipc-start');
-          return false;
-        }
 
-        const result = await invoke<SaveResult>('save_content', { filename: 'data.json', content: jsonString, generationId: currentGen });
-        
-        performance.mark('save-ipc-end');
-        performance.measure('save-ipc', 'save-ipc-start', 'save-ipc-end');
-        
-        const totalDuration = performance.getEntriesByName('save-ipc')[0]?.duration || 0;
-        const ioDuration = result?.io_duration_ms || 0;
-        const ipcOverhead = totalDuration - ioDuration;
-        
-        console.log(`[Save] 总耗时: ${totalDuration.toFixed(2)}ms, Rust I/O: ${ioDuration}ms, IPC开销: ${ipcOverhead.toFixed(2)}ms`);
-        
-        diagnostics.updateMetrics({ lastSaveDuration: Math.round(totalDuration) });
-        if (totalDuration > 500) {
-          diagnostics.recordSlowPath('数据落盘 (IPC+IO)', totalDuration);
+          const result = await invoke<SaveResult>('save_content', { filename: 'data.json', content: jsonString, generationId: currentGen });
+          ipcDuration = performance.now() - ipcStart;
+          const ioDuration = result?.io_duration_ms || 0;
+
+          // 检查 Rust 侧写入结果（WriteAck.success 可能为 false）
+          if (!result?.success) {
+            const errorMsg = result?.error || '磁盘写入失败';
+            if (import.meta.env.DEV) {
+              console.warn(`[Save] Rust 写入失败: ${errorMsg}, 重试: ${result?.retries || 0}`);
+            }
+            if (get().saveGenerationId === currentGen) {
+               set({ saveStatus: 'error', saveError: errorMsg });
+            }
+            return false;
+          }
+
+          if (import.meta.env.DEV) {
+            console.log(`[Save] 序列化: ${serializationDuration.toFixed(2)}ms, IPC+IO: ${ipcDuration.toFixed(2)}ms, Rust I/O: ${ioDuration}ms`);
+          }
+
+          diagnostics.updateMetrics({ lastSaveDuration: Math.round(ipcDuration) });
+          if (ipcDuration > 500) {
+            diagnostics.recordSlowPath('数据落盘 (IPC+IO)', ipcDuration);
+          }
+
+          if (get().saveGenerationId === currentGen) {
+             set({ saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });
+          }
+
+          return true;
+        } finally {
+          // 确保 Performance Timeline 清理（如果有使用 User Timing API）
+          performance.clearMarks?.('save-serialization-start');
+          performance.clearMarks?.('save-serialization-end');
+          performance.clearMeasures?.('save-serialization');
+          performance.clearMarks?.('save-ipc-start');
+          performance.clearMarks?.('save-ipc-end');
+          performance.clearMeasures?.('save-ipc');
         }
-        
-        if (get().saveGenerationId === currentGen) {
-           set({ saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });
-        }
-        
-        // 清理 Performance Timeline
-        performance.clearMarks('save-serialization-start');
-        performance.clearMarks('save-serialization-end');
-        performance.clearMeasures('save-serialization');
-        performance.clearMarks('save-ipc-start');
-        performance.clearMarks('save-ipc-end');
-        performance.clearMeasures('save-ipc');
-        
-        return true;
       } catch (err) {
         console.error('Disk Save Failed:', err);
         if (get().saveGenerationId === currentGen) {
            set({ saveStatus: 'error', saveError: resolveSaveErrorMessage(err) });
         }
-        
-        performance.clearMarks('save-serialization-start');
-        performance.clearMarks('save-serialization-end');
-        performance.clearMeasures('save-serialization');
-        performance.clearMarks('save-ipc-start');
-        performance.clearMarks('save-ipc-end');
-        performance.clearMeasures('save-ipc');
-        
         return false;
       } finally {
         set({ isSaving: false });
