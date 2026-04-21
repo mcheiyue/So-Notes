@@ -5,6 +5,7 @@ import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuS
 import { db } from './db';
 import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
+import { diagnostics } from '../utils/diagnostics';
 
 interface ImportFromFileResult {
   status: 'cancelled' | 'success' | 'error';
@@ -1060,6 +1061,11 @@ export const useStore = create<State>()(
         const ipcOverhead = totalDuration - ioDuration;
         
         console.log(`[Save] 总耗时: ${totalDuration.toFixed(2)}ms, Rust I/O: ${ioDuration}ms, IPC开销: ${ipcOverhead.toFixed(2)}ms`);
+        
+        diagnostics.updateMetrics({ lastSaveDuration: Math.round(totalDuration) });
+        if (totalDuration > 500) {
+          diagnostics.recordSlowPath('数据落盘 (IPC+IO)', totalDuration);
+        }
         
         if (get().saveGenerationId === currentGen) {
            set({ saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });

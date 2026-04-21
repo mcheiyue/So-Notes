@@ -10,6 +10,7 @@ interface MetricsData {
   selectedNotes: number;
   trashNotes: number;
   lastSaveDuration: number;
+  lastRenderDuration: number;
   lastSearchDuration: number;
   lastInitDuration: number;
   fps: number;
@@ -24,6 +25,7 @@ export class DiagnosticsCollector {
     selectedNotes: 0,
     trashNotes: 0,
     lastSaveDuration: 0,
+    lastRenderDuration: 0,
     lastSearchDuration: 0,
     lastInitDuration: 0,
     fps: 60,

@@ -1,8 +1,9 @@
-import React, { useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useRef, useEffect, useCallback, useMemo, Profiler } from "react";
 import { useStore } from "../store/useStore";
 import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
+import { diagnostics } from "../utils/diagnostics";
 
 const VIEWPORT_BUFFER = 500;
 const NOTE_WIDTH = 224;
@@ -31,9 +32,9 @@ const isBlankCanvasTarget = (target: EventTarget | null): boolean => {
 };
 
 export const Canvas: React.FC = () => {
-  const { 
-    notes, currentBoardId, addNote, init, isLoaded, 
-    stickyDrag, setStickyDrag, moveNote, setContextMenu, 
+  const {
+    notes, currentBoardId, addNote, init, isLoaded,
+    stickyDrag, setStickyDrag, moveNote, setContextMenu,
     setSelectedIds, selectedIds, moveSelectedNotes, clearSelection, finalizeLayoutChange,
     interaction, viewport, setPanMode, panViewport, setViewportPosition, setEdgePush
   } = useStore();
@@ -64,6 +65,7 @@ export const Canvas: React.FC = () => {
       );
     });
   }, [notes, currentBoardId, throttledViewportRect]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const scale = 1;
 
@@ -589,5 +591,24 @@ export const Canvas: React.FC = () => {
         </div>
       )}
     </section>
+  );
+};
+
+// Wrapped Canvas with Profiler
+export const CanvasWithProfiler: React.FC = () => {
+  const handleProfilerRender: React.ProfilerOnRenderCallback = useCallback(
+    (_id, phase, actualDuration) => {
+      diagnostics.updateMetrics({ lastRenderDuration: Math.round(actualDuration) });
+      if (actualDuration > 50) {
+        diagnostics.recordSlowPath(`Canvas render (${phase})`, actualDuration);
+      }
+    },
+    []
+  );
+
+  return (
+    <Profiler id="Canvas" onRender={handleProfilerRender}>
+      <Canvas />
+    </Profiler>
   );
 };

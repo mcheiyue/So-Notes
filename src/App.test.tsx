@@ -35,6 +35,15 @@ vi.mock('./utils/fileSystem', () => ({
 
 vi.mock('./components/Canvas', () => ({
   Canvas: () => <div data-testid="canvas" />,
+  CanvasWithProfiler: () => <div data-testid="canvas" />,
+}));
+
+vi.mock('./utils/performance', () => ({
+  useFPSMonitor: () => ({ start: () => {}, stop: () => {} }),
+}));
+
+vi.mock('./utils/diagnostics', () => ({
+  diagnostics: { updateFPS: () => {}, updateNoteStats: () => {}, updateMetrics: () => {}, recordSlowPath: () => {} },
 }));
 
 vi.mock('./components/TrashGrid', () => ({

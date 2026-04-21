@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store/useStore";
-import { Canvas } from "./components/Canvas";
+import { CanvasWithProfiler } from "./components/Canvas";
 import { TrashGrid } from "./components/TrashGrid";
 import { BoardDock } from "./components/BoardDock";
 import { PinFab } from "./components/PinFab";
@@ -12,11 +12,32 @@ import ShortcutsManager from "./components/ShortcutsManager";
 import { Spotlight } from "./components/Spotlight";
 import { WindowShell, WindowShellContentRect } from "./components/WindowShell";
 import { Z_INDEX } from "./constants/layout";
+import { useFPSMonitor } from "./utils/performance";
+import { diagnostics } from "./utils/diagnostics";
 
 function App() {
   const isMouseDownRef = useRef(false);
   const viewMode = useStore(state => state.viewMode);
   const isSpotlightOpen = useStore(state => state.isSpotlightOpen);
+  const notes = useStore(state => state.notes);
+  const currentBoardId = useStore(state => state.currentBoardId);
+  const selectedIds = useStore(state => state.selectedIds);
+
+  const { start: startFPS, stop: stopFPS } = useFPSMonitor();
+
+  useEffect(() => {
+    startFPS((data) => {
+      diagnostics.updateFPS(data.fps, data.jankCount);
+    });
+    return stopFPS;
+  }, [startFPS, stopFPS]);
+
+  useEffect(() => {
+    const currentBoardNotes = notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length;
+    const trashNotes = notes.filter(n => n.deletedAt).length;
+    diagnostics.updateNoteStats(notes.length, currentBoardNotes, selectedIds.length, trashNotes);
+  }, [notes, currentBoardId, selectedIds]);
+
   const syncViewportToShell = useCallback((rect: WindowShellContentRect) => {
     const nextWidth = Math.max(0, rect.width);
     const nextHeight = Math.max(0, rect.height);
@@ -108,7 +129,7 @@ function App() {
   return (
     <>
       <WindowShell overlay={shellOverlay} onContentRectChange={syncViewportToShell}>
-        {viewMode === 'BOARD' ? <Canvas /> : <TrashGrid />}
+        {viewMode === 'BOARD' ? <CanvasWithProfiler /> : <TrashGrid />}
       </WindowShell>
 
       <ContextMenu />

@@ -67,6 +67,7 @@ export const BoardDock = () => {
   const [editingBoardId, setEditingBoardId] = useState<string | null>(null);
   const [reorderId, setReorderId] = useState<string | null>(null);
   const [importFeedback, setImportFeedback] = useState<ImportFeedback | null>(null);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -131,8 +132,18 @@ export const BoardDock = () => {
   }, [showSettings]);
 
   const onExportClick = async () => {
-    await exportAll();
-    setShowSettings(false);
+    try {
+      setExportStatus('正在导出...');
+      await exportAll();
+      setExportStatus('导出成功');
+      setTimeout(() => {
+        setExportStatus(null);
+        setShowSettings(false);
+      }, 1500);
+    } catch {
+      setExportStatus('导出已取消或失败');
+      setTimeout(() => setExportStatus(null), 2000);
+    }
   };
 
   const onImportClick = async () => {
@@ -459,11 +470,17 @@ export const BoardDock = () => {
                             onClick={onImportClick}
                             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
                         >
-                            <Upload className="w-4 h-4 text-text-tertiary" />
-                            <span>恢复备份</span>
-                        </button>
+        <Upload className="w-4 h-4 text-text-tertiary" />
+          <span>恢复备份</span>
+        </button>
 
-                        {importFeedback && (
+        {exportStatus && (
+          <div className="mx-3 mt-2 rounded-md border border-border-subtle bg-secondary-bg/70 px-3 py-2 text-xs leading-5 text-text-secondary">
+            {exportStatus}
+          </div>
+        )}
+
+        {importFeedback && (
                             <div
                                 data-testid="board-import-feedback"
                                 role={importFeedback.status === 'error' ? 'alert' : 'status'}
@@ -512,19 +529,9 @@ export const BoardDock = () => {
                             )}
                         </div>
 
-                        <button
-                            type="button"
-                            onClick={() => setSettingsView('DATA')}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
-                        >
-                            <Database className="w-4 h-4 text-text-tertiary" />
-                            <span>数据管理</span>
-                            <ChevronRight className="w-4 h-4 ml-auto text-text-tertiary" />
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() => setSettingsView('DIAGNOSTICS')}
+        <button
+          type="button"
+          onClick={() => setSettingsView('DIAGNOSTICS')}
                             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
                         >
                             <Activity className="w-4 h-4 text-text-tertiary" />
