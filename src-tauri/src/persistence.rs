@@ -7,7 +7,10 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 #[derive(Clone, Debug, Serialize)]
 pub struct WriteAck {
     pub generation_id: u64,
-    pub result: Result<(), String>,
+    pub success: bool,
+    pub error: Option<String>,
+    pub io_duration_ms: u64,
+    pub retries: u32,
 }
 
 pub enum WriteIntent {
@@ -41,7 +44,7 @@ impl IntentQueue {
         (Self { tx }, Arc::new(Mutex::new(rx)))
     }
 
-    pub async fn submit_save(&self, content: String, path: PathBuf, generation_id: u64) -> Result<(), String> {
+    pub async fn submit_save(&self, content: String, path: PathBuf, generation_id: u64) -> Result<WriteAck, String> {
         let (ack_tx, ack_rx) = oneshot::channel();
         self.tx
             .send(WriteIntent::Save {
@@ -53,12 +56,12 @@ impl IntentQueue {
             .map_err(|_| "Queue closed".to_string())?;
         
         match ack_rx.await {
-            Ok(ack) => ack.result,
+            Ok(ack) => Ok(ack),
             Err(_) => Err("Ack channel closed".to_string()),
         }
     }
 
-    pub async fn submit_import(&self, content: String, path: PathBuf, generation_id: u64) -> Result<(), String> {
+    pub async fn submit_import(&self, content: String, path: PathBuf, generation_id: u64) -> Result<WriteAck, String> {
         let (ack_tx, ack_rx) = oneshot::channel();
         self.tx
             .send(WriteIntent::Import {
@@ -70,7 +73,7 @@ impl IntentQueue {
             .map_err(|_| "Queue closed".to_string())?;
         
         match ack_rx.await {
-            Ok(ack) => ack.result,
+            Ok(ack) => Ok(ack),
             Err(_) => Err("Ack channel closed".to_string()),
         }
     }
@@ -116,7 +119,10 @@ impl IntentQueue {
                     }
                     
                     let last_save_idx = j - 1;
-                    let mut save_result = Ok(());
+                    let mut save_success = true;
+                    let mut save_error: Option<String> = None;
+                    let mut save_io_duration_ms: u64 = 0;
+                    let mut save_retries: u32 = 0;
                     
                     // Execute the last save in the batch
                     let intent = &mut owned_batch[last_save_idx];
@@ -124,21 +130,33 @@ impl IntentQueue {
                         let c = std::mem::take(content);
                         let p = path.clone();
                         let g = *generation_id;
-                        let res = Self::write_content(p, c).await;
-                        save_result = res.clone();
-                        
+                        let (res, io_duration_ms, retries) = Self::write_content(p, c).await;
+                        save_success = res.is_ok();
+                        save_error = res.err();
+                        save_io_duration_ms = io_duration_ms;
+                        save_retries = retries;
+                         
                         let ack_tx = std::mem::replace(ack, oneshot::channel().0);
-                        let _ = ack_tx.send(WriteAck { generation_id: g, result: res });
+                        let _ = ack_tx.send(WriteAck {
+                            generation_id: g,
+                            success: save_success,
+                            error: save_error.clone(),
+                            io_duration_ms: save_io_duration_ms,
+                            retries: save_retries,
+                        });
                     }
-                    
+                     
                     // Acknowledge all others with the result of the last save
                     for k in i..last_save_idx {
                         if let WriteIntent::Save { generation_id, ack, .. } = &mut owned_batch[k] {
                             let g = *generation_id;
                             let ack_tx = std::mem::replace(ack, oneshot::channel().0);
-                            let _ = ack_tx.send(WriteAck { 
-                                generation_id: g, 
-                                result: save_result.clone() 
+                            let _ = ack_tx.send(WriteAck {
+                                generation_id: g,
+                                success: save_success,
+                                error: save_error.clone(),
+                                io_duration_ms: save_io_duration_ms,
+                                retries: save_retries,
                             });
                         }
                     }
@@ -153,7 +171,17 @@ impl IntentQueue {
                             let g = *generation_id;
                             let res = Self::atomic_import(p, c).await;
                             let ack_tx = std::mem::replace(ack, oneshot::channel().0);
-                            let _ = ack_tx.send(WriteAck { generation_id: g, result: res });
+                            let (success, error) = match res {
+                                Ok(()) => (true, None),
+                                Err(e) => (false, Some(e)),
+                            };
+                            let _ = ack_tx.send(WriteAck {
+                                generation_id: g,
+                                success,
+                                error,
+                                io_duration_ms: 0,
+                                retries: 0,
+                            });
                         }
                         WriteIntent::Restore { content, path, generation_id, ack } => {
                             let c = std::mem::take(content);
@@ -161,7 +189,17 @@ impl IntentQueue {
                             let g = *generation_id;
                             let res = Self::atomic_restore(p, c).await;
                             let ack_tx = std::mem::replace(ack, oneshot::channel().0);
-                            let _ = ack_tx.send(WriteAck { generation_id: g, result: res });
+                            let (success, error) = match res {
+                                Ok(()) => (true, None),
+                                Err(e) => (false, Some(e)),
+                            };
+                            let _ = ack_tx.send(WriteAck {
+                                generation_id: g,
+                                success,
+                                error,
+                                io_duration_ms: 0,
+                                retries: 0,
+                            });
                         }
                         _ => unreachable!()
                     }
@@ -171,60 +209,96 @@ impl IntentQueue {
         }
     }
 
-    async fn write_content(path: PathBuf, content: String) -> Result<(), String> {
+    async fn write_content(path: PathBuf, content: String) -> (Result<(), String>, u64, u32) {
         use fs4::fs_std::FileExt;
         use std::fs::OpenOptions;
         use std::io::Write;
-        
+        use std::time::Instant;
+
         let lock_path = path.with_extension("tmp.lock");
         let tmp_path = path.with_extension("tmp");
-        let parent = path.parent().ok_or("Invalid path: no parent")?;
-        
-        tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
-        
-        let lock_file = OpenOptions::new()
+        let parent = match path.parent() {
+            Some(p) => p,
+            None => return (Err("Invalid path: no parent".to_string()), 0, 0),
+        };
+
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            return (Err(e.to_string()), 0, 0);
+        }
+
+        let lock_file = match OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .open(&lock_path)
-            .map_err(|e| format!("Failed to open lock file: {}", e))?;
-            
-        let max_retries = 8;
-        let base_delay_ms = 50;
+        {
+            Ok(f) => f,
+            Err(e) => return (Err(format!("Failed to open lock file: {}", e)), 0, 0),
+        };
+
+        let max_retries: u32 = 8;
+        let base_delay_ms: u64 = 50;
+        let mut retries: u32 = 0;
         for attempt in 0..max_retries {
             if let Err(e) = lock_file.try_lock_exclusive() {
+                retries += 1;
                 let jitter = (rand::random::<u64>() % 20) as u64;
-                let delay = Duration::from_millis((base_delay_ms * (1 << attempt)) + jitter);
+                let delay = Duration::from_millis((base_delay_ms * (1u64 << attempt)) + jitter);
                 tokio::time::sleep(delay).await;
                 if attempt == max_retries - 1 {
-                    return Err(format!("Lock contention exhausted after retries: {}", e));
+                    return (
+                        Err(format!("Lock contention exhausted after retries: {}", e)),
+                        0,
+                        retries,
+                    );
                 }
                 continue;
             }
             break;
         }
-        
-        let mut file = std::fs::File::create(&tmp_path).map_err(|e| e.to_string())?;
-        file.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        
-        std::fs::rename(&tmp_path, &path).map_err(|e| e.to_string())?;
-        
+
+        let io_start = Instant::now();
+
+        let mut file = match std::fs::File::create(&tmp_path) {
+            Ok(f) => f,
+            Err(e) => {
+                drop(lock_file);
+                return (Err(e.to_string()), 0, retries);
+            }
+        };
+        if let Err(e) = file.write_all(content.as_bytes()) {
+            drop(lock_file);
+            return (Err(e.to_string()), 0, retries);
+        }
+        if let Err(e) = file.sync_all() {
+            drop(lock_file);
+            return (Err(e.to_string()), 0, retries);
+        }
+
+        if let Err(e) = std::fs::rename(&tmp_path, &path) {
+            drop(lock_file);
+            return (Err(e.to_string()), 0, retries);
+        }
+
+        let io_duration_ms = io_start.elapsed().as_millis() as u64;
+
         drop(lock_file);
-        Ok(())
+        (Ok(()), io_duration_ms, retries)
     }
 
     async fn atomic_import(path: PathBuf, content: String) -> Result<(), String> {
         let bak_path = path.with_extension("bak");
-        
+
         if tokio::fs::try_exists(&path).await.unwrap_or(false) {
             tokio::fs::copy(&path, &bak_path).await.map_err(|e| e.to_string())?;
         }
-        
-        Self::write_content(path, content).await
+
+        let (res, _, _) = Self::write_content(path, content).await;
+        res
     }
 
     async fn atomic_restore(path: PathBuf, content: String) -> Result<(), String> {
-        Self::write_content(path, content).await
+        let (res, _, _) = Self::write_content(path, content).await;
+        res
     }
 }

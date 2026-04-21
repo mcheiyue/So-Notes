@@ -154,3 +154,10 @@ export const DEFAULT_CONFIG: AppConfig = {
 
 // Board Icons for Random Picker
 export const BOARD_ICONS = ['💡', '🚀', '🎨', '🧸', '📅', '🛒', '🎵', '📚', '💼', '🏠'];
+
+export interface SaveResult {
+  success: boolean;
+  error?: string;
+  io_duration_ms: number;
+  retries: number;
+}

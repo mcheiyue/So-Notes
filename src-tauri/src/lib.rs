@@ -62,7 +62,7 @@ async fn save_content(
     filename: String,
     content: String,
     generation_id: u64,
-) -> Result<(), String> {
+) -> Result<persistence::WriteAck, String> {
     let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
     let app_dir = doc_dir.join("SoNotes");
     if !app_dir.exists() {

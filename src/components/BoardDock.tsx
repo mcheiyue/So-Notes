@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
-import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check } from "lucide-react";
+import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity } from "lucide-react";
 import { Z_INDEX } from "../constants/layout";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 type StoreState = ReturnType<typeof useStore.getState>;
@@ -57,7 +58,7 @@ export const BoardDock = () => {
   } = store;
   const [isInputMode, setIsInputMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsView, setSettingsView] = useState<'MAIN' | 'DATA' | 'THEME'>('MAIN');
+  const [settingsView, setSettingsView] = useState<'MAIN' | 'DATA' | 'THEME' | 'DIAGNOSTICS'>('MAIN');
   const [newBoardName, setNewBoardName] = useState("");
   const [contextMenuBoard, setContextMenuBoard] = useState<{ id: string; name: string; x: number; y: number } | null>(null);
   
@@ -510,6 +511,42 @@ export const BoardDock = () => {
                                 <p className="mt-1 text-[11px] leading-4 opacity-90">{saveError}</p>
                             )}
                         </div>
+
+                        <button
+                            type="button"
+                            onClick={() => setSettingsView('DATA')}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
+                        >
+                            <Database className="w-4 h-4 text-text-tertiary" />
+                            <span>数据管理</span>
+                            <ChevronRight className="w-4 h-4 ml-auto text-text-tertiary" />
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setSettingsView('DIAGNOSTICS')}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
+                        >
+                            <Activity className="w-4 h-4 text-text-tertiary" />
+                            <span>性能诊断</span>
+                            <ChevronRight className="w-4 h-4 ml-auto text-text-tertiary" />
+                        </button>
+                    </div>
+                )}
+
+                {settingsView === 'DIAGNOSTICS' && (
+                    <div className="py-1">
+                        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border-subtle mb-1">
+                            <button
+                                type="button"
+                                onClick={() => setSettingsView('DATA')}
+                                className="p-1 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded text-text-secondary hover:text-text-primary transition-colors"
+                            >
+                                <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <span className="text-xs text-text-tertiary font-medium">性能诊断</span>
+                        </div>
+                        <DiagnosticsPanel />
                     </div>
                 )}
             </div>

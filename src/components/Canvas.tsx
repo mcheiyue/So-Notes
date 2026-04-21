@@ -1,8 +1,12 @@
-import React, { useRef, useEffect, useCallback } from "react";
+import React, { useRef, useEffect, useCallback, useMemo } from "react";
 import { useStore } from "../store/useStore";
 import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
+
+const VIEWPORT_BUFFER = 500;
+const NOTE_WIDTH = 224;
+const NOTE_HEIGHT = 160;
 
 const CANVAS_NON_BLANK_SELECTOR = [
   '[data-canvas-hit="blocked"]',
@@ -33,6 +37,33 @@ export const Canvas: React.FC = () => {
     setSelectedIds, selectedIds, moveSelectedNotes, clearSelection, finalizeLayoutChange,
     interaction, viewport, setPanMode, panViewport, setViewportPosition, setEdgePush
   } = useStore();
+
+  const throttledViewportX = Math.floor(viewport.x / 100) * 100;
+  const throttledViewportY = Math.floor(viewport.y / 100) * 100;
+
+  const throttledViewportRect = useMemo(() => ({
+    x: throttledViewportX - VIEWPORT_BUFFER,
+    y: throttledViewportY - VIEWPORT_BUFFER,
+    w: viewport.w + VIEWPORT_BUFFER * 2,
+    h: viewport.h + VIEWPORT_BUFFER * 2,
+  }), [
+    throttledViewportX,
+    throttledViewportY,
+    viewport.w,
+    viewport.h
+  ]);
+
+  const visibleNotes = useMemo(() => {
+    return notes.filter(note => {
+      if (note.boardId !== currentBoardId || note.deletedAt) return false;
+      return (
+        note.x >= throttledViewportRect.x - NOTE_WIDTH &&
+        note.x <= throttledViewportRect.x + throttledViewportRect.w &&
+        note.y >= throttledViewportRect.y - NOTE_HEIGHT &&
+        note.y <= throttledViewportRect.y + throttledViewportRect.h
+      );
+    });
+  }, [notes, currentBoardId, throttledViewportRect]);
   const containerRef = useRef<HTMLDivElement>(null);
   const scale = 1;
 
@@ -511,13 +542,22 @@ export const Canvas: React.FC = () => {
         style={{ display: 'none', zIndex: Z_INDEX.SELECTION_BOX }}
       />
       
-      {notes
-        .filter(note => note.boardId === currentBoardId && !note.deletedAt) // Filter by current board and not deleted
-        .map((note) => (
+      {visibleNotes.map((note) => (
         <NoteCard key={note.id} id={note.id} scale={scale} /> 
       ))}
       
-      {notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length === 0 && (
+      {visibleNotes.length === 0 && notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length > 0 && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
+          <p className="text-lg font-medium text-text-tertiary">
+            当前视口外有 {notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length} 个便签
+          </p>
+          <p className="text-xs text-text-tertiary mt-1">
+            拖拽或平移查看
+          </p>
+        </div>
+      )}
+      
+      {visibleNotes.length === 0 && notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
           <p className="text-lg font-medium text-text-tertiary">
             {currentBoardId === 'default' ? '双击空白处新建便签' : '当前看板为空'}

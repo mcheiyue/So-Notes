@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState } from './types';
+import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult } from './types';
 import { db } from './db';
 import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
@@ -1031,28 +1031,62 @@ export const useStore = create<State>()(
       set({ isSaving: true, saveStatus: 'saving', saveError: null, saveGenerationId: currentGen });
 
       try {
+        performance.mark('save-serialization-start');
+        const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
+        performance.mark('save-serialization-end');
+        performance.measure('save-serialization', 'save-serialization-start', 'save-serialization-end');
+
+        performance.mark('save-ipc-start');
+        
         const walSaved = await db.saveWAL({ notes, config, boards, currentBoardId });
         if (!walSaved) {
-          // Only update state if this is still the latest generation
           if (get().saveGenerationId === currentGen) {
              set({ saveStatus: 'error', saveError: '写入本地缓存失败，未保存到磁盘。' });
           }
+          performance.clearMarks('save-serialization-start');
+          performance.clearMarks('save-serialization-end');
+          performance.clearMeasures('save-serialization');
+          performance.clearMarks('save-ipc-start');
           return false;
         }
 
-        const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
-        await invoke('save_content', { filename: 'data.json', content: jsonString, generationId: currentGen });
+        const result = await invoke<SaveResult>('save_content', { filename: 'data.json', content: jsonString, generationId: currentGen });
         
-        // ACK only valid if generation matches
+        performance.mark('save-ipc-end');
+        performance.measure('save-ipc', 'save-ipc-start', 'save-ipc-end');
+        
+        const totalDuration = performance.getEntriesByName('save-ipc')[0]?.duration || 0;
+        const ioDuration = result?.io_duration_ms || 0;
+        const ipcOverhead = totalDuration - ioDuration;
+        
+        console.log(`[Save] 总耗时: ${totalDuration.toFixed(2)}ms, Rust I/O: ${ioDuration}ms, IPC开销: ${ipcOverhead.toFixed(2)}ms`);
+        
         if (get().saveGenerationId === currentGen) {
            set({ saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });
         }
+        
+        // 清理 Performance Timeline
+        performance.clearMarks('save-serialization-start');
+        performance.clearMarks('save-serialization-end');
+        performance.clearMeasures('save-serialization');
+        performance.clearMarks('save-ipc-start');
+        performance.clearMarks('save-ipc-end');
+        performance.clearMeasures('save-ipc');
+        
         return true;
       } catch (err) {
         console.error('Disk Save Failed:', err);
         if (get().saveGenerationId === currentGen) {
            set({ saveStatus: 'error', saveError: resolveSaveErrorMessage(err) });
         }
+        
+        performance.clearMarks('save-serialization-start');
+        performance.clearMarks('save-serialization-end');
+        performance.clearMeasures('save-serialization');
+        performance.clearMarks('save-ipc-start');
+        performance.clearMarks('save-ipc-end');
+        performance.clearMeasures('save-ipc');
+        
         return false;
       } finally {
         set({ isSaving: false });
