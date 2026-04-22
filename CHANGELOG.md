@@ -2,17 +2,17 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
-## [v1.3.1] - 2026-04-21
+## [v1.3.1] - 2026-04-22
 
 ### ✨ 新特性 (Features)
-* **性能基线与诊断 (Performance Baseline & Diagnostics)**
+* **性能基线与诊断**
   > 建立固定规模性能样本（100/500/1000/3000条便签），实现真实渲染耗时测量与性能预算监控，并引入脱离 React 管线的轻量诊断面板。
 
 * **固定规模性能样本**
   > 新增测试数据工厂，支持生成多种场景样本（密集/稀疏/长文本/废纸篓），用于可重复的压测基线。
 
 * **性能预算与监控**
-  > 定义渲染、IPC、交互三大维度预算阈值；使用 React.Profiler 测量真实渲染耗时，User Timing API 拆解 IPC 序列化/传输耗时；支持 FPS 与掉帧监控。
+  > 定义渲染、IPC、交互三大维度预算阈值；使用 React.Profiler 测量真实渲染耗时，`performance.now()` 拆解 IPC 序列化/传输耗时；支持 FPS 与掉帧监控。
 
 * **跨端时钟对齐**
   > Rust 侧自测真实 I/O 耗时并返回前端，支持准确区分 JS 序列化开销与文件系统瓶颈。
@@ -20,9 +20,29 @@
 * **轻量诊断面板**
   > 完全脱离 React 渲染管线的诊断组件，使用 memo 锁死 + ref 直接操作避免性能反噬；实时展示便签统计、保存耗时、FPS 与慢路径告警。
 
-### 🚀 优化 (Optimizations)
+* **Profiling 构建隔离**
+  > 新增 `dev:profiling`/`build:profiling` 脚本，通过条件别名切换 React profiling 模式，生产构建默认不开启以保持性能。
+
+### 🚀 优化
 * **画布虚拟化节流**
   > 引入视口外圈缓冲（500px）与坐标百位取整，大幅降低平移场景下的 O(N) 遍历重算频率，保住 60fps 拖拽体验。
+
+### 🐛 问题修复
+* **Performance API 竞态警告**
+  > 用 `performance.now()` 替代 User Timing API 的 mark/measure 机制，消除并发保存时的 "mark does not exist" 警告。
+
+* **诊断面板断线修复**
+  > 接通 FPS 探针、便签统计同步、压测注入入口（`window.__injectTestData`），确保诊断面板数据完整。
+
+* **测试桩与递归修复**
+  > 修正 `CanvasWithProfiler`、FPS 监控、diagnostics 的测试桩，消除 Vitest fake timers 与 requestAnimationFrame 的无限递归。
+
+* **高并发保存状态修复**
+  > finally 中 isSaving 清理加世代校验，防止高并发下旧世代误清 loading 状态；补齐 Rust success:false 分支测试。
+
+### 🧹 清理
+* **移除残留清理代码**
+  > 清理改用 `performance.now()` 后遗留的 `performance.clearMarks` 调用，消除复制粘贴痕迹。
 
 ## [v1.3.0] - 2026-04-20
 
