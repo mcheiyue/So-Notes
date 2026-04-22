@@ -1080,6 +1080,15 @@ export const useStore = create<State>()(
           }
 
           return true;
+        } finally {
+          // 确保 Performance Timeline 清理（如果有使用 User Timing API）
+          performance.clearMarks?.('save-serialization-start');
+          performance.clearMarks?.('save-serialization-end');
+          performance.clearMeasures?.('save-serialization');
+          performance.clearMarks?.('save-ipc-start');
+          performance.clearMarks?.('save-ipc-end');
+          performance.clearMeasures?.('save-ipc');
+        }
       } catch (err) {
         console.error('Disk Save Failed:', err);
         if (get().saveGenerationId === currentGen) {
