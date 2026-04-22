@@ -4,6 +4,7 @@ import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { diagnostics } from "../utils/diagnostics";
+import { useFPSMonitor } from "../utils/performance";
 
 const VIEWPORT_BUFFER = 500;
 const NOTE_WIDTH = 224;
@@ -594,8 +595,11 @@ export const Canvas: React.FC = () => {
   );
 };
 
-// Wrapped Canvas with Profiler
+// Wrapped Canvas with Profiler and FPS Monitor
 export const CanvasWithProfiler: React.FC = () => {
+  // Activate FPS monitoring for the canvas
+  useFPSMonitor();
+
   const handleProfilerRender: React.ProfilerOnRenderCallback = useCallback(
     (_id, phase, actualDuration) => {
       diagnostics.updateMetrics({ lastRenderDuration: Math.round(actualDuration) });

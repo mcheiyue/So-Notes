@@ -93,3 +93,19 @@ export class DiagnosticsCollector {
 }
 
 export const diagnostics = new DiagnosticsCollector();
+
+// Subscribe to Zustand store changes to sync note stats
+// Use dynamic import to avoid circular dependency
+if (typeof window !== 'undefined') {
+  import('../store/useStore').then(({ useStore }) => {
+    useStore.subscribe((state) => {
+      const totalNotes = state.notes.length;
+      const currentBoardNotes = state.notes.filter(
+        (n) => n.boardId === state.currentBoardId && !n.deletedAt
+      ).length;
+      const selectedNotes = state.selectedIds.length;
+      const trashNotes = state.notes.filter((n) => n.deletedAt).length;
+      diagnostics.updateNoteStats(totalNotes, currentBoardNotes, selectedNotes, trashNotes);
+    });
+  });
+}

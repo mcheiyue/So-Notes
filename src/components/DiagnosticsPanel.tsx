@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { diagnostics } from '../utils/diagnostics';
 import DiagnosticsMetric, { DiagnosticsMetricHandle } from './DiagnosticsMetric';
 import { cn } from '../utils/cn';
+import { SAMPLE_PRESETS, generatePresetSample } from '../test/fixtures/sampleData';
+import { useStore } from '../store/useStore';
 
 const UPDATE_INTERVAL = 1000;
 
@@ -14,13 +16,47 @@ export const DiagnosticsPanel: React.FC = () => {
   const lastSearchRef = useRef<DiagnosticsMetricHandle>(null);
   const fpsRef = useRef<DiagnosticsMetricHandle>(null);
   const jankRef = useRef<DiagnosticsMetricHandle>(null);
-  
+
   const [slowPaths, setSlowPaths] = useState<Array<{ name: string; duration: number; timestamp: number }>>([]);
+
+  // Inject test data handler
+  const injectTestData = (presetName: keyof typeof SAMPLE_PRESETS) => {
+    const sampleData = generatePresetSample(presetName);
+    const store = useStore.getState();
+    const existingBoardNames = store.boards.map((b) => b.name);
+
+    // Rename boards to avoid conflicts
+    const renamedBoards = sampleData.boards.map((b, i) => ({
+      ...b,
+      name: existingBoardNames.includes(b.name) ? `${b.name} (测试${i})` : b.name,
+    }));
+
+    // Merge data into store via setState
+    useStore.setState((state) => {
+      // Add boards
+      state.boards.push(...renamedBoards);
+      // Add notes with new board IDs mapping
+      const boardIdMap = new Map<string, string>();
+      sampleData.boards.forEach((oldBoard, i) => {
+        boardIdMap.set(oldBoard.id, renamedBoards[i].id);
+      });
+      const newNotes = sampleData.notes.map((n) => ({
+        ...n,
+        boardId: boardIdMap.get(n.boardId) || state.currentBoardId,
+      }));
+      state.notes.push(...newNotes);
+      // Update maxZ
+      state.config.maxZ = Math.max(state.config.maxZ, state.notes.length + 1);
+    });
+
+    // Trigger save
+    store.saveToDisk();
+  };
 
   useEffect(() => {
     const updateMetrics = () => {
       const metrics = diagnostics.getMetrics();
-      
+
       totalNotesRef.current?.setText(`${metrics.totalNotes} 条`);
       currentBoardNotesRef.current?.setText(`${metrics.currentBoardNotes} 条`);
       selectedNotesRef.current?.setText(`${metrics.selectedNotes} 条`);
@@ -31,10 +67,10 @@ export const DiagnosticsPanel: React.FC = () => {
       jankRef.current?.setText(`${metrics.jankCount}`);
       setSlowPaths([...metrics.slowPaths]);
     };
-    
+
     const interval = setInterval(updateMetrics, UPDATE_INTERVAL);
     updateMetrics();
-    
+
     return () => clearInterval(interval);
   }, []);
 
@@ -63,7 +99,7 @@ export const DiagnosticsPanel: React.FC = () => {
           </div>
         </div>
       </div>
-      
+
       <div className="mb-4">
         <h4 className="text-xs font-medium text-text-secondary uppercase tracking-wider mb-2">
           性能指标
@@ -90,7 +126,7 @@ export const DiagnosticsPanel: React.FC = () => {
           </div>
         </div>
       </div>
-      
+
       {slowPaths.length > 0 && (
         <div className="border-t border-border-subtle pt-3">
           <h4 className="text-xs font-medium text-warning-text uppercase tracking-wider mb-2">
@@ -112,6 +148,42 @@ export const DiagnosticsPanel: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* Test Data Injection */}
+      <div className="border-t border-border-subtle pt-3">
+        <h4 className="text-xs font-medium text-text-secondary uppercase tracking-wider mb-2">
+          压测样本注入
+        </h4>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => injectTestData('NOTES_100')}
+            className="px-2 py-1.5 text-[10px] bg-secondary-bg/70 hover:bg-primary-bg/20 text-text-secondary hover:text-primary border border-border-subtle rounded transition-colors"
+          >
+            注入 100 条
+          </button>
+          <button
+            onClick={() => injectTestData('NOTES_500')}
+            className="px-2 py-1.5 text-[10px] bg-secondary-bg/70 hover:bg-primary-bg/20 text-text-secondary hover:text-primary border border-border-subtle rounded transition-colors"
+          >
+            注入 500 条
+          </button>
+          <button
+            onClick={() => injectTestData('NOTES_1000')}
+            className="px-2 py-1.5 text-[10px] bg-secondary-bg/70 hover:bg-warning-bg/20 text-text-secondary hover:text-warning-text border border-border-subtle rounded transition-colors"
+          >
+            注入 1000 条
+          </button>
+          <button
+            onClick={() => injectTestData('NOTES_3000')}
+            className="px-2 py-1.5 text-[10px] bg-red-50/10 hover:bg-red-100/20 text-red-500 hover:text-red-600 border border-red-200/30 rounded transition-colors"
+          >
+            注入 3000 条
+          </button>
+        </div>
+        <p className="mt-2 text-[10px] text-text-tertiary opacity-70">
+          测试数据将复制当前看板并注入，便于测试视口裁剪性能
+        </p>
+      </div>
     </div>
   );
 };
