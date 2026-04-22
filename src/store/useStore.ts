@@ -1032,54 +1032,49 @@ export const useStore = create<State>()(
       set({ isSaving: true, saveStatus: 'saving', saveError: null, saveGenerationId: currentGen });
 
       try {
-        // 使用 try-catch-finally 确保 Performance API 清理
-        let serializationDuration = 0;
-        let ipcDuration = 0;
+        const serializationStart = performance.now();
+        const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
+        const serializationDuration = performance.now() - serializationStart;
 
-        try {
-          const serializationStart = performance.now();
-          const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
-          serializationDuration = performance.now() - serializationStart;
-
-          const ipcStart = performance.now();
-          const walSaved = await db.saveWAL({ notes, config, boards, currentBoardId });
-          if (!walSaved) {
-            if (get().saveGenerationId === currentGen) {
-               set({ saveStatus: 'error', saveError: '写入本地缓存失败，未保存到磁盘。' });
-            }
-            return false;
-          }
-
-          const result = await invoke<SaveResult>('save_content', { filename: 'data.json', content: jsonString, generationId: currentGen });
-          ipcDuration = performance.now() - ipcStart;
-          const ioDuration = result?.io_duration_ms || 0;
-
-          // 检查 Rust 侧写入结果（WriteAck.success 可能为 false）
-          if (!result?.success) {
-            const errorMsg = result?.error || '磁盘写入失败';
-            if (import.meta.env.DEV) {
-              console.warn(`[Save] Rust 写入失败: ${errorMsg}, 重试: ${result?.retries || 0}`);
-            }
-            if (get().saveGenerationId === currentGen) {
-               set({ saveStatus: 'error', saveError: errorMsg });
-            }
-            return false;
-          }
-
-          if (import.meta.env.DEV) {
-            console.log(`[Save] 序列化: ${serializationDuration.toFixed(2)}ms, IPC+IO: ${ipcDuration.toFixed(2)}ms, Rust I/O: ${ioDuration}ms`);
-          }
-
-          diagnostics.updateMetrics({ lastSaveDuration: Math.round(ipcDuration) });
-          if (ipcDuration > 500) {
-            diagnostics.recordSlowPath('数据落盘 (IPC+IO)', ipcDuration);
-          }
-
+        const ipcStart = performance.now();
+        const walSaved = await db.saveWAL({ notes, config, boards, currentBoardId });
+        if (!walSaved) {
           if (get().saveGenerationId === currentGen) {
-             set({ saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });
+             set({ saveStatus: 'error', saveError: '写入本地缓存失败，未保存到磁盘。' });
           }
+          return false;
+        }
 
-          return true;
+        const result = await invoke<SaveResult>('save_content', { filename: 'data.json', content: jsonString, generationId: currentGen });
+        const ipcDuration = performance.now() - ipcStart;
+        const ioDuration = result?.io_duration_ms || 0;
+
+        // 检查 Rust 侧写入结果（WriteAck.success 可能为 false）
+        if (!result?.success) {
+          const errorMsg = result?.error || '磁盘写入失败';
+          if (import.meta.env.DEV) {
+            console.warn(`[Save] Rust 写入失败: ${errorMsg}, 重试: ${result?.retries || 0}`);
+          }
+          if (get().saveGenerationId === currentGen) {
+             set({ saveStatus: 'error', saveError: errorMsg });
+          }
+          return false;
+        }
+
+        if (import.meta.env.DEV) {
+          console.log(`[Save] 序列化: ${serializationDuration.toFixed(2)}ms, IPC+IO: ${ipcDuration.toFixed(2)}ms, Rust I/O: ${ioDuration}ms`);
+        }
+
+        diagnostics.updateMetrics({ lastSaveDuration: Math.round(ipcDuration) });
+        if (ipcDuration > 500) {
+          diagnostics.recordSlowPath('数据落盘 (IPC+IO)', ipcDuration);
+        }
+
+        if (get().saveGenerationId === currentGen) {
+           set({ saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });
+        }
+
+        return true;
       } catch (err) {
         console.error('Disk Save Failed:', err);
         if (get().saveGenerationId === currentGen) {
