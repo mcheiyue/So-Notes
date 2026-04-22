@@ -1082,7 +1082,11 @@ export const useStore = create<State>()(
         }
         return false;
       } finally {
-        set({ isSaving: false });
+        // 只有当前世代仍是自己时，才由自己关闭 loading 状态
+        // 否则高并发下旧世代的 finally 会误清新世代的 isSaving
+        if (get().saveGenerationId === currentGen) {
+          set({ isSaving: false });
+        }
       }
     },
 
