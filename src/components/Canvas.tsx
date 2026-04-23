@@ -34,14 +34,17 @@ const isBlankCanvasTarget = (target: EventTarget | null): boolean => {
 };
 
 export const Canvas: React.FC = () => {
-  const {
-    currentBoardId, addNote, init, isLoaded,
-    stickyDrag, setStickyDrag, moveNote, setContextMenu,
-    setSelectedIds, selectedIds, moveSelectedNotes, clearSelection, finalizeLayoutChange,
-    interaction, viewport, setPanMode, panViewport, setViewportPosition, setEdgePush
-  } = useStore();
-  const layoutNotesById = useStore((state) => state.layoutNotesById);
-  const currentBoardNoteIds = useStore((state) => state.boardNoteIds[state.currentBoardId] ?? EMPTY_NOTE_IDS);
+  // 细粒度订阅：只订阅渲染路径真正需要的状态
+  const isLoaded = useStore((s) => s.isLoaded);
+  const currentBoardId = useStore((s) => s.currentBoardId);
+  const stickyDragId = useStore((s) => s.stickyDrag.id);
+  const selectedIds = useStore((s) => s.selectedIds);
+  const isPanMode = useStore((s) => s.interaction.isPanMode);
+  const edgePush = useStore((s) => s.interaction.edgePush);
+  const viewport = useStore((s) => s.viewport);
+
+  const layoutNotesById = useStore((s) => s.layoutNotesById);
+  const currentBoardNoteIds = useStore((s) => s.boardNoteIds[s.currentBoardId] ?? EMPTY_NOTE_IDS);
 
   const throttledViewportX = Math.floor(viewport.x / 100) * 100;
   const throttledViewportY = Math.floor(viewport.y / 100) * 100;
@@ -152,44 +155,37 @@ export const Canvas: React.FC = () => {
 
   useEffect(() => {
     const bootstrap = async () => {
-      await init();
+      await useStore.getState().init();
     };
     bootstrap();
-  }, [init]);
+  }, []);
 
   // Space Key Listener (Pan Mode)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Check for Space key
       if (e.code === 'Space') {
-        // Ignore input fields
         const active = document.activeElement;
         const isInput = active instanceof HTMLInputElement || 
                         active instanceof HTMLTextAreaElement || 
                         active?.getAttribute('contenteditable') === 'true';
         
-        // Prevent pan if Spotlight is open or typing
         const isSpotlightOpen = useStore.getState().isSpotlightOpen;
 
           if (!isInput && !isSpotlightOpen) {
              e.preventDefault(); 
              
-             // Only toggle on initial press (ignore repeat events)
              if (!e.repeat) {
                  const now = Date.now();
                  const DOUBLE_PRESS_DELAY = 300;
                  
                  if (now - lastSpacePressTime.current < DOUBLE_PRESS_DELAY) {
-                     // Double Press Detected: Reset Viewport
-                     console.log('Space Double Press: Reset Viewport');
-                     setViewportPosition(0, 0);
-                     setPanMode(false); // Exit pan mode
-                     lastSpacePressTime.current = 0; // Reset timer
+                     const s = useStore.getState();
+                     s.setViewportPosition(0, 0);
+                     s.setPanMode(false);
+                     lastSpacePressTime.current = 0;
                  } else {
-                     // Single Press: Toggle Pan Mode
                      const currentMode = useStore.getState().interaction.isPanMode;
-                     console.log('Space Toggle:', !currentMode); 
-                     setPanMode(!currentMode);
+                     useStore.getState().setPanMode(!currentMode);
                      lastSpacePressTime.current = now;
                  }
              }
@@ -197,27 +193,27 @@ export const Canvas: React.FC = () => {
       }
     };
 
-    // Ensure no stale listeners
     window.removeEventListener('keydown', handleKeyDown);
     window.addEventListener('keydown', handleKeyDown);
     
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [setPanMode, setViewportPosition]);
+  }, []);
 
   // Edge Push Animation Loop
   useEffect(() => {
-    const { top, bottom, left, right } = interaction.edgePush;
+    const { top, bottom, left, right } = edgePush;
     if (!top && !bottom && !left && !right) {
         if (edgePushFrameRef.current) cancelAnimationFrame(edgePushFrameRef.current);
+        useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
         return;
     }
 
     const pushLoop = () => {
         let dx = 0;
         let dy = 0;
-        const SPEED = 5; // Pixels per frame (~300px/s)
+        const SPEED = 5;
 
         if (left) dx -= SPEED;
         if (right) dx += SPEED;
@@ -225,11 +221,26 @@ export const Canvas: React.FC = () => {
         if (bottom) dy += SPEED;
 
         if (dx !== 0 || dy !== 0) {
-            panViewport(dx, dy);
-            // Move selected notes along with viewport to keep them static relative to screen
-            // This prevents them from "drifting" away from the cursor during edge push
-            if (selectedIds.length > 0) {
-                moveSelectedNotes(dx, dy);
+            panOffsetRef.current.x -= dx;
+            panOffsetRef.current.y -= dy;
+            if (panOffsetRef.current.x < 0) panOffsetRef.current.x = 0;
+            if (panOffsetRef.current.y < 0) panOffsetRef.current.y = 0;
+
+            if (worldLayerRef.current) {
+                worldLayerRef.current.style.transform = `translate3d(${-panOffsetRef.current.x}px, ${-panOffsetRef.current.y}px, 0)`;
+            }
+
+            const state = useStore.getState();
+            if (state.selectedIds.length > 0) {
+                state.selectedIds.forEach((id) => {
+                    const el = document.querySelector(`[data-id="${id}"]`) as HTMLElement | null;
+                    if (!el) return;
+                    const note = state.notesById[id];
+                    if (!note) return;
+                    const nx = note.x - panOffsetRef.current.x;
+                    const ny = note.y - panOffsetRef.current.y;
+                    el.style.transform = `translate(${nx}px, ${ny}px)`;
+                });
             }
         }
         edgePushFrameRef.current = requestAnimationFrame(pushLoop);
@@ -239,7 +250,7 @@ export const Canvas: React.FC = () => {
     return () => {
         if (edgePushFrameRef.current) cancelAnimationFrame(edgePushFrameRef.current);
     };
-  }, [interaction.edgePush, moveSelectedNotes, panViewport, selectedIds.length]);
+  }, [edgePush]);
 
   const handleMouseMove = (e: React.MouseEvent) => {
       // Safety check: If no mouse button is pressed, stop any active drag
@@ -267,20 +278,32 @@ export const Canvas: React.FC = () => {
       }
 
       // 1. Sticky Drag Logic
-      if (stickyDrag.id) {
+      if (stickyDragId) {
           const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
-          const newX = (localPoint.x - stickyDrag.offsetX) / scale + viewport.x;
-          const newY = (localPoint.y - stickyDrag.offsetY) / scale + viewport.y;
+          const state = useStore.getState();
+          const vp = state.viewport;
+          const newX = (localPoint.x - state.stickyDrag.offsetX) / scale + vp.x;
+          const newY = (localPoint.y - state.stickyDrag.offsetY) / scale + vp.y;
           
-          const currentNote = useStore.getState().notesById[stickyDrag.id];
-          const isSelected = selectedIds.includes(stickyDrag.id);
+          const currentNote = state.notesById[stickyDragId];
+          const isSelected = state.selectedIds.includes(stickyDragId);
           
-          if (isSelected && selectedIds.length > 1 && currentNote) {
+          if (isSelected && state.selectedIds.length > 1 && currentNote) {
               const dx = newX - currentNote.x;
               const dy = newY - currentNote.y;
-              moveSelectedNotes(dx, dy);
+              state.selectedIds.forEach((id) => {
+                  if (id === stickyDragId) return;
+                  const el = document.querySelector(`[data-id="${id}"]`) as HTMLElement | null;
+                  if (!el) return;
+                  const note = state.notesById[id];
+                  if (!note) return;
+                  el.style.transform = `translate(${note.x + dx}px, ${note.y + dy}px)`;
+              });
+              const leaderEl = document.querySelector(`[data-id="${stickyDragId}"]`) as HTMLElement | null;
+              if (leaderEl) leaderEl.style.transform = `translate(${newX}px, ${newY}px)`;
           } else {
-              moveNote(stickyDrag.id, newX, newY);
+              const el = document.querySelector(`[data-id="${stickyDragId}"]`) as HTMLElement | null;
+              if (el) el.style.transform = `translate(${newX}px, ${newY}px)`;
           }
           return;
       }
@@ -311,7 +334,7 @@ export const Canvas: React.FC = () => {
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
-    if (interaction.isDragging) {
+    if (useStore.getState().interaction.isDragging) {
       return;
     }
 
@@ -323,9 +346,10 @@ export const Canvas: React.FC = () => {
     // The click (e.clientX) is in screen space.
     // The note needs to be placed in world space.
     const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
-    const x = localPoint.x + viewport.x;
-    const y = localPoint.y + viewport.y;
-    addNote(x, y);
+    const vp = useStore.getState().viewport;
+    const x = localPoint.x + vp.x;
+    const y = localPoint.y + vp.y;
+    useStore.getState().addNote(x, y);
   };
   
   const applyBoundaryGuard = (id: string) => {
@@ -377,13 +401,13 @@ export const Canvas: React.FC = () => {
                 }
 
               if (changed) {
-                  moveNote(noteId, finalX, finalY);
+                  useStore.getState().moveNote(noteId, finalX, finalY);
               }
           }
       });
 
       if (idsToCheck.length > 0) {
-          finalizeLayoutChange(idsToCheck);
+          useStore.getState().finalizeLayoutChange(idsToCheck);
       }
   };
 
@@ -391,26 +415,39 @@ export const Canvas: React.FC = () => {
       const isBlankTarget = isBlankCanvasTarget(e.target);
 
       // 0. Start Panning (Space Mode + Left Click on Background)
-      if (interaction.isPanMode && e.button === 0 && isBlankTarget) {
+      if (useStore.getState().interaction.isPanMode && e.button === 0 && isBlankTarget) {
           isPanning.current = true;
           panStart.current = { x: e.clientX, y: e.clientY };
-          panOffsetRef.current = { x: viewport.x, y: viewport.y };
+          const vp = useStore.getState().viewport;
+          panOffsetRef.current = { x: vp.x, y: vp.y };
           return;
       }
 
       // 1. Handle Sticky Drag Drop
-      if (e.button !== 2 && stickyDrag.id) {
-          applyBoundaryGuard(stickyDrag.id);
-          setStickyDrag(null);
+      if (e.button !== 2 && stickyDragId) {
+          const state = useStore.getState();
+          const idsToCommit = (state.selectedIds.includes(stickyDragId) && state.selectedIds.length > 1)
+            ? state.selectedIds
+            : [stickyDragId];
+          idsToCommit.forEach((id) => {
+              const el = document.querySelector(`[data-id="${id}"]`) as HTMLElement | null;
+              if (!el) return;
+              const match = el.style.transform.match(/translate\(\s*([-\d.]+)px\s*,\s*([-\d.]+)px\s*\)/);
+              if (match) {
+                  state.moveNote(id, parseFloat(match[1]), parseFloat(match[2]));
+              }
+          });
+          applyBoundaryGuard(stickyDragId);
+          state.setStickyDrag(null);
           return;
       }
 
-      if (interaction.isDragging) {
+      if (useStore.getState().interaction.isDragging) {
           return;
       }
 
       // 2. Start Marquee Selection (Left Click on Canvas)
-      if (e.button === 0 && !stickyDrag.id && isBlankTarget) {
+      if (e.button === 0 && !stickyDragId && isBlankTarget) {
           isSelecting.current = true;
           selectionStart.current = { x: e.clientX, y: e.clientY };
           const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
@@ -425,7 +462,7 @@ export const Canvas: React.FC = () => {
           
           // Clear existing selection if not holding shift/ctrl (optional, for now simple clear)
           if (!e.shiftKey && !e.ctrlKey) {
-             clearSelection();
+             useStore.getState().clearSelection();
           }
       }
   };
@@ -434,7 +471,7 @@ export const Canvas: React.FC = () => {
       if (isPanning.current) {
           isPanning.current = false;
           stopPanFlushLoop();
-          setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
+          useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
           return;
       }
 
@@ -485,10 +522,10 @@ export const Canvas: React.FC = () => {
           });
           
           if (newSelectedIds.length > 0) {
-               setSelectedIds(newSelectedIds);
+               useStore.getState().setSelectedIds(newSelectedIds);
            }
       }
-  }, [setSelectedIds, stopPanFlushLoop]);
+  }, [stopPanFlushLoop]);
 
   // Global Mouse Up & Blur Handler to prevent sticky drag
   useEffect(() => {
@@ -498,7 +535,7 @@ export const Canvas: React.FC = () => {
           isSelecting.current = false;
           panDeltaRef.current = { dx: 0, dy: 0 };
           stopPanFlushLoop();
-          setEdgePush({ top: false, bottom: false, left: false, right: false });
+          useStore.getState().setEdgePush({ top: false, bottom: false, left: false, right: false });
           if (selectionBoxRef.current) {
               selectionBoxRef.current.style.display = 'none';
           }
@@ -511,7 +548,7 @@ export const Canvas: React.FC = () => {
           window.removeEventListener('mouseup', handleWindowUp);
           window.removeEventListener('blur', handleWindowBlur);
       };
-  }, [handleGlobalUp, setEdgePush, stopPanFlushLoop]);
+  }, [handleGlobalUp, stopPanFlushLoop]);
 
   if (!isLoaded) return null;
 
@@ -521,7 +558,7 @@ export const Canvas: React.FC = () => {
       role="application"
       className={cn(
         "w-full h-full overflow-hidden relative select-none outline-none focus:outline-none focus-visible:outline-none",
-        interaction.isPanMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
+        isPanMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
       )}
       onDoubleClick={handleDoubleClick}
       onMouseMove={handleMouseMove}
@@ -529,11 +566,11 @@ export const Canvas: React.FC = () => {
       onMouseUp={handleGlobalUp}
       onContextMenu={(e) => {
           e.preventDefault();
-          if (stickyDrag.id) {
-              applyBoundaryGuard(stickyDrag.id);
-              setStickyDrag(null);
+          if (stickyDragId) {
+              applyBoundaryGuard(stickyDragId);
+              useStore.getState().setStickyDrag(null);
           } else {
-              setContextMenu({
+              useStore.getState().setContextMenu({
                   isOpen: true,
                   x: e.clientX,
                   y: e.clientY,
@@ -551,10 +588,10 @@ export const Canvas: React.FC = () => {
       />
       
       {/* Edge Push Indicators */}
-      <div className={cn("absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", interaction.edgePush.top ? "opacity-100" : "opacity-0")} />
-      <div className={cn("absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", interaction.edgePush.bottom ? "opacity-100" : "opacity-0")} />
-      <div className={cn("absolute top-0 bottom-0 left-0 w-8 bg-gradient-to-r from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", interaction.edgePush.left ? "opacity-100" : "opacity-0")} />
-      <div className={cn("absolute top-0 bottom-0 right-0 w-8 bg-gradient-to-l from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", interaction.edgePush.right ? "opacity-100" : "opacity-0")} />
+      <div className={cn("absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", edgePush.top ? "opacity-100" : "opacity-0")} />
+      <div className={cn("absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", edgePush.bottom ? "opacity-100" : "opacity-0")} />
+      <div className={cn("absolute top-0 bottom-0 left-0 w-8 bg-gradient-to-r from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", edgePush.left ? "opacity-100" : "opacity-0")} />
+      <div className={cn("absolute top-0 bottom-0 right-0 w-8 bg-gradient-to-l from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", edgePush.right ? "opacity-100" : "opacity-0")} />
       
       {/* Board Badge moved to App.tsx for better reactivity */}
 
@@ -597,7 +634,7 @@ export const Canvas: React.FC = () => {
         </div>
       )}
       
-      {interaction.isPanMode && (
+      {isPanMode && (
         <div 
             className="fixed top-6 left-1/2 -translate-x-1/2 px-4 py-2 bg-secondary-bg/60 text-text-secondary border border-border-subtle shadow-lg rounded-full text-xs font-medium backdrop-blur-xl pointer-events-none transition-all animate-in fade-in zoom-in-95 duration-300 select-none flex items-center gap-2"
             style={{ zIndex: Z_INDEX.PAN_MODE_BADGE }}
@@ -607,7 +644,7 @@ export const Canvas: React.FC = () => {
         </div>
       )}
       
-      {stickyDrag.id && (
+      {stickyDragId && (
         <div 
             className="fixed bottom-10 left-0 w-full text-center pointer-events-none"
             style={{ zIndex: Z_INDEX.STICKY_DRAG_MSG }}

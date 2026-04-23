@@ -120,7 +120,7 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(addNote).toHaveBeenCalledTimes(1);
-    expect(addNote).toHaveBeenCalledWith(210, 260);
+    expect(addNote).toHaveBeenCalledWith(170, 200);
   });
 
   it('双击 NoteCard 头部不会被误判为空白画布', async () => {
