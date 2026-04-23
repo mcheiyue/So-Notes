@@ -41,6 +41,9 @@ const ContextMenuContent: React.FC = () => {
     copyNoteToBoard,
     moveSelectedNotesToBoard,
     copySelectedNotesToBoard,
+    batchToggleCollapse,
+    batchBringToFront,
+    batchSendToBack,
     viewport,
     shellRect,
   } = useStore();
@@ -223,6 +226,34 @@ const ContextMenuContent: React.FC = () => {
           >
             <span>🧲</span> {isGroupContext ? '群组吸附' : '吸附移动'}
           </MenuItemButton>
+          
+          {isGroupContext && (
+            <>
+              <div className="h-px bg-border-subtle my-1" />
+              <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                onClick={() => handleAction(() => batchToggleCollapse(selectedIds))}
+              >
+                <span>📦</span> 批量折叠/展开
+              </MenuItemButton>
+              <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                onClick={() => handleAction(() => batchBringToFront(selectedIds))}
+              >
+                <span>⬆️</span> 置顶
+              </MenuItemButton>
+              <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                onClick={() => handleAction(() => batchSendToBack(selectedIds))}
+              >
+                <span>⬇️</span> 置底
+              </MenuItemButton>
+            </>
+          )}
+          
           <div className="h-px bg-border-subtle my-1" />
           
           <div className="px-4 py-2 text-xs text-text-tertiary font-semibold">

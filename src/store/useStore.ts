@@ -110,6 +110,9 @@ interface State {
   copyNoteToBoard: (id: string, targetBoardId: string) => void;
   moveSelectedNotesToBoard: (targetBoardId: string) => void;
   copySelectedNotesToBoard: (targetBoardId: string) => void;
+  batchToggleCollapse: (ids: string[]) => void;
+  batchBringToFront: (ids: string[]) => void;
+  batchSendToBack: (ids: string[]) => void;
   reorderBoard: (boardId: string, direction: 'left' | 'right') => void;
 
   // Selection Actions
@@ -1122,6 +1125,76 @@ export const useStore = create<State>()(
                     appendNoteToNormalizedState(state, newNote);
                     state.layoutNotesById[newNote.id] = extractLayoutNote(newNote);
                     state.config.maxZ += 1;
+                }
+            });
+        });
+        get().saveToDisk();
+    },
+
+    batchToggleCollapse: (ids) => {
+        set((state) => {
+            if (ids.length === 0) return;
+            
+            const collapsedCount = ids.filter(id => {
+                const note = state.notesById[id];
+                return note?.collapsed;
+            }).length;
+            
+            const shouldExpand = collapsedCount <= ids.length / 2;
+            
+            ids.forEach(id => {
+                const note = state.notesById[id];
+                if (note) {
+                    note.collapsed = shouldExpand ? false : true;
+                }
+            });
+        });
+        get().saveToDisk();
+    },
+
+    batchBringToFront: (ids) => {
+        set((state) => {
+            if (ids.length === 0) return;
+            
+            const notesWithZ = ids
+                .map(id => ({ id, z: state.notesById[id]?.z ?? 0 }))
+                .sort((a, b) => a.z - b.z);
+            
+            let currentMaxZ = state.config.maxZ;
+            
+            notesWithZ.forEach(({ id }) => {
+                const note = state.notesById[id];
+                if (note) {
+                    currentMaxZ += 1;
+                    note.z = currentMaxZ;
+                }
+            });
+            
+            state.config.maxZ = currentMaxZ;
+        });
+        get().saveToDisk();
+    },
+
+    batchSendToBack: (ids) => {
+        set((state) => {
+            if (ids.length === 0) return;
+            
+            const allZValues = Object.values(state.notesById)
+                .map(n => n.z)
+                .filter((z): z is number => z !== undefined);
+            const minZ = Math.min(...allZValues, 0);
+            
+            const notesWithZ = ids
+                .map(id => ({ id, z: state.notesById[id]?.z ?? 0 }))
+                .sort((a, b) => a.z - b.z);
+            
+            let currentMinZ = minZ - ids.length;
+            
+            notesWithZ.forEach(({ id }) => {
+                const note = state.notesById[id];
+                if (note) {
+                    currentMinZ += 1;
+                    note.z = currentMinZ;
                 }
             });
         });
