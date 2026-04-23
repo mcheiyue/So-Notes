@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { LayoutNote, Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult } from './types';
 
 import { db } from './db';
-import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, normalizeNotes, updateLayoutNote } from './normalization';
+import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes } from './normalization';
 
 import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
@@ -216,10 +216,7 @@ const moveNoteBetweenBoards = (state: Pick<State, 'notesById' | 'boardNoteIds' |
   ensureBoardNoteBucket(state, targetBoardId).push(noteId);
 
   if (state.layoutNotesById[noteId]) {
-    state.layoutNotesById[noteId] = {
-      ...state.layoutNotesById[noteId],
-      boardId: targetBoardId,
-    };
+    state.layoutNotesById[noteId].boardId = targetBoardId;
   }
 };
 
@@ -669,7 +666,7 @@ export const useStore = create<State>()(
         if (note) {
           note.x = x;
           note.y = y;
-          state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
+          state.layoutNotesById[note.id] = extractLayoutNote(note);
         }
       });
     },
@@ -683,7 +680,7 @@ export const useStore = create<State>()(
                 if (note) {
                     note.x += dx;
                     note.y += dy;
-                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
+                    state.layoutNotesById[note.id] = extractLayoutNote(note);
                 }
             });
         });
@@ -792,7 +789,7 @@ export const useStore = create<State>()(
                 if (stateNote) {
                     stateNote.x = currentX;
                     stateNote.y = currentY;
-                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, stateNote);
+                    state.layoutNotesById[stateNote.id] = extractLayoutNote(stateNote);
                 }
 
 
@@ -827,7 +824,7 @@ export const useStore = create<State>()(
         const note = getNoteById(state, id);
         if (note) {
           note.deletedAt = Date.now(); // Soft delete
-          state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
+          state.layoutNotesById[note.id] = extractLayoutNote(note);
         }
         // Remove from selection if deleted
         state.selectedIds = state.selectedIds.filter(selId => selId !== id);
@@ -851,7 +848,7 @@ export const useStore = create<State>()(
                 // Visual Feedback: Bring to top so user sees it
                 state.config.maxZ += 1;
                 note.z = state.config.maxZ;
-                state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
+                state.layoutNotesById[note.id] = extractLayoutNote(note);
             }
         });
         get().saveToDisk();
@@ -889,7 +886,7 @@ export const useStore = create<State>()(
                     // Bring to front
                     state.config.maxZ += 1;
                     note.z = state.config.maxZ;
-                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
+                    state.layoutNotesById[note.id] = extractLayoutNote(note);
                 }
             });
         });
@@ -902,7 +899,7 @@ export const useStore = create<State>()(
          const note = getNoteById(state, id);
          if (note) {
            note.color = color;
-           state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
+           state.layoutNotesById[note.id] = extractLayoutNote(note);
          }
       });
       get().saveToDisk();
@@ -914,7 +911,7 @@ export const useStore = create<State>()(
                 const note = getNoteById(state, id);
                 if (note) {
                     note.color = color;
-                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
+                    state.layoutNotesById[note.id] = extractLayoutNote(note);
                 }
             });
         });
@@ -981,7 +978,7 @@ export const useStore = create<State>()(
                 const note = state.notesById[id];
                 if (note) {
                     note.deletedAt = Date.now();
-                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
+                    state.layoutNotesById[note.id] = extractLayoutNote(note);
                 }
             });
             state.selectedIds = [];
@@ -1051,7 +1048,7 @@ export const useStore = create<State>()(
                 moveNoteBetweenBoards(state, id, targetBoardId);
                 note.x += Math.floor(Math.random() * 20);
                 note.y += Math.floor(Math.random() * 20);
-                state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
+                state.layoutNotesById[note.id] = extractLayoutNote(note);
                 state.selectedIds = state.selectedIds.filter(selId => selId !== id);
             }
         });
@@ -1073,7 +1070,7 @@ export const useStore = create<State>()(
                 newNote.x += Math.floor(Math.random() * 20);
                 newNote.y += Math.floor(Math.random() * 20);
                 appendNoteToNormalizedState(state, newNote);
-                state.layoutNotesById = updateLayoutNote(state.layoutNotesById, newNote);
+                state.layoutNotesById[newNote.id] = extractLayoutNote(newNote);
                 state.config.maxZ += 1;
             }
         });
@@ -1092,7 +1089,7 @@ export const useStore = create<State>()(
                     moveNoteBetweenBoards(state, id, targetBoardId);
                     note.x += Math.floor(Math.random() * 30);
                     note.y += Math.floor(Math.random() * 30);
-                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
+                    state.layoutNotesById[note.id] = extractLayoutNote(note);
                     movedCount++;
                 }
             });
@@ -1123,7 +1120,7 @@ export const useStore = create<State>()(
                     newNote.x += Math.floor(Math.random() * 30);
                     newNote.y += Math.floor(Math.random() * 30);
                     appendNoteToNormalizedState(state, newNote);
-                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, newNote);
+                    state.layoutNotesById[newNote.id] = extractLayoutNote(newNote);
                     state.config.maxZ += 1;
                 }
             });

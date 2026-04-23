@@ -9,6 +9,7 @@ import { useFPSMonitor } from "../utils/performance";
 const VIEWPORT_BUFFER = 500;
 const NOTE_WIDTH = 224;
 const NOTE_HEIGHT = 160;
+const EMPTY_NOTE_IDS: string[] = [];
 
 const CANVAS_NON_BLANK_SELECTOR = [
   '[data-canvas-hit="blocked"]',
@@ -40,7 +41,7 @@ export const Canvas: React.FC = () => {
     interaction, viewport, setPanMode, panViewport, setViewportPosition, setEdgePush
   } = useStore();
   const layoutNotesById = useStore((state) => state.layoutNotesById);
-  const currentBoardNoteIds = useStore((state) => state.boardNoteIds[state.currentBoardId] ?? []);
+  const currentBoardNoteIds = useStore((state) => state.boardNoteIds[state.currentBoardId] ?? EMPTY_NOTE_IDS);
 
   const throttledViewportX = Math.floor(viewport.x / 100) * 100;
   const throttledViewportY = Math.floor(viewport.y / 100) * 100;
