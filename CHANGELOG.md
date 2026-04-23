@@ -2,6 +2,31 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.3.2] - 2026-04-24
+
+### 🚀 优化 (Optimizations)
+* **状态结构规范化**
+  > 运行时主状态从 `notes: Note[]` 切换到 `notesById + allNoteIds + boardNoteIds` 规范化模型，
+  > 单便签编辑不再触发整张列表引用扩散，消除级联重渲染的根源。
+
+* **轻量渲染投影**
+  > 新增 `layoutNotesById` 轻量投影，Canvas / MiniMap 仅订阅布局坐标而非完整便签对象，
+  > 进一步降低画布平移、拖拽、看板切换时的订阅粒度。
+
+* **拖拽 DOM 直接操作**
+  > NoteCard 单卡拖拽与多选拖拽期间改用 `useRef` + 直接 DOM transform，移除每帧 React re-render；
+  > Canvas 粘性拖拽（Sticky Drag）与边缘推送（Edge Push）同步改为 DOM 操作，
+  > 结束时一次性提交到 Store，拖拽跟手度显著提升。
+
+* **Canvas 订阅收敛**
+  > 拆解 `useStore()` 全量解构为 7 个独立 selector，事件处理器统一用 `useStore.getState()`，
+  > 画布不再因无关状态变化而重绘。
+
+### 🧹 清理 (Cleanup)
+* **移除浅拷贝反模式**
+  > 清除 Immer 中间件内的 `updateLayoutNote` 浅拷贝调用，改为原地属性赋值，
+  > 与 Immer 不可变语义保持一致。
+
 ## [v1.3.1] - 2026-04-22
 
 ### ✨ 新特性 (Features)
