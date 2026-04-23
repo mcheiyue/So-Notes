@@ -60,19 +60,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const groupBoundsRef = useRef<{ minX: number, minY: number, width: number, height: number } | null>(null);
   const shouldFinalizeOnMouseUpRef = useRef(false);
 
-  // We use dragPos to control position ONLY during drag to prevent jitter/re-renders
-  // Initial value is null, meaning "use Store position"
-  const [dragPos, setDragPos] = useState<{x: number, y: number} | null>(null);
+  // dragPos ref: tracks drag status without triggering React re-renders
+  // react-draggable handles DOM transforms directly during drag
+  const dragPosRef = useRef(false);
 
   // Calculated Screen Position (from Store)
   const screenX = note ? note.x - viewport.x : 0;
   const screenY = note ? note.y - viewport.y : 0;
-
-  // Determine Final Position for Draggable
-  // If dragging, use local state (follows mouse, ignores viewport shift for stability)
-  // If idle, use calculated screen position (follows viewport)
-  const finalX = dragPos ? dragPos.x : screenX;
-  const finalY = dragPos ? dragPos.y : screenY;
 
   // Auto-resize textarea
   useLayoutEffect(() => {
@@ -92,7 +86,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const shouldShowExpandedActions = !isStatic && !note.collapsed && (isHovered || isEditing);
   const shouldShowCollapsedActions = note.collapsed && !isStatic;
   const shouldExpandContent = isEditing || (isSelected && !isGlobalDragging);
-  const disableHeaderTooltips = isStickyDragging || !!dragPos;
+  const disableHeaderTooltips = isStickyDragging || dragPosRef.current;
   const disableCollapseTooltip = disableHeaderTooltips || isStatic;
 
   const handleStart = () => {
@@ -140,11 +134,9 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   };
 
   const handleDrag = (_e: DraggableEvent, data: DraggableData) => {
-      // 1. Sync Local State (Hybrid Control)
       if (!isDragging.current) isDragging.current = true;
-      setDragPos({ x: data.x, y: data.y });
+      dragPosRef.current = true;
 
-      // Group Drag Logic
       if (isSelected && isGroupSelection) {
           const deltaX = data.deltaX;
           const deltaY = data.deltaY;
@@ -170,7 +162,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   
   const handleStop = (_e: DraggableEvent, data: DraggableData) => {
     isDragging.current = false;
-    setDragPos(null); // Switch back to Store control
+    dragPosRef.current = false;
     setIsDragging(false);
     
     // Cleanup Edge Push
@@ -355,8 +347,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         nodeRef={nodeRef}
         handle=".drag-handle"
         cancel={'.note-action, input, textarea, [data-note-no-drag="true"]'}
-        defaultPosition={undefined} // Controlled via position prop
-        position={{ x: finalX, y: finalY }}
+        position={{ x: screenX, y: screenY }}
         scale={scale}
         onStart={handleStart}
         onDrag={handleDrag}
