@@ -1,4 +1,4 @@
-import { Note, NormalizedNotesState } from './types';
+import { LayoutNote, Note, NormalizedNotesState } from './types';
 
 export const createEmptyNormalizedNotesState = (): NormalizedNotesState => ({
   notesById: {},
@@ -28,4 +28,45 @@ export const denormalizeNotes = ({ notesById, allNoteIds }: NormalizedNotesState
     const note = notesById[id];
     return note ? [note] : [];
   });
+};
+
+const extractLayoutNote = (note: Note): LayoutNote => ({
+  id: note.id,
+  x: note.x,
+  y: note.y,
+  boardId: note.boardId,
+  deletedAt: note.deletedAt ?? null,
+  color: note.color,
+  width: note.width,
+  height: note.height,
+});
+
+export const createLayoutNotesById = (notesById: Record<string, Note>): Record<string, LayoutNote> => {
+  const layoutNotesById: Record<string, LayoutNote> = {};
+
+  Object.values(notesById).forEach((note) => {
+    layoutNotesById[note.id] = extractLayoutNote(note);
+  });
+
+  return layoutNotesById;
+};
+
+export const updateLayoutNote = (
+  layoutNotesById: Record<string, LayoutNote>,
+  note: Note,
+): Record<string, LayoutNote> => ({
+  ...layoutNotesById,
+  [note.id]: extractLayoutNote(note),
+});
+
+export const removeLayoutNote = (
+  layoutNotesById: Record<string, LayoutNote>,
+  noteId: string,
+): Record<string, LayoutNote> => {
+  if (!(noteId in layoutNotesById)) {
+    return layoutNotesById;
+  }
+
+  const { [noteId]: _removed, ...rest } = layoutNotesById;
+  return rest;
 };

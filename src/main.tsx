@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { generatePresetSample } from "./test/fixtures/sampleData";
-import { normalizeNotes } from "./store/normalization";
+import { normalizeNotes, createLayoutNotesById } from "./store/normalization";
 import { useStore } from "./store/useStore";
 
 if (typeof window !== 'undefined') {
@@ -12,6 +12,7 @@ if (typeof window !== 'undefined') {
     const normalizedNotes = normalizeNotes(state.notes);
     useStore.setState({
       ...normalizedNotes,
+      layoutNotesById: createLayoutNotesById(normalizedNotes.notesById),
       boards: state.boards,
       currentBoardId: state.currentBoardId,
       isLoaded: true,

@@ -39,7 +39,7 @@ export const Canvas: React.FC = () => {
     setSelectedIds, selectedIds, moveSelectedNotes, clearSelection, finalizeLayoutChange,
     interaction, viewport, setPanMode, panViewport, setViewportPosition, setEdgePush
   } = useStore();
-  const notesById = useStore((state) => state.notesById);
+  const layoutNotesById = useStore((state) => state.layoutNotesById);
   const currentBoardNoteIds = useStore((state) => state.boardNoteIds[state.currentBoardId] ?? []);
 
   const throttledViewportX = Math.floor(viewport.x / 100) * 100;
@@ -57,22 +57,22 @@ export const Canvas: React.FC = () => {
     viewport.h
   ]);
 
-  const visibleNotes = useMemo(() => {
-    return currentBoardNoteIds.flatMap((id) => {
-      const note = notesById[id];
-      if (!note || note.deletedAt) return [];
+  const visibleNoteIds = useMemo(() => {
+    return currentBoardNoteIds.filter((id) => {
+      const ln = layoutNotesById[id];
+      if (!ln || ln.deletedAt) return false;
       return (
-        note.x >= throttledViewportRect.x - NOTE_WIDTH &&
-        note.x <= throttledViewportRect.x + throttledViewportRect.w &&
-        note.y >= throttledViewportRect.y - NOTE_HEIGHT &&
-        note.y <= throttledViewportRect.y + throttledViewportRect.h
-      ) ? [note] : [];
+        ln.x >= throttledViewportRect.x - NOTE_WIDTH &&
+        ln.x <= throttledViewportRect.x + throttledViewportRect.w &&
+        ln.y >= throttledViewportRect.y - NOTE_HEIGHT &&
+        ln.y <= throttledViewportRect.y + throttledViewportRect.h
+      );
     });
-  }, [currentBoardNoteIds, notesById, throttledViewportRect]);
+  }, [currentBoardNoteIds, layoutNotesById, throttledViewportRect]);
 
   const currentBoardVisibleCount = useMemo(
-    () => currentBoardNoteIds.filter((id) => !notesById[id]?.deletedAt).length,
-    [currentBoardNoteIds, notesById],
+    () => currentBoardNoteIds.filter((id) => !layoutNotesById[id]?.deletedAt).length,
+    [currentBoardNoteIds, layoutNotesById],
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -553,11 +553,11 @@ export const Canvas: React.FC = () => {
         style={{ display: 'none', zIndex: Z_INDEX.SELECTION_BOX }}
       />
       
-      {visibleNotes.map((note) => (
-        <NoteCard key={note.id} id={note.id} scale={scale} /> 
+      {visibleNoteIds.map((id) => (
+        <NoteCard key={id} id={id} scale={scale} /> 
       ))}
       
-      {visibleNotes.length === 0 && currentBoardVisibleCount > 0 && (
+      {visibleNoteIds.length === 0 && currentBoardVisibleCount > 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
           <p className="text-lg font-medium text-text-tertiary">
             当前视口外有 {currentBoardVisibleCount} 个便签
@@ -568,7 +568,7 @@ export const Canvas: React.FC = () => {
         </div>
       )}
       
-      {visibleNotes.length === 0 && currentBoardVisibleCount === 0 && (
+      {visibleNoteIds.length === 0 && currentBoardVisibleCount === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
           <p className="text-lg font-medium text-text-tertiary">
             {currentBoardId === 'default' ? '双击空白处新建便签' : '当前看板为空'}

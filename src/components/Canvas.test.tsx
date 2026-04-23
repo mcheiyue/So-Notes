@@ -25,7 +25,7 @@ vi.mock('react-draggable', () => ({
 
 import { Canvas } from './Canvas';
 import { useStore } from '../store/useStore';
-import { normalizeNotes } from '../store/normalization';
+import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
 import { Note } from '../store/types';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
@@ -63,8 +63,10 @@ describe('Canvas 空白命中判定', () => {
     vi.stubGlobal('cancelAnimationFrame', cancelRafMock);
 
     useStore.setState(useStore.getInitialState(), true);
+    const normalized = normalizeNotes([createNote()]);
     useStore.setState({
-      ...normalizeNotes([createNote()]),
+      ...normalized,
+      layoutNotesById: createLayoutNotesById(normalized.notesById),
       currentBoardId: 'default',
       isLoaded: true,
       init: vi.fn(async () => undefined),

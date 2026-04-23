@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult } from './types';
+import { LayoutNote, Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult } from './types';
+
 import { db } from './db';
-import { createEmptyNormalizedNotesState, denormalizeNotes, normalizeNotes } from './normalization';
+import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, normalizeNotes, updateLayoutNote } from './normalization';
+
 import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
 import { diagnostics } from '../utils/diagnostics';
@@ -22,6 +24,8 @@ interface State {
   notesById: Record<string, Note>;
   allNoteIds: string[];
   boardNoteIds: Record<string, string[]>;
+  layoutNotesById: Record<string, LayoutNote>;
+
 
   boards: Board[];
   currentBoardId: string;
@@ -171,11 +175,22 @@ const ensureBoardNoteBucket = (state: Pick<State, 'boardNoteIds'>, boardId: stri
   return state.boardNoteIds[boardId];
 };
 
-const appendNoteToNormalizedState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds'>, note: Note) => {
+const appendNoteToNormalizedState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds' | 'layoutNotesById'>, note: Note) => {
   state.notesById[note.id] = note;
   state.allNoteIds.push(note.id);
   ensureBoardNoteBucket(state, note.boardId).push(note.id);
+  state.layoutNotesById[note.id] = {
+    id: note.id,
+    x: note.x,
+    y: note.y,
+    boardId: note.boardId,
+    deletedAt: note.deletedAt ?? null,
+    color: note.color,
+    width: note.width,
+    height: note.height,
+  };
 };
+
 
 const removeNoteIdFromBoard = (state: Pick<State, 'boardNoteIds'>, boardId: string, noteId: string) => {
   const boardIds = state.boardNoteIds[boardId];
@@ -190,7 +205,7 @@ const removeNoteIdFromBoard = (state: Pick<State, 'boardNoteIds'>, boardId: stri
   }
 };
 
-const moveNoteBetweenBoards = (state: Pick<State, 'notesById' | 'boardNoteIds'>, noteId: string, targetBoardId: string) => {
+const moveNoteBetweenBoards = (state: Pick<State, 'notesById' | 'boardNoteIds' | 'layoutNotesById'>, noteId: string, targetBoardId: string) => {
   const note = state.notesById[noteId];
   if (!note || note.boardId === targetBoardId) {
     return;
@@ -199,9 +214,17 @@ const moveNoteBetweenBoards = (state: Pick<State, 'notesById' | 'boardNoteIds'>,
   removeNoteIdFromBoard(state, note.boardId, noteId);
   note.boardId = targetBoardId;
   ensureBoardNoteBucket(state, targetBoardId).push(noteId);
+
+  if (state.layoutNotesById[noteId]) {
+    state.layoutNotesById[noteId] = {
+      ...state.layoutNotesById[noteId],
+      boardId: targetBoardId,
+    };
+  }
 };
 
-const removeNoteFromNormalizedState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds'>, noteId: string) => {
+
+const removeNoteFromNormalizedState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds' | 'layoutNotesById'>, noteId: string) => {
   const note = state.notesById[noteId];
   if (!note) {
     return;
@@ -210,12 +233,16 @@ const removeNoteFromNormalizedState = (state: Pick<State, 'notesById' | 'allNote
   removeNoteIdFromBoard(state, note.boardId, noteId);
   delete state.notesById[noteId];
   state.allNoteIds = state.allNoteIds.filter((id) => id !== noteId);
+  delete state.layoutNotesById[noteId];
 };
+
 
 export const useStore = create<State>()(
   immer((set, get) => ({
     ...createEmptyNormalizedNotesState(),
+    layoutNotesById: {},
     config: DEFAULT_CONFIG,
+
     isLoaded: false,
     isSaving: false,
     saveStatus: 'idle',
@@ -336,6 +363,8 @@ export const useStore = create<State>()(
         state.notesById = normalizedNotes.notesById;
         state.allNoteIds = normalizedNotes.allNoteIds;
         state.boardNoteIds = normalizedNotes.boardNoteIds;
+        state.layoutNotesById = createLayoutNotesById(normalizedNotes.notesById);
+
         state.config = finalData.config;
         state.boards = finalData.boards;
         state.currentBoardId = finalData.currentBoardId;
@@ -640,9 +669,11 @@ export const useStore = create<State>()(
         if (note) {
           note.x = x;
           note.y = y;
+          state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
         }
       });
     },
+
 
     moveSelectedNotes: (dx, dy, excludeId) => {
         set((state) => {
@@ -652,10 +683,12 @@ export const useStore = create<State>()(
                 if (note) {
                     note.x += dx;
                     note.y += dy;
+                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
                 }
             });
         });
     },
+
 
     finalizeLayoutChange: (noteIds) => {
         const uniqueIds = [...new Set(noteIds)];
@@ -759,7 +792,9 @@ export const useStore = create<State>()(
                 if (stateNote) {
                     stateNote.x = currentX;
                     stateNote.y = currentY;
+                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, stateNote);
                 }
+
 
                 // Advance X
                 currentX += COLUMN_WIDTH;
@@ -792,12 +827,14 @@ export const useStore = create<State>()(
         const note = getNoteById(state, id);
         if (note) {
           note.deletedAt = Date.now(); // Soft delete
+          state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
         }
         // Remove from selection if deleted
         state.selectedIds = state.selectedIds.filter(selId => selId !== id);
       });
       get().saveToDisk();
     },
+
     
     restoreNote: (id) => {
         set((state) => {
@@ -814,10 +851,12 @@ export const useStore = create<State>()(
                 // Visual Feedback: Bring to top so user sees it
                 state.config.maxZ += 1;
                 note.z = state.config.maxZ;
+                state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
             }
         });
         get().saveToDisk();
     },
+
 
     deleteNotePermanently: (id) => {
         set((state) => {
@@ -850,17 +889,20 @@ export const useStore = create<State>()(
                     // Bring to front
                     state.config.maxZ += 1;
                     note.z = state.config.maxZ;
+                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
                 }
             });
         });
         get().saveToDisk();
     },
+
     
     changeColor: (id, color) => {
       set((state) => {
          const note = getNoteById(state, id);
          if (note) {
            note.color = color;
+           state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
          }
       });
       get().saveToDisk();
@@ -872,6 +914,7 @@ export const useStore = create<State>()(
                 const note = getNoteById(state, id);
                 if (note) {
                     note.color = color;
+                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
                 }
             });
         });
@@ -938,6 +981,7 @@ export const useStore = create<State>()(
                 const note = state.notesById[id];
                 if (note) {
                     note.deletedAt = Date.now();
+                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
                 }
             });
             state.selectedIds = [];
@@ -1005,14 +1049,9 @@ export const useStore = create<State>()(
             const note = getNoteById(state, id);
             if (note) {
                 moveNoteBetweenBoards(state, id, targetBoardId);
-                // Smart Placement: Center it or Offset?
-                // For now, let's just keep position but offset slightly to imply movement if they switch back
-                // Or just keep it. "Stacked" issue is solved by user arranging.
-                // But let's add a small random jitter to prevent perfect stacking if bulk moving.
                 note.x += Math.floor(Math.random() * 20);
                 note.y += Math.floor(Math.random() * 20);
-                
-                // CRITICAL: Remove from selection if moved away
+                state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
                 state.selectedIds = state.selectedIds.filter(selId => selId !== id);
             }
         });
@@ -1031,11 +1070,10 @@ export const useStore = create<State>()(
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
                 };
-                // Jitter for target board
                 newNote.x += Math.floor(Math.random() * 20);
                 newNote.y += Math.floor(Math.random() * 20);
-                
                 appendNoteToNormalizedState(state, newNote);
+                state.layoutNotesById = updateLayoutNote(state.layoutNotesById, newNote);
                 state.config.maxZ += 1;
             }
         });
@@ -1052,15 +1090,15 @@ export const useStore = create<State>()(
                 const note = state.notesById[id];
                 if (note) {
                     moveNoteBetweenBoards(state, id, targetBoardId);
-                    // Jitter to prevent perfect stacking
-                    note.x += Math.floor(Math.random() * 30); 
+                    note.x += Math.floor(Math.random() * 30);
                     note.y += Math.floor(Math.random() * 30);
+                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, note);
                     movedCount++;
                 }
             });
 
             if (movedCount > 0) {
-                state.selectedIds = []; // Clear selection after move
+                state.selectedIds = [];
             }
         });
         get().saveToDisk();
@@ -1082,11 +1120,10 @@ export const useStore = create<State>()(
                         createdAt: Date.now(),
                         updatedAt: Date.now(),
                     };
-                    // Jitter
                     newNote.x += Math.floor(Math.random() * 30);
                     newNote.y += Math.floor(Math.random() * 30);
-                    
                     appendNoteToNormalizedState(state, newNote);
+                    state.layoutNotesById = updateLayoutNote(state.layoutNotesById, newNote);
                     state.config.maxZ += 1;
                 }
             });
@@ -1260,6 +1297,7 @@ export const useStore = create<State>()(
                 state.notesById = normalizedSnapshot.notesById;
                 state.allNoteIds = normalizedSnapshot.allNoteIds;
                 state.boardNoteIds = normalizedSnapshot.boardNoteIds;
+                state.layoutNotesById = createLayoutNotesById(normalizedSnapshot.notesById);
                 state.currentBoardId = snapshot.currentBoardId;
                 state.viewMode = snapshot.viewMode;
                 state.selectedIds = snapshot.selectedIds;

@@ -3,15 +3,15 @@ import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
 import { LAYOUT, Z_INDEX } from '../constants/layout';
-import { getNoteColor, Note } from '../store/types';
+import { getNoteColor, LayoutNote } from '../store/types';
 import { useDarkMode } from '../hooks/useDarkMode';
 
 const EMPTY_NOTE_IDS: string[] = [];
 
 export const MiniMap: React.FC = () => {
-    const { notesById, currentBoardNoteIds, viewport, interaction, setViewportPosition } = useStore(
+    const { layoutNotesById, currentBoardNoteIds, viewport, interaction, setViewportPosition } = useStore(
         useShallow(state => ({
-            notesById: state.notesById,
+            layoutNotesById: state.layoutNotesById,
             currentBoardNoteIds: state.boardNoteIds[state.currentBoardId] ?? EMPTY_NOTE_IDS,
             viewport: state.viewport,
             interaction: state.interaction,
@@ -25,10 +25,10 @@ export const MiniMap: React.FC = () => {
 
     const visibleNotes = useMemo(
         () => currentBoardNoteIds.flatMap((id) => {
-            const note = notesById[id];
-            return note && !note.deletedAt ? [note] : [];
+            const ln = layoutNotesById[id];
+            return ln && !ln.deletedAt ? [ln] : [];
         }),
-        [currentBoardNoteIds, notesById]
+        [currentBoardNoteIds, layoutNotesById]
     );
     
     // Calculate World Bounds (Always anchored at 0,0)
@@ -318,7 +318,7 @@ export const MiniMap: React.FC = () => {
 };
 
 // Optimized Sub-component for Individual Note Item
-const MiniMapNoteItem = React.memo(({ note, scale, isDarkMode }: { note: Note, scale: number, isDarkMode: boolean }) => {
+const MiniMapNoteItem = React.memo(({ note, scale, isDarkMode }: { note: LayoutNote, scale: number, isDarkMode: boolean }) => {
     const w = note.width || LAYOUT.NOTE_WIDTH;
     const h = note.height || LAYOUT.NOTE_MIN_HEIGHT;
     
@@ -356,7 +356,7 @@ const MiniMapNoteItem = React.memo(({ note, scale, isDarkMode }: { note: Note, s
 });
 
 // Optimized Container for Notes Layer
-const MiniMapNotes = React.memo(({ notes, scale, isDarkMode }: { notes: Note[], scale: number, isDarkMode: boolean }) => {
+const MiniMapNotes = React.memo(({ notes, scale, isDarkMode }: { notes: LayoutNote[], scale: number, isDarkMode: boolean }) => {
     return (
         <>
             {notes.map(note => (

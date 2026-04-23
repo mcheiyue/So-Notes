@@ -4,7 +4,7 @@ import DiagnosticsMetric, { DiagnosticsMetricHandle } from './DiagnosticsMetric'
 import { cn } from '../utils/cn';
 import { SAMPLE_PRESETS, generatePresetSample } from '../test/fixtures/sampleData';
 import { useStore } from '../store/useStore';
-import { normalizeNotes } from '../store/normalization';
+import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
 
 const UPDATE_INTERVAL = 1000;
 
@@ -54,7 +54,8 @@ export const DiagnosticsPanel: React.FC = () => {
         }
         state.boardNoteIds[boardId].push(...noteIds);
       });
-      // Update maxZ
+      const newLayoutNotes = createLayoutNotesById(normalizedNotes.notesById);
+      Object.assign(state.layoutNotesById, newLayoutNotes);
       state.config.maxZ = Math.max(state.config.maxZ, state.allNoteIds.length + 1);
     });
 

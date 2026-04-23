@@ -144,6 +144,18 @@ export interface NormalizedNotesState {
   boardNoteIds: Record<string, string[]>;
 }
 
+export interface LayoutNote {
+  id: string;
+  x: number;
+  y: number;
+  boardId: string;
+  deletedAt: number | null;
+  color: NoteColor;
+  width?: number;
+  height?: number;
+}
+
+
 
 export const DEFAULT_BOARD: Board = {
   id: 'default',

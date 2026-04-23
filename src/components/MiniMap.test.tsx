@@ -20,7 +20,7 @@ vi.mock('../utils/fileSystem', () => ({
 }));
 
 import { MiniMap } from './MiniMap';
-import { normalizeNotes } from '../store/normalization';
+import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
 import { useStore } from '../store/useStore';
 
 describe('MiniMap 看板隔离', () => {
@@ -30,6 +30,46 @@ describe('MiniMap 看板隔离', () => {
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     useStore.setState(useStore.getInitialState(), true);
+
+    const normalized = normalizeNotes([
+      {
+        id: 'note-a',
+        boardId: 'default',
+        x: 100,
+        y: 120,
+        title: 'A',
+        content: 'alpha',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'note-b',
+        boardId: 'board-2',
+        x: 3000,
+        y: 2400,
+        title: 'B',
+        content: 'beta',
+        color: '#FFFFFF',
+        z: 2,
+        createdAt: 2,
+        updatedAt: 2,
+      },
+      {
+        id: 'note-c',
+        boardId: 'default',
+        x: 200,
+        y: 220,
+        title: 'C',
+        content: 'gamma',
+        color: '#FFFFFF',
+        z: 3,
+        createdAt: 3,
+        updatedAt: 3,
+        deletedAt: 999,
+      },
+    ]);
 
     useStore.setState({
       boards: [
@@ -44,45 +84,8 @@ describe('MiniMap 看板隔离', () => {
         isDragging: false,
         edgePush: { top: false, bottom: false, left: false, right: false },
       },
-      ...normalizeNotes([
-        {
-          id: 'note-a',
-          boardId: 'default',
-          x: 100,
-          y: 120,
-          title: 'A',
-          content: 'alpha',
-          color: '#FFFFFF',
-          z: 1,
-          createdAt: 1,
-          updatedAt: 1,
-        },
-        {
-          id: 'note-b',
-          boardId: 'board-2',
-          x: 3000,
-          y: 2400,
-          title: 'B',
-          content: 'beta',
-          color: '#FFFFFF',
-          z: 2,
-          createdAt: 2,
-          updatedAt: 2,
-        },
-        {
-          id: 'note-c',
-          boardId: 'default',
-          x: 200,
-          y: 220,
-          title: 'C',
-          content: 'gamma',
-          color: '#FFFFFF',
-          z: 3,
-          createdAt: 3,
-          updatedAt: 3,
-          deletedAt: 999,
-        },
-      ]),
+      ...normalized,
+      layoutNotesById: createLayoutNotesById(normalized.notesById),
     });
 
     container = document.createElement('div');
