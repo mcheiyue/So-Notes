@@ -52,6 +52,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
   
   // Drag State (Hybrid Control)
   const isDragging = useRef(false);
@@ -84,7 +85,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const shouldShowExpandedActions = !isStatic && !note.collapsed && (isHovered || isEditing);
   const shouldShowCollapsedActions = note.collapsed && !isStatic;
   const shouldExpandContent = isEditing || isSelected;
-  const disableHeaderTooltips = isStickyDragging || dragPosRef.current;
+  const disableHeaderTooltips = isStickyDragging || isDragActive;
   const disableCollapseTooltip = disableHeaderTooltips || isStatic;
 
   const handleStart = () => {
@@ -136,6 +137,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const handleDrag = (_e: DraggableEvent, data: DraggableData) => {
       if (!isDragging.current) isDragging.current = true;
       dragPosRef.current = true;
+      if (!isDragActive) setIsDragActive(true);
 
       if (isSelected && isGroupSelection) {
           groupDragOffsetRef.current.dx += data.deltaX;
@@ -174,6 +176,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const handleStop = (_e: DraggableEvent, data: DraggableData) => {
     isDragging.current = false;
     dragPosRef.current = false;
+    setIsDragActive(false);
     setIsDragging(false);
     document.body.classList.remove('is-dragging');
     
