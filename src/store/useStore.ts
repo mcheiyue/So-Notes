@@ -95,9 +95,11 @@ interface State {
   deleteNote: (id: string) => void; // Soft delete
   restoreNote: (id: string) => void; // Restore from Trash
   deleteNotePermanently: (id: string) => void; // Hard delete
-  emptyTrash: () => void; // Hard delete all in Trash
-  restoreAllTrash: () => void; // Restore all in Trash
-  deleteSelectedNotes: () => void; // Batch soft delete
+  emptyTrash: () => void;
+  restoreAllTrash: () => void;
+  restoreSelectedTrash: (ids: string[]) => void;
+  deleteSelectedPermanently: (ids: string[]) => void;
+  deleteSelectedNotes: () => void;
   changeColor: (id: string, color: string) => void;
   changeSelectedNotesColor: (color: string) => void;
   toggleCollapse: (id: string) => void;
@@ -128,6 +130,7 @@ interface State {
   exportBoard: (boardId: string) => Promise<void>;
   exportCurrentBoard: () => Promise<void>;
   exportAll: () => Promise<void>;
+  exportSelectedNotes: () => Promise<void>;
   importFromFile: () => Promise<ImportFromFileResult>;
   
   // Theme Action
@@ -896,6 +899,36 @@ export const useStore = create<State>()(
         get().saveToDisk();
     },
 
+    restoreSelectedTrash: (ids) => {
+        set((state) => {
+            ids.forEach((id) => {
+                const note = state.notesById[id];
+                if (!note || !note.deletedAt) return;
+                
+                note.deletedAt = null;
+                
+                if (!state.boards.some(b => b.id === note.boardId)) {
+                    moveNoteBetweenBoards(state, id, state.currentBoardId);
+                }
+                
+                state.config.maxZ += 1;
+                note.z = state.config.maxZ;
+                state.layoutNotesById[note.id] = extractLayoutNote(note);
+            });
+        });
+        get().saveToDisk();
+    },
+
+    deleteSelectedPermanently: (ids) => {
+        set((state) => {
+            ids.forEach((id) => {
+                removeNoteFromNormalizedState(state, id);
+            });
+            state.selectedIds = state.selectedIds.filter((selectedId) => !ids.includes(selectedId));
+        });
+        get().saveToDisk();
+    },
+
     
     changeColor: (id, color) => {
       set((state) => {
@@ -1308,6 +1341,26 @@ export const useStore = create<State>()(
         const notes = denormalizeNotes(state);
         const json = generateFullBackup(boards, notes, config, currentBoardId);
         const fileName = `SoNotes_Backup_${new Date().toISOString().split('T')[0]}.json`;
+        
+        await saveFile(json, fileName);
+    },
+
+    exportSelectedNotes: async () => {
+        const state = get();
+        const { selectedIds, boards, currentBoardId } = state;
+        if (selectedIds.length === 0) return;
+
+        const selectedNotes = selectedIds
+            .map(id => state.notesById[id])
+            .filter((n): n is Note => n !== undefined && !n.deletedAt);
+
+        if (selectedNotes.length === 0) return;
+
+        const currentBoard = boards.find(b => b.id === currentBoardId);
+        if (!currentBoard) return;
+
+        const json = generateBoardExport(currentBoard, selectedNotes);
+        const fileName = `Selected_${selectedNotes.length}_notes.json`;
         
         await saveFile(json, fileName);
     },

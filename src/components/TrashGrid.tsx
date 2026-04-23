@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { NoteCard } from './NoteCard';
 import { Trash2, RotateCcw, X } from 'lucide-react';
@@ -11,8 +11,11 @@ export const TrashGrid: React.FC = () => {
     const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
     const emptyTrash = useStore(state => state.emptyTrash);
     const restoreAllTrash = useStore(state => state.restoreAllTrash);
+    const restoreSelectedTrash = useStore(state => state.restoreSelectedTrash);
+    const deleteSelectedPermanently = useStore(state => state.deleteSelectedPermanently);
 
-    // Filter deleted notes
+    const [selectedTrashIds, setSelectedTrashIds] = useState<string[]>([]);
+
     const deletedNotes = allNoteIds
         .flatMap((id) => {
             const note = notesById[id];
@@ -20,12 +23,37 @@ export const TrashGrid: React.FC = () => {
         })
         .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
 
-    // Get board name helper
     const getBoardName = (boardId: string) => {
         return boards.find(b => b.id === boardId)?.name || 'Unknown Board';
     };
 
     const setViewMode = useStore(state => state.setViewMode);
+
+    const handleTrashNoteClick = (noteId: string, e: React.MouseEvent) => {
+        if (e.ctrlKey || e.shiftKey) {
+            setSelectedTrashIds(prev => 
+                prev.includes(noteId) 
+                    ? prev.filter(id => id !== noteId)
+                    : [...prev, noteId]
+            );
+        } else {
+            setSelectedTrashIds([noteId]);
+        }
+    };
+
+    const handleBatchRestore = () => {
+        if (selectedTrashIds.length === 0) return;
+        restoreSelectedTrash(selectedTrashIds);
+        setSelectedTrashIds([]);
+    };
+
+    const handleBatchDelete = () => {
+        if (selectedTrashIds.length === 0) return;
+        if (window.confirm(`确认永久删除选中的 ${selectedTrashIds.length} 个便签吗? 此操作无法撤销。`)) {
+            deleteSelectedPermanently(selectedTrashIds);
+            setSelectedTrashIds([]);
+        }
+    };
 
     if (deletedNotes.length === 0) {
         return (
@@ -64,6 +92,27 @@ export const TrashGrid: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-3">
+                    {selectedTrashIds.length > 0 && (
+                        <>
+                            <button 
+                                type="button"
+                                onClick={handleBatchRestore}
+                                className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 border border-blue-100 rounded-lg hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-900/50 dark:hover:bg-blue-900/50 transition-colors text-sm font-medium shadow-sm"
+                            >
+                                <RotateCcw size={16} />
+                                还原选中 ({selectedTrashIds.length})
+                            </button>
+                            <button 
+                                type="button"
+                                onClick={handleBatchDelete}
+                                className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 dark:border-red-900/50 dark:hover:bg-red-900/50 transition-colors text-sm font-medium shadow-sm"
+                            >
+                                <Trash2 size={16} />
+                                永久删除选中 ({selectedTrashIds.length})
+                            </button>
+                            <div className="w-px h-6 bg-border-subtle"></div>
+                        </>
+                    )}
                     <button 
                         type="button"
                         onClick={() => {
@@ -99,16 +148,28 @@ export const TrashGrid: React.FC = () => {
             {/* Grid Content */}
             <div className="p-8 grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-6 pb-32">
                 {deletedNotes.map(note => (
-                    <div key={note.id} className="relative group flex flex-col">
+                    <div 
+                        key={note.id} 
+                        className={`relative group flex flex-col cursor-pointer rounded-2xl transition-all ${
+                            selectedTrashIds.includes(note.id) 
+                                ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-secondary-bg' 
+                                : ''
+                        }`}
+                        onClick={(e) => handleTrashNoteClick(note.id, e)}
+                    >
                         {/* Wrapper to overlay actions */}
                         <div className="relative">
                             <NoteCard 
                                 id={note.id}
-                                isStatic={true} // Disable DnD
+                                isStatic={true}
                             />
                             
                             {/* Overlay Mask */}
-                            <div className="absolute inset-0 bg-white/10 dark:bg-black/10 group-hover:bg-white/0 dark:group-hover:bg-black/0 transition-colors pointer-events-none rounded-2xl" />
+                            <div className={`absolute inset-0 transition-colors pointer-events-none rounded-2xl ${
+                                selectedTrashIds.includes(note.id)
+                                    ? 'bg-blue-500/10'
+                                    : 'bg-white/10 dark:bg-black/10 group-hover:bg-white/0 dark:group-hover:bg-black/0'
+                            }`} />
                         </div>
 
                         {/* Metadata & Actions Footer */}
@@ -125,7 +186,10 @@ export const TrashGrid: React.FC = () => {
                             <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button
                                     type="button"
-                                    onClick={() => restoreNote(note.id)}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        restoreNote(note.id);
+                                    }}
                                     className="p-1.5 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 transition-colors"
                                     title="还原"
                                 >
@@ -133,7 +197,8 @@ export const TrashGrid: React.FC = () => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                        e.stopPropagation();
                                         if (window.confirm('确认永久删除此便签?')) deleteNotePermanently(note.id);
                                     }}
                                     className="p-1.5 bg-red-50 text-red-600 rounded-md hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 transition-colors"

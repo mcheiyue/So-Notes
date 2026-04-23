@@ -403,6 +403,16 @@ const ContextMenuContent: React.FC = () => {
             <span>🔝</span> 置顶
           </MenuItemButton>
           
+          {isGroupContext && (
+            <MenuItemButton
+              role="menuitem"
+              className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+              onClick={() => handleAction(() => useStore.getState().exportSelectedNotes())}
+            >
+              <span>📤</span> 导出选中 ({selectedIds.length})
+            </MenuItemButton>
+          )}
+          
           <div className="h-px bg-border-subtle my-1" />
 
           <MenuItemButton
