@@ -4,7 +4,8 @@ import { NoteCard } from './NoteCard';
 import { Trash2, RotateCcw, X } from 'lucide-react';
 
 export const TrashGrid: React.FC = () => {
-    const notes = useStore(state => state.notes);
+    const notesById = useStore(state => state.notesById);
+    const allNoteIds = useStore(state => state.allNoteIds);
     const boards = useStore(state => state.boards);
     const restoreNote = useStore(state => state.restoreNote);
     const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
@@ -12,7 +13,12 @@ export const TrashGrid: React.FC = () => {
     const restoreAllTrash = useStore(state => state.restoreAllTrash);
 
     // Filter deleted notes
-    const deletedNotes = notes.filter(n => n.deletedAt).sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
+    const deletedNotes = allNoteIds
+        .flatMap((id) => {
+            const note = notesById[id];
+            return note?.deletedAt ? [note] : [];
+        })
+        .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
 
     // Get board name helper
     const getBoardName = (boardId: string) => {

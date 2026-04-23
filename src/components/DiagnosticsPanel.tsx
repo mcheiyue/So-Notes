@@ -4,6 +4,7 @@ import DiagnosticsMetric, { DiagnosticsMetricHandle } from './DiagnosticsMetric'
 import { cn } from '../utils/cn';
 import { SAMPLE_PRESETS, generatePresetSample } from '../test/fixtures/sampleData';
 import { useStore } from '../store/useStore';
+import { normalizeNotes } from '../store/normalization';
 
 const UPDATE_INTERVAL = 1000;
 
@@ -44,9 +45,17 @@ export const DiagnosticsPanel: React.FC = () => {
         ...n,
         boardId: boardIdMap.get(n.boardId) || state.currentBoardId,
       }));
-      state.notes.push(...newNotes);
+      const normalizedNotes = normalizeNotes(newNotes);
+      Object.assign(state.notesById, normalizedNotes.notesById);
+      state.allNoteIds.push(...normalizedNotes.allNoteIds);
+      Object.entries(normalizedNotes.boardNoteIds).forEach(([boardId, noteIds]) => {
+        if (!state.boardNoteIds[boardId]) {
+          state.boardNoteIds[boardId] = [];
+        }
+        state.boardNoteIds[boardId].push(...noteIds);
+      });
       // Update maxZ
-      state.config.maxZ = Math.max(state.config.maxZ, state.notes.length + 1);
+      state.config.maxZ = Math.max(state.config.maxZ, state.allNoteIds.length + 1);
     });
 
     // Trigger save

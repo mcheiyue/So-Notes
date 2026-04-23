@@ -19,7 +19,9 @@ function App() {
   const isMouseDownRef = useRef(false);
   const viewMode = useStore(state => state.viewMode);
   const isSpotlightOpen = useStore(state => state.isSpotlightOpen);
-  const notes = useStore(state => state.notes);
+  const notesById = useStore(state => state.notesById);
+  const allNoteIds = useStore(state => state.allNoteIds);
+  const boardNoteIds = useStore(state => state.boardNoteIds);
   const currentBoardId = useStore(state => state.currentBoardId);
   const selectedIds = useStore(state => state.selectedIds);
 
@@ -33,10 +35,11 @@ function App() {
   }, [startFPS, stopFPS]);
 
   useEffect(() => {
-    const currentBoardNotes = notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length;
-    const trashNotes = notes.filter(n => n.deletedAt).length;
-    diagnostics.updateNoteStats(notes.length, currentBoardNotes, selectedIds.length, trashNotes);
-  }, [notes, currentBoardId, selectedIds]);
+    const totalNotes = allNoteIds.length;
+    const currentBoardNotes = (boardNoteIds[currentBoardId] ?? []).filter((id) => !notesById[id]?.deletedAt).length;
+    const trashNotes = allNoteIds.filter((id) => notesById[id]?.deletedAt).length;
+    diagnostics.updateNoteStats(totalNotes, currentBoardNotes, selectedIds.length, trashNotes);
+  }, [allNoteIds, boardNoteIds, currentBoardId, notesById, selectedIds]);
 
   const syncViewportToShell = useCallback((rect: WindowShellContentRect) => {
     const nextWidth = Math.max(0, rect.width);

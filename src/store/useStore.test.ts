@@ -21,11 +21,14 @@ import { useStore } from './useStore';
 import { db } from './db';
 import { openFile } from '../utils/fileSystem';
 import { invoke } from '@tauri-apps/api/core';
+import { createEmptyNormalizedNotesState, denormalizeNotes, normalizeNotes } from './normalization';
 
 const flushMicrotasks = async () => {
   await Promise.resolve();
   await Promise.resolve();
 };
+
+const getNote = (id: string) => useStore.getState().notesById[id];
 
 describe('useStore 布局持久化契约', () => {
   beforeEach(() => {
@@ -34,7 +37,7 @@ describe('useStore 布局持久化契约', () => {
     useStore.setState(useStore.getInitialState(), true);
 
     useStore.setState({
-      notes: [
+      ...normalizeNotes([
         {
           id: 'note-1',
           boardId: 'default',
@@ -59,7 +62,7 @@ describe('useStore 布局持久化契约', () => {
           createdAt: 200,
           updatedAt: 200,
         },
-      ],
+      ]),
       currentBoardId: 'default',
       selectedIds: ['note-1', 'note-2'],
       viewport: { x: 0, y: 0, w: 1280, h: 720 },
@@ -74,7 +77,7 @@ describe('useStore 布局持久化契约', () => {
     useStore.getState().moveNote('note-1', 110, 210);
     vi.advanceTimersByTime(3000);
 
-    const note = useStore.getState().notes.find((item) => item.id === 'note-1');
+    const note = getNote('note-1');
     expect(note?.x).toBe(110);
     expect(note?.y).toBe(210);
     expect(note?.updatedAt).toBe(100);
@@ -88,8 +91,8 @@ describe('useStore 布局持久化契约', () => {
     useStore.getState().moveSelectedNotes(15, -5, 'note-1');
     vi.advanceTimersByTime(3000);
 
-    const first = useStore.getState().notes.find((item) => item.id === 'note-1');
-    const second = useStore.getState().notes.find((item) => item.id === 'note-2');
+    const first = getNote('note-1');
+    const second = getNote('note-2');
 
     expect(first?.x).toBe(10);
     expect(first?.y).toBe(20);
@@ -108,8 +111,8 @@ describe('useStore 布局持久化契约', () => {
     useStore.getState().finalizeLayoutChange(['note-1', 'note-1']);
     await flushMicrotasks();
 
-    const first = useStore.getState().notes.find((item) => item.id === 'note-1');
-    const second = useStore.getState().notes.find((item) => item.id === 'note-2');
+    const first = getNote('note-1');
+    const second = getNote('note-2');
     const expectedTimestamp = new Date('2026-03-19T10:00:00.000Z').getTime();
 
     expect(first?.updatedAt).toBe(expectedTimestamp);
@@ -126,7 +129,7 @@ describe('useStore 布局持久化契约', () => {
     useStore.getState().finalizeLayoutChange(['note-1']);
     await flushMicrotasks();
 
-    const note = useStore.getState().notes.find((item) => item.id === 'note-1');
+    const note = getNote('note-1');
     const expectedTimestamp = new Date('2026-03-19T10:05:00.000Z').getTime();
 
     expect(note?.z).toBe(3);
@@ -143,8 +146,8 @@ describe('useStore 布局持久化契约', () => {
     useStore.getState().arrangeNotes(100, 120);
     await flushMicrotasks();
 
-    const first = useStore.getState().notes.find((item) => item.id === 'note-1');
-    const second = useStore.getState().notes.find((item) => item.id === 'note-2');
+    const first = getNote('note-1');
+    const second = getNote('note-2');
     const expectedTimestamp = new Date('2026-03-19T10:10:00.000Z').getTime();
 
     expect(first?.x).toBe(100);
@@ -160,8 +163,8 @@ describe('useStore 导入契约', () => {
     vi.clearAllMocks();
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
+      ...createEmptyNormalizedNotesState(),
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
-      notes: [],
       currentBoardId: 'default',
       viewMode: 'BOARD',
       selectedIds: ['legacy-selection'],
@@ -185,7 +188,7 @@ describe('useStore 导入契约', () => {
 
     expect(result.status).toBe('error');
     expect(useStore.getState().boards).toHaveLength(1);
-    expect(useStore.getState().notes).toHaveLength(0);
+    expect(useStore.getState().allNoteIds).toHaveLength(0);
     expect(useStore.getState().currentBoardId).toBe('default');
     expect(useStore.getState().selectedIds).toEqual(['legacy-selection']);
     expect(saveSpy).not.toHaveBeenCalled();
@@ -224,14 +227,15 @@ describe('useStore 导入契约', () => {
 
     const result = await useStore.getState().importFromFile();
     const state = useStore.getState();
+    const notes = denormalizeNotes(state);
 
     expect(result.status).toBe('success');
     expect(state.boards).toHaveLength(2);
     expect(state.boards[1].id).toBe('11111111-1111-4111-8111-111111111111');
     expect(state.boards[1].name).toBe('主板（导入）');
-    expect(state.notes).toHaveLength(1);
-    expect(state.notes[0].id).toBe('22222222-2222-4222-8222-222222222222');
-    expect(state.notes[0].boardId).toBe('11111111-1111-4111-8111-111111111111');
+    expect(notes).toHaveLength(1);
+    expect(notes[0].id).toBe('22222222-2222-4222-8222-222222222222');
+    expect(notes[0].boardId).toBe('11111111-1111-4111-8111-111111111111');
     expect(state.currentBoardId).toBe('11111111-1111-4111-8111-111111111111');
     expect(state.selectedIds).toEqual([]);
     expect(saveSpy).toHaveBeenCalledTimes(1);
@@ -360,14 +364,15 @@ describe('useStore 导入契约', () => {
 
     const result = await useStore.getState().importFromFile();
     const state = useStore.getState();
+    const notes = denormalizeNotes(state);
 
     expect(result.status).toBe('success');
     expect(result.message).toBe('导入完成，已跳过 1 条异常便签。');
     expect(result.summary?.skippedNotesCount).toBe(1);
     expect(result.summary?.issues[0].code).toBe('INVALID_NOTE');
     expect(state.boards).toHaveLength(2);
-    expect(state.notes).toHaveLength(1);
-    expect(state.notes[0].id).toBe('66666666-bbbb-4666-8666-666666666666');
+    expect(notes).toHaveLength(1);
+    expect(notes[0].id).toBe('66666666-bbbb-4666-8666-666666666666');
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -394,6 +399,7 @@ describe('useStore 导入契约', () => {
 
     const result = await useStore.getState().importFromFile();
     const state = useStore.getState();
+    const notes = denormalizeNotes(state);
 
     expect(result.status).toBe('success');
     expect(result.message).toBe('已导入旧版备份，并按当前规则完成兼容处理。');
@@ -408,7 +414,7 @@ describe('useStore 导入契约', () => {
       'FALLBACK_CURRENT_BOARD',
     ]);
     expect(state.boards).toHaveLength(2);
-    expect(state.notes).toHaveLength(1);
+    expect(notes).toHaveLength(1);
     expect(state.currentBoardId).toBe('12121212-1212-4121-8121-121212121212');
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
@@ -491,7 +497,7 @@ describe('useStore 导入契约', () => {
     expect(result.code).toBe('SAVE_FAILED');
     expect(result.rolledBack).toBe(true);
     expect(state.boards).toEqual(originalState.boards);
-    expect(state.notes).toEqual(originalState.notes);
+    expect(denormalizeNotes(state)).toEqual(denormalizeNotes(originalState));
     expect(state.currentBoardId).toBe(originalState.currentBoardId);
     expect(state.selectedIds).toEqual(['keep-me']);
     expect(saveSpy).toHaveBeenCalledTimes(1);
@@ -539,7 +545,7 @@ describe('useStore 导入契约', () => {
     expect(result.code).toBe('SAVE_FAILED');
     expect(result.rolledBack).toBe(true);
     expect(state.boards).toEqual(originalState.boards);
-    expect(state.notes).toEqual(originalState.notes);
+    expect(denormalizeNotes(state)).toEqual(denormalizeNotes(originalState));
     expect(state.currentBoardId).toBe(originalState.currentBoardId);
     expect(state.selectedIds).toEqual(['keep-me']);
     expect(db.saveWAL).toHaveBeenCalledTimes(2);
@@ -551,8 +557,8 @@ describe('useStore 保存状态可见性契约', () => {
     vi.clearAllMocks();
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
+      ...createEmptyNormalizedNotesState(),
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
-      notes: [],
       currentBoardId: 'default',
       config: { ...useStore.getState().config, maxZ: 1 },
     });
@@ -616,8 +622,8 @@ describe('v1.3.0 并发与代际契约', () => {
     vi.clearAllMocks();
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
+      ...createEmptyNormalizedNotesState(),
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
-      notes: [],
       currentBoardId: 'default',
       config: { ...useStore.getState().config, maxZ: 1 },
     });
@@ -629,9 +635,12 @@ describe('v1.3.0 并发与代际契约', () => {
     let resolveGen1: () => void;
     const gen1Promise = new Promise<void>((res) => { resolveGen1 = res; });
     
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) => {
-      if (args?.generationId === 1) {
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: unknown) => {
+      const generationId = typeof args === 'object' && args !== null && 'generationId' in args
+        ? (args as { generationId?: unknown }).generationId
+        : undefined;
+
+      if (generationId === 1) {
         await gen1Promise;
       }
       return { success: true, io_duration_ms: 0, retries: 0 };

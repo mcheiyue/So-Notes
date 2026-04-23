@@ -3,6 +3,7 @@ import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
 import { Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult } from './types';
 import { db } from './db';
+import { createEmptyNormalizedNotesState, denormalizeNotes, normalizeNotes } from './normalization';
 import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
 import { diagnostics } from '../utils/diagnostics';
@@ -18,7 +19,9 @@ interface ImportFromFileResult {
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 interface State {
-  notes: Note[];
+  notesById: Record<string, Note>;
+  allNoteIds: string[];
+  boardNoteIds: Record<string, string[]>;
 
   boards: Board[];
   currentBoardId: string;
@@ -142,9 +145,76 @@ const resolveSaveErrorMessage = (error: unknown): string => {
   return '写入本地存储时发生未知错误。';
 };
 
+const serializeState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds' | 'boards' | 'currentBoardId' | 'config'>): StorageData => ({
+  notes: denormalizeNotes(state),
+  boards: state.boards,
+  currentBoardId: state.currentBoardId,
+  config: state.config,
+});
+
+const getBoardNoteIds = (state: Pick<State, 'boardNoteIds'>, boardId: string): string[] => state.boardNoteIds[boardId] ?? [];
+
+const getNoteById = (state: Pick<State, 'notesById'>, id: string): Note | undefined => state.notesById[id];
+
+const getBoardNotes = (state: Pick<State, 'notesById' | 'boardNoteIds'>, boardId: string): Note[] => {
+  return getBoardNoteIds(state, boardId).flatMap((id) => {
+    const note = state.notesById[id];
+    return note ? [note] : [];
+  });
+};
+
+const ensureBoardNoteBucket = (state: Pick<State, 'boardNoteIds'>, boardId: string): string[] => {
+  if (!state.boardNoteIds[boardId]) {
+    state.boardNoteIds[boardId] = [];
+  }
+
+  return state.boardNoteIds[boardId];
+};
+
+const appendNoteToNormalizedState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds'>, note: Note) => {
+  state.notesById[note.id] = note;
+  state.allNoteIds.push(note.id);
+  ensureBoardNoteBucket(state, note.boardId).push(note.id);
+};
+
+const removeNoteIdFromBoard = (state: Pick<State, 'boardNoteIds'>, boardId: string, noteId: string) => {
+  const boardIds = state.boardNoteIds[boardId];
+  if (!boardIds) {
+    return;
+  }
+
+  state.boardNoteIds[boardId] = boardIds.filter((id) => id !== noteId);
+
+  if (state.boardNoteIds[boardId].length === 0) {
+    delete state.boardNoteIds[boardId];
+  }
+};
+
+const moveNoteBetweenBoards = (state: Pick<State, 'notesById' | 'boardNoteIds'>, noteId: string, targetBoardId: string) => {
+  const note = state.notesById[noteId];
+  if (!note || note.boardId === targetBoardId) {
+    return;
+  }
+
+  removeNoteIdFromBoard(state, note.boardId, noteId);
+  note.boardId = targetBoardId;
+  ensureBoardNoteBucket(state, targetBoardId).push(noteId);
+};
+
+const removeNoteFromNormalizedState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds'>, noteId: string) => {
+  const note = state.notesById[noteId];
+  if (!note) {
+    return;
+  }
+
+  removeNoteIdFromBoard(state, note.boardId, noteId);
+  delete state.notesById[noteId];
+  state.allNoteIds = state.allNoteIds.filter((id) => id !== noteId);
+};
+
 export const useStore = create<State>()(
   immer((set, get) => ({
-    notes: [],
+    ...createEmptyNormalizedNotesState(),
     config: DEFAULT_CONFIG,
     isLoaded: false,
     isSaving: false,
@@ -262,7 +332,10 @@ export const useStore = create<State>()(
       }
 
       set((state) => {
-        state.notes = finalData.notes;
+        const normalizedNotes = normalizeNotes(finalData.notes);
+        state.notesById = normalizedNotes.notesById;
+        state.allNoteIds = normalizedNotes.allNoteIds;
+        state.boardNoteIds = normalizedNotes.boardNoteIds;
         state.config = finalData.config;
         state.boards = finalData.boards;
         state.currentBoardId = finalData.currentBoardId;
@@ -360,13 +433,16 @@ export const useStore = create<State>()(
         const fallbackId = boards.find(b => b.id !== boardId)?.id || 'default';
 
         set((state) => {
-            // Delete all notes in this board
-            state.notes = state.notes.filter(n => n.boardId !== boardId);
+            const noteIdsToDelete = [...getBoardNoteIds(state, boardId)];
+            noteIdsToDelete.forEach((noteId) => removeNoteFromNormalizedState(state, noteId));
+            delete state.boardNoteIds[boardId];
             
             state.boards = state.boards.filter(b => b.id !== boardId);
             if (state.currentBoardId === boardId) {
                 state.currentBoardId = fallbackId;
                 state.selectedIds = [];
+            } else {
+                state.selectedIds = state.selectedIds.filter((id) => state.notesById[id]);
             }
         });
         get().saveToDisk();
@@ -489,7 +565,7 @@ export const useStore = create<State>()(
       };
 
       set((state) => {
-        state.notes.push(newNote);
+        appendNoteToNormalizedState(state, newNote);
         state.config.maxZ += 1;
       });
 
@@ -512,7 +588,7 @@ export const useStore = create<State>()(
       };
 
       set((state) => {
-        state.notes.push(newNote);
+        appendNoteToNormalizedState(state, newNote);
         state.config.maxZ += 1;
       });
 
@@ -521,7 +597,7 @@ export const useStore = create<State>()(
 
     updateTitle: (id, title) => {
       set((state) => {
-        const note = state.notes.find((n) => n.id === id);
+        const note = getNoteById(state, id);
         if (note) {
           note.title = title;
           note.updatedAt = Date.now();
@@ -532,7 +608,7 @@ export const useStore = create<State>()(
       const now = Date.now();
       if (now - lastWALSave > WAL_THROTTLE) {
         lastWALSave = now;
-        db.saveWAL({ notes: get().notes, config: get().config, boards: get().boards, currentBoardId: get().currentBoardId });
+        db.saveWAL(serializeState(get()));
       }
       
       if (saveTimeout) clearTimeout(saveTimeout);
@@ -541,7 +617,7 @@ export const useStore = create<State>()(
 
     updateNote: (id, content) => {
       set((state) => {
-        const note = state.notes.find((n) => n.id === id);
+        const note = getNoteById(state, id);
         if (note) {
           note.content = content;
           note.updatedAt = Date.now();
@@ -551,7 +627,7 @@ export const useStore = create<State>()(
       const now = Date.now();
       if (now - lastWALSave > WAL_THROTTLE) {
         lastWALSave = now;
-        db.saveWAL({ notes: get().notes, config: get().config, boards: get().boards, currentBoardId: get().currentBoardId });
+        db.saveWAL(serializeState(get()));
       }
       
       if (saveTimeout) clearTimeout(saveTimeout);
@@ -560,7 +636,7 @@ export const useStore = create<State>()(
 
     moveNote: (id, x, y) => {
       set((state) => {
-        const note = state.notes.find((n) => n.id === id);
+        const note = getNoteById(state, id);
         if (note) {
           note.x = x;
           note.y = y;
@@ -572,7 +648,7 @@ export const useStore = create<State>()(
         set((state) => {
             state.selectedIds.forEach(id => {
                 if (id === excludeId) return;
-                const note = state.notes.find(n => n.id === id);
+                const note = getNoteById(state, id);
                 if (note) {
                     note.x += dx;
                     note.y += dy;
@@ -595,7 +671,7 @@ export const useStore = create<State>()(
 
         set((state) => {
             uniqueIds.forEach((id) => {
-                const note = state.notes.find((n) => n.id === id);
+                const note = getNoteById(state, id);
                 if (note) {
                     note.updatedAt = timestamp;
                     hasUpdatedNotes = true;
@@ -623,14 +699,17 @@ export const useStore = create<State>()(
             const ROW_GAP = 20;
             
             // 1. Determine targets: Selection or All
-            let targetNotes = state.notes;
+            let targetNotes = denormalizeNotes(state);
             const isGroupArrange = state.selectedIds.length > 0;
             
             if (isGroupArrange) {
-                targetNotes = state.notes.filter(n => state.selectedIds.includes(n.id));
+                targetNotes = state.selectedIds.flatMap((id) => {
+                    const note = state.notesById[id];
+                    return note ? [note] : [];
+                });
             } else {
                 // Fix: Only arrange notes in the current board!
-                targetNotes = state.notes.filter(n => n.boardId === state.currentBoardId);
+                targetNotes = getBoardNotes(state, state.currentBoardId);
             }
 
             if (targetNotes.length === 0) return;
@@ -676,7 +755,7 @@ export const useStore = create<State>()(
 
                 // Update Note Position in State
                 // We need to find the actual note object in the drafted state
-                const stateNote = state.notes.find(n => n.id === note.id);
+                const stateNote = getNoteById(state, note.id);
                 if (stateNote) {
                     stateNote.x = currentX;
                     stateNote.y = currentY;
@@ -700,7 +779,7 @@ export const useStore = create<State>()(
 
     bringToFront: (id) => {
       set((state) => {
-        const note = state.notes.find((n) => n.id === id);
+        const note = getNoteById(state, id);
         if (note) {
           state.config.maxZ += 1;
           note.z = state.config.maxZ;
@@ -710,7 +789,7 @@ export const useStore = create<State>()(
 
     deleteNote: (id) => {
       set((state) => {
-        const note = state.notes.find((n) => n.id === id);
+        const note = getNoteById(state, id);
         if (note) {
           note.deletedAt = Date.now(); // Soft delete
         }
@@ -722,14 +801,14 @@ export const useStore = create<State>()(
     
     restoreNote: (id) => {
         set((state) => {
-            const note = state.notes.find(n => n.id === id);
+            const note = getNoteById(state, id);
             if (note) {
                 note.deletedAt = null; // Restore
                 
                 // Safety Check: Does the target board still exist?
                 const boardExists = state.boards.some(b => b.id === note.boardId);
                 if (!boardExists) {
-                    note.boardId = state.currentBoardId; // Fallback to current
+                    moveNoteBetweenBoards(state, id, state.currentBoardId);
                 }
                 
                 // Visual Feedback: Bring to top so user sees it
@@ -742,26 +821,31 @@ export const useStore = create<State>()(
 
     deleteNotePermanently: (id) => {
         set((state) => {
-            state.notes = state.notes.filter(n => n.id !== id);
+            removeNoteFromNormalizedState(state, id);
+            state.selectedIds = state.selectedIds.filter((selectedId) => selectedId !== id);
         });
         get().saveToDisk();
     },
 
     emptyTrash: () => {
         set((state) => {
-            state.notes = state.notes.filter(n => !n.deletedAt);
+            const noteIdsToDelete = state.allNoteIds.filter((id) => state.notesById[id]?.deletedAt);
+            noteIdsToDelete.forEach((noteId) => removeNoteFromNormalizedState(state, noteId));
+            state.selectedIds = state.selectedIds.filter((id) => state.notesById[id]);
         });
         get().saveToDisk();
     },
 
     restoreAllTrash: () => {
         set((state) => {
-            state.notes.forEach(note => {
+            state.allNoteIds.forEach((id) => {
+                const note = state.notesById[id];
+                if (!note) return;
                 if (note.deletedAt) {
                     note.deletedAt = null;
                     // Safety Check
                     if (!state.boards.some(b => b.id === note.boardId)) {
-                        note.boardId = state.currentBoardId;
+                        moveNoteBetweenBoards(state, id, state.currentBoardId);
                     }
                     // Bring to front
                     state.config.maxZ += 1;
@@ -774,7 +858,7 @@ export const useStore = create<State>()(
     
     changeColor: (id, color) => {
       set((state) => {
-         const note = state.notes.find((n) => n.id === id);
+         const note = getNoteById(state, id);
          if (note) {
            note.color = color;
          }
@@ -785,7 +869,7 @@ export const useStore = create<State>()(
     changeSelectedNotesColor: (color) => {
         set((state) => {
             state.selectedIds.forEach(id => {
-                const note = state.notes.find(n => n.id === id);
+                const note = getNoteById(state, id);
                 if (note) {
                     note.color = color;
                 }
@@ -796,7 +880,7 @@ export const useStore = create<State>()(
 
     toggleCollapse: (id) => {
       set((state) => {
-        const note = state.notes.find((n) => n.id === id);
+        const note = getNoteById(state, id);
         if (note) {
           note.collapsed = !note.collapsed;
         }
@@ -834,7 +918,7 @@ export const useStore = create<State>()(
 
     selectAllNotes: () => {
         set((state) => {
-            const currentBoardNotes = state.notes.filter(n => n.boardId === state.currentBoardId);
+            const currentBoardNotes = getBoardNotes(state, state.currentBoardId).filter((note) => !note.deletedAt);
             state.selectedIds = currentBoardNotes.map(n => n.id);
         });
     },
@@ -850,9 +934,10 @@ export const useStore = create<State>()(
         if (selectedIds.length === 0) return;
         
         set((state) => {
-            state.notes.forEach(note => {
-                if (selectedIds.includes(note.id)) {
-                    note.deletedAt = Date.now(); // Soft delete
+            selectedIds.forEach((id) => {
+                const note = state.notesById[id];
+                if (note) {
+                    note.deletedAt = Date.now();
                 }
             });
             state.selectedIds = [];
@@ -862,7 +947,7 @@ export const useStore = create<State>()(
 
     duplicateNote: (id) => {
         set((state) => {
-            const note = state.notes.find(n => n.id === id);
+            const note = getNoteById(state, id);
             if (note) {
                 const newNote: Note = {
                     ...note,
@@ -874,7 +959,7 @@ export const useStore = create<State>()(
                     updatedAt: Date.now(),
                     // Title copy? Yes.
                 };
-                state.notes.push(newNote);
+                appendNoteToNormalizedState(state, newNote);
                 state.config.maxZ += 1;
                 // Auto-select the new note? Maybe not, to avoid confusion.
             }
@@ -890,7 +975,7 @@ export const useStore = create<State>()(
             const newSelectedIds: string[] = [];
 
             selectedIds.forEach(id => {
-                const note = state.notes.find(n => n.id === id);
+                const note = getNoteById(state, id);
                 if (note) {
                     const newNote: Note = {
                         ...note,
@@ -901,7 +986,7 @@ export const useStore = create<State>()(
                         createdAt: Date.now(),
                         updatedAt: Date.now(),
                     };
-                    state.notes.push(newNote);
+                    appendNoteToNormalizedState(state, newNote);
                     state.config.maxZ += 1;
                     newSelectedIds.push(newNote.id);
                 }
@@ -917,9 +1002,9 @@ export const useStore = create<State>()(
 
     moveNoteToBoard: (id, targetBoardId) => {
         set((state) => {
-            const note = state.notes.find(n => n.id === id);
+            const note = getNoteById(state, id);
             if (note) {
-                note.boardId = targetBoardId;
+                moveNoteBetweenBoards(state, id, targetBoardId);
                 // Smart Placement: Center it or Offset?
                 // For now, let's just keep position but offset slightly to imply movement if they switch back
                 // Or just keep it. "Stacked" issue is solved by user arranging.
@@ -936,7 +1021,7 @@ export const useStore = create<State>()(
 
     copyNoteToBoard: (id, targetBoardId) => {
         set((state) => {
-            const note = state.notes.find(n => n.id === id);
+            const note = getNoteById(state, id);
             if (note) {
                 const newNote: Note = {
                     ...note,
@@ -950,7 +1035,7 @@ export const useStore = create<State>()(
                 newNote.x += Math.floor(Math.random() * 20);
                 newNote.y += Math.floor(Math.random() * 20);
                 
-                state.notes.push(newNote);
+                appendNoteToNormalizedState(state, newNote);
                 state.config.maxZ += 1;
             }
         });
@@ -963,9 +1048,10 @@ export const useStore = create<State>()(
             if (selectedIds.length === 0) return;
 
             let movedCount = 0;
-            state.notes.forEach(note => {
-                if (selectedIds.includes(note.id)) {
-                    note.boardId = targetBoardId;
+            selectedIds.forEach((id) => {
+                const note = state.notesById[id];
+                if (note) {
+                    moveNoteBetweenBoards(state, id, targetBoardId);
                     // Jitter to prevent perfect stacking
                     note.x += Math.floor(Math.random() * 30); 
                     note.y += Math.floor(Math.random() * 30);
@@ -986,7 +1072,7 @@ export const useStore = create<State>()(
             if (selectedIds.length === 0) return;
 
             selectedIds.forEach(id => {
-                const note = state.notes.find(n => n.id === id);
+                const note = getNoteById(state, id);
                 if (note) {
                     const newNote: Note = {
                         ...note,
@@ -1000,7 +1086,7 @@ export const useStore = create<State>()(
                     newNote.x += Math.floor(Math.random() * 30);
                     newNote.y += Math.floor(Math.random() * 30);
                     
-                    state.notes.push(newNote);
+                    appendNoteToNormalizedState(state, newNote);
                     state.config.maxZ += 1;
                 }
             });
@@ -1027,17 +1113,19 @@ export const useStore = create<State>()(
     },
 
     saveToDisk: async () => {
-      const { notes, config, boards, currentBoardId, saveGenerationId } = get();
+      const currentState = get();
+      const { saveGenerationId } = currentState;
+      const storageData = serializeState(currentState);
       const currentGen = saveGenerationId + 1;
       set({ isSaving: true, saveStatus: 'saving', saveError: null, saveGenerationId: currentGen });
 
       try {
         const serializationStart = performance.now();
-        const jsonString = JSON.stringify({ notes, config, boards, currentBoardId }, null, 2);
+        const jsonString = JSON.stringify(storageData, null, 2);
         const serializationDuration = performance.now() - serializationStart;
 
         const ipcStart = performance.now();
-        const walSaved = await db.saveWAL({ notes, config, boards, currentBoardId });
+        const walSaved = await db.saveWAL(storageData);
         if (!walSaved) {
           if (get().saveGenerationId === currentGen) {
              set({ saveStatus: 'error', saveError: '写入本地缓存失败，未保存到磁盘。' });
@@ -1091,11 +1179,12 @@ export const useStore = create<State>()(
     },
 
     exportBoard: async (boardId) => {
-        const { boards, notes } = get();
+        const state = get();
+        const { boards } = state;
         const board = boards.find(b => b.id === boardId);
         if (!board) return;
 
-        const json = generateBoardExport(board, notes);
+        const json = generateBoardExport(board, denormalizeNotes(state));
         const fileName = `Board_${board.name.replace(/[^a-z0-9]/gi, '_')}.json`;
         
         await saveFile(json, fileName);
@@ -1107,7 +1196,9 @@ export const useStore = create<State>()(
     },
 
     exportAll: async () => {
-        const { boards, notes, config, currentBoardId } = get();
+        const state = get();
+        const { boards, config, currentBoardId } = state;
+        const notes = denormalizeNotes(state);
         const json = generateFullBackup(boards, notes, config, currentBoardId);
         const fileName = `SoNotes_Backup_${new Date().toISOString().split('T')[0]}.json`;
         
@@ -1134,7 +1225,7 @@ export const useStore = create<State>()(
         const previousState = get();
         const snapshot = {
             boards: previousState.boards,
-            notes: previousState.notes,
+            notes: denormalizeNotes(previousState),
             currentBoardId: previousState.currentBoardId,
             viewMode: previousState.viewMode,
             selectedIds: previousState.selectedIds,
@@ -1152,7 +1243,7 @@ export const useStore = create<State>()(
         set((state) => {
             // v1.2.7 约定：导入批次保留内部相对顺序，并整体追加到本地看板末尾。
             state.boards.push(...newBoards);
-            state.notes.push(...newNotes);
+            newNotes.forEach((note) => appendNoteToNormalizedState(state, note));
             
             if (suggestedCurrentBoardId) {
                 state.currentBoardId = suggestedCurrentBoardId;
@@ -1164,8 +1255,11 @@ export const useStore = create<State>()(
         const saved = await get().saveToDisk();
         if (!saved) {
             set((state) => {
+                const normalizedSnapshot = normalizeNotes(snapshot.notes);
                 state.boards = snapshot.boards;
-                state.notes = snapshot.notes;
+                state.notesById = normalizedSnapshot.notesById;
+                state.allNoteIds = normalizedSnapshot.allNoteIds;
+                state.boardNoteIds = normalizedSnapshot.boardNoteIds;
                 state.currentBoardId = snapshot.currentBoardId;
                 state.viewMode = snapshot.viewMode;
                 state.selectedIds = snapshot.selectedIds;

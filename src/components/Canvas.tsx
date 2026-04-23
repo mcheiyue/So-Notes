@@ -34,11 +34,13 @@ const isBlankCanvasTarget = (target: EventTarget | null): boolean => {
 
 export const Canvas: React.FC = () => {
   const {
-    notes, currentBoardId, addNote, init, isLoaded,
+    currentBoardId, addNote, init, isLoaded,
     stickyDrag, setStickyDrag, moveNote, setContextMenu,
     setSelectedIds, selectedIds, moveSelectedNotes, clearSelection, finalizeLayoutChange,
     interaction, viewport, setPanMode, panViewport, setViewportPosition, setEdgePush
   } = useStore();
+  const notesById = useStore((state) => state.notesById);
+  const currentBoardNoteIds = useStore((state) => state.boardNoteIds[state.currentBoardId] ?? []);
 
   const throttledViewportX = Math.floor(viewport.x / 100) * 100;
   const throttledViewportY = Math.floor(viewport.y / 100) * 100;
@@ -56,16 +58,22 @@ export const Canvas: React.FC = () => {
   ]);
 
   const visibleNotes = useMemo(() => {
-    return notes.filter(note => {
-      if (note.boardId !== currentBoardId || note.deletedAt) return false;
+    return currentBoardNoteIds.flatMap((id) => {
+      const note = notesById[id];
+      if (!note || note.deletedAt) return [];
       return (
         note.x >= throttledViewportRect.x - NOTE_WIDTH &&
         note.x <= throttledViewportRect.x + throttledViewportRect.w &&
         note.y >= throttledViewportRect.y - NOTE_HEIGHT &&
         note.y <= throttledViewportRect.y + throttledViewportRect.h
-      );
+      ) ? [note] : [];
     });
-  }, [notes, currentBoardId, throttledViewportRect]);
+  }, [currentBoardNoteIds, notesById, throttledViewportRect]);
+
+  const currentBoardVisibleCount = useMemo(
+    () => currentBoardNoteIds.filter((id) => !notesById[id]?.deletedAt).length,
+    [currentBoardNoteIds, notesById],
+  );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const scale = 1;
@@ -252,7 +260,7 @@ export const Canvas: React.FC = () => {
           const newX = (localPoint.x - stickyDrag.offsetX) / scale + viewport.x;
           const newY = (localPoint.y - stickyDrag.offsetY) / scale + viewport.y;
           
-          const currentNote = useStore.getState().notes.find(n => n.id === stickyDrag.id);
+          const currentNote = useStore.getState().notesById[stickyDrag.id];
           const isSelected = selectedIds.includes(stickyDrag.id);
           
           if (isSelected && selectedIds.length > 1 && currentNote) {
@@ -317,7 +325,7 @@ export const Canvas: React.FC = () => {
       const idsToCheck = (isSelected && selectedIds.length > 0) ? selectedIds : [id];
       
       idsToCheck.forEach(noteId => {
-          const n = state.notes.find(item => item.id === noteId);
+          const n = state.notesById[noteId];
           
           if (n) {
               let finalX = n.x;
@@ -549,10 +557,10 @@ export const Canvas: React.FC = () => {
         <NoteCard key={note.id} id={note.id} scale={scale} /> 
       ))}
       
-      {visibleNotes.length === 0 && notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length > 0 && (
+      {visibleNotes.length === 0 && currentBoardVisibleCount > 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
           <p className="text-lg font-medium text-text-tertiary">
-            当前视口外有 {notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length} 个便签
+            当前视口外有 {currentBoardVisibleCount} 个便签
           </p>
           <p className="text-xs text-text-tertiary mt-1">
             拖拽或平移查看
@@ -560,7 +568,7 @@ export const Canvas: React.FC = () => {
         </div>
       )}
       
-      {visibleNotes.length === 0 && notes.filter(n => n.boardId === currentBoardId && !n.deletedAt).length === 0 && (
+      {visibleNotes.length === 0 && currentBoardVisibleCount === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
           <p className="text-lg font-medium text-text-tertiary">
             {currentBoardId === 'default' ? '双击空白处新建便签' : '当前看板为空'}

@@ -138,6 +138,12 @@ export interface StorageData {
   config: AppConfig;
 }
 
+export interface NormalizedNotesState {
+  notesById: Record<string, Note>;
+  allNoteIds: string[];
+  boardNoteIds: Record<string, string[]>;
+}
+
 
 export const DEFAULT_BOARD: Board = {
   id: 'default',

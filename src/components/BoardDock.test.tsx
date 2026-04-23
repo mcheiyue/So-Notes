@@ -21,6 +21,7 @@ vi.mock('../utils/fileSystem', () => ({
 
 import { BoardDock } from './BoardDock';
 import { Z_INDEX } from '../constants/layout';
+import { createEmptyNormalizedNotesState } from '../store/normalization';
 import { useStore } from '../store/useStore';
 
 describe('BoardDock v1.2.4 最小修复', () => {
@@ -58,11 +59,11 @@ describe('BoardDock v1.2.4 最小修复', () => {
   beforeEach(() => {
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
+      ...createEmptyNormalizedNotesState(),
       boards: [
         { id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } },
         { id: 'board-2', name: '实验板', icon: '🧪', createdAt: 1, viewport: { x: 40, y: 60 } },
       ],
-      notes: [],
       currentBoardId: 'default',
       isDockVisible: true,
       viewMode: 'BOARD',

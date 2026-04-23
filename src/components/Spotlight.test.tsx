@@ -22,6 +22,7 @@ vi.mock('../utils/fileSystem', () => ({
 }));
 
 import { Spotlight } from './Spotlight';
+import { normalizeNotes } from '../store/normalization';
 import { useStore } from '../store/useStore';
 import { Note } from '../store/types';
 import { LAYOUT } from '../constants/layout';
@@ -62,7 +63,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
     useStore.setState({
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
       currentBoardId: 'default',
-      notes: [createNote()],
+      ...normalizeNotes([createNote()]),
       isSpotlightOpen: true,
       viewport: { x: 0, y: 0, w: 320, h: 240 },
     });

@@ -47,7 +47,7 @@ const formatImportHighlights = (summary: NonNullable<ImportFeedback['summary']>)
 export const BoardDock = () => {
   const store = useStore();
   const { 
-    boards, notes, currentBoardId, 
+    boards, boardNoteIds, currentBoardId, 
     switchBoard, createBoard, deleteBoard, updateBoard, reorderBoard,
     isDockVisible, setDockVisible, 
     viewMode, setViewMode, 
@@ -182,7 +182,7 @@ export const BoardDock = () => {
           setDeleteConfirm(null);
       } else {
           // First click: Check count
-          const count = notes.filter(n => n.boardId === contextMenuBoard.id).length;
+          const count = (boardNoteIds[contextMenuBoard.id] ?? []).length;
           if (count > 0) {
               setDeleteConfirm({ id: contextMenuBoard.id, count });
           } else {

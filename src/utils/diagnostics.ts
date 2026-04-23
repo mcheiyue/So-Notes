@@ -99,12 +99,12 @@ export const diagnostics = new DiagnosticsCollector();
 if (typeof window !== 'undefined') {
   import('../store/useStore').then(({ useStore }) => {
     useStore.subscribe((state) => {
-      const totalNotes = state.notes.length;
-      const currentBoardNotes = state.notes.filter(
-        (n) => n.boardId === state.currentBoardId && !n.deletedAt
+      const totalNotes = state.allNoteIds.length;
+      const currentBoardNotes = (state.boardNoteIds[state.currentBoardId] ?? []).filter(
+        (id) => !state.notesById[id]?.deletedAt,
       ).length;
       const selectedNotes = state.selectedIds.length;
-      const trashNotes = state.notes.filter((n) => n.deletedAt).length;
+      const trashNotes = state.allNoteIds.filter((id) => state.notesById[id]?.deletedAt).length;
       diagnostics.updateNoteStats(totalNotes, currentBoardNotes, selectedNotes, trashNotes);
     });
   });

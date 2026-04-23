@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
@@ -20,6 +20,7 @@ vi.mock('../utils/fileSystem', () => ({
 }));
 
 import { MiniMap } from './MiniMap';
+import { normalizeNotes } from '../store/normalization';
 import { useStore } from '../store/useStore';
 
 describe('MiniMap 看板隔离', () => {
@@ -27,6 +28,7 @@ describe('MiniMap 看板隔离', () => {
   let root: Root;
 
   beforeEach(() => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     useStore.setState(useStore.getInitialState(), true);
 
     useStore.setState({
@@ -42,7 +44,7 @@ describe('MiniMap 看板隔离', () => {
         isDragging: false,
         edgePush: { top: false, bottom: false, left: false, right: false },
       },
-      notes: [
+      ...normalizeNotes([
         {
           id: 'note-a',
           boardId: 'default',
@@ -80,12 +82,20 @@ describe('MiniMap 看板隔离', () => {
           updatedAt: 3,
           deletedAt: 999,
         },
-      ],
+      ]),
     });
 
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    vi.unstubAllGlobals();
   });
 
   const renderMiniMap = async () => {

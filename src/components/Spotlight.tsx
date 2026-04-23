@@ -13,7 +13,8 @@ export const Spotlight = () => {
   const resultsRef = useRef<HTMLDivElement>(null);
 
   // Use granular state access to prevent rerenders on unrelated changes
-  const notes = useStore((state) => state.notes);
+  const notesById = useStore((state) => state.notesById);
+  const allNoteIds = useStore((state) => state.allNoteIds);
   const boards = useStore((state) => state.boards);
   const currentBoardId = useStore((state) => state.currentBoardId);
   const isSpotlightOpen = useStore((state) => state.isSpotlightOpen);
@@ -41,8 +42,8 @@ export const Spotlight = () => {
   useEffect(() => {
     if (!pendingTargetId) return;
 
-    const targetNote = notes.find(note => note.id === pendingTargetId && !note.deletedAt);
-    if (!targetNote) {
+    const targetNote = pendingTargetId ? notesById[pendingTargetId] : undefined;
+    if (!targetNote || targetNote.deletedAt) {
       requestAnimationFrame(() => {
         setPendingTargetId(null);
       });
@@ -71,7 +72,7 @@ export const Spotlight = () => {
     });
 
     return () => cancelAnimationFrame(frameId);
-  }, [bringToFront, clearSelection, currentBoardId, notes, pendingTargetId, setSelectedIds, setViewportPosition, viewport.h, viewport.w]);
+  }, [bringToFront, clearSelection, currentBoardId, notesById, pendingTargetId, setSelectedIds, setViewportPosition, viewport.h, viewport.w]);
 
   // Close on Escape
   useEffect(() => {
@@ -91,8 +92,11 @@ export const Spotlight = () => {
 
     const q = query.toLowerCase();
     
-    return notes
-      .filter(note => !note.deletedAt) // Exclude trash
+    return allNoteIds
+      .flatMap((id) => {
+        const note = notesById[id];
+        return note && !note.deletedAt ? [note] : [];
+      })
       .map(note => {
         const title = String(note.title || "").toLowerCase();
         const content = String(note.content || "").toLowerCase();
@@ -114,7 +118,7 @@ export const Spotlight = () => {
       .sort((a, b) => b.score - a.score)
       .slice(0, 50) // Limit results
       .map(item => item.note);
-  }, [query, notes]);
+  }, [allNoteIds, notesById, query]);
 
   // Scroll active item into view
   useEffect(() => {

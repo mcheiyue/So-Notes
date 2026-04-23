@@ -6,11 +6,13 @@ import { LAYOUT, Z_INDEX } from '../constants/layout';
 import { getNoteColor, Note } from '../store/types';
 import { useDarkMode } from '../hooks/useDarkMode';
 
+const EMPTY_NOTE_IDS: string[] = [];
+
 export const MiniMap: React.FC = () => {
-    const { notes, currentBoardId, viewport, interaction, setViewportPosition } = useStore(
+    const { notesById, currentBoardNoteIds, viewport, interaction, setViewportPosition } = useStore(
         useShallow(state => ({
-            notes: state.notes,
-            currentBoardId: state.currentBoardId,
+            notesById: state.notesById,
+            currentBoardNoteIds: state.boardNoteIds[state.currentBoardId] ?? EMPTY_NOTE_IDS,
             viewport: state.viewport,
             interaction: state.interaction,
             setViewportPosition: state.setViewportPosition,
@@ -22,8 +24,11 @@ export const MiniMap: React.FC = () => {
     const isDarkMode = useDarkMode();
 
     const visibleNotes = useMemo(
-        () => notes.filter(note => note.boardId === currentBoardId && !note.deletedAt),
-        [currentBoardId, notes]
+        () => currentBoardNoteIds.flatMap((id) => {
+            const note = notesById[id];
+            return note && !note.deletedAt ? [note] : [];
+        }),
+        [currentBoardNoteIds, notesById]
     );
     
     // Calculate World Bounds (Always anchored at 0,0)

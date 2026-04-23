@@ -17,7 +17,7 @@ interface NoteCardProps {
 
 export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = false, scale = 1 }) => {
   // Selectors
-  const note = useStore(state => state.notes.find(n => n.id === id));
+  const note = useStore(state => state.notesById[id]);
 
   const updateNote = useStore(state => state.updateNote);
   const updateTitle = useStore(state => state.updateTitle);
@@ -102,7 +102,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
       if (isSelected && isGroupSelection) {
           const state = useStore.getState();
-          const selectedNotes = state.notes.filter(n => state.selectedIds.includes(n.id));
+          const selectedNotes = state.selectedIds.flatMap((selectedId) => {
+              const selectedNote = state.notesById[selectedId];
+              return selectedNote ? [selectedNote] : [];
+          });
           
           if (selectedNotes.length > 0) {
               let minX = Infinity, minY = Infinity;
@@ -222,7 +225,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         const state = useStore.getState();
         state.selectedIds.forEach(id => {
             if (id === note.id) return;
-            const n = state.notes.find(item => item.id === id);
+            const n = state.notesById[id];
             if (n) {
                 let nWorldX = n.x;
                 let nWorldY = n.y;

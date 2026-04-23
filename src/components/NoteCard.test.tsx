@@ -25,6 +25,7 @@ vi.mock('react-draggable', () => ({
 
 import { NoteCard } from './NoteCard';
 import { useStore } from '../store/useStore';
+import { normalizeNotes } from '../store/normalization';
 import { getNoteColor, Note } from '../store/types';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
@@ -55,7 +56,7 @@ describe('NoteCard 头部交互边界', () => {
   beforeEach(() => {
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
-      notes: [createNote()],
+      ...normalizeNotes([createNote()]),
       currentBoardId: 'default',
       viewport: { x: 0, y: 0, w: 1280, h: 720 },
       interaction: {
@@ -100,7 +101,7 @@ describe('NoteCard 头部交互边界', () => {
 
   it('折叠态只保留标题与删除按钮，不渲染复制和颜色按钮', async () => {
     useStore.setState({
-      notes: [createNote({ collapsed: true, title: '已折叠便签' })],
+      ...normalizeNotes([createNote({ collapsed: true, title: '已折叠便签' })]),
     });
 
     await renderNoteCard();
@@ -119,7 +120,7 @@ describe('NoteCard 头部交互边界', () => {
 
   it('空标题时头部与标题输入共享同一套显隐派生状态', async () => {
     useStore.setState({
-      notes: [createNote({ title: '' })],
+      ...normalizeNotes([createNote({ title: '' })]),
     });
 
     await renderNoteCard();
@@ -144,7 +145,7 @@ describe('NoteCard 头部交互边界', () => {
 
   it('深色模式下增强正文、占位符、选中文本与单选态可见性', async () => {
     useStore.setState({
-      notes: [createNote({ color: '#fef9c3' })],
+      ...normalizeNotes([createNote({ color: '#fef9c3' })]),
       selectedIds: ['note-1'],
       config: {
         ...useStore.getState().config,
@@ -176,7 +177,7 @@ describe('NoteCard 头部交互边界', () => {
 
   it('折叠态标题与展开态标题保持同一主文本层级', async () => {
     useStore.setState({
-      notes: [createNote({ title: '折叠标题', collapsed: true })],
+      ...normalizeNotes([createNote({ title: '折叠标题', collapsed: true })]),
       config: {
         ...useStore.getState().config,
         themeMode: 'dark',
@@ -200,7 +201,7 @@ describe('NoteCard 头部交互边界', () => {
     const textarea = container.querySelector('textarea[placeholder="记点什么..."]') as HTMLTextAreaElement | null;
     const header = container.querySelector('.drag-handle') as HTMLDivElement | null;
 
-    expect(useStore.getState().notes.find((note) => note.id === 'note-1')?.collapsed).toBe(false);
+    expect(useStore.getState().notesById['note-1']?.collapsed).toBe(false);
 
     await act(async () => {
       textarea?.dispatchEvent(new MouseEvent('dblclick', {
@@ -210,7 +211,7 @@ describe('NoteCard 头部交互边界', () => {
       }));
     });
 
-    expect(useStore.getState().notes.find((note) => note.id === 'note-1')?.collapsed).toBe(false);
+    expect(useStore.getState().notesById['note-1']?.collapsed).toBe(false);
 
     await act(async () => {
       header?.dispatchEvent(new MouseEvent('dblclick', {
@@ -220,6 +221,6 @@ describe('NoteCard 头部交互边界', () => {
       }));
     });
 
-    expect(useStore.getState().notes.find((note) => note.id === 'note-1')?.collapsed).toBe(true);
+    expect(useStore.getState().notesById['note-1']?.collapsed).toBe(true);
   });
 });

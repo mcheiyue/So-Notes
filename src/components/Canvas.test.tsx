@@ -25,6 +25,7 @@ vi.mock('react-draggable', () => ({
 
 import { Canvas } from './Canvas';
 import { useStore } from '../store/useStore';
+import { normalizeNotes } from '../store/normalization';
 import { Note } from '../store/types';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
@@ -63,7 +64,7 @@ describe('Canvas 空白命中判定', () => {
 
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
-      notes: [createNote()],
+      ...normalizeNotes([createNote()]),
       currentBoardId: 'default',
       isLoaded: true,
       init: vi.fn(async () => undefined),
@@ -138,7 +139,7 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(addNote).not.toHaveBeenCalled();
-    expect(useStore.getState().notes.find((note) => note.id === 'note-1')?.collapsed).toBe(true);
+    expect(useStore.getState().notesById['note-1']?.collapsed).toBe(true);
   });
 
   it('点击头部按钮区不会触发空白命中的清空选择', async () => {

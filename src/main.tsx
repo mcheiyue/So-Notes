@@ -3,13 +3,15 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { generatePresetSample } from "./test/fixtures/sampleData";
+import { normalizeNotes } from "./store/normalization";
 import { useStore } from "./store/useStore";
 
 if (typeof window !== 'undefined') {
   (window as unknown as Record<string, unknown>).__injectTestData = (preset: string) => {
     const state = generatePresetSample(preset as Parameters<typeof generatePresetSample>[0]);
+    const normalizedNotes = normalizeNotes(state.notes);
     useStore.setState({
-      notes: state.notes,
+      ...normalizedNotes,
       boards: state.boards,
       currentBoardId: state.currentBoardId,
       isLoaded: true,
