@@ -2,6 +2,31 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.3.3] - 2026-04-24
+
+### ✨ 新特性 (Features)
+* **框选 AABB 碰撞重构**
+  > 框选碰撞检测从 DOM `getBoundingClientRect()` 重构为 `layoutNotesById` 纯数学 AABB，
+  > 规避 Layout Thrashing，支持视口外便签框选，修复 Shift+框选追加逻辑。
+
+* **批量视图突变**
+  > 新增批量折叠/展开、批量置顶/置底操作，验证 selector 收敛的隔离效果。
+  > 置顶算法保持选中便签组的内部相对 z-order。
+
+* **选中项精准导出**
+  > 新增导出选中便签为 JSON 文件，复用现有导出链路，与全量导入兼容。
+
+* **废纸篓批量操作**
+  > 废纸篓视图新增多选能力（Ctrl/Shift+点击），支持批量还原和批量硬删除（含二次确认）。
+
+### 🐛 修复 (Bug Fixes)
+* **框选追加逻辑修复**
+  > 修复 Shift+框选追加模式：启动时正确保留旧选区，结束时合并而非覆盖。
+
+### 🔧 改进 (Improvements)
+* **常量统一**
+  > Canvas.tsx 中硬编码的 `NOTE_WIDTH`/`NOTE_HEIGHT` 统一为 `LAYOUT.NOTE_WIDTH`/`LAYOUT.NOTE_MIN_HEIGHT`。
+
 ## [v1.3.2] - 2026-04-24
 
 ### 🚀 优化 (Optimizations)
