@@ -77,6 +77,8 @@ export const Canvas: React.FC = () => {
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const worldLayerRef = useRef<HTMLDivElement>(null);
+  const panOffsetRef = useRef({ x: 0, y: 0 });
   const scale = 1;
 
   const getCanvasBounds = () => {
@@ -126,12 +128,21 @@ export const Canvas: React.FC = () => {
         return;
       }
 
-      panViewport(dx, dy);
+      panOffsetRef.current.x -= dx;
+      panOffsetRef.current.y -= dy;
+
+      if (panOffsetRef.current.x < 0) panOffsetRef.current.x = 0;
+      if (panOffsetRef.current.y < 0) panOffsetRef.current.y = 0;
+
+      if (worldLayerRef.current) {
+        worldLayerRef.current.style.transform = `translate3d(${-panOffsetRef.current.x}px, ${-panOffsetRef.current.y}px, 0)`;
+      }
+
       panDeltaRef.current = { dx: 0, dy: 0 };
     };
 
     panFlushFrameRef.current = requestAnimationFrame(flushPanDelta);
-  }, [panViewport]);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -383,6 +394,7 @@ export const Canvas: React.FC = () => {
       if (interaction.isPanMode && e.button === 0 && isBlankTarget) {
           isPanning.current = true;
           panStart.current = { x: e.clientX, y: e.clientY };
+          panOffsetRef.current = { x: viewport.x, y: viewport.y };
           return;
       }
 
@@ -421,9 +433,8 @@ export const Canvas: React.FC = () => {
   const handleGlobalUp = useCallback((e: React.MouseEvent | MouseEvent) => {
       if (isPanning.current) {
           isPanning.current = false;
-          if (panDeltaRef.current.dx === 0 && panDeltaRef.current.dy === 0) {
-            stopPanFlushLoop();
-          }
+          stopPanFlushLoop();
+          setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
           return;
       }
 
@@ -554,9 +565,15 @@ export const Canvas: React.FC = () => {
         style={{ display: 'none', zIndex: Z_INDEX.SELECTION_BOX }}
       />
       
-      {visibleNoteIds.map((id) => (
-        <NoteCard key={id} id={id} scale={scale} /> 
-      ))}
+      <div
+        ref={worldLayerRef}
+        className="absolute top-0 left-0"
+        style={{ transform: `translate3d(${-viewport.x}px, ${-viewport.y}px, 0)` }}
+      >
+        {visibleNoteIds.map((id) => (
+          <NoteCard key={id} id={id} scale={scale} />
+        ))}
+      </div>
       
       {visibleNoteIds.length === 0 && currentBoardVisibleCount > 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">

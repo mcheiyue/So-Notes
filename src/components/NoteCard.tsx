@@ -38,9 +38,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const isStickyDragging = useStore(state => state.stickyDrag.id === id);
   const isSelected = useStore(state => state.selectedIds.includes(id));
   const isGroupSelection = useStore(state => state.selectedIds.length > 1);
-  const viewport = useStore(state => state.viewport);
   const isPanMode = useStore(state => state.interaction.isPanMode);
-  const isGlobalDragging = useStore(state => state.interaction.isDragging);
   const isDarkMode = useDarkMode();
   
   // Custom Hooks
@@ -58,15 +56,15 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   // Drag State (Hybrid Control)
   const isDragging = useRef(false);
   const groupBoundsRef = useRef<{ minX: number, minY: number, width: number, height: number } | null>(null);
+  const groupDragOffsetRef = useRef({ dx: 0, dy: 0 });
   const shouldFinalizeOnMouseUpRef = useRef(false);
 
   // dragPos ref: tracks drag status without triggering React re-renders
   // react-draggable handles DOM transforms directly during drag
   const dragPosRef = useRef(false);
 
-  // Calculated Screen Position (from Store)
-  const screenX = note ? note.x - viewport.x : 0;
-  const screenY = note ? note.y - viewport.y : 0;
+  const screenX = note ? note.x : 0;
+  const screenY = note ? note.y : 0;
 
   // Auto-resize textarea
   useLayoutEffect(() => {
@@ -85,14 +83,16 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const shouldRenderCopyButton = !isStatic && !note.collapsed && (isHovered || isEditing);
   const shouldShowExpandedActions = !isStatic && !note.collapsed && (isHovered || isEditing);
   const shouldShowCollapsedActions = note.collapsed && !isStatic;
-  const shouldExpandContent = isEditing || (isSelected && !isGlobalDragging);
+  const shouldExpandContent = isEditing || isSelected;
   const disableHeaderTooltips = isStickyDragging || dragPosRef.current;
   const disableCollapseTooltip = disableHeaderTooltips || isStatic;
 
   const handleStart = () => {
       isDragging.current = true;
       setIsDragging(true);
+      document.body.classList.add('is-dragging');
       shouldFinalizeOnMouseUpRef.current = false;
+      groupDragOffsetRef.current = { dx: 0, dy: 0 };
 
       if (isSelected && isGroupSelection) {
           const state = useStore.getState();
@@ -138,9 +138,20 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       dragPosRef.current = true;
 
       if (isSelected && isGroupSelection) {
-          const deltaX = data.deltaX;
-          const deltaY = data.deltaY;
-          moveSelectedNotes(deltaX, deltaY, note.id);
+          groupDragOffsetRef.current.dx += data.deltaX;
+          groupDragOffsetRef.current.dy += data.deltaY;
+
+          const state = useStore.getState();
+          state.selectedIds.forEach((selectedId) => {
+              if (selectedId === note.id) return;
+              const el = document.querySelector(`[data-id="${selectedId}"]`) as HTMLElement | null;
+              if (!el) return;
+              const selectedNote = state.notesById[selectedId];
+              if (!selectedNote) return;
+              const nx = selectedNote.x + groupDragOffsetRef.current.dx;
+              const ny = selectedNote.y + groupDragOffsetRef.current.dy;
+              el.style.transform = `translate(${nx}px, ${ny}px)`;
+          });
       }
 
       // 2. Edge Push Logic (Delegated to Hook)
@@ -164,49 +175,45 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     isDragging.current = false;
     dragPosRef.current = false;
     setIsDragging(false);
+    document.body.classList.remove('is-dragging');
     
-    // Cleanup Edge Push
     clearEdge();
     
-    // Was this an edge push? If so, apply a small "bounce back" margin for physical feel
-    // Check if we are currently at the edge (using the edge state is tricky as we just cleared it)
-    // We check coordinates instead.
-    
+    const viewport = useStore.getState().viewport;
     const winW = viewport.w;
     const winH = viewport.h;
     const noteWidth = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
     const noteHeight = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
     const MARGIN = 10;
     
-    // Use data.x (final drag pos)
     let finalScreenX = data.x;
     let finalScreenY = data.y;
 
-    // 1. Calculate World Coordinates
     let worldX = finalScreenX + viewport.x;
     let worldY = finalScreenY + viewport.y;
 
-    // 2. Safe Mode: Viewport Constraints (Cage Mode)
-    // Only applied when NOT in Pan Mode
     if (!isPanMode) {
-        // Right / Bottom with Snapback Margin
         if (finalScreenX > winW - noteWidth) finalScreenX = winW - noteWidth - MARGIN;
         if (finalScreenY > winH - noteHeight) finalScreenY = winH - noteHeight - MARGIN;
 
-        // Left / Top Hard Clamp
         if (finalScreenX < 0) finalScreenX = 0;
         if (finalScreenY < 0) finalScreenY = 0;
         
-        // Recalculate World Coordinates based on clamped Screen Coordinates
         worldX = finalScreenX + viewport.x;
         worldY = finalScreenY + viewport.y;
     }
 
-    // 3. HARD CONSTRAINT: World Origin (0,0) is impassable
     if (worldX < 0) worldX = 0;
     if (worldY < 0) worldY = 0;
 
     moveNote(note.id, worldX, worldY);
+
+    if (isSelected && isGroupSelection) {
+        const { dx, dy } = groupDragOffsetRef.current;
+        if (dx !== 0 || dy !== 0) {
+            moveSelectedNotes(dx, dy, note.id);
+        }
+    }
 
     const affectedIds = (isSelected && isGroupSelection)
       ? [...useStore.getState().selectedIds]
@@ -306,19 +313,16 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   
   const cycleColor = (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (isGlobalDragging) return;
       const currentIndex = NOTE_COLORS.indexOf(note.color);
       const nextIndex = (currentIndex + 1) % NOTE_COLORS.length;
       changeColor(note.id, NOTE_COLORS[nextIndex]);
   };
 
   const handleCollapseToggle = () => {
-      if (isGlobalDragging) return;
       toggleCollapse(note.id);
   };
 
   const handleHeaderDoubleClick = (e: React.MouseEvent) => {
-      if (isGlobalDragging) return;
       const targetElement = e.target instanceof Element ? e.target : null;
       if (!targetElement?.closest('.drag-handle')) return;
       if (targetElement?.closest('.note-action')) return;
@@ -332,7 +336,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
   const handleCopy = async (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (isGlobalDragging) return;
       try {
         await navigator.clipboard.writeText(note.title ? `${note.title}\n${note.content}` : note.content);
         setIsCopied(true);
@@ -486,7 +489,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                   aria-label={isStatic ? "永久删除" : "删除便签"}
                   onClick={(e) => {
                       e.stopPropagation();
-                      if (isGlobalDragging) return;
                       if (isStatic) {
                           if (window.confirm("确定要永久删除吗？无法找回。")) {
                               deleteNotePermanently(note.id);

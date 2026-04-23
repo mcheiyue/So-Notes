@@ -125,3 +125,12 @@ body.is-dragging .tooltip-portal {
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
 }
+
+body.is-dragging {
+  pointer-events: none;
+  cursor: grabbing !important;
+}
+
+body.is-dragging [data-canvas-hit="blocked"] {
+  pointer-events: auto;
+}
