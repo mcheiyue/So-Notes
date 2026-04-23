@@ -7,8 +7,6 @@ import { diagnostics } from "../utils/diagnostics";
 import { useFPSMonitor } from "../utils/performance";
 
 const VIEWPORT_BUFFER = 500;
-const NOTE_WIDTH = 224;
-const NOTE_HEIGHT = 160;
 const EMPTY_NOTE_IDS: string[] = [];
 
 const CANVAS_NON_BLANK_SELECTOR = [
@@ -66,9 +64,9 @@ export const Canvas: React.FC = () => {
       const ln = layoutNotesById[id];
       if (!ln || ln.deletedAt) return false;
       return (
-        ln.x >= throttledViewportRect.x - NOTE_WIDTH &&
+        ln.x >= throttledViewportRect.x - LAYOUT.NOTE_WIDTH &&
         ln.x <= throttledViewportRect.x + throttledViewportRect.w &&
-        ln.y >= throttledViewportRect.y - NOTE_HEIGHT &&
+        ln.y >= throttledViewportRect.y - LAYOUT.NOTE_MIN_HEIGHT &&
         ln.y <= throttledViewportRect.y + throttledViewportRect.h
       );
     });
@@ -481,49 +479,58 @@ export const Canvas: React.FC = () => {
               selectionBoxRef.current.style.display = 'none';
           }
           
-          // Calculate Selection
           const startX = selectionStart.current.x;
           const startY = selectionStart.current.y;
           const endX = e.clientX;
           const endY = e.clientY;
           
-          const rect = {
+          const screenRect = {
               left: Math.min(startX, endX),
               top: Math.min(startY, endY),
               right: Math.max(startX, endX),
               bottom: Math.max(startY, endY)
           };
           
-          // AABB Collision Detection
-          // Note: Notes coordinates are in screen space (since scale=1)
-          // But we need to account for note width/height.
-          // NoteCard default size is roughly min-w-[200px] min-h-[100px] but variable.
-          // Since we don't store w/h in store, we might need DOM lookup or assume default size for now?
-          // Better: Use DOM elements to check collision since we are in React.
+          const vp = useStore.getState().viewport;
+          const worldRect = {
+              left: screenRect.left + vp.x,
+              top: screenRect.top + vp.y,
+              right: screenRect.right + vp.x,
+              bottom: screenRect.bottom + vp.y
+          };
           
-          const noteElements = document.querySelectorAll('.note-card');
+          const boardNoteIds = useStore.getState().boardNoteIds[useStore.getState().currentBoardId] ?? [];
+          const layoutNotesById = useStore.getState().layoutNotesById;
           const newSelectedIds: string[] = [];
           
-          noteElements.forEach((el) => {
-              const domRect = el.getBoundingClientRect();
+          for (const id of boardNoteIds) {
+              const ln = layoutNotesById[id];
+              if (!ln || ln.deletedAt) continue;
               
-              // Check intersection
+              const noteWidth = ln.width ?? LAYOUT.NOTE_WIDTH;
+              const noteHeight = ln.height ?? LAYOUT.NOTE_MIN_HEIGHT;
+              
               const isIntersecting = !(
-                  rect.right < domRect.left || 
-                  rect.left > domRect.right || 
-                  rect.bottom < domRect.top || 
-                  rect.top > domRect.bottom
+                  worldRect.right < ln.x || 
+                  worldRect.left > ln.x + noteWidth || 
+                  worldRect.bottom < ln.y || 
+                  worldRect.top > ln.y + noteHeight
               );
               
               if (isIntersecting) {
-                  const id = el.getAttribute('data-id');
-                  if (id) newSelectedIds.push(id);
+                  newSelectedIds.push(id);
               }
-          });
+          }
           
+          const existingIds = useStore.getState().selectedIds;
           if (newSelectedIds.length > 0) {
-               useStore.getState().setSelectedIds(newSelectedIds);
-           }
+              if (e.shiftKey) {
+                  const mergedIds = [...new Set([...existingIds, ...newSelectedIds])];
+                  useStore.getState().setSelectedIds(mergedIds);
+              } else {
+                  useStore.getState().setSelectedIds(newSelectedIds);
+              }
+          }
       }
   }, [stopPanFlushLoop]);
 
