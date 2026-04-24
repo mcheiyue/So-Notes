@@ -10,7 +10,7 @@
     "build:profiling": "npm run typecheck && cross-env ENABLE_PROFILING=true vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint src/store src/test src/components/NoteCard.tsx src/components/Canvas.tsx src/components/ContextMenu.tsx vite.config.ts --max-warnings=0",
-    "test": "vitest run",
+    "test": "vitest run --reporter=json --outputFile=test-results.json",
     "test:watch": "vitest",
     "check": "npm run lint && npm run test && npm run typecheck",
     "preview": "vite preview",
