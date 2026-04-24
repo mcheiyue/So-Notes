@@ -21,6 +21,19 @@ vi.mock('../utils/fileSystem', () => ({
   openFile: vi.fn(async () => null),
 }));
 
+vi.mock('../hooks/useSearchWorker', () => ({
+  useSearchWorker: () => ({
+    isReady: true,
+    isSearching: false,
+    groups: [],
+    total: 0,
+    search: vi.fn(),
+    updateNotes: vi.fn(),
+    updateBoards: vi.fn(),
+    currentBoardId: 'default',
+  }),
+}));
+
 import { Spotlight } from './Spotlight';
 import { normalizeNotes } from '../store/normalization';
 import { useStore } from '../store/useStore';
