@@ -697,11 +697,6 @@ export const useStore = create<State>()(
         const uniqueIds = [...new Set(noteIds)];
         if (uniqueIds.length === 0) return;
 
-        if (saveTimeout) {
-            clearTimeout(saveTimeout);
-            saveTimeout = null;
-        }
-
         const timestamp = Date.now();
         let hasUpdatedNotes = false;
 
@@ -716,7 +711,8 @@ export const useStore = create<State>()(
         });
 
         if (hasUpdatedNotes) {
-            void get().saveToDisk();
+            if (saveTimeout) clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
         }
     },
 
@@ -1173,7 +1169,7 @@ export const useStore = create<State>()(
                 return note?.collapsed;
             }).length;
             
-            const shouldExpand = collapsedCount <= ids.length / 2;
+            const shouldExpand = collapsedCount >= ids.length / 2;
             
             ids.forEach(id => {
                 const note = state.notesById[id];

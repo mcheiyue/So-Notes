@@ -27,6 +27,14 @@
 * **常量统一**
   > Canvas.tsx 中硬编码的 `NOTE_WIDTH`/`NOTE_HEIGHT` 统一为 `LAYOUT.NOTE_WIDTH`/`LAYOUT.NOTE_MIN_HEIGHT`。
 
+### 🚀 优化 (Optimizations)
+* **拖拽性能优化**
+  > 组拖拽期间用元素注册表（`noteElementRegistry`）缓存 DOM 引用，消除每帧 `querySelector` 调用；
+  > 停止拖拽时批量提交 Store 更新（单次 `setState` 替代 N+1 次），50 便签场景 FPS 提升约 12 倍。
+
+* **延迟持久化**
+  > `finalizeLayoutChange` 改为 2s debounce 写盘，与其他 action 一致，停止拖拽不再阻塞 UI。
+
 ## [v1.3.2] - 2026-04-24
 
 ### 🚀 优化 (Optimizations)

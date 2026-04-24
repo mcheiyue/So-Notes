@@ -1,4 +1,4 @@
-import React, { useRef, useState, useLayoutEffect } from "react";
+import React, { useRef, useState, useLayoutEffect, useEffect } from "react";
 import Draggable, { DraggableData, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
 import { NOTE_COLORS, getNoteColor } from "../store/types";
@@ -8,6 +8,7 @@ import { useEdgePush } from "../hooks/useEdgePush";
 import { useDarkMode } from "../hooks/useDarkMode";
 import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
+import { registerNoteElement, unregisterNoteElement, getNoteElement } from "../utils/noteElementRegistry";
 
 interface NoteCardProps {
   id: string;
@@ -21,8 +22,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
   const updateNote = useStore(state => state.updateNote);
   const updateTitle = useStore(state => state.updateTitle);
-  const moveNote = useStore(state => state.moveNote);
-  const moveSelectedNotes = useStore(state => state.moveSelectedNotes);
   const finalizeLayoutChange = useStore(state => state.finalizeLayoutChange);
   const deleteNote = useStore(state => state.deleteNote);
   const bringToFront = useStore(state => state.bringToFront);
@@ -63,6 +62,16 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   // dragPos ref: tracks drag status without triggering React re-renders
   // react-draggable handles DOM transforms directly during drag
   const dragPosRef = useRef(false);
+
+  // P0: 缓存 DOM 引用，避免组拖拽时每帧 querySelector
+  const noteId = note?.id;
+  useEffect(() => {
+    const el = nodeRef.current;
+    if (el && noteId) {
+      registerNoteElement(noteId, el);
+      return () => unregisterNoteElement(noteId);
+    }
+  }, [noteId]);
 
   const screenX = note ? note.x : 0;
   const screenY = note ? note.y : 0;
@@ -144,15 +153,14 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           groupDragOffsetRef.current.dy += data.deltaY;
 
           const state = useStore.getState();
+          const { dx, dy } = groupDragOffsetRef.current;
           state.selectedIds.forEach((selectedId) => {
               if (selectedId === note.id) return;
-              const el = document.querySelector(`[data-id="${selectedId}"]`) as HTMLElement | null;
+              const el = getNoteElement(selectedId);
               if (!el) return;
               const selectedNote = state.notesById[selectedId];
               if (!selectedNote) return;
-              const nx = selectedNote.x + groupDragOffsetRef.current.dx;
-              const ny = selectedNote.y + groupDragOffsetRef.current.dy;
-              el.style.transform = `translate(${nx}px, ${ny}px)`;
+              el.style.transform = `translate(${selectedNote.x + dx}px, ${selectedNote.y + dy}px)`;
           });
       }
 
@@ -209,61 +217,54 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     if (worldX < 0) worldX = 0;
     if (worldY < 0) worldY = 0;
 
-    moveNote(note.id, worldX, worldY);
+    // P1: 批量更新所有拖拽涉及的便签位置（单次 set）
+    const timestamp = Date.now();
+    useStore.setState((state) => {
+      const leaderNote = state.notesById[note.id];
+      if (leaderNote) {
+        leaderNote.x = worldX;
+        leaderNote.y = worldY;
+        leaderNote.updatedAt = timestamp;
+        state.layoutNotesById[note.id] = { id: note.id, x: worldX, y: worldY, boardId: leaderNote.boardId, deletedAt: leaderNote.deletedAt ?? null, color: leaderNote.color, width: leaderNote.width, height: leaderNote.height };
+      }
 
-    if (isSelected && isGroupSelection) {
+      if (isSelected && isGroupSelection) {
         const { dx, dy } = groupDragOffsetRef.current;
         if (dx !== 0 || dy !== 0) {
-            moveSelectedNotes(dx, dy, note.id);
+          state.selectedIds.forEach(id => {
+            if (id === note.id) return;
+            const n = state.notesById[id];
+            if (!n) return;
+
+            let nWorldX = n.x + dx;
+            let nWorldY = n.y + dy;
+
+            if (nWorldX < 0) nWorldX = 0;
+            if (nWorldY < 0) nWorldY = 0;
+
+            if (!isPanMode) {
+              const maxWorldX = viewport.x + winW - (n.width || LAYOUT.NOTE_WIDTH) - MARGIN;
+              if (nWorldX > maxWorldX) nWorldX = maxWorldX;
+              if (n.height) {
+                const maxWorldY = viewport.y + winH - n.height - MARGIN;
+                if (nWorldY > maxWorldY) nWorldY = maxWorldY;
+              }
+              if (nWorldX < viewport.x) nWorldX = viewport.x;
+              if (nWorldY < viewport.y) nWorldY = viewport.y;
+            }
+
+            n.x = nWorldX;
+            n.y = nWorldY;
+            n.updatedAt = timestamp;
+            state.layoutNotesById[id] = { id: n.id, x: n.x, y: n.y, boardId: n.boardId, deletedAt: n.deletedAt ?? null, color: n.color, width: n.width, height: n.height };
+          });
         }
-    }
+      }
+    });
 
     const affectedIds = (isSelected && isGroupSelection)
       ? [...useStore.getState().selectedIds]
       : [note.id];
-
-    // 4. Group Distributed Clamp
-    if (isSelected && isGroupSelection) {
-        const state = useStore.getState();
-        state.selectedIds.forEach(id => {
-            if (id === note.id) return;
-            const n = state.notesById[id];
-            if (n) {
-                let nWorldX = n.x;
-                let nWorldY = n.y;
-                let changed = false;
-
-                // Hard Limit for Group Members (Absolute World 0,0)
-                if (nWorldX < 0) { nWorldX = 0; changed = true; }
-                if (nWorldY < 0) { nWorldY = 0; changed = true; }
-
-                // Viewport Constraints (Independent Clamp)
-                // Only if NOT in Pan Mode
-                if (!isPanMode) {
-                    // Right Limit
-                    const maxWorldX = viewport.x + winW - (n.width || LAYOUT.NOTE_WIDTH) - MARGIN;
-                    if (nWorldX > maxWorldX) { nWorldX = maxWorldX; changed = true; }
-
-                    // Bottom Limit
-                    if (n.height) {
-                        const maxWorldY = viewport.y + winH - n.height - MARGIN;
-                        if (nWorldY > maxWorldY) { nWorldY = maxWorldY; changed = true; }
-                    }
-
-                    // Left Limit (Viewport)
-                    if (nWorldX < viewport.x) { nWorldX = viewport.x; changed = true; }
-                    
-                    // Top Limit (Viewport)
-                    if (nWorldY < viewport.y) { nWorldY = viewport.y; changed = true; }
-                }
-
-                if (changed) {
-                    moveNote(id, nWorldX, nWorldY);
-                }
-            }
-        });
-    }
-
     finalizeLayoutChange(affectedIds);
   };
 

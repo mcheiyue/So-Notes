@@ -103,13 +103,13 @@ describe('useStore 布局持久化契约', () => {
     expect(saveSpy).not.toHaveBeenCalled();
   });
 
-  it('finalizeLayoutChange 只刷新受影响便签并立即持久化一次', async () => {
+  it('finalizeLayoutChange 只刷新受影响便签并通过 debounce 持久化', async () => {
+    vi.useFakeTimers();
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
     vi.setSystemTime(new Date('2026-03-19T10:00:00.000Z'));
     useStore.getState().finalizeLayoutChange(['note-1', 'note-1']);
-    await flushMicrotasks();
 
     const first = getNote('note-1');
     const second = getNote('note-2');
@@ -117,17 +117,21 @@ describe('useStore 布局持久化契约', () => {
 
     expect(first?.updatedAt).toBe(expectedTimestamp);
     expect(second?.updatedAt).toBe(200);
+    expect(saveSpy).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(2000);
     expect(saveSpy).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 
-  it('显式置顶后通过最终提交点刷新 updatedAt 并持久化', async () => {
+  it('显式置顶后通过最终提交点刷新 updatedAt 并通过 debounce 持久化', async () => {
+    vi.useFakeTimers();
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
     vi.setSystemTime(new Date('2026-03-19T10:05:00.000Z'));
     useStore.getState().bringToFront('note-1');
     useStore.getState().finalizeLayoutChange(['note-1']);
-    await flushMicrotasks();
 
     const note = getNote('note-1');
     const expectedTimestamp = new Date('2026-03-19T10:05:00.000Z').getTime();
@@ -135,16 +139,20 @@ describe('useStore 布局持久化契约', () => {
     expect(note?.z).toBe(3);
     expect(useStore.getState().config.maxZ).toBe(3);
     expect(note?.updatedAt).toBe(expectedTimestamp);
+    expect(saveSpy).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(2000);
     expect(saveSpy).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 
-  it('arrangeNotes 会通过统一最终提交点刷新 updatedAt 并立即持久化', async () => {
+  it('arrangeNotes 会通过统一最终提交点刷新 updatedAt 并通过 debounce 持久化', async () => {
+    vi.useFakeTimers();
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy, selectedIds: [] });
 
     vi.setSystemTime(new Date('2026-03-19T10:10:00.000Z'));
     useStore.getState().arrangeNotes(100, 120);
-    await flushMicrotasks();
 
     const first = getNote('note-1');
     const second = getNote('note-2');
@@ -154,7 +162,11 @@ describe('useStore 布局持久化契约', () => {
     expect(first?.y).toBe(120);
     expect(first?.updatedAt).toBe(expectedTimestamp);
     expect(second?.updatedAt).toBe(expectedTimestamp);
+    expect(saveSpy).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(2000);
     expect(saveSpy).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 });
 
