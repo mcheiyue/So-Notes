@@ -15,6 +15,7 @@ on:
       - 'vite.config.ts'
       - 'tailwind.config.js'
       - 'postcss.config.js'
+      - '.github/workflows/**'
   pull_request:
     branches:
       - main
@@ -29,6 +30,7 @@ on:
       - 'vite.config.ts'
       - 'tailwind.config.js'
       - 'postcss.config.js'
+      - '.github/workflows/**'
 
 jobs:
   build:
