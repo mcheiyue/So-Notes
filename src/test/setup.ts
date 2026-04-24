@@ -1,4 +1,4 @@
-import { beforeEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
 
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
@@ -17,4 +17,8 @@ Object.defineProperty(window, 'matchMedia', {
 beforeEach(() => {
   document.body.className = '';
   localStorage.clear();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async () => null),
@@ -32,7 +32,7 @@ const getNote = (id: string) => useStore.getState().notesById[id];
 
 describe('useStore 布局持久化契约', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     vi.clearAllMocks();
     useStore.setState(useStore.getInitialState(), true);
 
@@ -70,6 +70,10 @@ describe('useStore 布局持久化契约', () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('moveNote 只更新位置，不刷新 updatedAt，也不调度持久化', () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
@@ -104,7 +108,6 @@ describe('useStore 布局持久化契约', () => {
   });
 
   it('finalizeLayoutChange 只刷新受影响便签并通过 debounce 持久化', async () => {
-    vi.useFakeTimers();
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
@@ -121,11 +124,9 @@ describe('useStore 布局持久化契约', () => {
 
     vi.advanceTimersByTime(2000);
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    vi.useRealTimers();
   });
 
   it('显式置顶后通过最终提交点刷新 updatedAt 并通过 debounce 持久化', async () => {
-    vi.useFakeTimers();
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
@@ -143,11 +144,9 @@ describe('useStore 布局持久化契约', () => {
 
     vi.advanceTimersByTime(2000);
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    vi.useRealTimers();
   });
 
   it('arrangeNotes 会通过统一最终提交点刷新 updatedAt 并通过 debounce 持久化', async () => {
-    vi.useFakeTimers();
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy, selectedIds: [] });
 
@@ -166,7 +165,6 @@ describe('useStore 布局持久化契约', () => {
 
     vi.advanceTimersByTime(2000);
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    vi.useRealTimers();
   });
 });
 

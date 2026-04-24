@@ -57,7 +57,7 @@ jobs:
       - name: Run tests
         run: npm run test
         env:
-          NODE_OPTIONS: '--max-old-space-size=8192'
+          NODE_OPTIONS: '--max-old-space-size=4096'
 
       - name: Run frontend build
         run: npm run build

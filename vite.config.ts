@@ -42,6 +42,7 @@ export default defineConfig(async () => ({
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
-    pool: "forks",
+    pool: "threads",
+    fileParallelism: false,
   },
 }));
