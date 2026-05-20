@@ -29,5 +29,5 @@ dist-ssr
 # Test artifacts
 performance-test-*.png
 
-# Release plans
-RELEASE_PLAN_*.md
+# Release plans generated in the repository root
+/RELEASE_PLAN_*.md
