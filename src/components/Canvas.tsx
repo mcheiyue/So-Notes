@@ -5,6 +5,7 @@ import { cn } from "../utils/cn";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { diagnostics } from "../utils/diagnostics";
 import { useFPSMonitor } from "../utils/performance";
+import { getNoteElement } from "../utils/noteElementRegistry";
 
 const VIEWPORT_BUFFER = 500;
 const EMPTY_NOTE_IDS: string[] = [];
@@ -108,6 +109,7 @@ export const Canvas: React.FC = () => {
   
   // Edge Push Loop
   const edgePushFrameRef = useRef<number>(0);
+  const edgePushStartOffsetRef = useRef({ x: 0, y: 0 });
 
   const stopPanFlushLoop = useCallback(() => {
     if (panFlushFrameRef.current) {
@@ -203,15 +205,22 @@ export const Canvas: React.FC = () => {
   useEffect(() => {
     const { top, bottom, left, right } = edgePush;
     if (!top && !bottom && !left && !right) {
-        if (edgePushFrameRef.current) cancelAnimationFrame(edgePushFrameRef.current);
-        useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
+        if (edgePushFrameRef.current) {
+            cancelAnimationFrame(edgePushFrameRef.current);
+            edgePushFrameRef.current = 0;
+            useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
+        }
         return;
     }
+
+    const viewport = useStore.getState().viewport;
+    panOffsetRef.current = { x: viewport.x, y: viewport.y };
+    edgePushStartOffsetRef.current = { x: viewport.x, y: viewport.y };
 
     const pushLoop = () => {
         let dx = 0;
         let dy = 0;
-        const SPEED = 5;
+        const SPEED = LAYOUT.EDGE_PUSH_SPEED;
 
         if (left) dx -= SPEED;
         if (right) dx += SPEED;
@@ -219,10 +228,12 @@ export const Canvas: React.FC = () => {
         if (bottom) dy += SPEED;
 
         if (dx !== 0 || dy !== 0) {
-            panOffsetRef.current.x -= dx;
-            panOffsetRef.current.y -= dy;
+            panOffsetRef.current.x += dx;
+            panOffsetRef.current.y += dy;
             if (panOffsetRef.current.x < 0) panOffsetRef.current.x = 0;
             if (panOffsetRef.current.y < 0) panOffsetRef.current.y = 0;
+
+            useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
 
             if (worldLayerRef.current) {
                 worldLayerRef.current.style.transform = `translate3d(${-panOffsetRef.current.x}px, ${-panOffsetRef.current.y}px, 0)`;
@@ -230,13 +241,15 @@ export const Canvas: React.FC = () => {
 
             const state = useStore.getState();
             if (state.selectedIds.length > 0) {
+                const offsetDx = panOffsetRef.current.x - edgePushStartOffsetRef.current.x;
+                const offsetDy = panOffsetRef.current.y - edgePushStartOffsetRef.current.y;
                 state.selectedIds.forEach((id) => {
-                    const el = document.querySelector(`[data-id="${id}"]`) as HTMLElement | null;
+                    const el = getNoteElement(id);
                     if (!el) return;
                     const note = state.notesById[id];
                     if (!note) return;
-                    const nx = note.x - panOffsetRef.current.x;
-                    const ny = note.y - panOffsetRef.current.y;
+                    const nx = note.x + offsetDx;
+                    const ny = note.y + offsetDy;
                     el.style.transform = `translate(${nx}px, ${ny}px)`;
                 });
             }
@@ -246,7 +259,10 @@ export const Canvas: React.FC = () => {
 
     edgePushFrameRef.current = requestAnimationFrame(pushLoop);
     return () => {
-        if (edgePushFrameRef.current) cancelAnimationFrame(edgePushFrameRef.current);
+        if (edgePushFrameRef.current) {
+            cancelAnimationFrame(edgePushFrameRef.current);
+            edgePushFrameRef.current = 0;
+        }
     };
   }, [edgePush]);
 

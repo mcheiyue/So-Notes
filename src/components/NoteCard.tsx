@@ -9,6 +9,7 @@ import { useDarkMode } from "../hooks/useDarkMode";
 import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
 import { registerNoteElement, unregisterNoteElement, getNoteElement } from "../utils/noteElementRegistry";
+import { getEdgeCheckRect, resolveDragStopWorldPosition } from "../utils/dragCoordinates";
 
 interface NoteCardProps {
   id: string;
@@ -73,8 +74,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     }
   }, [noteId]);
 
-  const screenX = note ? note.x : 0;
-  const screenY = note ? note.y : 0;
+  const worldX = note ? note.x : 0;
+  const worldY = note ? note.y : 0;
 
   // Auto-resize textarea
   useLayoutEffect(() => {
@@ -165,20 +166,17 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       }
 
       // 2. Edge Push Logic (Delegated to Hook)
-      let checkX = data.x;
-      let checkY = data.y;
-      let checkW = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
-      let checkH = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
+      const viewport = useStore.getState().viewport;
+      const edgeRect = getEdgeCheckRect(
+          data.x,
+          data.y,
+          viewport,
+          nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH,
+          nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT,
+          groupBoundsRef.current,
+      );
 
-      // Use Group Bounding Box if available
-      if (groupBoundsRef.current) {
-          checkX = data.x + groupBoundsRef.current.minX;
-          checkY = data.y + groupBoundsRef.current.minY;
-          checkW = groupBoundsRef.current.width;
-          checkH = groupBoundsRef.current.height;
-      }
-
-      checkEdge(checkX, checkY, checkW, checkH);
+      checkEdge(edgeRect.x, edgeRect.y, edgeRect.width, edgeRect.height);
   };
   
   const handleStop = (_e: DraggableEvent, data: DraggableData) => {
@@ -197,35 +195,25 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     const noteHeight = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
     const MARGIN = 10;
     
-    let finalScreenX = data.x;
-    let finalScreenY = data.y;
-
-    let worldX = finalScreenX + viewport.x;
-    let worldY = finalScreenY + viewport.y;
-
-    if (!isPanMode) {
-        if (finalScreenX > winW - noteWidth) finalScreenX = winW - noteWidth - MARGIN;
-        if (finalScreenY > winH - noteHeight) finalScreenY = winH - noteHeight - MARGIN;
-
-        if (finalScreenX < 0) finalScreenX = 0;
-        if (finalScreenY < 0) finalScreenY = 0;
-        
-        worldX = finalScreenX + viewport.x;
-        worldY = finalScreenY + viewport.y;
-    }
-
-    if (worldX < 0) worldX = 0;
-    if (worldY < 0) worldY = 0;
+    const finalPosition = resolveDragStopWorldPosition(
+      data.x,
+      data.y,
+      viewport,
+      noteWidth,
+      noteHeight,
+      isPanMode,
+      MARGIN,
+    );
 
     // P1: 批量更新所有拖拽涉及的便签位置（单次 set）
     const timestamp = Date.now();
     useStore.setState((state) => {
       const leaderNote = state.notesById[note.id];
       if (leaderNote) {
-        leaderNote.x = worldX;
-        leaderNote.y = worldY;
+        leaderNote.x = finalPosition.x;
+        leaderNote.y = finalPosition.y;
         leaderNote.updatedAt = timestamp;
-        state.layoutNotesById[note.id] = { id: note.id, x: worldX, y: worldY, boardId: leaderNote.boardId, deletedAt: leaderNote.deletedAt ?? null, color: leaderNote.color, width: leaderNote.width, height: leaderNote.height };
+        state.layoutNotesById[note.id] = { id: note.id, x: finalPosition.x, y: finalPosition.y, boardId: leaderNote.boardId, deletedAt: leaderNote.deletedAt ?? null, color: leaderNote.color, width: leaderNote.width, height: leaderNote.height };
       }
 
       if (isSelected && isGroupSelection) {
@@ -354,7 +342,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         nodeRef={nodeRef}
         handle=".drag-handle"
         cancel={'.note-action, input, textarea, [data-note-no-drag="true"]'}
-        position={{ x: screenX, y: screenY }}
+        position={{ x: worldX, y: worldY }}
         scale={scale}
         onStart={handleStart}
         onDrag={handleDrag}

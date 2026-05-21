@@ -27,6 +27,7 @@ import { NoteCard } from './NoteCard';
 import { useStore } from '../store/useStore';
 import { normalizeNotes } from '../store/normalization';
 import { getNoteColor, Note } from '../store/types';
+import { getEdgeCheckRect, resolveDragStopWorldPosition } from '../utils/dragCoordinates';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
@@ -222,5 +223,54 @@ describe('NoteCard 头部交互边界', () => {
     });
 
     expect(useStore.getState().notesById['note-1']?.collapsed).toBe(true);
+  });
+});
+
+describe('NoteCard 拖拽坐标换算', () => {
+  it('边缘检测将世界坐标换算为屏幕坐标', () => {
+    expect(getEdgeCheckRect(860, 260, { x: 200, y: 40 }, 260, 160)).toEqual({
+      x: 660,
+      y: 220,
+      width: 260,
+      height: 160,
+    });
+  });
+
+  it('组拖拽边缘检测同样扣除当前视口偏移', () => {
+    expect(getEdgeCheckRect(860, 260, { x: 200, y: 40 }, 260, 160, {
+      minX: -120,
+      minY: 30,
+      width: 720,
+      height: 360,
+    })).toEqual({
+      x: 540,
+      y: 250,
+      width: 720,
+      height: 360,
+    });
+  });
+
+  it('拖拽停止时保留 react-draggable 返回的世界坐标，避免重复叠加视口', () => {
+    expect(resolveDragStopWorldPosition(230, 180, {
+      x: 100,
+      y: 50,
+      w: 1280,
+      h: 720,
+    }, 260, 160, false, 10)).toEqual({
+      x: 230,
+      y: 180,
+    });
+  });
+
+  it('拖拽停止时仍按屏幕边界夹取后换回世界坐标', () => {
+    expect(resolveDragStopWorldPosition(1500, 900, {
+      x: 100,
+      y: 50,
+      w: 1280,
+      h: 720,
+    }, 260, 160, false, 10)).toEqual({
+      x: 1110,
+      y: 600,
+    });
   });
 });

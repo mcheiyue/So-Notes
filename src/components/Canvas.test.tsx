@@ -48,6 +48,7 @@ describe('Canvas 空白命中判定', () => {
   let root: Root;
   let rafMock: ReturnType<typeof vi.fn>;
   let cancelRafMock: ReturnType<typeof vi.fn>;
+  let rafCallbacks: FrameRequestCallback[];
 
   const renderCanvas = async () => {
     await act(async () => {
@@ -57,7 +58,11 @@ describe('Canvas 空白命中判定', () => {
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    rafMock = vi.fn(() => 1);
+    rafCallbacks = [];
+    rafMock = vi.fn((callback: FrameRequestCallback) => {
+      rafCallbacks.push(callback);
+      return rafCallbacks.length;
+    });
     cancelRafMock = vi.fn();
     vi.stubGlobal('requestAnimationFrame', rafMock);
     vi.stubGlobal('cancelAnimationFrame', cancelRafMock);
@@ -120,7 +125,7 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(addNote).toHaveBeenCalledTimes(1);
-    expect(addNote).toHaveBeenCalledWith(170, 200);
+    expect(addNote).toHaveBeenCalledWith(210, 260);
   });
 
   it('双击 NoteCard 头部不会被误判为空白画布', async () => {
@@ -335,5 +340,32 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(cancelRafMock).toHaveBeenCalledWith(1);
+  });
+
+  it('边缘推动按当前视口推进画布并补偿选中便签位置', async () => {
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        edgePush: { top: false, bottom: false, left: false, right: true },
+      },
+    });
+
+    await renderCanvas();
+
+    expect(rafMock).toHaveBeenCalledTimes(1);
+
+    const noteEl = container.querySelector('[data-id="note-1"]') as HTMLElement | null;
+    const worldLayer = noteEl?.parentElement as HTMLElement | null;
+    expect(noteEl).not.toBeNull();
+    expect(worldLayer).not.toBeNull();
+
+    await act(async () => {
+      rafCallbacks[0]?.(0);
+    });
+
+    expect(useStore.getState().viewport.x).toBe(45);
+    expect(useStore.getState().viewport.y).toBe(60);
+    expect(worldLayer?.style.transform).toBe('translate3d(-45px, -60px, 0)');
+    expect(noteEl?.style.transform).toBe('translate(125px, 140px)');
   });
 });
