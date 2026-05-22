@@ -381,6 +381,8 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(worldLayer?.style.transform).toBe('translate3d(-10px, -35px, 0)');
+    expect(useStore.getState().viewport.x).toBe(10);
+    expect(useStore.getState().viewport.y).toBe(35);
 
     await act(async () => {
       window.dispatchEvent(new MouseEvent('mouseup', {

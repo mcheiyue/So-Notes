@@ -141,6 +141,8 @@ export const Canvas: React.FC = () => {
         worldLayerRef.current.style.transform = `translate3d(${-panOffsetRef.current.x}px, ${-panOffsetRef.current.y}px, 0)`;
       }
 
+      useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
+
       panDeltaRef.current = { dx: 0, dy: 0 };
     };
 
