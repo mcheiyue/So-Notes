@@ -7,7 +7,6 @@ import { diagnostics } from "../utils/diagnostics";
 import { useFPSMonitor } from "../utils/performance";
 import {
   getEdgePushDragLeader,
-  getEdgePushDragSessionNoteIds,
   hasActiveEdgePushDragSession,
   accumulateEdgePushDelta,
   applyActiveDragSessionTransforms,
@@ -53,6 +52,7 @@ export const Canvas: React.FC = () => {
   const stickyDragId = useStore((s) => s.stickyDrag.id);
   const selectedIds = useStore((s) => s.selectedIds);
   const isPanMode = useStore((s) => s.interaction.isPanMode);
+  const isDragging = useStore((s) => s.interaction.isDragging);
   const edgePush = useStore((s) => s.interaction.edgePush);
   const viewport = useStore((s) => s.viewport);
 
@@ -75,26 +75,34 @@ export const Canvas: React.FC = () => {
   ]);
 
   const visibleNoteIds = useMemo(() => {
-    const viewportVisibleIds = currentBoardNoteIds.filter((id) => {
+    const liveNoteIds = currentBoardNoteIds.filter((id) => !layoutNotesById[id]?.deletedAt);
+
+    // v1.3.1 引入视口虚拟化后，持续交互中的便签可能因为旧 layout 位置被裁剪而卸载，
+    // 造成 edgePush 中断、小地图收起、拖拽会话残留。拖拽 / sticky drag 期间必须保留稳定 DOM。
+    if (isDragging || stickyDragId || getEdgePushDragLeader()) {
+      return liveNoteIds;
+    }
+
+    const viewportRight = throttledViewportRect.x + throttledViewportRect.w;
+    const viewportBottom = throttledViewportRect.y + throttledViewportRect.h;
+
+    return liveNoteIds.filter((id) => {
       const ln = layoutNotesById[id];
-      if (!ln || ln.deletedAt) return false;
+      if (!ln) return false;
+
+      const noteWidth = ln.width ?? LAYOUT.NOTE_WIDTH;
+      const noteHeight = ln.height ?? LAYOUT.NOTE_MIN_HEIGHT;
+      const noteRight = ln.x + noteWidth;
+      const noteBottom = ln.y + noteHeight;
+
       return (
-        ln.x >= throttledViewportRect.x - LAYOUT.NOTE_WIDTH &&
-        ln.x <= throttledViewportRect.x + throttledViewportRect.w &&
-        ln.y >= throttledViewportRect.y - LAYOUT.NOTE_MIN_HEIGHT &&
-        ln.y <= throttledViewportRect.y + throttledViewportRect.h
+        noteRight >= throttledViewportRect.x &&
+        ln.x <= viewportRight &&
+        noteBottom >= throttledViewportRect.y &&
+        ln.y <= viewportBottom
       );
     });
-
-    // DragSession 中的真实位置由 DOM/会话状态维护，layoutNotesById 会在松手时才落盘。
-    // 边缘推动期间 viewport 可能把旧 layout 位置推出 buffer；这里强制保留 active drag 便签，避免拖拽中被虚拟化卸载。
-    const activeDragIds = getEdgePushDragSessionNoteIds().filter((id) => {
-      const ln = layoutNotesById[id];
-      return currentBoardNoteIds.includes(id) && !!ln && !ln.deletedAt;
-    });
-
-    return [...new Set([...viewportVisibleIds, ...activeDragIds])];
-  }, [currentBoardNoteIds, layoutNotesById, throttledViewportRect]);
+  }, [currentBoardNoteIds, isDragging, layoutNotesById, stickyDragId, throttledViewportRect]);
 
   const currentBoardVisibleCount = useMemo(
     () => currentBoardNoteIds.filter((id) => !layoutNotesById[id]?.deletedAt).length,

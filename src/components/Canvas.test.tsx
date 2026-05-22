@@ -548,6 +548,45 @@ describe('Canvas 空白命中判定', () => {
     expect(container.querySelector('[data-id="note-1"]')).toBeNull();
   });
 
+  it('拖拽中会临时禁用虚拟化，避免便签 DOM 被卸载导致 edgePush 中断', async () => {
+    useStore.setState({
+      viewport: { x: 2000, y: 60, w: 1280, h: 720 },
+      interaction: {
+        ...useStore.getState().interaction,
+        isDragging: true,
+      },
+    });
+
+    await renderCanvas();
+
+    expect(container.querySelector('[data-id="note-1"]')).not.toBeNull();
+  });
+
+  it('sticky drag 中会临时禁用虚拟化，避免待放置便签被卸载', async () => {
+    useStore.setState({
+      viewport: { x: 2000, y: 60, w: 1280, h: 720 },
+      stickyDrag: { id: 'note-1', offsetX: 20, offsetY: 20 },
+    });
+
+    await renderCanvas();
+
+    expect(container.querySelector('[data-id="note-1"]')).not.toBeNull();
+  });
+
+  it('普通虚拟化使用便签矩形相交判断，宽便签边缘进入缓冲区时仍会渲染', async () => {
+    const wideNote = createNote({ x: 1000, y: 140, width: 600, height: 160 });
+    const normalized = normalizeNotes([wideNote]);
+    useStore.setState({
+      ...normalized,
+      layoutNotesById: createLayoutNotesById(normalized.notesById),
+      viewport: { x: 2000, y: 60, w: 1280, h: 720 },
+    });
+
+    await renderCanvas();
+
+    expect(container.querySelector('[data-id="note-1"]')).not.toBeNull();
+  });
+
   it('边缘推动推进视口与选中便签世界坐标', async () => {
     useStore.setState({
       interaction: {
