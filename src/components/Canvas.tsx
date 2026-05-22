@@ -5,6 +5,12 @@ import { cn } from "../utils/cn";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { diagnostics } from "../utils/diagnostics";
 import { useFPSMonitor } from "../utils/performance";
+import {
+  getEdgePushDragLeader,
+  accumulateEdgePushDelta,
+  applyLeaderDOMCompensation,
+  setEdgePushDragLeader,
+} from "../utils/edgePushDragCompensation";
 
 
 
@@ -211,6 +217,7 @@ export const Canvas: React.FC = () => {
             cancelAnimationFrame(edgePushFrameRef.current);
             edgePushFrameRef.current = 0;
             useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
+            setEdgePushDragLeader(null);
         }
         return;
     }
@@ -240,7 +247,13 @@ export const Canvas: React.FC = () => {
                 worldLayerRef.current.style.transform = `translate3d(${-panOffsetRef.current.x}px, ${-panOffsetRef.current.y}px, 0)`;
             }
 
-            useStore.getState().moveSelectedNotes(dx, dy);
+            const leaderId = getEdgePushDragLeader();
+            useStore.getState().moveSelectedNotes(dx, dy, leaderId ?? undefined);
+
+            if (leaderId) {
+                accumulateEdgePushDelta(dx, dy);
+                applyLeaderDOMCompensation();
+            }
         }
         edgePushFrameRef.current = requestAnimationFrame(pushLoop);
     };
@@ -555,6 +568,7 @@ export const Canvas: React.FC = () => {
           panDeltaRef.current = { dx: 0, dy: 0 };
           stopPanFlushLoop();
           useStore.getState().setEdgePush({ top: false, bottom: false, left: false, right: false });
+          setEdgePushDragLeader(null);
           if (selectionBoxRef.current) {
               selectionBoxRef.current.style.display = 'none';
           }

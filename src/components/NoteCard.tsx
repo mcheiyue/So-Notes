@@ -10,6 +10,7 @@ import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
 import { registerNoteElement, unregisterNoteElement, getNoteElement } from "../utils/noteElementRegistry";
 import { getEdgeCheckRect, resolveDragStopWorldPosition } from "../utils/dragCoordinates";
+import { setEdgePushDragLeader, setLastDraggablePosition, getEdgePushAccumulatedDelta } from "../utils/edgePushDragCompensation";
 
 interface NoteCardProps {
   id: string;
@@ -70,7 +71,12 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     const el = nodeRef.current;
     if (el && noteId) {
       registerNoteElement(noteId, el);
-      return () => unregisterNoteElement(noteId);
+      return () => {
+        unregisterNoteElement(noteId);
+        if (isDragging.current) {
+          setEdgePushDragLeader(null);
+        }
+      };
     }
   }, [noteId]);
 
@@ -104,6 +110,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       document.body.classList.add('is-dragging');
       shouldFinalizeOnMouseUpRef.current = false;
       groupDragOffsetRef.current = { dx: 0, dy: 0 };
+      setEdgePushDragLeader(note.id);
 
       if (isSelected && isGroupSelection) {
           const state = useStore.getState();
@@ -165,19 +172,31 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           });
       }
 
-      // 2. Edge Push Logic (Delegated to Hook)
-      const viewport = useStore.getState().viewport;
-      const edgeRect = getEdgeCheckRect(
-          data.x,
-          data.y,
-          viewport,
-          nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH,
-          nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT,
-          groupBoundsRef.current,
-      );
+       const epDelta = getEdgePushAccumulatedDelta();
 
-      checkEdge(edgeRect.x, edgeRect.y, edgeRect.width, edgeRect.height);
-  };
+       // 2. Edge Push Logic (Delegated to Hook)
+       // 在 edge push 期间，leader 的可见位置 = draggable(data.x/y) + edgePush 累计增量。
+       // 若不把增量合并进边缘检测坐标，viewport 变化会让检测坐标“漂移离开边缘”，导致中途断开。
+       const viewport = useStore.getState().viewport;
+       const edgeRect = getEdgeCheckRect(
+           data.x + epDelta.x,
+           data.y + epDelta.y,
+           viewport,
+           nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH,
+           nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT,
+           groupBoundsRef.current,
+       );
+
+       checkEdge(edgeRect.x, edgeRect.y, edgeRect.width, edgeRect.height);
+
+       setLastDraggablePosition(data.x, data.y);
+       if (epDelta.x !== 0 || epDelta.y !== 0) {
+           const leaderEl = nodeRef.current;
+           if (leaderEl) {
+               leaderEl.style.transform = `translate(${data.x + epDelta.x}px, ${data.y + epDelta.y}px)`;
+           }
+       }
+   };
   
   const handleStop = (_e: DraggableEvent, data: DraggableData) => {
     isDragging.current = false;
@@ -188,6 +207,9 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     
     clearEdge();
     
+    const epDelta = getEdgePushAccumulatedDelta();
+    setEdgePushDragLeader(null);
+
     const viewport = useStore.getState().viewport;
     const winW = viewport.w;
     const winH = viewport.h;
@@ -196,8 +218,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     const MARGIN = 10;
     
     const finalPosition = resolveDragStopWorldPosition(
-      data.x,
-      data.y,
+      data.x + epDelta.x,
+      data.y + epDelta.y,
       viewport,
       noteWidth,
       noteHeight,

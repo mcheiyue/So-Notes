@@ -27,6 +27,12 @@ import { Canvas } from './Canvas';
 import { useStore } from '../store/useStore';
 import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
 import { Note } from '../store/types';
+import { LAYOUT } from '../constants/layout';
+import {
+  setEdgePushDragLeader,
+  getEdgePushAccumulatedDelta,
+  setLastDraggablePosition,
+} from '../utils/edgePushDragCompensation';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
@@ -68,6 +74,7 @@ describe('Canvas 空白命中判定', () => {
     vi.stubGlobal('cancelAnimationFrame', cancelRafMock);
 
     useStore.setState(useStore.getInitialState(), true);
+    setEdgePushDragLeader(null);
     const normalized = normalizeNotes([createNote()]);
     useStore.setState({
       ...normalized,
@@ -502,5 +509,129 @@ describe('Canvas 空白命中判定', () => {
     expect(useStore.getState().viewport.y).toBe(60);
     expect(worldLayer?.style.transform).toBe('translate3d(-45px, -60px, 0)');
     expect(useStore.getState().notesById['note-1']?.x).toBe(125);
+  });
+
+  it('边缘推动拖拽 leader 时排除 leader，只移动 follower', async () => {
+    const normalized = normalizeNotes([
+      createNote({ id: 'leader', x: 100, y: 100 }),
+      createNote({ id: 'follower', x: 300, y: 100, createdAt: 2 }),
+    ]);
+    useStore.setState({
+      ...normalized,
+      layoutNotesById: createLayoutNotesById(normalized.notesById),
+      boardNoteIds: { 'default': ['leader', 'follower'] },
+      selectedIds: ['leader', 'follower'],
+      interaction: {
+        ...useStore.getState().interaction,
+        edgePush: { top: false, bottom: false, left: false, right: true },
+      },
+    });
+
+    setEdgePushDragLeader('leader');
+    setLastDraggablePosition(150, 100);
+
+    await renderCanvas();
+
+    expect(rafMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rafCallbacks[0]?.(0);
+    });
+
+    expect(useStore.getState().notesById['leader']?.x).toBe(100);
+    expect(useStore.getState().notesById['follower']?.x).toBe(305);
+  });
+
+  it('边缘推动拖拽期间累积增量跨帧保持 edgePush true', async () => {
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        edgePush: { top: false, bottom: false, left: false, right: true },
+      },
+    });
+
+    setEdgePushDragLeader('note-1');
+    setLastDraggablePosition(120, 140);
+
+    await renderCanvas();
+
+    expect(rafMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rafCallbacks[0]?.(0);
+    });
+
+    expect(getEdgePushAccumulatedDelta().x).toBe(LAYOUT.EDGE_PUSH_SPEED);
+    expect(useStore.getState().interaction.edgePush.right).toBe(true);
+
+    await act(async () => {
+      rafCallbacks[1]?.(0);
+    });
+
+    expect(getEdgePushAccumulatedDelta().x).toBe(LAYOUT.EDGE_PUSH_SPEED * 2);
+    expect(useStore.getState().interaction.edgePush.right).toBe(true);
+  });
+
+  it('边缘推动 leader DOM 补偿应用到元素', async () => {
+    const normalized = normalizeNotes([createNote({ id: 'note-1', x: 120, y: 140 })]);
+    useStore.setState({
+      ...normalized,
+      layoutNotesById: createLayoutNotesById(normalized.notesById),
+      interaction: {
+        ...useStore.getState().interaction,
+        edgePush: { top: false, bottom: false, left: false, right: true },
+      },
+    });
+
+    setEdgePushDragLeader('note-1');
+    setLastDraggablePosition(200, 140);
+
+    await renderCanvas();
+
+    const noteEl = container.querySelector('[data-id="note-1"]') as HTMLElement | null;
+    expect(noteEl).not.toBeNull();
+
+    await act(async () => {
+      rafCallbacks[0]?.(0);
+    });
+
+    const expectedX = 200 + LAYOUT.EDGE_PUSH_SPEED;
+    expect(noteEl?.style.transform).toBe(`translate(${expectedX}px, 140px)`);
+  });
+
+  it('边缘推动 leader 排除后最终位置含累积增量', async () => {
+    const normalized = normalizeNotes([
+      createNote({ id: 'leader', x: 100, y: 100 }),
+    ]);
+    useStore.setState({
+      ...normalized,
+      layoutNotesById: createLayoutNotesById(normalized.notesById),
+      boardNoteIds: { 'default': ['leader'] },
+      selectedIds: ['leader'],
+      interaction: {
+        ...useStore.getState().interaction,
+        edgePush: { top: false, bottom: false, left: false, right: true },
+      },
+    });
+
+    setEdgePushDragLeader('leader');
+    setLastDraggablePosition(150, 100);
+
+    await renderCanvas();
+
+    await act(async () => {
+      rafCallbacks[0]?.(0);
+      rafCallbacks[1]?.(0);
+      rafCallbacks[2]?.(0);
+    });
+
+    const delta = getEdgePushAccumulatedDelta();
+    expect(delta.x).toBe(LAYOUT.EDGE_PUSH_SPEED * 3);
+
+    const leaderStore = useStore.getState().notesById['leader'];
+    expect(leaderStore?.x).toBe(100);
+
+    const finalX = 150 + delta.x;
+    expect(finalX).toBe(150 + LAYOUT.EDGE_PUSH_SPEED * 3);
   });
 });
