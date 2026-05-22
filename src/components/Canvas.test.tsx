@@ -36,6 +36,7 @@ import {
   getEdgePushAccumulatedDelta,
   updateEdgePushPointerDelta,
 } from '../utils/edgePushDragCompensation';
+import { resolveDragStopWorldPosition } from '../utils/dragCoordinates';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
@@ -711,7 +712,7 @@ describe('Canvas 空白命中判定', () => {
     expect(noteEl?.style.transform).toBe('translate(120px, 140px)');
   });
 
-  it('sticky 群组落位按整组边界约束，不会逐卡散组', async () => {
+  it('sticky 群组落位与普通拖拽一致，按单卡贴边语义分别结算', async () => {
     const normalized = normalizeNotes([
       createNote({ id: 'leader', x: 100, y: 100 }),
       createNote({ id: 'follower', x: 320, y: 130, createdAt: 2 }),
@@ -748,12 +749,31 @@ describe('Canvas 空白命中判定', () => {
 
     const leader = useStore.getState().notesById['leader'];
     const follower = useStore.getState().notesById['follower'];
+    const viewport = useStore.getState().viewport;
+    const expectedLeader = resolveDragStopWorldPosition(
+      1100,
+      650,
+      viewport,
+      LAYOUT.NOTE_WIDTH,
+      LAYOUT.NOTE_MIN_HEIGHT,
+      false,
+      10,
+    );
+    const expectedFollower = resolveDragStopWorldPosition(
+      1320,
+      680,
+      viewport,
+      LAYOUT.NOTE_WIDTH,
+      LAYOUT.NOTE_MIN_HEIGHT,
+      false,
+      10,
+    );
 
     expect(useStore.getState().stickyDrag.id).toBeNull();
-    expect(follower?.x! - leader?.x!).toBe(220);
-    expect(follower?.y! - leader?.y!).toBe(30);
-    expect((follower?.x ?? 0) + LAYOUT.NOTE_WIDTH).toBeLessThanOrEqual(1310);
-    expect((follower?.y ?? 0) + LAYOUT.NOTE_MIN_HEIGHT).toBeLessThanOrEqual(770);
+    expect(leader?.x).toBe(expectedLeader.x);
+    expect(leader?.y).toBe(expectedLeader.y);
+    expect(follower?.x).toBe(expectedFollower.x);
+    expect(follower?.y).toBe(expectedFollower.y);
   });
 
   it('普通虚拟化使用便签矩形相交判断，宽便签边缘进入缓冲区时仍会渲染', async () => {

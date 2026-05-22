@@ -14,7 +14,7 @@ import {
 } from "../utils/edgePushDragCompensation";
 import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetrics";
 import { getNoteElement } from "../utils/noteElementRegistry";
-import { alignGroupPositionsWithinBounds } from "../utils/dragCoordinates";
+import { resolveDragStopWorldPosition } from "../utils/dragCoordinates";
 
 
 
@@ -169,23 +169,29 @@ export const Canvas: React.FC = () => {
       }),
     ) as Record<string, { x: number; y: number }>;
 
-    const finalPositions = alignGroupPositionsWithinBounds(
-      rawPositions,
-      idsToCommit,
-      state.viewport,
-      state.interaction.isPanMode,
-      10,
-      (id) => {
+    const finalPositions = Object.fromEntries(
+      idsToCommit.flatMap((id) => {
         const note = state.notesById[id];
         const layout = state.layoutNotesById[id];
-        if (!note || !layout) return null;
+        const rawPosition = rawPositions[id];
+        if (!note || !layout || !rawPosition) {
+          return [];
+        }
 
-        return {
-          width: getNoteVisualWidth(note, layout),
-          height: getNoteVisualHeight(note, layout),
-        };
-      },
-    );
+        return [[
+          id,
+          resolveDragStopWorldPosition(
+            rawPosition.x,
+            rawPosition.y,
+            state.viewport,
+            getNoteVisualWidth(note, layout),
+            getNoteVisualHeight(note, layout),
+            state.interaction.isPanMode,
+            10,
+          ),
+        ]];
+      }),
+    ) as Record<string, { x: number; y: number }>;
 
     const timestamp = Date.now();
     useStore.setState((draft) => {

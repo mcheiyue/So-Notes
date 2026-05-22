@@ -9,7 +9,7 @@ import { useDarkMode } from "../hooks/useDarkMode";
 import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
 import { registerNoteElement, unregisterNoteElement } from "../utils/noteElementRegistry";
-import { alignGroupPositionsWithinBounds, getEdgeCheckRect, resolveDragStopWorldPosition } from "../utils/dragCoordinates";
+import { getEdgeCheckRect, resolveDragStopWorldPosition } from "../utils/dragCoordinates";
 import {
   beginEdgePushDragSession,
   setEdgePushDragLeader,
@@ -19,7 +19,6 @@ import {
   getEdgePushDragSessionPosition,
   applyActiveDragSessionTransforms,
 } from "../utils/edgePushDragCompensation";
-import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetrics";
 
 interface NoteCardProps {
   id: string;
@@ -236,33 +235,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     );
 
     const dragIds = sessionIds.length > 0 ? sessionIds : [note.id];
-    const resolvedGroupPositions = dragIds.length > 1
-      ? alignGroupPositionsWithinBounds(
-          Object.fromEntries(
-            dragIds.flatMap((id) => {
-              if (id === note.id) {
-                return [[id, effectivePos]];
-              }
-
-              const rawPosition = sessionPositions[id];
-              return rawPosition ? [[id, rawPosition]] : [];
-            }),
-          ),
-          dragIds,
-          viewport,
-          isPanMode,
-          MARGIN,
-          (id) => {
-            const currentNote = useStore.getState().notesById[id];
-            if (!currentNote) return null;
-
-            return {
-              width: getNoteVisualWidth(currentNote),
-              height: getNoteVisualHeight(currentNote),
-            };
-          },
-        )
-      : null;
 
     // P1: 批量更新所有拖拽涉及的便签位置（单次 set）
     const timestamp = Date.now();
@@ -271,17 +243,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         const n = state.notesById[id];
         if (!n) return;
 
-        const rawPosition = resolvedGroupPositions
-          ? resolvedGroupPositions[id]
-          : id === note.id
-            ? finalPosition
-            : sessionPositions[id];
+        const rawPosition = id === note.id
+          ? finalPosition
+          : sessionPositions[id];
         if (!rawPosition) return;
 
-        const resolvedPosition = resolvedGroupPositions
-          ? rawPosition
-          : id === note.id
-            ? finalPosition
+        const resolvedPosition = id === note.id
+          ? finalPosition
           : resolveDragStopWorldPosition(
               rawPosition.x,
               rawPosition.y,
