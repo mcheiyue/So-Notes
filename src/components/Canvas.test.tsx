@@ -663,12 +663,97 @@ describe('Canvas 空白命中判定', () => {
   it('sticky drag 中会临时禁用虚拟化，避免待放置便签被卸载', async () => {
     useStore.setState({
       viewport: { x: 2000, y: 60, w: 1280, h: 720 },
-      stickyDrag: { id: 'note-1', offsetX: 20, offsetY: 20 },
+      stickyDrag: { id: 'note-1', offsetX: 20, offsetY: 20, status: 'active' },
     });
 
     await renderCanvas();
 
     expect(container.querySelector('[data-id="note-1"]')).not.toBeNull();
+  });
+
+  it('sticky drag 失焦时进入 suspended 状态而不是直接清空', async () => {
+    useStore.setState({
+      stickyDrag: { id: 'note-1', offsetX: 20, offsetY: 20, status: 'active' },
+    });
+
+    await renderCanvas();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    expect(useStore.getState().stickyDrag).toEqual({
+      id: 'note-1',
+      offsetX: 20,
+      offsetY: 20,
+      status: 'suspended',
+    });
+    expect(container.textContent).toContain('吸附移动已暂停');
+  });
+
+  it('sticky drag 按 Escape 会取消并恢复预览位置', async () => {
+    useStore.setState({
+      stickyDrag: { id: 'note-1', offsetX: 20, offsetY: 20, status: 'active' },
+    });
+
+    await renderCanvas();
+
+    const noteEl = container.querySelector('[data-id="note-1"]') as HTMLElement | null;
+    expect(noteEl).not.toBeNull();
+
+    noteEl!.style.transform = 'translate(500px, 600px)';
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+
+    expect(useStore.getState().stickyDrag.id).toBeNull();
+    expect(noteEl?.style.transform).toBe('translate(120px, 140px)');
+  });
+
+  it('sticky 群组落位按整组边界约束，不会逐卡散组', async () => {
+    const normalized = normalizeNotes([
+      createNote({ id: 'leader', x: 100, y: 100 }),
+      createNote({ id: 'follower', x: 320, y: 130, createdAt: 2 }),
+    ]);
+
+    useStore.setState({
+      ...normalized,
+      layoutNotesById: createLayoutNotesById(normalized.notesById),
+      boardNoteIds: { default: ['leader', 'follower'] },
+      selectedIds: ['leader', 'follower'],
+      stickyDrag: { id: 'leader', offsetX: 20, offsetY: 20, status: 'active' },
+    });
+
+    await renderCanvas();
+
+    const leaderEl = container.querySelector('[data-id="leader"]') as HTMLElement | null;
+    const followerEl = container.querySelector('[data-id="follower"]') as HTMLElement | null;
+    expect(leaderEl).not.toBeNull();
+    expect(followerEl).not.toBeNull();
+
+    leaderEl!.style.transform = 'translate(1100px, 650px)';
+    followerEl!.style.transform = 'translate(1320px, 680px)';
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 260,
+        clientY: 260,
+      }));
+    });
+
+    const leader = useStore.getState().notesById['leader'];
+    const follower = useStore.getState().notesById['follower'];
+
+    expect(useStore.getState().stickyDrag.id).toBeNull();
+    expect(follower?.x! - leader?.x!).toBe(220);
+    expect(follower?.y! - leader?.y!).toBe(30);
+    expect((follower?.x ?? 0) + LAYOUT.NOTE_WIDTH).toBeLessThanOrEqual(1310);
+    expect((follower?.y ?? 0) + LAYOUT.NOTE_MIN_HEIGHT).toBeLessThanOrEqual(770);
   });
 
   it('普通虚拟化使用便签矩形相交判断，宽便签边缘进入缓冲区时仍会渲染', async () => {

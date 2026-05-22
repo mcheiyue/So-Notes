@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
@@ -29,6 +29,30 @@ export const MiniMap: React.FC = () => {
     const mapRef = useRef<HTMLDivElement>(null);
     const viewportRef = useRef<HTMLButtonElement>(null);
     const isDarkMode = useDarkMode();
+    const dragCleanupRef = useRef<(() => void) | null>(null);
+
+    const clearActiveDrag = useCallback(() => {
+        dragCleanupRef.current?.();
+        dragCleanupRef.current = null;
+    }, []);
+
+    useEffect(() => {
+        const handleBlur = () => clearActiveDrag();
+        const handleVisibilityChange = () => {
+            if (document.visibilityState !== 'visible') {
+                clearActiveDrag();
+            }
+        };
+
+        window.addEventListener('blur', handleBlur);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            window.removeEventListener('blur', handleBlur);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            clearActiveDrag();
+        };
+    }, [clearActiveDrag]);
 
     const visibleNotes = useMemo<MiniMapRenderableNote[]>(
         () => currentBoardNoteIds.flatMap((id) => {
@@ -139,6 +163,7 @@ export const MiniMap: React.FC = () => {
     const handleViewportDrag = (e: React.MouseEvent) => {
         e.stopPropagation(); // Prevent jumping
         e.preventDefault();
+        clearActiveDrag();
         
         const startX = e.clientX;
         const startY = e.clientY;
@@ -153,6 +178,11 @@ export const MiniMap: React.FC = () => {
         let frameId: number | null = null;
 
         const handleMove = (moveEvent: MouseEvent) => {
+            if (moveEvent.buttons === 0) {
+                handleUp();
+                return;
+            }
+
             const dx = moveEvent.clientX - startX;
             const dy = moveEvent.clientY - startY;
 
@@ -183,8 +213,12 @@ export const MiniMap: React.FC = () => {
             }
             window.removeEventListener('mousemove', handleMove);
             window.removeEventListener('mouseup', handleUp);
+            if (dragCleanupRef.current === handleUp) {
+                dragCleanupRef.current = null;
+            }
         };
         
+        dragCleanupRef.current = handleUp;
         window.addEventListener('mousemove', handleMove);
         window.addEventListener('mouseup', handleUp);
     };
@@ -193,6 +227,7 @@ export const MiniMap: React.FC = () => {
     const handleMapDrag = (e: React.MouseEvent) => {
         if (!mapRef.current) return;
         e.preventDefault();
+        clearActiveDrag();
         
         const rect = mapRef.current.getBoundingClientRect();
         
@@ -212,14 +247,23 @@ export const MiniMap: React.FC = () => {
         updatePosition(e.clientX, e.clientY);
         
         const handleMove = (moveEvent: MouseEvent) => {
+            if (moveEvent.buttons === 0) {
+                handleUp();
+                return;
+            }
+
             updatePosition(moveEvent.clientX, moveEvent.clientY);
         };
         
         const handleUp = () => {
             window.removeEventListener('mousemove', handleMove);
             window.removeEventListener('mouseup', handleUp);
+            if (dragCleanupRef.current === handleUp) {
+                dragCleanupRef.current = null;
+            }
         };
         
+        dragCleanupRef.current = handleUp;
         window.addEventListener('mousemove', handleMove);
         window.addEventListener('mouseup', handleUp);
     };

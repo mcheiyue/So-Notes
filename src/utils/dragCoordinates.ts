@@ -12,6 +12,11 @@ interface GroupDragBounds {
   height: number;
 }
 
+interface WorldPosition {
+  x: number;
+  y: number;
+}
+
 export const getEdgeCheckRect = (
   dragX: number,
   dragY: number,
@@ -67,4 +72,76 @@ export const resolveDragStopWorldPosition = (
     x: Math.max(0, finalWorldX),
     y: Math.max(0, finalWorldY),
   };
+};
+
+export const alignGroupPositionsWithinBounds = (
+  positions: Record<string, WorldPosition>,
+  ids: string[],
+  viewport: DragViewport,
+  isPanMode: boolean,
+  margin: number,
+  getBounds: (id: string) => { width: number; height: number } | null,
+) => {
+  if (ids.length === 0) {
+    return {} as Record<string, WorldPosition>;
+  }
+
+  let groupLeft = Infinity;
+  let groupTop = Infinity;
+  let groupRight = -Infinity;
+  let groupBottom = -Infinity;
+
+  ids.forEach((id) => {
+    const position = positions[id];
+    const bounds = getBounds(id);
+    if (!position || !bounds) return;
+
+    groupLeft = Math.min(groupLeft, position.x);
+    groupTop = Math.min(groupTop, position.y);
+    groupRight = Math.max(groupRight, position.x + bounds.width);
+    groupBottom = Math.max(groupBottom, position.y + bounds.height);
+  });
+
+  if (!Number.isFinite(groupLeft) || !Number.isFinite(groupTop)) {
+    return { ...positions };
+  }
+
+  const minX = isPanMode ? 0 : viewport.x;
+  const minY = isPanMode ? 0 : viewport.y;
+  const maxRight = isPanMode ? Number.POSITIVE_INFINITY : viewport.x + viewport.w - margin;
+  const maxBottom = isPanMode ? Number.POSITIVE_INFINITY : viewport.y + viewport.h - margin;
+
+  let deltaX = 0;
+  let deltaY = 0;
+
+  if (groupLeft < minX) {
+    deltaX = minX - groupLeft;
+  }
+  if (groupTop < minY) {
+    deltaY = minY - groupTop;
+  }
+
+  if (Number.isFinite(maxRight) && groupRight + deltaX > maxRight) {
+    deltaX += maxRight - (groupRight + deltaX);
+  }
+  if (Number.isFinite(maxBottom) && groupBottom + deltaY > maxBottom) {
+    deltaY += maxBottom - (groupBottom + deltaY);
+  }
+
+  return Object.fromEntries(
+    ids.map((id) => {
+      const position = positions[id];
+      if (!position) {
+        return [id, { x: 0, y: 0 }];
+      }
+
+      return [
+        id,
+        {
+          x: Math.max(0, position.x + deltaX),
+          y: Math.max(0, position.y + deltaY),
+        },
+      ];
+    }),
+  ) as Record<string, WorldPosition>;
 };

@@ -26,9 +26,18 @@ import { useStore } from '../store/useStore';
 describe('MiniMap 看板隔离', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let rafMock: ReturnType<typeof vi.fn>;
+  let cancelRafMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    rafMock = vi.fn((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    cancelRafMock = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', rafMock);
+    vi.stubGlobal('cancelAnimationFrame', cancelRafMock);
     useStore.setState(useStore.getInitialState(), true);
 
     const normalized = normalizeNotes([
@@ -249,6 +258,82 @@ describe('MiniMap 看板隔离', () => {
     const defaultHeight = Number.parseFloat(notes[0]?.style.height ?? '0');
     const tallHeight = Number.parseFloat(notes[1]?.style.height ?? '0');
     expect(tallHeight).toBeGreaterThan(defaultHeight);
+  });
+
+  it('MiniMap 视口拖拽在 blur 时立即取消，不再继续更新 viewport', async () => {
+    await renderMiniMap();
+
+    const viewportButton = container.querySelector('button[aria-label="当前视口位置"]') as HTMLButtonElement | null;
+    expect(viewportButton).not.toBeNull();
+
+    await act(async () => {
+      viewportButton?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 100,
+        clientY: 100,
+        buttons: 1,
+      }));
+    });
+
+    window.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true,
+      clientX: 160,
+      clientY: 130,
+      buttons: 1,
+    }));
+
+    const draggedViewport = { ...useStore.getState().viewport };
+
+    window.dispatchEvent(new Event('blur'));
+
+    window.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true,
+      clientX: 260,
+      clientY: 230,
+      buttons: 1,
+    }));
+
+    expect(useStore.getState().viewport).toEqual(draggedViewport);
+  });
+
+  it('MiniMap 背景拖动在 visibilitychange 后立即取消，不再继续更新 viewport', async () => {
+    await renderMiniMap();
+
+    const mapButton = container.querySelector('button[aria-label="小地图导航"]') as HTMLButtonElement | null;
+    expect(mapButton).not.toBeNull();
+
+    await act(async () => {
+      mapButton?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 120,
+        clientY: 120,
+        buttons: 1,
+      }));
+    });
+
+    window.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true,
+      clientX: 180,
+      clientY: 180,
+      buttons: 1,
+    }));
+
+    const draggedViewport = { ...useStore.getState().viewport };
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    window.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true,
+      clientX: 260,
+      clientY: 260,
+      buttons: 1,
+    }));
+
+    expect(useStore.getState().viewport).toEqual(draggedViewport);
   });
 
 });

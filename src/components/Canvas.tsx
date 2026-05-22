@@ -13,6 +13,8 @@ import {
   setEdgePushDragLeader,
 } from "../utils/edgePushDragCompensation";
 import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetrics";
+import { getNoteElement } from "../utils/noteElementRegistry";
+import { alignGroupPositionsWithinBounds } from "../utils/dragCoordinates";
 
 
 
@@ -43,7 +45,7 @@ const isBlankCanvasTarget = (target: EventTarget | null): boolean => {
 
 const isDragInteractionLocked = (): boolean => {
   const state = useStore.getState();
-  return state.interaction.isDragging || getEdgePushDragLeader() !== null;
+  return state.interaction.isDragging || getEdgePushDragLeader() !== null || state.stickyDrag.id !== null;
 };
 
 export const Canvas: React.FC = () => {
@@ -51,7 +53,7 @@ export const Canvas: React.FC = () => {
   const isLoaded = useStore((s) => s.isLoaded);
   const currentBoardId = useStore((s) => s.currentBoardId);
   const stickyDragId = useStore((s) => s.stickyDrag.id);
-  const selectedIds = useStore((s) => s.selectedIds);
+  const stickyDragStatus = useStore((s) => s.stickyDrag.status);
   const isPanMode = useStore((s) => s.interaction.isPanMode);
   const isDragging = useStore((s) => s.interaction.isDragging);
   const edgePush = useStore((s) => s.interaction.edgePush);
@@ -120,6 +122,115 @@ export const Canvas: React.FC = () => {
   const getCanvasBounds = () => {
     return containerRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
   };
+
+  const getStickyDragIds = useCallback((state = useStore.getState()) => {
+    const leaderId = state.stickyDrag.id;
+    if (!leaderId) {
+      return [] as string[];
+    }
+
+    if (state.selectedIds.includes(leaderId) && state.selectedIds.length > 1) {
+      return state.selectedIds;
+    }
+
+    return [leaderId];
+  }, []);
+
+  const restoreStickyDragPreview = useCallback((state = useStore.getState()) => {
+    const ids = getStickyDragIds(state);
+    ids.forEach((id) => {
+      const el = getNoteElement(id);
+      const note = state.notesById[id];
+      if (!el || !note) return;
+      el.style.transform = `translate(${note.x}px, ${note.y}px)`;
+    });
+  }, [getStickyDragIds]);
+
+  const commitStickyDragPlacement = useCallback(() => {
+    const state = useStore.getState();
+    const idsToCommit = getStickyDragIds(state);
+    if (idsToCommit.length === 0) {
+      state.setStickyDrag(null);
+      return;
+    }
+
+    const rawPositions = Object.fromEntries(
+      idsToCommit.flatMap((id) => {
+        const note = state.notesById[id];
+        if (!note) return [];
+
+        const el = getNoteElement(id);
+        const match = el?.style.transform.match(/translate\(\s*([-\d.]+)px\s*,\s*([-\d.]+)px\s*\)/);
+        if (match) {
+          return [[id, { x: parseFloat(match[1]), y: parseFloat(match[2]) }]];
+        }
+
+        return [[id, { x: note.x, y: note.y }]];
+      }),
+    ) as Record<string, { x: number; y: number }>;
+
+    const finalPositions = alignGroupPositionsWithinBounds(
+      rawPositions,
+      idsToCommit,
+      state.viewport,
+      state.interaction.isPanMode,
+      10,
+      (id) => {
+        const note = state.notesById[id];
+        const layout = state.layoutNotesById[id];
+        if (!note || !layout) return null;
+
+        return {
+          width: getNoteVisualWidth(note, layout),
+          height: getNoteVisualHeight(note, layout),
+        };
+      },
+    );
+
+    const timestamp = Date.now();
+    useStore.setState((draft) => {
+      idsToCommit.forEach((id) => {
+        const note = draft.notesById[id];
+        const position = finalPositions[id];
+        if (!note || !position) return;
+
+        note.x = position.x;
+        note.y = position.y;
+        note.updatedAt = timestamp;
+        draft.layoutNotesById[id] = {
+          id: note.id,
+          x: note.x,
+          y: note.y,
+          boardId: note.boardId,
+          deletedAt: note.deletedAt ?? null,
+          color: note.color,
+          width: note.width,
+          height: note.height,
+        };
+      });
+      draft.stickyDrag = { id: null, offsetX: 0, offsetY: 0, status: 'active' };
+    });
+
+    state.finalizeLayoutChange(idsToCommit);
+  }, [getStickyDragIds]);
+
+  const cancelStickyDrag = useCallback(() => {
+    const state = useStore.getState();
+    if (!state.stickyDrag.id) return;
+    restoreStickyDragPreview(state);
+    state.setStickyDrag(null);
+  }, [restoreStickyDragPreview]);
+
+  const suspendStickyDrag = useCallback(() => {
+    const state = useStore.getState();
+    if (!state.stickyDrag.id || state.stickyDrag.status === 'suspended') return;
+    state.setStickyDrag(
+      state.stickyDrag.id,
+      state.stickyDrag.offsetX,
+      state.stickyDrag.offsetY,
+      'suspended',
+    );
+  }, []);
 
   const toCanvasLocalPoint = (clientX: number, clientY: number) => {
     const bounds = getCanvasBounds();
@@ -322,28 +433,32 @@ export const Canvas: React.FC = () => {
       if (stickyDragId) {
           const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
           const state = useStore.getState();
+          if (state.stickyDrag.status === 'suspended') {
+            return;
+          }
           const vp = state.viewport;
           const newX = (localPoint.x - state.stickyDrag.offsetX) / scale + vp.x;
           const newY = (localPoint.y - state.stickyDrag.offsetY) / scale + vp.y;
           
           const currentNote = state.notesById[stickyDragId];
           const isSelected = state.selectedIds.includes(stickyDragId);
+          const ids = getStickyDragIds(state);
           
-          if (isSelected && state.selectedIds.length > 1 && currentNote) {
+          if (isSelected && ids.length > 1 && currentNote) {
               const dx = newX - currentNote.x;
               const dy = newY - currentNote.y;
-              state.selectedIds.forEach((id) => {
+              ids.forEach((id) => {
                   if (id === stickyDragId) return;
-                  const el = document.querySelector(`[data-id="${id}"]`) as HTMLElement | null;
+                  const el = getNoteElement(id);
                   if (!el) return;
                   const note = state.notesById[id];
                   if (!note) return;
                   el.style.transform = `translate(${note.x + dx}px, ${note.y + dy}px)`;
               });
-              const leaderEl = document.querySelector(`[data-id="${stickyDragId}"]`) as HTMLElement | null;
+              const leaderEl = getNoteElement(stickyDragId);
               if (leaderEl) leaderEl.style.transform = `translate(${newX}px, ${newY}px)`;
           } else {
-              const el = document.querySelector(`[data-id="${stickyDragId}"]`) as HTMLElement | null;
+              const el = getNoteElement(stickyDragId);
               if (el) el.style.transform = `translate(${newX}px, ${newY}px)`;
           }
           return;
@@ -393,67 +508,14 @@ export const Canvas: React.FC = () => {
     useStore.getState().addNote(x, y);
   };
   
-  const applyBoundaryGuard = (id: string) => {
-      // Use useStore.getState() to access the latest viewport state
-      const state = useStore.getState();
-      
-      // Determine if we are guarding a group or single note
-      const isSelected = selectedIds.includes(id);
-      const idsToCheck = (isSelected && selectedIds.length > 0) ? selectedIds : [id];
-      
-      idsToCheck.forEach(noteId => {
-          const n = state.notesById[noteId];
-          
-          if (n) {
-              let finalX = n.x;
-              let finalY = n.y;
-              let changed = false;
-
-              // Infinite Canvas: Only enforce positive coordinates
-              if (finalX < 0) { finalX = 0; changed = true; }
-              if (finalY < 0) { finalY = 0; changed = true; }
-
-              // Safe Mode Constraints (Consistent with Normal Drag)
-                if (!state.interaction.isPanMode) {
-                    const { x: vx, y: vy, w: vw, h: vh } = state.viewport;
-                    // Match NoteCard.tsx logic: Keep note strictly inside viewport with 10px margin
-                    // Assuming default dimensions since we don't have exact note size here
-                    const ESTIMATED_W = LAYOUT.NOTE_WIDTH; 
-                    const ESTIMATED_H = LAYOUT.NOTE_MIN_HEIGHT; 
-                    const MARGIN = 10;
-                    
-                    const LIMIT_RIGHT = vx + vw - ESTIMATED_W - MARGIN;
-                    const LIMIT_BOTTOM = vy + vh - ESTIMATED_H - MARGIN;
-                    
-                    // Clamp to Viewport
-                    // Right Edge
-                    if (finalX > LIMIT_RIGHT) { 
-                        finalX = LIMIT_RIGHT; 
-                        changed = true; 
-                    }
-                    // Bottom Edge
-                    if (finalY > LIMIT_BOTTOM) { 
-                        finalY = LIMIT_BOTTOM; 
-                        changed = true; 
-                    }
-                    // Left/Top Viewport Edge
-                    if (finalX < vx) { finalX = vx; changed = true; }
-                    if (finalY < vy) { finalY = vy; changed = true; }
-                }
-
-              if (changed) {
-                  useStore.getState().moveNote(noteId, finalX, finalY);
-              }
-          }
-      });
-
-      if (idsToCheck.length > 0) {
-          useStore.getState().finalizeLayoutChange(idsToCheck);
-      }
-  };
-
     const handleGlobalDown = (e: React.MouseEvent) => {
     const isBlankTarget = isBlankCanvasTarget(e.target);
+
+      // 0. Handle Sticky Drag Commit (explicit placement mode)
+      if (e.button !== 2 && stickyDragId) {
+          commitStickyDragPlacement();
+          return;
+      }
 
       if (isDragInteractionLocked()) {
           return;
@@ -465,25 +527,6 @@ export const Canvas: React.FC = () => {
           panStart.current = { x: e.clientX, y: e.clientY };
           const vp = useStore.getState().viewport;
           panOffsetRef.current = { x: vp.x, y: vp.y };
-          return;
-      }
-
-      // 1. Handle Sticky Drag Drop
-      if (e.button !== 2 && stickyDragId) {
-          const state = useStore.getState();
-          const idsToCommit = (state.selectedIds.includes(stickyDragId) && state.selectedIds.length > 1)
-            ? state.selectedIds
-            : [stickyDragId];
-          idsToCommit.forEach((id) => {
-              const el = document.querySelector(`[data-id="${id}"]`) as HTMLElement | null;
-              if (!el) return;
-              const match = el.style.transform.match(/translate\(\s*([-\d.]+)px\s*,\s*([-\d.]+)px\s*\)/);
-              if (match) {
-                  state.moveNote(id, parseFloat(match[1]), parseFloat(match[2]));
-              }
-          });
-          applyBoundaryGuard(stickyDragId);
-          state.setStickyDrag(null);
           return;
       }
 
@@ -602,19 +645,29 @@ export const Canvas: React.FC = () => {
           useStore.getState().setEdgePush({ top: false, bottom: false, left: false, right: false });
           useStore.getState().setIsDragging(false);
           setEdgePushDragLeader(null);
+          suspendStickyDrag();
           if (selectionBoxRef.current) {
               selectionBoxRef.current.style.display = 'none';
           }
       };
 
+      const handleKeyDown = (event: KeyboardEvent) => {
+          if (event.key === 'Escape' && useStore.getState().stickyDrag.id) {
+              event.preventDefault();
+              cancelStickyDrag();
+          }
+      };
+
       window.addEventListener('mouseup', handleWindowUp);
       window.addEventListener('blur', handleWindowBlur);
+      window.addEventListener('keydown', handleKeyDown);
       
       return () => {
           window.removeEventListener('mouseup', handleWindowUp);
           window.removeEventListener('blur', handleWindowBlur);
+          window.removeEventListener('keydown', handleKeyDown);
       };
-  }, [handleGlobalUp, stopPanFlushLoop]);
+  }, [cancelStickyDrag, handleGlobalUp, stopPanFlushLoop, suspendStickyDrag]);
 
   if (!isLoaded) return null;
 
@@ -633,8 +686,7 @@ export const Canvas: React.FC = () => {
       onContextMenu={(e) => {
           e.preventDefault();
           if (stickyDragId) {
-              applyBoundaryGuard(stickyDragId);
-              useStore.getState().setStickyDrag(null);
+              return;
           } else {
               useStore.getState().setContextMenu({
                   isOpen: true,
@@ -716,7 +768,9 @@ export const Canvas: React.FC = () => {
             style={{ zIndex: Z_INDEX.STICKY_DRAG_MSG }}
         >
             <span className="bg-tertiary-bg/80 text-text-primary text-xs px-4 py-1.5 rounded-full shadow-lg backdrop-blur-md">
-                再次点击放置便签
+                {stickyDragStatus === 'suspended'
+                  ? '吸附移动已暂停，点击落位 / Esc 取消'
+                  : '再次点击放置便签，Esc 取消'}
             </span>
         </div>
       )}

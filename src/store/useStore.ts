@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { LayoutNote, Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult } from './types';
+import { LayoutNote, Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus } from './types';
 
 import { db } from './db';
 import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes } from './normalization';
@@ -45,6 +45,7 @@ interface State {
     id: string | null;
     offsetX: number;
     offsetY: number;
+    status: StickyDragStatus;
   };
 
   // Selection & UI State
@@ -104,7 +105,7 @@ interface State {
   changeColor: (id: string, color: string) => void;
   changeSelectedNotesColor: (color: string) => void;
   toggleCollapse: (id: string) => void;
-  setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number) => void;
+  setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number, status?: StickyDragStatus) => void;
   
   // New Actions for v1.1.1 & v1.1.2
   duplicateNote: (id: string) => void;
@@ -259,6 +260,7 @@ export const useStore = create<State>()(
         id: null,
         offsetX: 0,
         offsetY: 0,
+        status: 'active',
     },
 
     selectedIds: [],
@@ -421,7 +423,7 @@ export const useStore = create<State>()(
                 state.currentBoardId = boardId;
                 state.viewMode = 'BOARD'; // Auto-switch to board view
                 state.selectedIds = []; // Clear selection to prevent ghost edits
-                state.stickyDrag = { id: null, offsetX: 0, offsetY: 0 }; // Reset drag
+                state.stickyDrag = { id: null, offsetX: 0, offsetY: 0, status: 'active' }; // Reset drag
                 
                 // 3. Restore viewport from NEW board
                 const newBoard = state.boards.find(b => b.id === boardId);
@@ -961,9 +963,9 @@ export const useStore = create<State>()(
       get().saveToDisk();
     },
     
-    setStickyDrag: (id, offsetX = 0, offsetY = 0) => {
+    setStickyDrag: (id, offsetX = 0, offsetY = 0, status: StickyDragStatus = 'active') => {
         set((state) => {
-            state.stickyDrag = { id, offsetX, offsetY };
+            state.stickyDrag = { id, offsetX, offsetY, status };
         });
     },
 

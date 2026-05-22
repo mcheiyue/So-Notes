@@ -121,6 +121,8 @@ export interface InteractionState {
   };
 }
 
+export type StickyDragStatus = 'active' | 'suspended';
+
 export type ViewMode = 'BOARD' | 'TRASH';
 
 export interface ContextMenuState {
