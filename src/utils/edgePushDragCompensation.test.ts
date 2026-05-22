@@ -8,6 +8,7 @@ import {
   getEdgePushDragSessionPosition,
   getEdgePushDragTotalDelta,
   updateEdgePushPointerDelta,
+  updateEdgePushPointerFromClient,
   setLastDraggablePosition,
   getLastDraggablePosition,
   getEffectiveLeaderPosition,
@@ -67,6 +68,18 @@ describe('edgePushDragCompensation', () => {
     expect(getEdgePushDragTotalDelta()).toEqual({ x: 55, y: 10 });
     expect(getEffectiveLeaderPosition()).toEqual({ x: 155, y: 110 });
     expect(getEdgePushDragSessionPosition('follower')).toEqual({ x: 355, y: 130 });
+  });
+
+  it('DragSession 只信任 raw client 坐标，忽略可能被 worldLayer transform 污染的 DraggableCore data', () => {
+    beginEdgePushDragSession('leader', ['leader'], {
+      leader: { x: 100, y: 100 },
+    }, { x: 100, y: 200 });
+
+    updateEdgePushPointerFromClient(140, 200);
+    accumulateEdgePushDelta(5, 0);
+
+    expect(getEdgePushDragTotalDelta()).toEqual({ x: 45, y: 0 });
+    expect(getEffectiveLeaderPosition()).toEqual({ x: 145, y: 100 });
   });
 
   it('leader 未设置时累积增量仍可写入但不影响 DOM', () => {

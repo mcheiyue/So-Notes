@@ -6,6 +6,7 @@ type DragSession = {
   leaderId: string;
   noteIds: string[];
   basePositions: Record<string, Position>;
+  pointerStart: Position;
   pointerDelta: Position;
   edgePushDelta: Position;
 };
@@ -44,6 +45,7 @@ export function beginEdgePushDragSession(
   leaderId: string,
   noteIds: string[],
   basePositions: Record<string, Position>,
+  pointerStart: Position = { x: 0, y: 0 },
 ): void {
   activeLeaderId = leaderId;
   accumulatedDelta = { x: 0, y: 0 };
@@ -55,6 +57,7 @@ export function beginEdgePushDragSession(
     basePositions: Object.fromEntries(
       Object.entries(basePositions).map(([id, pos]) => [id, { ...pos }]),
     ),
+    pointerStart: { ...pointerStart },
     pointerDelta: { x: 0, y: 0 },
     edgePushDelta: { x: 0, y: 0 },
   };
@@ -113,6 +116,18 @@ export function updateEdgePushPointerDelta(deltaX: number, deltaY: number): void
   if (!activeSession) return;
   activeSession.pointerDelta.x += deltaX;
   activeSession.pointerDelta.y += deltaY;
+  const leaderPosition = getEdgePushDragSessionPosition(activeSession.leaderId);
+  if (leaderPosition) {
+    lastDraggablePos = { ...leaderPosition };
+  }
+}
+
+export function updateEdgePushPointerFromClient(clientX: number, clientY: number): void {
+  if (!activeSession) return;
+  activeSession.pointerDelta = {
+    x: clientX - activeSession.pointerStart.x,
+    y: clientY - activeSession.pointerStart.y,
+  };
   const leaderPosition = getEdgePushDragSessionPosition(activeSession.leaderId);
   if (leaderPosition) {
     lastDraggablePos = { ...leaderPosition };

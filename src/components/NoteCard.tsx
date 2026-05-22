@@ -1,5 +1,5 @@
 import React, { useRef, useState, useLayoutEffect, useEffect } from "react";
-import { DraggableCore, DraggableData, DraggableEvent } from "react-draggable";
+import { DraggableCore, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
 import { NOTE_COLORS, getNoteColor } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
@@ -13,7 +13,7 @@ import { getEdgeCheckRect, resolveDragStopWorldPosition } from "../utils/dragCoo
 import {
   beginEdgePushDragSession,
   setEdgePushDragLeader,
-  updateEdgePushPointerDelta,
+  updateEdgePushPointerFromClient,
   getEffectiveLeaderPosition,
   getEdgePushDragSessionNoteIds,
   getEdgePushDragSessionPosition,
@@ -25,6 +25,16 @@ interface NoteCardProps {
   isStatic?: boolean;
   scale?: number;
 }
+
+const getClientPoint = (event: DraggableEvent): { x: number; y: number } | null => {
+  if ('clientX' in event && 'clientY' in event) {
+    return { x: event.clientX, y: event.clientY };
+  }
+
+  const touchEvent = event as TouchEvent;
+  const touch = touchEvent.touches[0] ?? touchEvent.changedTouches[0];
+  return touch ? { x: touch.clientX, y: touch.clientY } : null;
+};
 
 export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = false, scale = 1 }) => {
   // Selectors
@@ -111,11 +121,12 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const disableHeaderTooltips = isStickyDragging || isDragActive;
   const disableCollapseTooltip = disableHeaderTooltips || isStatic;
 
-  const handleStart = () => {
+  const handleStart = (e: DraggableEvent) => {
       isDragging.current = true;
       setIsDragging(true);
       document.body.classList.add('is-dragging');
       shouldFinalizeOnMouseUpRef.current = false;
+      const clientPoint = getClientPoint(e) ?? { x: 0, y: 0 };
       const state = useStore.getState();
       const dragIds = state.selectedIds.includes(note.id) ? state.selectedIds : [note.id];
       const dragNotes = dragIds.flatMap((dragId) => {
@@ -125,7 +136,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       const basePositions = Object.fromEntries(
           dragNotes.map((dragNote) => [dragNote.id, { x: dragNote.x, y: dragNote.y }]),
       );
-      beginEdgePushDragSession(note.id, dragIds, basePositions);
+      beginEdgePushDragSession(note.id, dragIds, basePositions, clientPoint);
 
       if (dragNotes.length > 1) {
               let minX = Infinity, minY = Infinity;
@@ -158,16 +169,19 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       }
   };
 
-  const handleDrag = (_e: DraggableEvent, data: DraggableData) => {
+  const handleDrag = (e: DraggableEvent) => {
       if (!isDragging.current) isDragging.current = true;
       dragPosRef.current = true;
       if (!isDragActive) setIsDragActive(true);
 
-      updateEdgePushPointerDelta(data.deltaX, data.deltaY);
+      const clientPoint = getClientPoint(e);
+      if (clientPoint) {
+        updateEdgePushPointerFromClient(clientPoint.x, clientPoint.y);
+      }
       applyActiveDragSessionTransforms();
 
       // 旧版推动手感的关键约束：拖拽中只有 DragSession 这一套位置真相。
-      // DraggableCore 只提供 delta 输入；leader、followers、edge check 与 stop 结算都读同一有效位置。
+      // DraggableCore 只作为事件入口；pointerDelta 只来自原始 clientX/Y，避免 worldLayer transform 污染 data.deltaX/Y。
       const effectivePos = getEffectiveLeaderPosition();
       const viewport = useStore.getState().viewport;
       const edgeRect = getEdgeCheckRect(
@@ -182,12 +196,17 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
        checkEdge(edgeRect.x, edgeRect.y, edgeRect.width, edgeRect.height);
     };
   
-  const handleStop = () => {
+  const handleStop = (e: DraggableEvent) => {
     isDragging.current = false;
     dragPosRef.current = false;
     setIsDragActive(false);
     setIsDragging(false);
     document.body.classList.remove('is-dragging');
+
+    const clientPoint = getClientPoint(e);
+    if (clientPoint) {
+      updateEdgePushPointerFromClient(clientPoint.x, clientPoint.y);
+    }
     
     const sessionIds = getEdgePushDragSessionNoteIds();
     const sessionPositions = Object.fromEntries(
