@@ -248,6 +248,86 @@ describe('Canvas 空白命中判定', () => {
     expect(updatedSelectionBox?.style.height).toBe('60px');
   });
 
+  it('空白单击不触发框选命中，仅清空选择', async () => {
+    const clearSelection = vi.fn();
+    const setSelectedIds = vi.fn();
+    useStore.setState({
+      clearSelection,
+      setSelectedIds,
+      selectedIds: ['note-1'],
+    });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 260,
+        clientY: 260,
+      }));
+      canvasRoot?.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+        clientX: 261,
+        clientY: 261,
+      }));
+    });
+
+    expect(clearSelection).toHaveBeenCalledTimes(1);
+    expect(setSelectedIds).not.toHaveBeenCalled();
+  });
+
+  it('非零 shell 偏移下框选 mouseup 命中正确扣除画布偏移', async () => {
+    useStore.setState({
+      selectedIds: [],
+      layoutNotesById: createLayoutNotesById({
+        'note-target': { id: 'note-target', boardId: 'default', x: 500, y: 500, width: 260, height: 200, z: 1, deletedAt: null, title: 't', content: 'c', color: '#fff', collapsed: false, createdAt: 1, updatedAt: 1 },
+      }),
+      boardNoteIds: { 'default': ['note-target'] },
+    });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 50,
+      top: 80,
+      right: 1330,
+      bottom: 800,
+      width: 1280,
+      height: 720,
+      x: 50,
+      y: 80,
+      toJSON: () => ({}),
+    } as DOMRect));
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 100,
+        clientY: 130,
+      }));
+      canvasRoot?.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        buttons: 1,
+        clientX: 700,
+        clientY: 700,
+      }));
+      canvasRoot?.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+        clientX: 700,
+        clientY: 700,
+      }));
+    });
+
+    expect(useStore.getState().selectedIds).toContain('note-target');
+  });
+
   it('拖拽锁开启时忽略空白画布双击与清空选择', async () => {
     const addNote = vi.fn();
     const clearSelection = vi.fn();
@@ -397,7 +477,7 @@ describe('Canvas 空白命中判定', () => {
     expect(useStore.getState().viewport.y).toBe(35);
   });
 
-  it('边缘推动按当前视口推进画布并补偿选中便签位置', async () => {
+  it('边缘推动推进视口与选中便签世界坐标', async () => {
     useStore.setState({
       interaction: {
         ...useStore.getState().interaction,
@@ -421,6 +501,6 @@ describe('Canvas 空白命中判定', () => {
     expect(useStore.getState().viewport.x).toBe(45);
     expect(useStore.getState().viewport.y).toBe(60);
     expect(worldLayer?.style.transform).toBe('translate3d(-45px, -60px, 0)');
-    expect(noteEl?.style.transform).toBe('translate(125px, 140px)');
+    expect(useStore.getState().notesById['note-1']?.x).toBe(125);
   });
 });

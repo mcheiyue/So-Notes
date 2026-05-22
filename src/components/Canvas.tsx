@@ -5,7 +5,8 @@ import { cn } from "../utils/cn";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { diagnostics } from "../utils/diagnostics";
 import { useFPSMonitor } from "../utils/performance";
-import { getNoteElement } from "../utils/noteElementRegistry";
+
+
 
 const VIEWPORT_BUFFER = 500;
 const EMPTY_NOTE_IDS: string[] = [];
@@ -109,7 +110,6 @@ export const Canvas: React.FC = () => {
   
   // Edge Push Loop
   const edgePushFrameRef = useRef<number>(0);
-  const edgePushStartOffsetRef = useRef({ x: 0, y: 0 });
 
   const stopPanFlushLoop = useCallback(() => {
     if (panFlushFrameRef.current) {
@@ -217,7 +217,6 @@ export const Canvas: React.FC = () => {
 
     const viewport = useStore.getState().viewport;
     panOffsetRef.current = { x: viewport.x, y: viewport.y };
-    edgePushStartOffsetRef.current = { x: viewport.x, y: viewport.y };
 
     const pushLoop = () => {
         let dx = 0;
@@ -241,20 +240,7 @@ export const Canvas: React.FC = () => {
                 worldLayerRef.current.style.transform = `translate3d(${-panOffsetRef.current.x}px, ${-panOffsetRef.current.y}px, 0)`;
             }
 
-            const state = useStore.getState();
-            if (state.selectedIds.length > 0) {
-                const offsetDx = panOffsetRef.current.x - edgePushStartOffsetRef.current.x;
-                const offsetDy = panOffsetRef.current.y - edgePushStartOffsetRef.current.y;
-                state.selectedIds.forEach((id) => {
-                    const el = getNoteElement(id);
-                    if (!el) return;
-                    const note = state.notesById[id];
-                    if (!note) return;
-                    const nx = note.x + offsetDx;
-                    const ny = note.y + offsetDy;
-                    el.style.transform = `translate(${nx}px, ${ny}px)`;
-                });
-            }
+            useStore.getState().moveSelectedNotes(dx, dy);
         }
         edgePushFrameRef.current = requestAnimationFrame(pushLoop);
     };
@@ -496,19 +482,27 @@ export const Canvas: React.FC = () => {
           if (selectionBoxRef.current) {
               selectionBoxRef.current.style.display = 'none';
           }
-          
-          const startX = selectionStart.current.x;
-          const startY = selectionStart.current.y;
-          const endX = e.clientX;
-          const endY = e.clientY;
-          
+
+          const bounds = getCanvasBounds();
+          const startX = selectionStart.current.x - bounds.left;
+          const startY = selectionStart.current.y - bounds.top;
+          const endX = e.clientX - bounds.left;
+          const endY = e.clientY - bounds.top;
+
+          // 最小位移阈值：小于 3px 视为空白单击，不跑 AABB 命中
+          const dx = Math.abs(endX - startX);
+          const dy = Math.abs(endY - startY);
+          if (dx < 3 && dy < 3) {
+              return;
+          }
+
           const screenRect = {
               left: Math.min(startX, endX),
               top: Math.min(startY, endY),
               right: Math.max(startX, endX),
               bottom: Math.max(startY, endY)
           };
-          
+
           const vp = useStore.getState().viewport;
           const worldRect = {
               left: screenRect.left + vp.x,
