@@ -156,4 +156,99 @@ describe('MiniMap 看板隔离', () => {
     expect(mapContainer?.className).toContain('pointer-events-none');
   });
 
+  it('折叠便签在 MiniMap 上按折叠高度渲染，而不是沿用展开默认高度', async () => {
+    const normalized = normalizeNotes([
+      {
+        id: 'collapsed-note',
+        boardId: 'default',
+        x: 100,
+        y: 120,
+        title: '折叠',
+        content: 'a',
+        color: '#FFFFFF',
+        z: 1,
+        collapsed: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'expanded-note',
+        boardId: 'default',
+        x: 260,
+        y: 120,
+        title: '展开',
+        content: 'b',
+        color: '#FFFFFF',
+        z: 2,
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ]);
+
+    useStore.setState({
+      ...normalized,
+      layoutNotesById: createLayoutNotesById(normalized.notesById),
+      boardNoteIds: { default: ['collapsed-note', 'expanded-note'] },
+      currentBoardId: 'default',
+      viewport: { x: 0, y: 0, w: 1200, h: 800 },
+    });
+
+    await renderMiniMap();
+
+    const notes = Array.from(container.querySelectorAll('.minimap-note')) as HTMLDivElement[];
+    expect(notes).toHaveLength(2);
+
+    const collapsedHeight = Number.parseFloat(notes[0]?.style.height ?? '0');
+    const expandedHeight = Number.parseFloat(notes[1]?.style.height ?? '0');
+    expect(collapsedHeight).toBeGreaterThan(0);
+    expect(expandedHeight).toBeGreaterThan(collapsedHeight);
+  });
+
+  it('显式 height 的展开便签在 MiniMap 世界边界中按真实高度参与缩放', async () => {
+    const normalized = normalizeNotes([
+      {
+        id: 'default-height',
+        boardId: 'default',
+        x: 100,
+        y: 120,
+        title: '默认高度',
+        content: 'a',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'tall-height',
+        boardId: 'default',
+        x: 260,
+        y: 120,
+        title: '显式高度',
+        content: 'b',
+        color: '#FFFFFF',
+        z: 2,
+        height: 180,
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ]);
+
+    useStore.setState({
+      ...normalized,
+      layoutNotesById: createLayoutNotesById(normalized.notesById),
+      boardNoteIds: { default: ['default-height', 'tall-height'] },
+      currentBoardId: 'default',
+      viewport: { x: 0, y: 0, w: 1200, h: 800 },
+    });
+
+    await renderMiniMap();
+
+    const notes = Array.from(container.querySelectorAll('.minimap-note')) as HTMLDivElement[];
+    expect(notes).toHaveLength(2);
+
+    const defaultHeight = Number.parseFloat(notes[0]?.style.height ?? '0');
+    const tallHeight = Number.parseFloat(notes[1]?.style.height ?? '0');
+    expect(tallHeight).toBeGreaterThan(defaultHeight);
+  });
+
 });

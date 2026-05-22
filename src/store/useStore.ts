@@ -9,6 +9,7 @@ import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNote
 import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
 import { diagnostics } from '../utils/diagnostics';
+import { getNoteVisualHeight } from '../utils/noteVisualMetrics';
 
 interface ImportFromFileResult {
   status: 'cancelled' | 'success' | 'error';
@@ -802,7 +803,7 @@ export const useStore = create<State>()(
                 // Since we don't know actual DOM height here, we assume a standard height or 
                 // we could improve this by passing heights from UI.
                 // For now, fixed row step or safe estimate.
-                const estimatedHeight = note.collapsed ? 50 : 200; // Rough estimate
+                const estimatedHeight = getNoteVisualHeight(note, state.layoutNotesById[note.id]);
                 if (estimatedHeight > maxRowH) maxRowH = estimatedHeight;
             });
         });

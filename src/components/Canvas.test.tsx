@@ -338,6 +338,104 @@ describe('Canvas 空白命中判定', () => {
     expect(useStore.getState().selectedIds).toContain('note-target');
   });
 
+  it('折叠便签只按当前可视高度命中，不会命中展开后才会占据的下方区域', async () => {
+    const normalized = normalizeNotes([
+      createNote({ id: 'note-collapsed', x: 120, y: 140, collapsed: true }),
+    ]);
+    useStore.setState({
+      ...normalized,
+      layoutNotesById: createLayoutNotesById(normalized.notesById),
+      boardNoteIds: { 'default': ['note-collapsed'] },
+      selectedIds: [],
+      viewport: { x: 40, y: 60, w: 1280, h: 720 },
+    });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 0,
+      top: 0,
+      right: 1280,
+      bottom: 720,
+      width: 1280,
+      height: 720,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect));
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 100,
+        clientY: 120,
+      }));
+      canvasRoot?.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        buttons: 1,
+        clientX: 200,
+        clientY: 160,
+      }));
+      canvasRoot?.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+        clientX: 200,
+        clientY: 160,
+      }));
+    });
+
+    expect(useStore.getState().selectedIds).toEqual([]);
+  });
+
+  it('Shift 空框选保持旧选择，不会因为空结果覆盖已有选中项', async () => {
+    useStore.setState({
+      selectedIds: ['note-1'],
+    });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 0,
+      top: 0,
+      right: 1280,
+      bottom: 720,
+      width: 1280,
+      height: 720,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect));
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 800,
+        clientY: 500,
+        shiftKey: true,
+      }));
+      canvasRoot?.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        buttons: 1,
+        clientX: 860,
+        clientY: 560,
+        shiftKey: true,
+      }));
+      canvasRoot?.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+        clientX: 860,
+        clientY: 560,
+        shiftKey: true,
+      }));
+    });
+
+    expect(useStore.getState().selectedIds).toEqual(['note-1']);
+  });
+
   it('拖拽锁开启时忽略空白画布双击与清空选择', async () => {
     const addNote = vi.fn();
     const clearSelection = vi.fn();

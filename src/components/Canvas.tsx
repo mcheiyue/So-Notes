@@ -12,6 +12,7 @@ import {
   applyActiveDragSessionTransforms,
   setEdgePushDragLeader,
 } from "../utils/edgePushDragCompensation";
+import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetrics";
 
 
 
@@ -56,6 +57,7 @@ export const Canvas: React.FC = () => {
   const edgePush = useStore((s) => s.interaction.edgePush);
   const viewport = useStore((s) => s.viewport);
 
+  const notesById = useStore((s) => s.notesById);
   const layoutNotesById = useStore((s) => s.layoutNotesById);
   const currentBoardNoteIds = useStore((s) => s.boardNoteIds[s.currentBoardId] ?? EMPTY_NOTE_IDS);
 
@@ -90,8 +92,9 @@ export const Canvas: React.FC = () => {
       const ln = layoutNotesById[id];
       if (!ln) return false;
 
-      const noteWidth = ln.width ?? LAYOUT.NOTE_WIDTH;
-      const noteHeight = ln.height ?? LAYOUT.NOTE_MIN_HEIGHT;
+      const note = notesById[id];
+      const noteWidth = getNoteVisualWidth(note, ln);
+      const noteHeight = getNoteVisualHeight(note, ln);
       const noteRight = ln.x + noteWidth;
       const noteBottom = ln.y + noteHeight;
 
@@ -102,7 +105,7 @@ export const Canvas: React.FC = () => {
         ln.y <= viewportBottom
       );
     });
-  }, [currentBoardNoteIds, isDragging, layoutNotesById, stickyDragId, throttledViewportRect]);
+  }, [currentBoardNoteIds, isDragging, layoutNotesById, notesById, stickyDragId, throttledViewportRect]);
 
   const currentBoardVisibleCount = useMemo(
     () => currentBoardNoteIds.filter((id) => !layoutNotesById[id]?.deletedAt).length,
@@ -553,14 +556,16 @@ export const Canvas: React.FC = () => {
           
           const boardNoteIds = useStore.getState().boardNoteIds[useStore.getState().currentBoardId] ?? [];
           const layoutNotesById = useStore.getState().layoutNotesById;
+          const notesById = useStore.getState().notesById;
           const newSelectedIds: string[] = [];
           
           for (const id of boardNoteIds) {
               const ln = layoutNotesById[id];
               if (!ln || ln.deletedAt) continue;
               
-              const noteWidth = ln.width ?? LAYOUT.NOTE_WIDTH;
-              const noteHeight = ln.height ?? LAYOUT.NOTE_MIN_HEIGHT;
+              const note = notesById[id];
+              const noteWidth = getNoteVisualWidth(note, ln);
+              const noteHeight = getNoteVisualHeight(note, ln);
               
               const isIntersecting = !(
                   worldRect.right < ln.x || 

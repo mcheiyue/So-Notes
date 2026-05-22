@@ -22,6 +22,7 @@ import { db } from './db';
 import { openFile } from '../utils/fileSystem';
 import { invoke } from '@tauri-apps/api/core';
 import { createEmptyNormalizedNotesState, denormalizeNotes, normalizeNotes } from './normalization';
+import { LAYOUT } from '../constants/layout';
 
 const flushMicrotasks = async () => {
   await Promise.resolve();
@@ -165,6 +166,125 @@ describe('useStore 布局持久化契约', () => {
 
     vi.advanceTimersByTime(2000);
     expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('arrangeNotes 对折叠便签使用 36px 高度估算下一行起点', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '折叠',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          collapsed: true,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'note-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: '下一行',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 500, h: 720 },
+    });
+
+    useStore.getState().arrangeNotes(100, 120);
+
+    expect(getNote('note-1')?.y).toBe(120);
+    expect(getNote('note-2')?.y).toBe(120 + LAYOUT.NOTE_COLLAPSED_HEIGHT + 20);
+  });
+
+  it('arrangeNotes 对无显式高度的展开便签使用 100px 最小高度估算下一行起点', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '展开',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'note-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: '下一行',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 500, h: 720 },
+    });
+
+    useStore.getState().arrangeNotes(100, 120);
+
+    expect(getNote('note-1')?.y).toBe(120);
+    expect(getNote('note-2')?.y).toBe(120 + LAYOUT.NOTE_MIN_HEIGHT + 20);
+  });
+
+  it('arrangeNotes 对显式高度的展开便签使用真实高度估算下一行起点', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '高便签',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          height: 180,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'note-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: '下一行',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 500, h: 720 },
+    });
+
+    useStore.getState().arrangeNotes(100, 120);
+
+    expect(getNote('note-1')?.y).toBe(120);
+    expect(getNote('note-2')?.y).toBe(120 + 180 + 20);
   });
 });
 

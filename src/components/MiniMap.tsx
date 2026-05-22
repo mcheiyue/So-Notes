@@ -3,14 +3,21 @@ import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
 import { LAYOUT, Z_INDEX } from '../constants/layout';
-import { getNoteColor, LayoutNote } from '../store/types';
+import { getNoteColor, LayoutNote, Note } from '../store/types';
 import { useDarkMode } from '../hooks/useDarkMode';
+import { getNoteVisualHeight, getNoteVisualWidth } from '../utils/noteVisualMetrics';
 
 const EMPTY_NOTE_IDS: string[] = [];
 
+interface MiniMapRenderableNote {
+    layout: LayoutNote;
+    note: Note | undefined;
+}
+
 export const MiniMap: React.FC = () => {
-    const { layoutNotesById, currentBoardNoteIds, viewport, interaction, setViewportPosition } = useStore(
+    const { notesById, layoutNotesById, currentBoardNoteIds, viewport, interaction, setViewportPosition } = useStore(
         useShallow(state => ({
+            notesById: state.notesById,
             layoutNotesById: state.layoutNotesById,
             currentBoardNoteIds: state.boardNoteIds[state.currentBoardId] ?? EMPTY_NOTE_IDS,
             viewport: state.viewport,
@@ -23,12 +30,19 @@ export const MiniMap: React.FC = () => {
     const viewportRef = useRef<HTMLButtonElement>(null);
     const isDarkMode = useDarkMode();
 
-    const visibleNotes = useMemo(
+    const visibleNotes = useMemo<MiniMapRenderableNote[]>(
         () => currentBoardNoteIds.flatMap((id) => {
-            const ln = layoutNotesById[id];
-            return ln && !ln.deletedAt ? [ln] : [];
+            const layout = layoutNotesById[id];
+            if (!layout || layout.deletedAt) {
+                return [];
+            }
+
+            return [{
+                layout,
+                note: notesById[id],
+            }];
         }),
-        [currentBoardNoteIds, layoutNotesById]
+        [currentBoardNoteIds, layoutNotesById, notesById]
     );
     
     // Calculate World Bounds (Always anchored at 0,0)
@@ -42,12 +56,11 @@ export const MiniMap: React.FC = () => {
         maxContentY = Math.max(maxContentY, viewport.y + viewport.h);
 
         // Check Notes bounds
-        visibleNotes.forEach(note => {
-            // Use note.width if available, otherwise default
-            const w = note.width || LAYOUT.NOTE_WIDTH;
-            const h = note.height || LAYOUT.NOTE_MIN_HEIGHT;
-            maxContentX = Math.max(maxContentX, note.x + w);
-            maxContentY = Math.max(maxContentY, note.y + h);
+        visibleNotes.forEach(({ layout, note }) => {
+            const w = getNoteVisualWidth(note, layout);
+            const h = getNoteVisualHeight(note, layout);
+            maxContentX = Math.max(maxContentX, layout.x + w);
+            maxContentY = Math.max(maxContentY, layout.y + h);
         });
 
         // 2. Add some "breathing room" to the world size (padding)
@@ -318,12 +331,13 @@ export const MiniMap: React.FC = () => {
 };
 
 // Optimized Sub-component for Individual Note Item
-const MiniMapNoteItem = React.memo(({ note, scale, isDarkMode }: { note: LayoutNote, scale: number, isDarkMode: boolean }) => {
-    const w = note.width || LAYOUT.NOTE_WIDTH;
-    const h = note.height || LAYOUT.NOTE_MIN_HEIGHT;
+const MiniMapNoteItem = React.memo(({ entry, scale, isDarkMode }: { entry: MiniMapRenderableNote, scale: number, isDarkMode: boolean }) => {
+    const { layout, note } = entry;
+    const w = getNoteVisualWidth(note, layout);
+    const h = getNoteVisualHeight(note, layout);
     
-    const left = note.x * scale;
-    const top = note.y * scale;
+    const left = layout.x * scale;
+    const top = layout.y * scale;
     const width = w * scale;
     const height = h * scale;
 
@@ -345,22 +359,22 @@ const MiniMapNoteItem = React.memo(({ note, scale, isDarkMode }: { note: LayoutN
                 top, 
                 width: Math.max(3, width), // Min size for visibility
                 height: Math.max(3, height),
-                backgroundColor: getNoteColor(note.color, isDarkMode),
+                backgroundColor: getNoteColor(layout.color, isDarkMode),
             }}
         />
     );
 }, (prev, next) => {
     // Only re-render if note reference changes (Immer ensures this only happens for the moved note)
     // or if scale changes (global zoom/pan affecting world bounds)
-    return prev.note === next.note && prev.scale === next.scale && prev.isDarkMode === next.isDarkMode;
+    return prev.entry === next.entry && prev.scale === next.scale && prev.isDarkMode === next.isDarkMode;
 });
 
 // Optimized Container for Notes Layer
-const MiniMapNotes = React.memo(({ notes, scale, isDarkMode }: { notes: LayoutNote[], scale: number, isDarkMode: boolean }) => {
+const MiniMapNotes = React.memo(({ notes, scale, isDarkMode }: { notes: MiniMapRenderableNote[], scale: number, isDarkMode: boolean }) => {
     return (
         <>
-            {notes.map(note => (
-                <MiniMapNoteItem key={note.id} note={note} scale={scale} isDarkMode={isDarkMode} />
+            {notes.map(entry => (
+                <MiniMapNoteItem key={entry.layout.id} entry={entry} scale={scale} isDarkMode={isDarkMode} />
             ))}
         </>
     );

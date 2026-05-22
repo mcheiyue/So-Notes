@@ -98,6 +98,10 @@ export const diagnostics = new DiagnosticsCollector();
 // Use dynamic import to avoid circular dependency
 if (typeof window !== 'undefined') {
   import('../store/useStore').then(({ useStore }) => {
+    if (!useStore || typeof useStore.subscribe !== 'function') {
+      return;
+    }
+
     useStore.subscribe((state) => {
       const totalNotes = state.allNoteIds.length;
       const currentBoardNotes = (state.boardNoteIds[state.currentBoardId] ?? []).filter(
@@ -107,5 +111,7 @@ if (typeof window !== 'undefined') {
       const trashNotes = state.allNoteIds.filter((id) => state.notesById[id]?.deletedAt).length;
       diagnostics.updateNoteStats(totalNotes, currentBoardNotes, selectedNotes, trashNotes);
     });
+  }).catch(() => {
+    // Tests and transient module init may not expose a subscribable store yet.
   });
 }
