@@ -30,6 +30,7 @@ import { Note } from '../store/types';
 import { LAYOUT } from '../constants/layout';
 import {
   setEdgePushDragLeader,
+  getEdgePushDragLeader,
   getEdgePushAccumulatedDelta,
   setLastDraggablePosition,
 } from '../utils/edgePushDragCompensation';
@@ -633,5 +634,56 @@ describe('Canvas 空白命中判定', () => {
 
     const finalX = 150 + delta.x;
     expect(finalX).toBe(150 + LAYOUT.EDGE_PUSH_SPEED * 3);
+  });
+
+  it('edgePush 短暂归零时不会提前清空 leader drag session', async () => {
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        edgePush: { top: false, bottom: false, left: false, right: true },
+      },
+    });
+
+    setEdgePushDragLeader('note-1');
+    setLastDraggablePosition(200, 140);
+
+    await renderCanvas();
+
+    await act(async () => {
+      rafCallbacks[0]?.(0);
+    });
+
+    expect(getEdgePushDragLeader()).toBe('note-1');
+    expect(getEdgePushAccumulatedDelta().x).toBe(LAYOUT.EDGE_PUSH_SPEED);
+
+    await act(async () => {
+      useStore.getState().setEdgePush({ top: false, bottom: false, left: false, right: false });
+    });
+
+    expect(getEdgePushDragLeader()).toBe('note-1');
+    expect(getEdgePushAccumulatedDelta().x).toBe(LAYOUT.EDGE_PUSH_SPEED);
+  });
+
+  it('窗口失焦时对称清理 dragging、edgePush 与 leader session', async () => {
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        isDragging: true,
+        edgePush: { top: false, bottom: false, left: false, right: true },
+      },
+    });
+
+    setEdgePushDragLeader('note-1');
+    setLastDraggablePosition(200, 140);
+
+    await renderCanvas();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    expect(useStore.getState().interaction.isDragging).toBe(false);
+    expect(useStore.getState().interaction.edgePush.right).toBe(false);
+    expect(getEdgePushDragLeader()).toBeNull();
   });
 });

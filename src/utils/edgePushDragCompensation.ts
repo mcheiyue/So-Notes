@@ -4,6 +4,11 @@ let activeLeaderId: string | null = null;
 let accumulatedDelta = { x: 0, y: 0 };
 let lastDraggablePos = { x: 0, y: 0 };
 
+const getEffectivePosition = () => ({
+  x: lastDraggablePos.x + accumulatedDelta.x,
+  y: lastDraggablePos.y + accumulatedDelta.y,
+});
+
 export function setEdgePushDragLeader(leaderId: string | null): void {
   if (leaderId !== activeLeaderId) {
     accumulatedDelta = { x: 0, y: 0 };
@@ -33,11 +38,14 @@ export function getLastDraggablePosition(): Readonly<{ x: number; y: number }> {
   return lastDraggablePos;
 }
 
+export function getEffectiveLeaderPosition(): Readonly<{ x: number; y: number }> {
+  return getEffectivePosition();
+}
+
 export function applyLeaderDOMCompensation(): void {
   if (!activeLeaderId) return;
   const el = getNoteElement(activeLeaderId);
   if (!el) return;
-  const tx = lastDraggablePos.x + accumulatedDelta.x;
-  const ty = lastDraggablePos.y + accumulatedDelta.y;
+  const { x: tx, y: ty } = getEffectivePosition();
   el.style.transform = `translate(${tx}px, ${ty}px)`;
 }

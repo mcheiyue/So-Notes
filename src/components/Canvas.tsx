@@ -217,7 +217,6 @@ export const Canvas: React.FC = () => {
             cancelAnimationFrame(edgePushFrameRef.current);
             edgePushFrameRef.current = 0;
             useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
-            setEdgePushDragLeader(null);
         }
         return;
     }
@@ -568,6 +567,7 @@ export const Canvas: React.FC = () => {
           panDeltaRef.current = { dx: 0, dy: 0 };
           stopPanFlushLoop();
           useStore.getState().setEdgePush({ top: false, bottom: false, left: false, right: false });
+          useStore.getState().setIsDragging(false);
           setEdgePushDragLeader(null);
           if (selectionBoxRef.current) {
               selectionBoxRef.current.style.display = 'none';

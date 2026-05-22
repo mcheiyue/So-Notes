@@ -6,6 +6,7 @@ import {
   getEdgePushAccumulatedDelta,
   setLastDraggablePosition,
   getLastDraggablePosition,
+  getEffectiveLeaderPosition,
 } from './edgePushDragCompensation';
 
 describe('edgePushDragCompensation', () => {
@@ -40,6 +41,14 @@ describe('edgePushDragCompensation', () => {
     setLastDraggablePosition(55, 65);
 
     expect(getLastDraggablePosition()).toEqual({ x: 55, y: 65 });
+  });
+
+  it('getEffectiveLeaderPosition 返回 draggable 位置与累积推动增量的统一真值', () => {
+    setEdgePushDragLeader('note-1');
+    setLastDraggablePosition(150, 200);
+    accumulateEdgePushDelta(15, -5);
+
+    expect(getEffectiveLeaderPosition()).toEqual({ x: 165, y: 195 });
   });
 
   it('leader 未设置时累积增量仍可写入但不影响 DOM', () => {
