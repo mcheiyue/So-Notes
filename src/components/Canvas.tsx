@@ -7,8 +7,9 @@ import { diagnostics } from "../utils/diagnostics";
 import { useFPSMonitor } from "../utils/performance";
 import {
   getEdgePushDragLeader,
+  hasActiveEdgePushDragSession,
   accumulateEdgePushDelta,
-  applyLeaderDOMCompensation,
+  applyActiveDragSessionTransforms,
   setEdgePushDragLeader,
 } from "../utils/edgePushDragCompensation";
 
@@ -37,6 +38,11 @@ const getEventTargetElement = (target: EventTarget | null): Element | null => {
 const isBlankCanvasTarget = (target: EventTarget | null): boolean => {
   const targetElement = getEventTargetElement(target);
   return !targetElement || !targetElement.closest(CANVAS_NON_BLANK_SELECTOR);
+};
+
+const isDragInteractionLocked = (): boolean => {
+  const state = useStore.getState();
+  return state.interaction.isDragging || getEdgePushDragLeader() !== null;
 };
 
 export const Canvas: React.FC = () => {
@@ -247,11 +253,11 @@ export const Canvas: React.FC = () => {
             }
 
             const leaderId = getEdgePushDragLeader();
-            useStore.getState().moveSelectedNotes(dx, dy, leaderId ?? undefined);
-
-            if (leaderId) {
-                accumulateEdgePushDelta(dx, dy);
-                applyLeaderDOMCompensation();
+            if (leaderId && hasActiveEdgePushDragSession()) {
+                 accumulateEdgePushDelta(dx, dy);
+                applyActiveDragSessionTransforms();
+            } else {
+                useStore.getState().moveSelectedNotes(dx, dy, leaderId ?? undefined);
             }
         }
         edgePushFrameRef.current = requestAnimationFrame(pushLoop);
@@ -348,7 +354,7 @@ export const Canvas: React.FC = () => {
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
-    if (useStore.getState().interaction.isDragging) {
+    if (isDragInteractionLocked()) {
       return;
     }
 
@@ -426,7 +432,11 @@ export const Canvas: React.FC = () => {
   };
 
     const handleGlobalDown = (e: React.MouseEvent) => {
-      const isBlankTarget = isBlankCanvasTarget(e.target);
+    const isBlankTarget = isBlankCanvasTarget(e.target);
+
+      if (isDragInteractionLocked()) {
+          return;
+      }
 
       // 0. Start Panning (Space Mode + Left Click on Background)
       if (useStore.getState().interaction.isPanMode && e.button === 0 && isBlankTarget) {

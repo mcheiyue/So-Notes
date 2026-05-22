@@ -21,6 +21,7 @@ vi.mock('../utils/fileSystem', () => ({
 
 vi.mock('react-draggable', () => ({
   default: ({ children }: { children: React.ReactNode }) => children,
+  DraggableCore: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 import { Canvas } from './Canvas';
@@ -29,10 +30,11 @@ import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
 import { Note } from '../store/types';
 import { LAYOUT } from '../constants/layout';
 import {
+  beginEdgePushDragSession,
   setEdgePushDragLeader,
   getEdgePushDragLeader,
   getEdgePushAccumulatedDelta,
-  setLastDraggablePosition,
+  updateEdgePushPointerDelta,
 } from '../utils/edgePushDragCompensation';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
@@ -372,6 +374,43 @@ describe('Canvas 空白命中判定', () => {
     expect(clearSelection).not.toHaveBeenCalled();
   });
 
+  it('leader drag session 活跃时即使 isDragging 为 false 也忽略空白画布双击与清空选择', async () => {
+    const addNote = vi.fn();
+    const clearSelection = vi.fn();
+    useStore.setState({
+      addNote,
+      clearSelection,
+      interaction: {
+        isPanMode: false,
+        isDragging: false,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+    });
+    setEdgePushDragLeader('note-1');
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('dblclick', {
+        bubbles: true,
+        clientX: 180,
+        clientY: 220,
+      }));
+
+      canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 260,
+        clientY: 260,
+      }));
+    });
+
+    expect(addNote).not.toHaveBeenCalled();
+    expect(clearSelection).not.toHaveBeenCalled();
+  });
+
   it('深色模式下框选矩形使用更强的边框与填充可见性', async () => {
     useStore.setState({
       config: {
@@ -512,7 +551,7 @@ describe('Canvas 空白命中判定', () => {
     expect(useStore.getState().notesById['note-1']?.x).toBe(125);
   });
 
-  it('边缘推动拖拽 leader 时排除 leader，只移动 follower', async () => {
+  it('边缘推动拖拽会话中 viewport 与所有拖拽便签读取同一 DragSession 位置', async () => {
     const normalized = normalizeNotes([
       createNote({ id: 'leader', x: 100, y: 100 }),
       createNote({ id: 'follower', x: 300, y: 100, createdAt: 2 }),
@@ -528,19 +567,26 @@ describe('Canvas 空白命中判定', () => {
       },
     });
 
-    setEdgePushDragLeader('leader');
-    setLastDraggablePosition(150, 100);
+    beginEdgePushDragSession('leader', ['leader', 'follower'], {
+      leader: { x: 100, y: 100 },
+      follower: { x: 300, y: 100 },
+    });
+    updateEdgePushPointerDelta(50, 0);
 
     await renderCanvas();
 
     expect(rafMock).toHaveBeenCalledTimes(1);
+    const leaderEl = container.querySelector('[data-id="leader"]') as HTMLElement | null;
+    const followerEl = container.querySelector('[data-id="follower"]') as HTMLElement | null;
 
     await act(async () => {
       rafCallbacks[0]?.(0);
     });
 
     expect(useStore.getState().notesById['leader']?.x).toBe(100);
-    expect(useStore.getState().notesById['follower']?.x).toBe(305);
+    expect(useStore.getState().notesById['follower']?.x).toBe(300);
+    expect(leaderEl?.style.transform).toBe('translate(155px, 100px)');
+    expect(followerEl?.style.transform).toBe('translate(355px, 100px)');
   });
 
   it('边缘推动拖拽期间累积增量跨帧保持 edgePush true', async () => {
@@ -551,8 +597,9 @@ describe('Canvas 空白命中判定', () => {
       },
     });
 
-    setEdgePushDragLeader('note-1');
-    setLastDraggablePosition(120, 140);
+    beginEdgePushDragSession('note-1', ['note-1'], {
+      'note-1': { x: 120, y: 140 },
+    });
 
     await renderCanvas();
 
@@ -584,8 +631,10 @@ describe('Canvas 空白命中判定', () => {
       },
     });
 
-    setEdgePushDragLeader('note-1');
-    setLastDraggablePosition(200, 140);
+    beginEdgePushDragSession('note-1', ['note-1'], {
+      'note-1': { x: 120, y: 140 },
+    });
+    updateEdgePushPointerDelta(80, 0);
 
     await renderCanvas();
 
@@ -615,8 +664,10 @@ describe('Canvas 空白命中判定', () => {
       },
     });
 
-    setEdgePushDragLeader('leader');
-    setLastDraggablePosition(150, 100);
+    beginEdgePushDragSession('leader', ['leader'], {
+      leader: { x: 100, y: 100 },
+    });
+    updateEdgePushPointerDelta(50, 0);
 
     await renderCanvas();
 
@@ -644,8 +695,10 @@ describe('Canvas 空白命中判定', () => {
       },
     });
 
-    setEdgePushDragLeader('note-1');
-    setLastDraggablePosition(200, 140);
+    beginEdgePushDragSession('note-1', ['note-1'], {
+      'note-1': { x: 120, y: 140 },
+    });
+    updateEdgePushPointerDelta(80, 0);
 
     await renderCanvas();
 
@@ -673,8 +726,10 @@ describe('Canvas 空白命中判定', () => {
       },
     });
 
-    setEdgePushDragLeader('note-1');
-    setLastDraggablePosition(200, 140);
+    beginEdgePushDragSession('note-1', ['note-1'], {
+      'note-1': { x: 120, y: 140 },
+    });
+    updateEdgePushPointerDelta(80, 0);
 
     await renderCanvas();
 

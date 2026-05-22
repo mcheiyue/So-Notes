@@ -21,6 +21,7 @@ vi.mock('../utils/fileSystem', () => ({
 
 vi.mock('react-draggable', () => ({
   default: ({ children }: { children: React.ReactNode }) => children,
+  DraggableCore: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 import { NoteCard } from './NoteCard';

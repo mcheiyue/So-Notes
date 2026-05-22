@@ -1,5 +1,5 @@
 import React, { useRef, useState, useLayoutEffect, useEffect } from "react";
-import Draggable, { DraggableData, DraggableEvent } from "react-draggable";
+import { DraggableCore, DraggableData, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
 import { NOTE_COLORS, getNoteColor } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
@@ -8,9 +8,17 @@ import { useEdgePush } from "../hooks/useEdgePush";
 import { useDarkMode } from "../hooks/useDarkMode";
 import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
-import { registerNoteElement, unregisterNoteElement, getNoteElement } from "../utils/noteElementRegistry";
+import { registerNoteElement, unregisterNoteElement } from "../utils/noteElementRegistry";
 import { getEdgeCheckRect, resolveDragStopWorldPosition } from "../utils/dragCoordinates";
-import { setEdgePushDragLeader, setLastDraggablePosition, getEffectiveLeaderPosition, applyLeaderDOMCompensation } from "../utils/edgePushDragCompensation";
+import {
+  beginEdgePushDragSession,
+  setEdgePushDragLeader,
+  updateEdgePushPointerDelta,
+  getEffectiveLeaderPosition,
+  getEdgePushDragSessionNoteIds,
+  getEdgePushDragSessionPosition,
+  applyActiveDragSessionTransforms,
+} from "../utils/edgePushDragCompensation";
 
 interface NoteCardProps {
   id: string;
@@ -58,7 +66,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   // Drag State (Hybrid Control)
   const isDragging = useRef(false);
   const groupBoundsRef = useRef<{ minX: number, minY: number, width: number, height: number } | null>(null);
-  const groupDragOffsetRef = useRef({ dx: 0, dy: 0 });
   const shouldFinalizeOnMouseUpRef = useRef(false);
 
   // dragPos ref: tracks drag status without triggering React re-renders
@@ -109,24 +116,25 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       setIsDragging(true);
       document.body.classList.add('is-dragging');
       shouldFinalizeOnMouseUpRef.current = false;
-      groupDragOffsetRef.current = { dx: 0, dy: 0 };
-      setEdgePushDragLeader(note.id);
+      const state = useStore.getState();
+      const dragIds = state.selectedIds.includes(note.id) ? state.selectedIds : [note.id];
+      const dragNotes = dragIds.flatMap((dragId) => {
+          const dragNote = state.notesById[dragId];
+          return dragNote ? [dragNote] : [];
+      });
+      const basePositions = Object.fromEntries(
+          dragNotes.map((dragNote) => [dragNote.id, { x: dragNote.x, y: dragNote.y }]),
+      );
+      beginEdgePushDragSession(note.id, dragIds, basePositions);
 
-      if (isSelected && isGroupSelection) {
-          const state = useStore.getState();
-          const selectedNotes = state.selectedIds.flatMap((selectedId) => {
-              const selectedNote = state.notesById[selectedId];
-              return selectedNote ? [selectedNote] : [];
-          });
-          
-          if (selectedNotes.length > 0) {
+      if (dragNotes.length > 1) {
               let minX = Infinity, minY = Infinity;
               let maxX = -Infinity, maxY = -Infinity;
               
               const leaderX = note.x;
               const leaderY = note.y;
 
-              selectedNotes.forEach(n => {
+              dragNotes.forEach(n => {
                   const nW = n.width || LAYOUT.NOTE_WIDTH;
                   const nH = n.height || (n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT);
                   
@@ -145,7 +153,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                   width: maxX - minX,
                   height: maxY - minY
               };
-          }
       } else {
           groupBoundsRef.current = null;
       }
@@ -156,29 +163,14 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       dragPosRef.current = true;
       if (!isDragActive) setIsDragActive(true);
 
-      if (isSelected && isGroupSelection) {
-          groupDragOffsetRef.current.dx += data.deltaX;
-          groupDragOffsetRef.current.dy += data.deltaY;
+      updateEdgePushPointerDelta(data.deltaX, data.deltaY);
+      applyActiveDragSessionTransforms();
 
-          const state = useStore.getState();
-          const { dx, dy } = groupDragOffsetRef.current;
-          state.selectedIds.forEach((selectedId) => {
-              if (selectedId === note.id) return;
-              const el = getNoteElement(selectedId);
-              if (!el) return;
-              const selectedNote = state.notesById[selectedId];
-              if (!selectedNote) return;
-              el.style.transform = `translate(${selectedNote.x + dx}px, ${selectedNote.y + dy}px)`;
-          });
-      }
-
-       // 2. Edge Push Logic (Delegated to Hook)
-       // 在 edge push 期间，leader 的“真位置”必须统一来源于 drag session 的有效位置。
-       // 否则 checkEdge、DOM 补偿与 stop 结算会分别相信不同坐标，手感就会断流或回弹。
-       setLastDraggablePosition(data.x, data.y);
-       const effectivePos = getEffectiveLeaderPosition();
-       const viewport = useStore.getState().viewport;
-       const edgeRect = getEdgeCheckRect(
+      // 旧版推动手感的关键约束：拖拽中只有 DragSession 这一套位置真相。
+      // DraggableCore 只提供 delta 输入；leader、followers、edge check 与 stop 结算都读同一有效位置。
+      const effectivePos = getEffectiveLeaderPosition();
+      const viewport = useStore.getState().viewport;
+      const edgeRect = getEdgeCheckRect(
             effectivePos.x,
             effectivePos.y,
             viewport,
@@ -188,10 +180,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         );
 
        checkEdge(edgeRect.x, edgeRect.y, edgeRect.width, edgeRect.height);
-
-        if (effectivePos.x !== data.x || effectivePos.y !== data.y) {
-            applyLeaderDOMCompensation();
-        }
     };
   
   const handleStop = () => {
@@ -201,13 +189,18 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     setIsDragging(false);
     document.body.classList.remove('is-dragging');
     
+    const sessionIds = getEdgePushDragSessionNoteIds();
+    const sessionPositions = Object.fromEntries(
+      sessionIds.flatMap((sessionId) => {
+        const sessionPosition = getEdgePushDragSessionPosition(sessionId);
+        return sessionPosition ? [[sessionId, sessionPosition]] : [];
+      }),
+    );
     const effectivePos = getEffectiveLeaderPosition();
     clearEdge();
     setEdgePushDragLeader(null);
 
     const viewport = useStore.getState().viewport;
-    const winW = viewport.w;
-    const winH = viewport.h;
     const noteWidth = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
     const noteHeight = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
     const MARGIN = 10;
@@ -222,54 +215,38 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       MARGIN,
     );
 
+    const dragIds = sessionIds.length > 0 ? sessionIds : [note.id];
+
     // P1: 批量更新所有拖拽涉及的便签位置（单次 set）
     const timestamp = Date.now();
     useStore.setState((state) => {
-      const leaderNote = state.notesById[note.id];
-      if (leaderNote) {
-        leaderNote.x = finalPosition.x;
-        leaderNote.y = finalPosition.y;
-        leaderNote.updatedAt = timestamp;
-        state.layoutNotesById[note.id] = { id: note.id, x: finalPosition.x, y: finalPosition.y, boardId: leaderNote.boardId, deletedAt: leaderNote.deletedAt ?? null, color: leaderNote.color, width: leaderNote.width, height: leaderNote.height };
-      }
+      dragIds.forEach((id) => {
+        const n = state.notesById[id];
+        if (!n) return;
 
-      if (isSelected && isGroupSelection) {
-        const { dx, dy } = groupDragOffsetRef.current;
-        if (dx !== 0 || dy !== 0) {
-          state.selectedIds.forEach(id => {
-            if (id === note.id) return;
-            const n = state.notesById[id];
-            if (!n) return;
+        const rawPosition = id === note.id ? finalPosition : sessionPositions[id];
+        if (!rawPosition) return;
 
-            let nWorldX = n.x + dx;
-            let nWorldY = n.y + dy;
+        const resolvedPosition = id === note.id
+          ? finalPosition
+          : resolveDragStopWorldPosition(
+              rawPosition.x,
+              rawPosition.y,
+              viewport,
+              n.width || LAYOUT.NOTE_WIDTH,
+              n.height || (n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT),
+              isPanMode,
+              MARGIN,
+            );
 
-            if (nWorldX < 0) nWorldX = 0;
-            if (nWorldY < 0) nWorldY = 0;
-
-            if (!isPanMode) {
-              const maxWorldX = viewport.x + winW - (n.width || LAYOUT.NOTE_WIDTH) - MARGIN;
-              if (nWorldX > maxWorldX) nWorldX = maxWorldX;
-              if (n.height) {
-                const maxWorldY = viewport.y + winH - n.height - MARGIN;
-                if (nWorldY > maxWorldY) nWorldY = maxWorldY;
-              }
-              if (nWorldX < viewport.x) nWorldX = viewport.x;
-              if (nWorldY < viewport.y) nWorldY = viewport.y;
-            }
-
-            n.x = nWorldX;
-            n.y = nWorldY;
-            n.updatedAt = timestamp;
-            state.layoutNotesById[id] = { id: n.id, x: n.x, y: n.y, boardId: n.boardId, deletedAt: n.deletedAt ?? null, color: n.color, width: n.width, height: n.height };
-          });
-        }
-      }
+        n.x = resolvedPosition.x;
+        n.y = resolvedPosition.y;
+        n.updatedAt = timestamp;
+        state.layoutNotesById[id] = { id: n.id, x: n.x, y: n.y, boardId: n.boardId, deletedAt: n.deletedAt ?? null, color: n.color, width: n.width, height: n.height };
+      });
     });
 
-    const affectedIds = (isSelected && isGroupSelection)
-      ? [...useStore.getState().selectedIds]
-      : [note.id];
+    const affectedIds = dragIds;
     finalizeLayoutChange(affectedIds);
   };
 
@@ -355,11 +332,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   };
 
   return (
-      <Draggable
+      <DraggableCore
         nodeRef={nodeRef}
         handle=".drag-handle"
         cancel={'.note-action, input, textarea, [data-note-no-drag="true"]'}
-        position={{ x: worldX, y: worldY }}
         scale={scale}
         onStart={handleStart}
         onDrag={handleDrag}
@@ -393,6 +369,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             minHeight: note.collapsed ? undefined : LAYOUT.NOTE_MIN_HEIGHT,
             backgroundColor: getNoteColor(note.color, isDarkMode),
             zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
+            transform: isStatic ? undefined : `translate(${worldX}px, ${worldY}px)`,
         }}
         onMouseDownCapture={handleMouseDown}
         onMouseUpCapture={handleMouseUpCapture}
@@ -581,7 +558,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             </div>
         )}
       </article>
-    </Draggable>
+    </DraggableCore>
   );
 });
 

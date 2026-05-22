@@ -63,6 +63,8 @@ describe('useEdgePush', () => {
   });
 
   it('首次靠边需要经过 arming 延迟后才进入 edge push', async () => {
+    expect(EDGE_PUSH_ACTIVATION_DELAY).toBe(1000);
+
     await act(async () => {
       harnessApi?.checkEdge(1005, 100, 260, 120);
     });

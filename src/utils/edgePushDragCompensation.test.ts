@@ -1,9 +1,13 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import {
+  beginEdgePushDragSession,
   setEdgePushDragLeader,
   getEdgePushDragLeader,
   accumulateEdgePushDelta,
   getEdgePushAccumulatedDelta,
+  getEdgePushDragSessionPosition,
+  getEdgePushDragTotalDelta,
+  updateEdgePushPointerDelta,
   setLastDraggablePosition,
   getLastDraggablePosition,
   getEffectiveLeaderPosition,
@@ -49,6 +53,20 @@ describe('edgePushDragCompensation', () => {
     accumulateEdgePushDelta(15, -5);
 
     expect(getEffectiveLeaderPosition()).toEqual({ x: 165, y: 195 });
+  });
+
+  it('DragSession 用 pointerDelta + edgePushDelta 推导所有便签的有效位置', () => {
+    beginEdgePushDragSession('leader', ['leader', 'follower'], {
+      leader: { x: 100, y: 100 },
+      follower: { x: 300, y: 120 },
+    });
+
+    updateEdgePushPointerDelta(40, 10);
+    accumulateEdgePushDelta(15, 0);
+
+    expect(getEdgePushDragTotalDelta()).toEqual({ x: 55, y: 10 });
+    expect(getEffectiveLeaderPosition()).toEqual({ x: 155, y: 110 });
+    expect(getEdgePushDragSessionPosition('follower')).toEqual({ x: 355, y: 130 });
   });
 
   it('leader 未设置时累积增量仍可写入但不影响 DOM', () => {
