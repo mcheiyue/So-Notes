@@ -342,6 +342,59 @@ describe('Canvas 空白命中判定', () => {
     expect(cancelRafMock).toHaveBeenCalledWith(1);
   });
 
+  it('Space 背景拖拽遵循抓手方向，向右下拖动时视口向左上移动', async () => {
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        isPanMode: true,
+      },
+    });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    const noteEl = container.querySelector('[data-id="note-1"]') as HTMLElement | null;
+    const worldLayer = noteEl?.parentElement as HTMLElement | null;
+    expect(canvasRoot).not.toBeNull();
+    expect(worldLayer).not.toBeNull();
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 220,
+        clientY: 240,
+      }));
+
+      canvasRoot?.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        buttons: 1,
+        clientX: 250,
+        clientY: 265,
+      }));
+    });
+
+    expect(rafMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rafCallbacks[0]?.(0);
+    });
+
+    expect(worldLayer?.style.transform).toBe('translate3d(-10px, -35px, 0)');
+
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+        clientX: 250,
+        clientY: 265,
+      }));
+    });
+
+    expect(useStore.getState().viewport.x).toBe(10);
+    expect(useStore.getState().viewport.y).toBe(35);
+  });
+
   it('边缘推动按当前视口推进画布并补偿选中便签位置', async () => {
     useStore.setState({
       interaction: {

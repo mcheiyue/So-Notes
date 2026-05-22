@@ -131,8 +131,8 @@ export const Canvas: React.FC = () => {
         return;
       }
 
-      panOffsetRef.current.x -= dx;
-      panOffsetRef.current.y -= dy;
+      panOffsetRef.current.x += dx;
+      panOffsetRef.current.y += dy;
 
       if (panOffsetRef.current.x < 0) panOffsetRef.current.x = 0;
       if (panOffsetRef.current.y < 0) panOffsetRef.current.y = 0;
