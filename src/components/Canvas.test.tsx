@@ -524,6 +524,30 @@ describe('Canvas 空白命中判定', () => {
     expect(useStore.getState().viewport.y).toBe(35);
   });
 
+  it('active DragSession 便签即使旧布局位置被虚拟化裁剪也会保持渲染', async () => {
+    useStore.setState({
+      viewport: { x: 2000, y: 60, w: 1280, h: 720 },
+    });
+
+    beginEdgePushDragSession('note-1', ['note-1'], {
+      'note-1': { x: 120, y: 140 },
+    });
+
+    await renderCanvas();
+
+    expect(container.querySelector('[data-id="note-1"]')).not.toBeNull();
+  });
+
+  it('没有 active DragSession 时视口外旧布局便签仍会被虚拟化裁剪', async () => {
+    useStore.setState({
+      viewport: { x: 2000, y: 60, w: 1280, h: 720 },
+    });
+
+    await renderCanvas();
+
+    expect(container.querySelector('[data-id="note-1"]')).toBeNull();
+  });
+
   it('边缘推动推进视口与选中便签世界坐标', async () => {
     useStore.setState({
       interaction: {

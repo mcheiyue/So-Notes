@@ -7,6 +7,7 @@ import { diagnostics } from "../utils/diagnostics";
 import { useFPSMonitor } from "../utils/performance";
 import {
   getEdgePushDragLeader,
+  getEdgePushDragSessionNoteIds,
   hasActiveEdgePushDragSession,
   accumulateEdgePushDelta,
   applyActiveDragSessionTransforms,
@@ -74,7 +75,7 @@ export const Canvas: React.FC = () => {
   ]);
 
   const visibleNoteIds = useMemo(() => {
-    return currentBoardNoteIds.filter((id) => {
+    const viewportVisibleIds = currentBoardNoteIds.filter((id) => {
       const ln = layoutNotesById[id];
       if (!ln || ln.deletedAt) return false;
       return (
@@ -84,6 +85,15 @@ export const Canvas: React.FC = () => {
         ln.y <= throttledViewportRect.y + throttledViewportRect.h
       );
     });
+
+    // DragSession 中的真实位置由 DOM/会话状态维护，layoutNotesById 会在松手时才落盘。
+    // 边缘推动期间 viewport 可能把旧 layout 位置推出 buffer；这里强制保留 active drag 便签，避免拖拽中被虚拟化卸载。
+    const activeDragIds = getEdgePushDragSessionNoteIds().filter((id) => {
+      const ln = layoutNotesById[id];
+      return currentBoardNoteIds.includes(id) && !!ln && !ln.deletedAt;
+    });
+
+    return [...new Set([...viewportVisibleIds, ...activeDragIds])];
   }, [currentBoardNoteIds, layoutNotesById, throttledViewportRect]);
 
   const currentBoardVisibleCount = useMemo(
