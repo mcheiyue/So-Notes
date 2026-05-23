@@ -1,7 +1,7 @@
 import React, { useRef, useState, useLayoutEffect, useEffect } from "react";
 import { DraggableCore, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
-import { NOTE_COLORS, getNoteColor } from "../store/types";
+import { NOTE_COLORS, getNoteColor, getNoteDarkSpectrum } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { useStore } from "../store/useStore";
 import { useEdgePush } from "../hooks/useEdgePush";
@@ -36,36 +36,141 @@ const getClientPoint = (event: DraggableEvent): { x: number; y: number } | null 
   return touch ? { x: touch.clientX, y: touch.clientY } : null;
 };
 
-function buildAcrylicShadow(
+function hexToRgbChannels(hex: string): { red: number; green: number; blue: number } {
+  const normalized = hex.replace('#', '');
+  const expanded = normalized.length === 3
+    ? normalized
+        .split('')
+        .map((channel) => `${channel}${channel}`)
+        .join('')
+    : normalized;
+
+  if (expanded.length !== 6) {
+    return { red: 59, green: 130, blue: 246 };
+  }
+
+  const red = Number.parseInt(expanded.slice(0, 2), 16);
+  const green = Number.parseInt(expanded.slice(2, 4), 16);
+  const blue = Number.parseInt(expanded.slice(4, 6), 16);
+
+  if (Number.isNaN(red) || Number.isNaN(green) || Number.isNaN(blue)) {
+    return { red: 59, green: 130, blue: 246 };
+  }
+
+  return { red, green, blue };
+}
+
+function toRgba(hex: string, alpha: number): string {
+  const { red, green, blue } = hexToRgbChannels(hex);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function buildNoteSurfaceBackground(
   isDark: boolean,
+  accentHex: string,
+  isEmphasized: boolean,
+): string {
+  if (!isDark) {
+    return 'linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 50%)';
+  }
+
+  const radialLead = isEmphasized ? 0.28 : 0.22;
+  const radialMid = isEmphasized ? 0.1 : 0.075;
+
+  return [
+    `radial-gradient(138% 112% at 15% 0%, ${toRgba(accentHex, radialLead)} 0%, ${toRgba(accentHex, radialMid)} 36%, ${toRgba(accentHex, 0.018)} 62%, transparent 82%)`,
+    'linear-gradient(155deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.034) 20%, transparent 54%)',
+    'linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(0,0,0,0.045) 76%, rgba(0,0,0,0.15) 100%)',
+  ].join(', ');
+}
+
+function getDarkBorderColor(
+  accentHex: string,
+  fallbackBorder: string,
   isActive: boolean,
   isDragging: boolean,
   isSelected: boolean,
   isGroupSelection: boolean,
 ): string {
-  const inset = isDark
-    ? (isActive ? 'inset 0 1px 1px rgba(255,255,255,0.12)' : 'inset 0 1px 1px rgba(255,255,255,0.08)')
-    : (isActive ? 'inset 0 1px 1px rgba(255,255,255,0.4)' : 'inset 0 1px 1px rgba(255,255,255,0.3)');
-
-  const outer = isDragging
-    ? (isDark ? '0 12px 24px rgba(0,0,0,0.22)' : '0 12px 24px rgba(0,0,0,0.08)')
-    : isActive
-      ? (isDark ? '0 4px 16px rgba(0,0,0,0.22)' : '0 4px 14px rgba(0,0,0,0.08)')
-      : (isDark ? '0 2px 8px rgba(0,0,0,0.18)' : '0 2px 8px rgba(0,0,0,0.05)');
-
-  let shadow = `${inset}, ${outer}`;
-
-  if (isSelected && !isDragging) {
-    const ringColor = isGroupSelection
-      ? (isDark ? 'rgba(191,219,254,0.6)' : 'rgba(59,130,246,0.55)')
-      : (isDark ? 'rgba(191,219,254,0.45)' : 'rgba(59,130,246,0.3)');
-    const glowColor = isGroupSelection
-      ? (isDark ? 'rgba(191,219,254,0.18)' : 'rgba(59,130,246,0.12)')
-      : (isDark ? 'rgba(191,219,254,0.14)' : 'rgba(59,130,246,0.08)');
-    shadow += `, 0 0 0 2px ${ringColor}, 0 0 0 1px ${glowColor}`;
+  if (isDragging) {
+    return toRgba(accentHex, 0.64);
   }
 
-  return shadow;
+  if (isSelected) {
+    return toRgba(accentHex, isGroupSelection ? 0.58 : 0.48);
+  }
+
+  if (isActive) {
+    return toRgba(accentHex, 0.4);
+  }
+
+  return fallbackBorder;
+}
+
+function buildNoteMaterialShadow(
+  isDark: boolean,
+  accentHex: string,
+  isActive: boolean,
+  isDragging: boolean,
+  isSelected: boolean,
+  isGroupSelection: boolean,
+): string {
+  if (!isDark) {
+    const inset = isActive
+      ? 'inset 0 1px 1px rgba(255,255,255,0.4)'
+      : 'inset 0 1px 1px rgba(255,255,255,0.3)';
+    const outer = isDragging
+      ? '0 12px 24px rgba(0,0,0,0.08)'
+      : isActive
+        ? '0 4px 14px rgba(0,0,0,0.08)'
+        : '0 2px 8px rgba(0,0,0,0.05)';
+
+    let shadow = `${inset}, ${outer}`;
+
+    if (isSelected && !isDragging) {
+      const ringColor = isGroupSelection ? 'rgba(59,130,246,0.55)' : 'rgba(59,130,246,0.3)';
+      const glowColor = isGroupSelection ? 'rgba(59,130,246,0.12)' : 'rgba(59,130,246,0.08)';
+      shadow += `, 0 0 0 2px ${ringColor}, 0 0 0 1px ${glowColor}`;
+    }
+
+    return shadow;
+  }
+
+  const outer = isDragging
+    ? '0 14px 30px -14px rgba(0,0,0,0.82)'
+    : isActive || isSelected
+      ? '0 10px 24px -12px rgba(0,0,0,0.78)'
+      : '0 8px 20px -12px rgba(0,0,0,0.72)';
+
+  const accentEdgeAlpha = isDragging
+    ? 0.18
+    : isSelected
+      ? (isGroupSelection ? 0.2 : 0.14)
+      : isActive
+        ? 0.1
+        : 0.035;
+
+  const accentGlowAlpha = isDragging
+    ? 0.28
+    : isSelected
+      ? (isGroupSelection ? 0.36 : 0.28)
+      : isActive
+        ? 0.22
+        : 0;
+
+  const layers = [
+    `inset 0 1px 0 ${isActive || isSelected ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.14)'}`,
+    'inset 1px 0 0 rgba(255,255,255,0.045)',
+    'inset 0 -1px 0 rgba(0,0,0,0.3)',
+    outer,
+    `0 0 0 1px ${toRgba(accentHex, accentEdgeAlpha)}`,
+  ];
+
+  if (accentGlowAlpha > 0) {
+    layers.push(`0 0 24px -10px ${toRgba(accentHex, accentGlowAlpha)}`);
+  }
+
+  return layers.join(', ');
 }
 
 export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = false, scale = 1 }) => {
@@ -142,6 +247,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
   const worldX = note ? note.x : 0;
   const worldY = note ? note.y : 0;
+  const darkSpectrum = getNoteDarkSpectrum(note?.color ?? '#FFFFFF');
 
   // Auto-resize textarea
   useLayoutEffect(() => {
@@ -163,6 +269,16 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const shouldExpandContent = isEditing || isSelected;
   const disableHeaderTooltips = isStickyDragging || isDragActive;
   const disableCollapseTooltip = disableHeaderTooltips || isStatic;
+  const isHoverActive = isHovered && !isDragActive && !isPanMode && !isStickyDragging;
+  const isMaterialAccentActive = isHoverActive || isDragActive || isStickyDragging || isSelected;
+  const darkBorderColor = getDarkBorderColor(
+    darkSpectrum.accent,
+    darkSpectrum.border,
+    isHoverActive,
+    isDragActive || isStickyDragging,
+    isSelected,
+    isGroupSelection,
+  );
 
   const handleStart = (e: DraggableEvent) => {
       isDragging.current = true;
@@ -412,38 +528,42 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
          ref={nodeRef}
           data-id={note.id}
           data-canvas-hit="blocked"
-          className={cn(
-          "note-card absolute flex flex-col",
-          note.collapsed ? "overflow-hidden" : "h-auto",
-          "rounded-xl transition-[box-shadow,border-color] duration-200 ease-out",
-          "border border-border-subtle dark:border-white/10",
-          "group",
-          isStickyDragging && "scale-[1.02] cursor-move",
-          isSelected && !isStickyDragging && (
-            isGroupSelection
-              ? "border-blue-500/60 dark:border-blue-300/55"
-              : "border-blue-500/40 dark:border-blue-300/45"
-          ),
-          isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto",
-          isPanMode && "pointer-events-none"
+           className={cn(
+           "note-card absolute flex flex-col",
+           note.collapsed ? "overflow-hidden" : "h-auto",
+           "rounded-xl transition-[box-shadow,border-color,background-color] duration-200 ease-out",
+           "border border-border-subtle",
+           "group",
+           isStickyDragging && "scale-[1.02] cursor-move",
+           isSelected && !isStickyDragging && !isDarkMode && (
+             isGroupSelection
+               ? "border-blue-500/60"
+               : "border-blue-500/40"
+           ),
+           isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto",
+           isPanMode && "pointer-events-none"
         )}
         style={{ 
-            width: LAYOUT.NOTE_WIDTH,
-            height: note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : 'auto',
-            minHeight: note.collapsed ? undefined : LAYOUT.NOTE_MIN_HEIGHT,
-            backgroundColor: getNoteColor(note.color, isDarkMode),
-            zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
-            transform: isStatic ? undefined : `translate(${worldX}px, ${worldY}px)`,
-            backgroundImage: isDarkMode
-              ? 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 60%)'
-              : 'linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 50%)',
-            boxShadow: buildAcrylicShadow(
-              isDarkMode,
-              isHovered && !isDragActive && !isPanMode && !isStickyDragging,
-              isStickyDragging,
-              isSelected,
-              isGroupSelection,
-            ),
+             width: LAYOUT.NOTE_WIDTH,
+             height: note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : 'auto',
+             minHeight: note.collapsed ? undefined : LAYOUT.NOTE_MIN_HEIGHT,
+             backgroundColor: getNoteColor(note.color, isDarkMode),
+             borderColor: isDarkMode ? darkBorderColor : undefined,
+             zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
+             transform: isStatic ? undefined : `translate(${worldX}px, ${worldY}px)`,
+             backgroundImage: buildNoteSurfaceBackground(
+               isDarkMode,
+               darkSpectrum.accent,
+               isMaterialAccentActive,
+             ),
+             boxShadow: buildNoteMaterialShadow(
+               isDarkMode,
+               darkSpectrum.accent,
+               isHoverActive,
+               isDragActive || isStickyDragging,
+               isSelected,
+               isGroupSelection,
+             ),
         }}
         onMouseDownCapture={handleMouseDown}
         onMouseUpCapture={handleMouseUpCapture}

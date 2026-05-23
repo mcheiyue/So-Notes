@@ -1,5 +1,11 @@
 export type NoteColor = string;
 
+export interface DarkSpectrum {
+  bg: string;
+  border: string;
+  accent: string;
+}
+
 // Windows 11 Inspired Solid Pastels
 // Opaque colors for better readability and "Solid" feel
 export const NOTE_COLORS: NoteColor[] = [
@@ -18,43 +24,48 @@ export const NOTE_COLORS: NoteColor[] = [
   "#ffe4e6", // Rose-100
 ];
 
-// NOTE_COLOR_MAP_DARK_MODE: 深色模式下的便签颜色映射 (亮色 -> 深色半透明底色)
-// 采用较低 alpha（≈0.75–0.76）营造轻盈亚克力质感，避免实心色块的沉重死板。
-// 配合仿玻璃方案，不依赖 backdrop-blur 采样相邻内容。
-export const NOTE_COLOR_MAP_DARK_MODE: Record<NoteColor, string> = {
-  "#FFFFFF": "rgba(71, 85, 105, 0.75)",   // White -> Slate-tinted neutral
-  "#fef9c3": "rgba(161, 98, 7, 0.76)",    // Yellow -> Dark amber
-  "#dcfce7": "rgba(21, 128, 61, 0.75)",   // Green -> Deep green
-  "#ccfbf1": "rgba(15, 118, 110, 0.75)",  // Teal -> Deep teal
-  "#dbeafe": "rgba(29, 78, 216, 0.76)",   // Blue -> Deep blue
-  "#f3e8ff": "rgba(126, 34, 206, 0.76)",  // Purple -> Deep purple
-  "#fce7f3": "rgba(190, 24, 93, 0.75)",   // Pink -> Deep pink
-  "#ffedd5": "rgba(194, 65, 12, 0.76)",   // Orange -> Deep orange
-  "#fee2e2": "rgba(185, 28, 28, 0.75)",   // Red -> Deep red
-  "#f1f5f9": "rgba(71, 85, 105, 0.76)",   // Slate -> Deep slate
-  "#ecfccb": "rgba(77, 124, 15, 0.75)",   // Lime -> Deep lime
-  "#cffafe": "rgba(14, 116, 144, 0.75)",  // Cyan -> Deep cyan
-  "#ffe4e6": "rgba(190, 18, 60, 0.75)",   // Rose -> Deep rose
+// NOTE_COLORS 继续作为持久化层的浅色单一事实来源。
+// 深色模式渲染时，再从这里派生出无 backdrop 的 tinted acrylic 光谱参数。
+export const DEFAULT_NOTE_DARK_SPECTRUM: DarkSpectrum = {
+  bg: "#131e31",
+  border: "#223452",
+  accent: "#3b82f6",
 };
 
-// 根据当前主题获取便签颜色
-export function getNoteColor(color: NoteColor, isDarkMode: boolean): string {
-  if (!isDarkMode) return color;
+export const NOTE_COLOR_MAP_DARK_MODE: Record<NoteColor, DarkSpectrum> = {
+  "#FFFFFF": { bg: "#131e31", border: "#223452", accent: "#3b82f6" },
+  "#fef9c3": { bg: "#251c0c", border: "#413014", accent: "#f59e0b" },
+  "#dcfce7": { bg: "#0e2417", border: "#173f27", accent: "#10b981" },
+  "#ccfbf1": { bg: "#0b2423", border: "#143f3d", accent: "#14b8a6" },
+  "#dbeafe": { bg: "#131e31", border: "#223452", accent: "#3b82f6" },
+  "#f3e8ff": { bg: "#1d152f", border: "#332353", accent: "#a855f7" },
+  "#fce7f3": { bg: "#27111d", border: "#451a32", accent: "#ec4899" },
+  "#ffedd5": { bg: "#29170e", border: "#462413", accent: "#f97316" },
+  "#fee2e2": { bg: "#281215", border: "#471b21", accent: "#ef4444" },
+  "#f1f5f9": { bg: "#202633", border: "#353f54", accent: "#94a3b8" },
+  "#ecfccb": { bg: "#1c240c", border: "#313f14", accent: "#84cc16" },
+  "#cffafe": { bg: "#0b2229", border: "#133a46", accent: "#06b6d4" },
+  "#ffe4e6": { bg: "#271115", border: "#451921", accent: "#f43f5e" },
+};
 
-  // 1. Try exact match
+function resolveNoteDarkSpectrum(color: NoteColor): DarkSpectrum | undefined {
   if (NOTE_COLOR_MAP_DARK_MODE[color]) {
     return NOTE_COLOR_MAP_DARK_MODE[color];
   }
 
-  // 2. Try case-insensitive match (Normalize)
   const lowerColor = color.toLowerCase();
-  const foundKey = Object.keys(NOTE_COLOR_MAP_DARK_MODE).find(k => k.toLowerCase() === lowerColor);
-  if (foundKey) {
-    return NOTE_COLOR_MAP_DARK_MODE[foundKey];
-  }
+  const foundKey = Object.keys(NOTE_COLOR_MAP_DARK_MODE).find((key) => key.toLowerCase() === lowerColor);
+  return foundKey ? NOTE_COLOR_MAP_DARK_MODE[foundKey] : undefined;
+}
 
-  // 3. Fallback for unknown/legacy colors
-  return "rgba(71, 85, 105, 0.72)";
+export function getNoteDarkSpectrum(color: NoteColor): DarkSpectrum {
+  return resolveNoteDarkSpectrum(color) ?? DEFAULT_NOTE_DARK_SPECTRUM;
+}
+
+// 根据当前主题获取便签颜色
+export function getNoteColor(color: NoteColor, isDarkMode: boolean): string {
+  if (!isDarkMode) return color;
+  return getNoteDarkSpectrum(color).bg;
 }
 
 export interface Note {

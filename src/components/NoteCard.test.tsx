@@ -27,8 +27,24 @@ vi.mock('react-draggable', () => ({
 import { NoteCard } from './NoteCard';
 import { useStore } from '../store/useStore';
 import { normalizeNotes } from '../store/normalization';
-import { getNoteColor, Note } from '../store/types';
+import { getNoteColor, getNoteDarkSpectrum, Note } from '../store/types';
 import { getEdgeCheckRect, resolveDragStopWorldPosition } from '../utils/dragCoordinates';
+
+const hexToRgbString = (hex: string): string => {
+  const normalized = hex.replace('#', '');
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgb(${red}, ${green}, ${blue})`;
+};
+
+const hexToRgbaString = (hex: string, alpha: number): string => {
+  const normalized = hex.replace('#', '');
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+};
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
@@ -160,10 +176,13 @@ describe('NoteCard 头部交互边界', () => {
     const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
     const titleInput = container.querySelector('input[placeholder="标题"]') as HTMLInputElement | null;
     const textarea = container.querySelector('textarea[placeholder="记点什么..."]') as HTMLTextAreaElement | null;
+    const spectrum = getNoteDarkSpectrum('#fef9c3');
 
-    expect(rootRegion?.style.backgroundColor).toBe(getNoteColor('#fef9c3', true));
-    expect(rootRegion?.className).toContain('dark:border-blue-300/45');
-    expect(rootRegion?.style.boxShadow).toContain('rgba(191,219,254,0.45)');
+    expect(rootRegion?.style.backgroundColor).toBe(hexToRgbString(getNoteColor('#fef9c3', true)));
+    expect(rootRegion?.style.backgroundImage).toContain('radial-gradient');
+    expect(rootRegion?.style.backgroundImage).toContain('245, 158, 11');
+    expect(rootRegion?.style.borderColor).toBe(hexToRgbaString(spectrum.accent, 0.48));
+    expect(rootRegion?.style.boxShadow).toContain(hexToRgbaString(spectrum.accent, 0.28));
 
     expect(titleInput?.className).toContain('dark:placeholder-text-secondary/75');
     expect(titleInput?.className).toContain('dark:selection:bg-blue-200/35');
@@ -243,6 +262,37 @@ describe('NoteCard 头部交互边界', () => {
     expect(rootRegion?.style.boxShadow).toContain('0 2px 8px');
   });
 
+  it('深色模式默认使用 spectrum border，hover 后切到 accent-derived border 且 hover 清除后恢复', async () => {
+    useStore.setState({
+      ...normalizeNotes([createNote({ color: '#fef9c3' })]),
+      config: {
+        ...useStore.getState().config,
+        themeMode: 'dark',
+      },
+    });
+
+    await renderNoteCard();
+
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    const spectrum = getNoteDarkSpectrum('#fef9c3');
+
+    expect(rootRegion?.style.borderColor).toBe(hexToRgbString(spectrum.border));
+
+    await act(async () => {
+      rootRegion?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+
+    expect(rootRegion?.style.borderColor).toBe(hexToRgbaString(spectrum.accent, 0.4));
+    expect(rootRegion?.style.boxShadow).toContain(hexToRgbaString(spectrum.accent, 0.22));
+
+    await act(async () => {
+      rootRegion?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+    });
+
+    expect(rootRegion?.style.borderColor).toBe(hexToRgbString(spectrum.border));
+    expect(rootRegion?.style.boxShadow).not.toContain(hexToRgbaString(spectrum.accent, 0.22));
+  });
+
   it('mouseover 时 box-shadow 外层增强而非过度夸张', async () => {
     await renderNoteCard();
 
@@ -282,6 +332,10 @@ describe('NoteCard 头部交互边界', () => {
     expect(rootRegion).not.toBeNull();
     expect(rootRegion?.className).not.toContain('backdrop-blur');
     expect(rootRegion?.className).not.toContain('backdrop-saturate');
+    expect(rootRegion?.className).not.toContain('hover:shadow');
+    expect(rootRegion?.className).not.toContain('dark:hover:bg');
+    expect(rootRegion?.style.backdropFilter).toBe('');
+    expect(rootRegion?.getAttribute('style')).not.toContain('backdrop-filter');
   });
 
   it('hover 态由 React 状态驱动 box-shadow 变化，不依赖 CSS hover 伪类', async () => {
@@ -354,9 +408,53 @@ describe('NoteCard 头部交互边界', () => {
     await renderNoteCard();
     const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
     const shadow = rootRegion?.style.boxShadow ?? '';
-    expect(shadow).toContain('inset 0 1px 1px');
+    expect(shadow).toContain('inset 0 1px 0');
+    expect(shadow).toContain('inset 1px 0 0');
     expect(shadow).toContain('rgba(255,255,255');
-    expect(shadow).toContain('0 2px 8px');
+    expect(shadow).toContain('0 8px 20px -12px');
+  });
+
+  it('深色模式 inline backgroundImage 使用 accent 径向柔光，而不是只有白色线性高光', async () => {
+    useStore.setState({
+      ...normalizeNotes([createNote({ color: '#f3e8ff' })]),
+      config: {
+        ...useStore.getState().config,
+        themeMode: 'dark',
+      },
+    });
+
+    await renderNoteCard();
+
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    const bgImage = rootRegion?.style.backgroundImage ?? '';
+    expect(bgImage).toContain('radial-gradient');
+    expect(bgImage).toContain('168, 85, 247');
+    expect(bgImage).toContain('linear-gradient');
+  });
+
+  it('pointercancel 清除 hover 态', async () => {
+    useStore.setState({
+      ...normalizeNotes([createNote({ color: '#fef9c3' })]),
+      config: {
+        ...useStore.getState().config,
+        themeMode: 'dark',
+      },
+    });
+
+    await renderNoteCard();
+
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    const spectrum = getNoteDarkSpectrum('#fef9c3');
+
+    await act(async () => {
+      rootRegion?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    expect(rootRegion?.style.borderColor).toBe(hexToRgbaString(spectrum.accent, 0.4));
+
+    await act(async () => {
+      rootRegion?.dispatchEvent(new Event('pointercancel', { bubbles: true }));
+    });
+    expect(rootRegion?.style.borderColor).toBe(hexToRgbString(spectrum.border));
   });
 });
 
