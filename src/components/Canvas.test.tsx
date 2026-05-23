@@ -36,6 +36,7 @@ import {
   getEdgePushAccumulatedDelta,
   updateEdgePushPointerDelta,
 } from '../utils/edgePushDragCompensation';
+import { registerActiveNoteDragFinalizer } from '../utils/activeNoteDrag';
 import { resolveDragStopWorldPosition } from '../utils/dragCoordinates';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
@@ -1006,5 +1007,30 @@ describe('Canvas 空白命中判定', () => {
     expect(useStore.getState().interaction.isDragging).toBe(false);
     expect(useStore.getState().interaction.edgePush.right).toBe(false);
     expect(getEdgePushDragLeader()).toBeNull();
+  });
+
+  it('窗口失焦会先触发普通便签拖拽收口，再执行全局拖拽清理', async () => {
+    const activeDragFinalizer = vi.fn();
+    registerActiveNoteDragFinalizer(activeDragFinalizer);
+    document.body.classList.add('is-dragging');
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        isDragging: true,
+        edgePush: { top: false, bottom: false, left: false, right: true },
+      },
+    });
+
+    await renderCanvas();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    expect(activeDragFinalizer).toHaveBeenCalledTimes(1);
+    expect(activeDragFinalizer).toHaveBeenCalledWith('window-blur');
+    expect(useStore.getState().interaction.isDragging).toBe(false);
+    expect(useStore.getState().interaction.edgePush.right).toBe(false);
+    expect(document.body.classList.contains('is-dragging')).toBe(false);
   });
 });

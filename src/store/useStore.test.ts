@@ -23,6 +23,7 @@ import { openFile } from '../utils/fileSystem';
 import { invoke } from '@tauri-apps/api/core';
 import { createEmptyNormalizedNotesState, denormalizeNotes, normalizeNotes } from './normalization';
 import { LAYOUT } from '../constants/layout';
+import { registerActiveNoteDragFinalizer } from '../utils/activeNoteDrag';
 
 const flushMicrotasks = async () => {
   await Promise.resolve();
@@ -757,6 +758,28 @@ describe('v1.3.0 并发与代际契约', () => {
       currentBoardId: 'default',
       config: { ...useStore.getState().config, maxZ: 1 },
     });
+  });
+
+  it('切换看板前先触发活动普通便签拖拽收口', () => {
+    const activeDragFinalizer = vi.fn();
+    registerActiveNoteDragFinalizer(activeDragFinalizer);
+
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-2', name: '二号板', icon: '🧩', createdAt: 1 },
+      ],
+      currentBoardId: 'default',
+      viewport: { x: 24, y: 36, w: 1280, h: 720 },
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    useStore.getState().switchBoard('board-2');
+
+    expect(activeDragFinalizer).toHaveBeenCalledTimes(1);
+    expect(activeDragFinalizer).toHaveBeenCalledWith('switch-board');
+    expect(useStore.getState().currentBoardId).toBe('board-2');
   });
 
   it('旧 generationId ACK 不得覆盖最新 UI 状态', async () => {

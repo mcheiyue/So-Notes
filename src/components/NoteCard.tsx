@@ -10,6 +10,7 @@ import { cn } from "../utils/cn";
 import { Tooltip } from "./Tooltip";
 import { registerNoteElement, unregisterNoteElement } from "../utils/noteElementRegistry";
 import { getEdgeCheckRect, resolveDragStopWorldPosition } from "../utils/dragCoordinates";
+import { finalizeActiveNoteDrag, registerActiveNoteDragFinalizer, unregisterActiveNoteDragFinalizer } from "../utils/activeNoteDrag";
 import {
   beginEdgePushDragSession,
   setEdgePushDragLeader,
@@ -226,10 +227,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     if (el && noteId) {
       registerNoteElement(noteId, el);
       return () => {
-        unregisterNoteElement(noteId);
         if (isDragging.current) {
-          setEdgePushDragLeader(null);
+          finalizeActiveNoteDrag('unmount');
         }
+        unregisterNoteElement(noteId);
       };
     }
   }, [noteId]);
@@ -280,6 +281,78 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     isGroupSelection,
   );
 
+  const handleFinalizeDragSession = (reason: 'stop' | 'window-blur' | 'switch-board' | 'unmount') => {
+    if (!isDragging.current) return;
+
+    const shouldUpdateLocalState = reason !== 'unmount';
+    const sessionIds = getEdgePushDragSessionNoteIds();
+    const sessionPositions = Object.fromEntries(
+      sessionIds.flatMap((sessionId) => {
+        const sessionPosition = getEdgePushDragSessionPosition(sessionId);
+        return sessionPosition ? [[sessionId, sessionPosition]] : [];
+      }),
+    );
+    const effectivePos = getEffectiveLeaderPosition();
+    const dragIds = sessionIds.length > 0 ? sessionIds : [note.id];
+    const viewport = useStore.getState().viewport;
+    const noteWidth = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
+    const noteHeight = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
+    const margin = 10;
+
+    const finalPosition = resolveDragStopWorldPosition(
+      effectivePos.x,
+      effectivePos.y,
+      viewport,
+      noteWidth,
+      noteHeight,
+      isPanMode,
+      margin,
+    );
+
+    isDragging.current = false;
+    dragPosRef.current = false;
+    shouldFinalizeOnMouseUpRef.current = false;
+    if (shouldUpdateLocalState) {
+      setIsDragActive(false);
+      setIsHovered(false);
+    }
+    setIsDragging(false);
+    document.body.classList.remove('is-dragging');
+    clearEdge();
+    setEdgePushDragLeader(null);
+    unregisterActiveNoteDragFinalizer(handleFinalizeDragSession);
+
+    useStore.setState((state) => {
+      dragIds.forEach((id) => {
+        const n = state.notesById[id];
+        if (!n) return;
+
+        const rawPosition = id === note.id
+          ? finalPosition
+          : sessionPositions[id];
+        if (!rawPosition) return;
+
+        const resolvedPosition = id === note.id
+          ? finalPosition
+          : resolveDragStopWorldPosition(
+              rawPosition.x,
+              rawPosition.y,
+              viewport,
+              n.width || LAYOUT.NOTE_WIDTH,
+              n.height || (n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT),
+              isPanMode,
+              margin,
+            );
+
+        n.x = resolvedPosition.x;
+        n.y = resolvedPosition.y;
+        state.layoutNotesById[id] = { id: n.id, x: n.x, y: n.y, boardId: n.boardId, deletedAt: n.deletedAt ?? null, color: n.color, width: n.width, height: n.height };
+      });
+    });
+
+    finalizeLayoutChange(dragIds);
+  };
+
   const handleStart = (e: DraggableEvent) => {
       isDragging.current = true;
       setIsDragging(true);
@@ -297,6 +370,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           dragNotes.map((dragNote) => [dragNote.id, { x: dragNote.x, y: dragNote.y }]),
       );
       beginEdgePushDragSession(note.id, dragIds, basePositions, clientPoint);
+      registerActiveNoteDragFinalizer(handleFinalizeDragSession);
 
       if (dragNotes.length > 1) {
               let minX = Infinity, minY = Infinity;
@@ -357,79 +431,11 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     };
   
   const handleStop = (e: DraggableEvent) => {
-    isDragging.current = false;
-    dragPosRef.current = false;
-    setIsDragActive(false);
-    setIsDragging(false);
-    setIsHovered(false);
-    document.body.classList.remove('is-dragging');
-
     const clientPoint = getClientPoint(e);
     if (clientPoint) {
       updateEdgePushPointerFromClient(clientPoint.x, clientPoint.y);
     }
-    
-    const sessionIds = getEdgePushDragSessionNoteIds();
-    const sessionPositions = Object.fromEntries(
-      sessionIds.flatMap((sessionId) => {
-        const sessionPosition = getEdgePushDragSessionPosition(sessionId);
-        return sessionPosition ? [[sessionId, sessionPosition]] : [];
-      }),
-    );
-    const effectivePos = getEffectiveLeaderPosition();
-    clearEdge();
-    setEdgePushDragLeader(null);
-
-    const viewport = useStore.getState().viewport;
-    const noteWidth = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
-    const noteHeight = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
-    const MARGIN = 10;
-    
-    const finalPosition = resolveDragStopWorldPosition(
-      effectivePos.x,
-      effectivePos.y,
-      viewport,
-      noteWidth,
-      noteHeight,
-      isPanMode,
-      MARGIN,
-    );
-
-    const dragIds = sessionIds.length > 0 ? sessionIds : [note.id];
-
-    // P1: 批量更新所有拖拽涉及的便签位置（单次 set）
-    const timestamp = Date.now();
-    useStore.setState((state) => {
-      dragIds.forEach((id) => {
-        const n = state.notesById[id];
-        if (!n) return;
-
-        const rawPosition = id === note.id
-          ? finalPosition
-          : sessionPositions[id];
-        if (!rawPosition) return;
-
-        const resolvedPosition = id === note.id
-          ? finalPosition
-          : resolveDragStopWorldPosition(
-              rawPosition.x,
-              rawPosition.y,
-              viewport,
-              n.width || LAYOUT.NOTE_WIDTH,
-              n.height || (n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT),
-              isPanMode,
-              MARGIN,
-            );
-
-        n.x = resolvedPosition.x;
-        n.y = resolvedPosition.y;
-        n.updatedAt = timestamp;
-        state.layoutNotesById[id] = { id: n.id, x: n.x, y: n.y, boardId: n.boardId, deletedAt: n.deletedAt ?? null, color: n.color, width: n.width, height: n.height };
-      });
-    });
-
-    const affectedIds = dragIds;
-    finalizeLayoutChange(affectedIds);
+    handleFinalizeDragSession('stop');
   };
 
   const handleMouseDown = (e: DraggableEvent) => {

@@ -10,6 +10,7 @@ import { generateBoardExport, generateFullBackup, processImport, ImportFailureCo
 import { saveFile, openFile } from '../utils/fileSystem';
 import { diagnostics } from '../utils/diagnostics';
 import { getNoteVisualHeight } from '../utils/noteVisualMetrics';
+import { finalizeActiveNoteDrag } from '../utils/activeNoteDrag';
 
 interface ImportFromFileResult {
   status: 'cancelled' | 'success' | 'error';
@@ -411,6 +412,7 @@ export const useStore = create<State>()(
     },
 
     switchBoard: (boardId) => {
+        finalizeActiveNoteDrag('switch-board');
         set((state) => {
             // 1. Save current viewport to OLD board
             const oldBoard = state.boards.find(b => b.id === state.currentBoardId);

@@ -15,6 +15,7 @@ import {
 import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetrics";
 import { getNoteElement } from "../utils/noteElementRegistry";
 import { resolveDragStopWorldPosition } from "../utils/dragCoordinates";
+import { finalizeActiveNoteDrag } from "../utils/activeNoteDrag";
 
 
 
@@ -644,6 +645,7 @@ export const Canvas: React.FC = () => {
   useEffect(() => {
       const handleWindowUp = (e: MouseEvent) => handleGlobalUp(e);
       const handleWindowBlur = () => {
+          finalizeActiveNoteDrag('window-blur');
           isPanning.current = false;
           isSelecting.current = false;
           panDeltaRef.current = { dx: 0, dy: 0 };
