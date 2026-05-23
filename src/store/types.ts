@@ -19,21 +19,21 @@ export const NOTE_COLORS: NoteColor[] = [
 ];
 
 // NOTE_COLOR_MAP_DARK_MODE: 深色模式下的便签颜色映射 (亮色 -> 深色增强可读性底色)
-// 使用更深的半透明染色底，避免浅色便签在深色主题下发灰、发白、正文对比不足。
+// 采用不透明染色底（α≈0.88–0.89），配合仿玻璃方案，避免 backdrop-blur 采样相邻内容产生伪影。
 export const NOTE_COLOR_MAP_DARK_MODE: Record<NoteColor, string> = {
-  "#FFFFFF": "rgba(71, 85, 105, 0.32)",   // White -> Slate-tinted neutral
-  "#fef9c3": "rgba(161, 98, 7, 0.34)",    // Yellow -> Dark amber
-  "#dcfce7": "rgba(21, 128, 61, 0.32)",   // Green -> Deep green
-  "#ccfbf1": "rgba(15, 118, 110, 0.32)",  // Teal -> Deep teal
-  "#dbeafe": "rgba(29, 78, 216, 0.34)",   // Blue -> Deep blue
-  "#f3e8ff": "rgba(126, 34, 206, 0.34)",  // Purple -> Deep purple
-  "#fce7f3": "rgba(190, 24, 93, 0.32)",   // Pink -> Deep pink
-  "#ffedd5": "rgba(194, 65, 12, 0.34)",   // Orange -> Deep orange
-  "#fee2e2": "rgba(185, 28, 28, 0.32)",   // Red -> Deep red
-  "#f1f5f9": "rgba(71, 85, 105, 0.34)",   // Slate -> Deep slate
-  "#ecfccb": "rgba(77, 124, 15, 0.32)",   // Lime -> Deep lime
-  "#cffafe": "rgba(14, 116, 144, 0.32)",  // Cyan -> Deep cyan
-  "#ffe4e6": "rgba(190, 18, 60, 0.32)",   // Rose -> Deep rose
+  "#FFFFFF": "rgba(71, 85, 105, 0.88)",   // White -> Slate-tinted neutral
+  "#fef9c3": "rgba(161, 98, 7, 0.89)",    // Yellow -> Dark amber
+  "#dcfce7": "rgba(21, 128, 61, 0.88)",   // Green -> Deep green
+  "#ccfbf1": "rgba(15, 118, 110, 0.88)",  // Teal -> Deep teal
+  "#dbeafe": "rgba(29, 78, 216, 0.89)",   // Blue -> Deep blue
+  "#f3e8ff": "rgba(126, 34, 206, 0.89)",  // Purple -> Deep purple
+  "#fce7f3": "rgba(190, 24, 93, 0.88)",   // Pink -> Deep pink
+  "#ffedd5": "rgba(194, 65, 12, 0.89)",   // Orange -> Deep orange
+  "#fee2e2": "rgba(185, 28, 28, 0.88)",   // Red -> Deep red
+  "#f1f5f9": "rgba(71, 85, 105, 0.89)",   // Slate -> Deep slate
+  "#ecfccb": "rgba(77, 124, 15, 0.88)",   // Lime -> Deep lime
+  "#cffafe": "rgba(14, 116, 144, 0.88)",  // Cyan -> Deep cyan
+  "#ffe4e6": "rgba(190, 18, 60, 0.88)",   // Rose -> Deep rose
 };
 
 // 根据当前主题获取便签颜色
@@ -53,8 +53,8 @@ export function getNoteColor(color: NoteColor, isDarkMode: boolean): string {
   }
 
   // 3. Fallback for unknown/legacy colors
-  // 保持为偏深的中性色，避免未知浅色在深色模式下刺眼。
-  return "rgba(71, 85, 105, 0.28)";
+  // 保持为偏深的不透明中性色，配合仿玻璃方案。
+  return "rgba(71, 85, 105, 0.85)";
 }
 
 export interface Note {

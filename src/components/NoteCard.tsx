@@ -97,6 +97,17 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     }
   }, [noteId]);
 
+  // 窗口失焦或标签页隐藏时，指针可能不会触发离开事件，需要兜底清除悬浮态。
+  useEffect(() => {
+    const clearHover = () => setIsHovered(false);
+    window.addEventListener('blur', clearHover);
+    document.addEventListener('visibilitychange', clearHover);
+    return () => {
+      window.removeEventListener('blur', clearHover);
+      document.removeEventListener('visibilitychange', clearHover);
+    };
+  }, []);
+
   const worldX = note ? note.x : 0;
   const worldY = note ? note.y : 0;
 
@@ -124,6 +135,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const handleStart = (e: DraggableEvent) => {
       isDragging.current = true;
       setIsDragging(true);
+      setIsHovered(false);
       document.body.classList.add('is-dragging');
       shouldFinalizeOnMouseUpRef.current = false;
       const clientPoint = getClientPoint(e) ?? { x: 0, y: 0 };
@@ -201,6 +213,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     dragPosRef.current = false;
     setIsDragActive(false);
     setIsDragging(false);
+    setIsHovered(false);
     document.body.classList.remove('is-dragging');
 
     const clientPoint = getClientPoint(e);
@@ -370,10 +383,12 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           className={cn(
           "note-card absolute flex flex-col",
           note.collapsed ? "overflow-hidden" : "h-auto",
-          "rounded-xl transition-all duration-200 ease-out",
-          "shadow-sm hover:shadow-xl dark:hover:bg-white/5",
-          "backdrop-blur-2xl backdrop-saturate-[1.8]",
+          "rounded-xl transition-shadow duration-200 ease-out",
+          isHovered && !isDragActive && !isPanMode && !isStickyDragging
+            ? "shadow-md"
+            : "shadow-sm",
           "border border-border-subtle dark:border-white/10",
+          "before:absolute before:inset-x-0 before:top-0 before:h-px before:rounded-t-xl before:bg-gradient-to-r before:from-transparent before:via-white/0 dark:before:via-white/[0.07] before:to-transparent before:pointer-events-none",
           "group",
           isStickyDragging && "shadow-2xl scale-[1.02] cursor-move",
           isSelected && !isStickyDragging && (
@@ -396,6 +411,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         onMouseUpCapture={handleMouseUpCapture}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
+        onPointerCancel={() => setIsHovered(false)}
         onContextMenu={handleContextMenu}
         onDoubleClick={handleHeaderDoubleClick}
       >
