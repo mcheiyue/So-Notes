@@ -36,6 +36,38 @@ const getClientPoint = (event: DraggableEvent): { x: number; y: number } | null 
   return touch ? { x: touch.clientX, y: touch.clientY } : null;
 };
 
+function buildAcrylicShadow(
+  isDark: boolean,
+  isActive: boolean,
+  isDragging: boolean,
+  isSelected: boolean,
+  isGroupSelection: boolean,
+): string {
+  const inset = isDark
+    ? (isActive ? 'inset 0 1px 1px rgba(255,255,255,0.12)' : 'inset 0 1px 1px rgba(255,255,255,0.08)')
+    : (isActive ? 'inset 0 1px 1px rgba(255,255,255,0.4)' : 'inset 0 1px 1px rgba(255,255,255,0.3)');
+
+  const outer = isDragging
+    ? (isDark ? '0 12px 24px rgba(0,0,0,0.22)' : '0 12px 24px rgba(0,0,0,0.08)')
+    : isActive
+      ? (isDark ? '0 4px 16px rgba(0,0,0,0.22)' : '0 4px 14px rgba(0,0,0,0.08)')
+      : (isDark ? '0 2px 8px rgba(0,0,0,0.18)' : '0 2px 8px rgba(0,0,0,0.05)');
+
+  let shadow = `${inset}, ${outer}`;
+
+  if (isSelected && !isDragging) {
+    const ringColor = isGroupSelection
+      ? (isDark ? 'rgba(191,219,254,0.6)' : 'rgba(59,130,246,0.55)')
+      : (isDark ? 'rgba(191,219,254,0.45)' : 'rgba(59,130,246,0.3)');
+    const glowColor = isGroupSelection
+      ? (isDark ? 'rgba(191,219,254,0.18)' : 'rgba(59,130,246,0.12)')
+      : (isDark ? 'rgba(191,219,254,0.14)' : 'rgba(59,130,246,0.08)');
+    shadow += `, 0 0 0 2px ${ringColor}, 0 0 0 1px ${glowColor}`;
+  }
+
+  return shadow;
+}
+
 export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = false, scale = 1 }) => {
   // Selectors
   const note = useStore(state => state.notesById[id]);
@@ -383,18 +415,14 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           className={cn(
           "note-card absolute flex flex-col",
           note.collapsed ? "overflow-hidden" : "h-auto",
-          "rounded-xl transition-shadow duration-200 ease-out",
-          isHovered && !isDragActive && !isPanMode && !isStickyDragging
-            ? "shadow-md"
-            : "shadow-sm",
+          "rounded-xl transition-[box-shadow,border-color] duration-200 ease-out",
           "border border-border-subtle dark:border-white/10",
-          "before:absolute before:inset-x-0 before:top-0 before:h-px before:rounded-t-xl before:bg-gradient-to-r before:from-transparent before:via-white/0 dark:before:via-white/[0.07] before:to-transparent before:pointer-events-none",
           "group",
-          isStickyDragging && "shadow-2xl scale-[1.02] cursor-move",
+          isStickyDragging && "scale-[1.02] cursor-move",
           isSelected && !isStickyDragging && (
             isGroupSelection
-              ? "ring-2 ring-blue-500/55 dark:ring-blue-300/60 border-blue-500/60 dark:border-blue-300/55 shadow-[0_0_0_1px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_1px_rgba(191,219,254,0.18)]"
-              : "ring-2 ring-blue-500/30 dark:ring-blue-300/45 border-blue-500/40 dark:border-blue-300/45 shadow-[0_0_0_1px_rgba(59,130,246,0.08)] dark:shadow-[0_0_0_1px_rgba(191,219,254,0.14)]"
+              ? "border-blue-500/60 dark:border-blue-300/55"
+              : "border-blue-500/40 dark:border-blue-300/45"
           ),
           isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto",
           isPanMode && "pointer-events-none"
@@ -406,6 +434,16 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             backgroundColor: getNoteColor(note.color, isDarkMode),
             zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
             transform: isStatic ? undefined : `translate(${worldX}px, ${worldY}px)`,
+            backgroundImage: isDarkMode
+              ? 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 60%)'
+              : 'linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 50%)',
+            boxShadow: buildAcrylicShadow(
+              isDarkMode,
+              isHovered && !isDragActive && !isPanMode && !isStickyDragging,
+              isStickyDragging,
+              isSelected,
+              isGroupSelection,
+            ),
         }}
         onMouseDownCapture={handleMouseDown}
         onMouseUpCapture={handleMouseUpCapture}

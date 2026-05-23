@@ -162,8 +162,8 @@ describe('NoteCard 头部交互边界', () => {
     const textarea = container.querySelector('textarea[placeholder="记点什么..."]') as HTMLTextAreaElement | null;
 
     expect(rootRegion?.style.backgroundColor).toBe(getNoteColor('#fef9c3', true));
-    expect(rootRegion?.className).toContain('dark:ring-blue-300/45');
     expect(rootRegion?.className).toContain('dark:border-blue-300/45');
+    expect(rootRegion?.style.boxShadow).toContain('rgba(191,219,254,0.45)');
 
     expect(titleInput?.className).toContain('dark:placeholder-text-secondary/75');
     expect(titleInput?.className).toContain('dark:selection:bg-blue-200/35');
@@ -226,37 +226,37 @@ describe('NoteCard 头部交互边界', () => {
     expect(useStore.getState().notesById['note-1']?.collapsed).toBe(true);
   });
 
-  it('mouseout 清除 hover 态，移除 shadow-md', async () => {
+  it('mouseout 清除 hover 态，box-shadow 回落到默认层级', async () => {
     await renderNoteCard();
 
     const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    expect(rootRegion?.style.boxShadow).toContain('0 2px 8px');
 
     await act(async () => {
       rootRegion?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     });
-    expect(rootRegion?.className).toContain('shadow-md');
+    expect(rootRegion?.style.boxShadow).toContain('0 4px');
 
     await act(async () => {
       rootRegion?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
     });
-    expect(rootRegion?.className).toContain('shadow-sm');
-    expect(rootRegion?.className).not.toContain('shadow-md');
+    expect(rootRegion?.style.boxShadow).toContain('0 2px 8px');
   });
 
-  it('mouseover 时卡片获得 shadow-md 而非 shadow-xl', async () => {
+  it('mouseover 时 box-shadow 外层增强而非过度夸张', async () => {
     await renderNoteCard();
 
     const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
-
-    expect(rootRegion?.className).toContain('shadow-sm');
-    expect(rootRegion?.className).not.toContain('shadow-md');
-    expect(rootRegion?.className).not.toContain('shadow-xl');
+    const shadow = rootRegion?.style.boxShadow ?? '';
+    expect(shadow).toContain('0 2px 8px');
+    expect(shadow).not.toContain('0 12px');
 
     await act(async () => {
       rootRegion?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     });
-    expect(rootRegion?.className).toContain('shadow-md');
-    expect(rootRegion?.className).not.toContain('shadow-xl');
+    const hoverShadow = rootRegion?.style.boxShadow ?? '';
+    expect(hoverShadow).toContain('0 4px');
+    expect(hoverShadow).not.toContain('0 12px');
   });
 
   it('window blur 清除 hover 态', async () => {
@@ -267,13 +267,12 @@ describe('NoteCard 头部交互边界', () => {
     await act(async () => {
       rootRegion?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     });
-    expect(rootRegion?.className).toContain('shadow-md');
+    expect(rootRegion?.style.boxShadow).toContain('0 4px');
 
     await act(async () => {
       window.dispatchEvent(new Event('blur'));
     });
-    expect(rootRegion?.className).toContain('shadow-sm');
-    expect(rootRegion?.className).not.toContain('shadow-md');
+    expect(rootRegion?.style.boxShadow).toContain('0 2px 8px');
   });
 
   it('不使用 backdrop-blur 和 backdrop-saturate（仿玻璃方案）', async () => {
@@ -285,23 +284,21 @@ describe('NoteCard 头部交互边界', () => {
     expect(rootRegion?.className).not.toContain('backdrop-saturate');
   });
 
-  it('hover 态由 React 状态驱动 shadow-md，不依赖 CSS hover 伪类', async () => {
+  it('hover 态由 React 状态驱动 box-shadow 变化，不依赖 CSS hover 伪类', async () => {
     await renderNoteCard();
 
     const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
-    expect(rootRegion?.className).toContain('shadow-sm');
-    expect(rootRegion?.className).not.toContain('shadow-md');
+    expect(rootRegion?.style.boxShadow).toContain('0 2px 8px');
 
     await act(async () => {
       rootRegion?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     });
-    expect(rootRegion?.className).toContain('shadow-md');
+    expect(rootRegion?.style.boxShadow).toContain('0 4px');
 
     await act(async () => {
       rootRegion?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
     });
-    expect(rootRegion?.className).toContain('shadow-sm');
-    expect(rootRegion?.className).not.toContain('shadow-md');
+    expect(rootRegion?.style.boxShadow).toContain('0 2px 8px');
   });
 
   it('visibilitychange hidden 清除 hover 态', async () => {
@@ -312,15 +309,54 @@ describe('NoteCard 头部交互边界', () => {
     await act(async () => {
       rootRegion?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     });
-    expect(rootRegion?.className).toContain('shadow-md');
+    expect(rootRegion?.style.boxShadow).toContain('0 4px');
 
     await act(async () => {
       Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
       Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
     });
-    expect(rootRegion?.className).toContain('shadow-sm');
-    expect(rootRegion?.className).not.toContain('shadow-md');
+    expect(rootRegion?.style.boxShadow).toContain('0 2px 8px');
+  });
+
+  it('不包含 before: 伪元素高光类（C2 已改用 inline 样式）', async () => {
+    await renderNoteCard();
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    expect(rootRegion?.className).not.toContain('before:absolute');
+    expect(rootRegion?.className).not.toContain('before:bg-gradient');
+  });
+
+  it('inline backgroundImage 提供静态亚克力表面光泽', async () => {
+    await renderNoteCard();
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    const bgImage = rootRegion?.style.backgroundImage ?? '';
+    expect(bgImage).toContain('linear-gradient');
+    expect(bgImage).toContain('rgba(255, 255, 255');
+  });
+
+  it('inline boxShadow 含 inset 高光层（亚克力质感）', async () => {
+    await renderNoteCard();
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    const shadow = rootRegion?.style.boxShadow ?? '';
+    expect(shadow).toContain('inset 0 1px 1px');
+    expect(shadow).toContain('rgba(255,255,255');
+  });
+
+  it('深色模式 inline boxShadow 同样包含 inset 高光', async () => {
+    useStore.setState({
+      ...normalizeNotes([createNote()]),
+      config: {
+        ...useStore.getState().config,
+        themeMode: 'dark',
+      },
+    });
+
+    await renderNoteCard();
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    const shadow = rootRegion?.style.boxShadow ?? '';
+    expect(shadow).toContain('inset 0 1px 1px');
+    expect(shadow).toContain('rgba(255,255,255');
+    expect(shadow).toContain('0 2px 8px');
   });
 });
 
