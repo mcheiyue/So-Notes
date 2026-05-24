@@ -10,23 +10,16 @@ import type { SearchFilter } from "../workers/searchWorker";
 export const Spotlight = () => {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [pendingTargetId, setPendingTargetId] = useState<string | null>(null);
   const [filter, setFilter] = useState<SearchFilter>({ scope: 'all-boards' });
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  const notesById = useStore((state) => state.notesById);
   const boards = useStore((state) => state.boards);
   const currentBoardId = useStore((state) => state.currentBoardId);
   const isSpotlightOpen = useStore((state) => state.isSpotlightOpen);
   const setSpotlightOpen = useStore((state) => state.setSpotlightOpen);
-  const setViewportPosition = useStore((state) => state.setViewportPosition);
-  const setSelectedIds = useStore((state) => state.setSelectedIds);
   const toggleCollapse = useStore((state) => state.toggleCollapse);
   const switchBoard = useStore((state) => state.switchBoard);
-  const clearSelection = useStore((state) => state.clearSelection);
-  const bringToFront = useStore((state) => state.bringToFront);
-  const viewport = useStore((state) => state.viewport);
 
   const {
     isSearching,
@@ -72,41 +65,6 @@ export const Spotlight = () => {
   }, [clearSearch, isSpotlightOpen]);
 
   useEffect(() => {
-    if (!pendingTargetId) return;
-
-    const targetNote = pendingTargetId ? notesById[pendingTargetId] : undefined;
-    if (!targetNote || targetNote.deletedAt) {
-      requestAnimationFrame(() => {
-        setPendingTargetId(null);
-      });
-      return;
-    }
-
-    if (targetNote.boardId !== currentBoardId) {
-      return;
-    }
-
-    if (targetNote.collapsed) {
-      return;
-    }
-
-    const nWidth = LAYOUT.NOTE_WIDTH;
-    const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, targetNote.height || LAYOUT.NOTE_MIN_HEIGHT);
-    const targetX = (targetNote.x + nWidth / 2) - (viewport.w / 2);
-    const targetY = (targetNote.y + nHeight / 2) - (viewport.h / 2);
-
-    const frameId = requestAnimationFrame(() => {
-      clearSelection();
-      setViewportPosition(targetX, targetY);
-      setSelectedIds([targetNote.id]);
-      bringToFront(targetNote.id);
-      setPendingTargetId(null);
-    });
-
-    return () => cancelAnimationFrame(frameId);
-  }, [bringToFront, clearSelection, currentBoardId, notesById, pendingTargetId, setSelectedIds, setViewportPosition, viewport.h, viewport.w]);
-
-  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isSpotlightOpen) return;
       if (e.key === "Escape") {
@@ -137,7 +95,24 @@ export const Spotlight = () => {
       toggleCollapse(note.id);
     }
 
-    requestAnimationFrame(() => setPendingTargetId(note.id));
+    requestAnimationFrame(() => {
+      const state = useStore.getState();
+      const targetNote = state.notesById[note.id];
+
+      if (!targetNote || targetNote.deletedAt || targetNote.boardId !== state.currentBoardId || targetNote.collapsed) {
+        return;
+      }
+
+      const nWidth = LAYOUT.NOTE_WIDTH;
+      const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, targetNote.height || LAYOUT.NOTE_MIN_HEIGHT);
+      const targetX = (targetNote.x + nWidth / 2) - (state.viewport.w / 2);
+      const targetY = (targetNote.y + nHeight / 2) - (state.viewport.h / 2);
+
+      state.clearSelection();
+      state.setViewportPosition(targetX, targetY);
+      state.setSelectedIds([targetNote.id]);
+      state.bringToFront(targetNote.id);
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

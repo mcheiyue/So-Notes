@@ -184,7 +184,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
     expect(clearSelection).toHaveBeenCalled();
   });
 
-  it('跨看板搜索结果会等待目标看板生效后再聚焦', async () => {
+  it('跨看板搜索结果会在关闭搜索后继续聚焦目标便签', async () => {
     const remoteNote = createNote({
       id: 'remote-note',
       boardId: 'board-2',
@@ -197,7 +197,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
     const clearSelection = vi.fn();
     const setSelectedIds = vi.fn();
     const bringToFront = vi.fn();
-    const switchBoard = vi.fn();
+    const saveToDisk = vi.fn(async () => true);
 
     searchWorkerMock.notes = [remoteNote];
     useStore.setState({
@@ -211,7 +211,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
       clearSelection,
       setSelectedIds,
       bringToFront,
-      switchBoard,
+      saveToDisk,
     });
 
     await renderSpotlight();
@@ -234,12 +234,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
       resultButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
 
-    expect(switchBoard).toHaveBeenCalledWith('board-2');
-    expect(setViewportPosition).not.toHaveBeenCalled();
-
-    await act(async () => {
-      useStore.setState({ currentBoardId: 'board-2' });
-    });
+    expect(useStore.getState().currentBoardId).toBe('board-2');
 
     expect(setViewportPosition).toHaveBeenCalledWith(
       (420 + LAYOUT.NOTE_WIDTH / 2) - 160,
