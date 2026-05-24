@@ -762,6 +762,7 @@ describe('v1.3.0 并发与代际契约', () => {
 
   it('切换看板前先触发活动普通便签拖拽收口', () => {
     const activeDragFinalizer = vi.fn();
+    const saveSpy = vi.fn(async () => true);
     registerActiveNoteDragFinalizer(activeDragFinalizer);
 
     useStore.setState({
@@ -773,6 +774,7 @@ describe('v1.3.0 并发与代际契约', () => {
       currentBoardId: 'default',
       viewport: { x: 24, y: 36, w: 1280, h: 720 },
       config: { ...useStore.getState().config, maxZ: 1 },
+      saveToDisk: saveSpy,
     });
 
     useStore.getState().switchBoard('board-2');
@@ -780,6 +782,32 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(activeDragFinalizer).toHaveBeenCalledTimes(1);
     expect(activeDragFinalizer).toHaveBeenCalledWith('switch-board');
     expect(useStore.getState().currentBoardId).toBe('board-2');
+    expect(useStore.getState().boards.find((board) => board.id === 'default')?.viewport).toEqual({ x: 24, y: 36 });
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('批量创建智能粘贴便签后选中新便签并只保存一次', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 3 },
+      saveToDisk: saveSpy,
+    });
+
+    const ids = useStore.getState().addNotesWithContentBatch([
+      { x: 10, y: 20, content: ' Alpha ' },
+      { x: 30, y: 40, content: 'Beta' },
+    ]);
+
+    const state = useStore.getState();
+    expect(ids).toHaveLength(2);
+    expect(state.selectedIds).toEqual(ids);
+    expect(state.allNoteIds).toEqual(ids);
+    expect(state.config.maxZ).toBe(5);
+    expect(state.notesById[ids[0]].content).toBe('Alpha');
+    expect(state.notesById[ids[1]].z).toBe(5);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 
   it('旧 generationId ACK 不得覆盖最新 UI 状态', async () => {

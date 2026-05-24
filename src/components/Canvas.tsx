@@ -16,6 +16,7 @@ import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetr
 import { getNoteElement } from "../utils/noteElementRegistry";
 import { resolveDragStopWorldPosition } from "../utils/dragCoordinates";
 import { finalizeActiveNoteDrag } from "../utils/activeNoteDrag";
+import { createSmartPasteNoteInputs } from "../utils/smartPaste";
 
 
 
@@ -514,6 +515,26 @@ export const Canvas: React.FC = () => {
     const y = localPoint.y + vp.y;
     useStore.getState().addNote(x, y);
   };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (isDragInteractionLocked()) {
+      return;
+    }
+
+    const text = e.clipboardData.getData('text/plain');
+    const vp = useStore.getState().viewport;
+    const boundsWidth = containerRef.current?.getBoundingClientRect().width ?? vp.w;
+    const originX = vp.x + Math.max(24, boundsWidth / 2 - LAYOUT.NOTE_WIDTH / 2);
+    const originY = vp.y + 72;
+    const notes = createSmartPasteNoteInputs(text, originX, originY);
+
+    if (notes.length === 0) {
+      return;
+    }
+
+    e.preventDefault();
+    useStore.getState().addNotesWithContentBatch(notes);
+  };
   
     const handleGlobalDown = (e: React.MouseEvent) => {
     const isBlankTarget = isBlankCanvasTarget(e.target);
@@ -683,11 +704,13 @@ export const Canvas: React.FC = () => {
     <section
       ref={containerRef}
       role="application"
+      tabIndex={0}
       className={cn(
         "w-full h-full overflow-hidden relative select-none outline-none focus:outline-none focus-visible:outline-none",
         isPanMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"
       )}
       onDoubleClick={handleDoubleClick}
+      onPaste={handlePaste}
       onMouseMove={handleMouseMove}
       onMouseDown={handleGlobalDown}
       onMouseUp={handleGlobalUp}

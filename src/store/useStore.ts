@@ -11,6 +11,7 @@ import { saveFile, openFile } from '../utils/fileSystem';
 import { diagnostics } from '../utils/diagnostics';
 import { getNoteVisualHeight } from '../utils/noteVisualMetrics';
 import { finalizeActiveNoteDrag } from '../utils/activeNoteDrag';
+import type { SmartPasteNoteInput } from '../utils/smartPaste';
 
 interface ImportFromFileResult {
   status: 'cancelled' | 'success' | 'error';
@@ -62,12 +63,14 @@ interface State {
   // Dock UI State (Transient)
   isDockVisible: boolean;
   isSpotlightOpen: boolean;
+  isQuickCaptureOpen: boolean;
 
   // Actions
   init: () => Promise<void>;
   
   // Viewport Actions
   setSpotlightOpen: (isOpen: boolean) => void;
+  setQuickCaptureOpen: (isOpen: boolean) => void;
   setPinned: (pinned: boolean) => void;
   setViewportSize: (w: number, h: number) => void;
   setShellRect: (rect: ShellRectState) => void;
@@ -88,6 +91,7 @@ interface State {
 
   addNote: (x: number, y: number) => void;
   addNoteWithContent: (x: number, y: number, content: string) => void;
+  addNotesWithContentBatch: (notes: SmartPasteNoteInput[]) => string[];
   updateTitle: (id: string, title: string) => void;
   updateNote: (id: string, content: string) => void;
   moveNote: (id: string, x: number, y: number) => void;
@@ -283,6 +287,7 @@ export const useStore = create<State>()(
     viewMode: 'BOARD',
     isDockVisible: false,
     isSpotlightOpen: false,
+    isQuickCaptureOpen: false,
 
     init: async () => {
       let finalData: StorageData = { 
@@ -438,6 +443,7 @@ export const useStore = create<State>()(
                 }
             }
         });
+        get().saveToDisk();
     },
 
     setViewMode: (mode) => {
@@ -584,6 +590,8 @@ export const useStore = create<State>()(
 
     setSpotlightOpen: (isOpen) => set({ isSpotlightOpen: isOpen }),
 
+    setQuickCaptureOpen: (isOpen) => set({ isQuickCaptureOpen: isOpen }),
+
     setPinned: (pinned) => set({ isPinned: pinned }),
 
     addNote: (x, y) => {
@@ -630,6 +638,47 @@ export const useStore = create<State>()(
       });
 
       get().saveToDisk();
+    },
+
+    addNotesWithContentBatch: (notes) => {
+      const normalizedNotes = notes
+        .map((note) => ({ ...note, content: note.content.trim() }))
+        .filter((note) => note.content.length > 0);
+
+      if (normalizedNotes.length === 0) {
+        return [];
+      }
+
+      const boardId = get().currentBoardId;
+      const createdAt = Date.now();
+      const startZ = get().config.maxZ;
+      const createdIds = normalizedNotes.map(() => crypto.randomUUID());
+
+      set((state) => {
+        normalizedNotes.forEach((note, index) => {
+          const newNote: Note = {
+            id: createdIds[index],
+            boardId,
+            title: '',
+            content: note.content,
+            x: note.x,
+            y: note.y,
+            z: startZ + index + 1,
+            color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
+            collapsed: false,
+            createdAt,
+            updatedAt: createdAt,
+          };
+
+          appendNoteToNormalizedState(state, newNote);
+        });
+
+        state.config.maxZ += normalizedNotes.length;
+        state.selectedIds = createdIds;
+      });
+
+      get().saveToDisk();
+      return createdIds;
     },
 
     updateTitle: (id, title) => {

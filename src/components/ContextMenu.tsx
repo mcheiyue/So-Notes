@@ -4,6 +4,7 @@ import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
 import { ChevronRight } from 'lucide-react';
 import { Z_INDEX } from '../constants/layout';
+import { createSmartPasteNoteInputs } from '../utils/smartPaste';
 
 type MenuItemButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement>;
 
@@ -27,7 +28,7 @@ const ContextMenuContent: React.FC = () => {
     changeSelectedNotesColor,
     bringToFront, 
     addNote, 
-    addNoteWithContent,
+    addNotesWithContentBatch,
     setStickyDrag, 
     deleteSelectedNotes, 
     selectedIds, 
@@ -168,11 +169,12 @@ const ContextMenuContent: React.FC = () => {
                     role="menuitem"
                     className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                      onClick={() => handleAction(async () => {
-                         const text = await readText();
-                         if (text) {
-                             addNoteWithContent(toWorldX(contextMenu.x), toWorldY(contextMenu.y), text);
-                         }
-                     })}
+                          const text = await readText();
+                          const notes = createSmartPasteNoteInputs(text, toWorldX(contextMenu.x), toWorldY(contextMenu.y));
+                          if (notes.length > 0) {
+                              addNotesWithContentBatch(notes);
+                          }
+                      })}
                   >
                      <span>📋</span> 粘贴并新建
                   </MenuItemButton>

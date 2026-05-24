@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useStore } from '../store/useStore';
-import { invoke } from '@tauri-apps/api/core';
+import { readText } from '@tauri-apps/plugin-clipboard-manager';
+import { createSmartPasteNoteInputs } from '../utils/smartPaste';
 
 export default function ShortcutsManager() {
   const deleteSelectedNotes = useStore((state) => state.deleteSelectedNotes);
@@ -44,9 +45,23 @@ export default function ShortcutsManager() {
     if (isSpotlightOpen) return;
     e.preventDefault();
     setViewportPosition(0, 0);
-    // 同时通知 Tauri 重置窗口大小（如果有相关逻辑的话，这里暂时只重置画布视口）
-    invoke('reset').catch(() => {}); 
   }, { enableOnFormTags: true }); // 视图操作允许在任何地方触发
+
+  // Ctrl + V / Cmd + V: 画布级智能粘贴（输入框内不拦截）
+  useHotkeys('mod+v', async (e) => {
+    if (isSpotlightOpen) return;
+    e.preventDefault();
+    const text = await readText().catch(() => '');
+    const { viewport, addNotesWithContentBatch } = useStore.getState();
+    const notes = createSmartPasteNoteInputs(
+      text,
+      viewport.x + Math.max(24, viewport.w / 2 - 130),
+      viewport.y + 72,
+    );
+    if (notes.length > 0) {
+      addNotesWithContentBatch(notes);
+    }
+  }, { enableOnFormTags: false });
 
   // --- Native Behavior Guard (UX Protection) ---
   
