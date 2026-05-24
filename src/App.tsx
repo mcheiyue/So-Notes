@@ -10,10 +10,13 @@ import { ContextMenu } from "./components/ContextMenu";
 import { MiniMap } from "./components/MiniMap";
 import ShortcutsManager from "./components/ShortcutsManager";
 import { Spotlight } from "./components/Spotlight";
+import { QuickCaptureOverlay } from "./components/QuickCaptureOverlay";
 import { WindowShell, WindowShellContentRect } from "./components/WindowShell";
 import { Z_INDEX } from "./constants/layout";
 import { useFPSMonitor } from "./utils/performance";
 import { diagnostics } from "./utils/diagnostics";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import { createSmartPasteNoteInputs } from "./utils/smartPaste";
 
 function App() {
   const isMouseDownRef = useRef(false);
@@ -93,6 +96,34 @@ function App() {
       useStore.getState().setPinned(event.payload);
     });
 
+    const unlistenQuickCapture = listen('open-quick-capture', () => {
+      useStore.getState().setQuickCaptureOpen(true);
+    });
+
+    const unlistenTrayNewNote = listen('tray-new-note', () => {
+      const { viewport, addNote } = useStore.getState();
+      addNote(viewport.x + 40, viewport.y + 40);
+    });
+
+    const unlistenClipboardNote = listen('create-note-from-clipboard', async () => {
+      const text = await readText().catch(() => '');
+      const { viewport, addNotesWithContentBatch } = useStore.getState();
+      const notes = createSmartPasteNoteInputs(text, viewport.x + 40, viewport.y + 40);
+      if (notes.length > 0) {
+        addNotesWithContentBatch(notes);
+      }
+    });
+
+    const unlistenResumeBoard = listen('resume-current-board', () => {
+      const { boards, currentBoardId, setViewportPosition, viewport } = useStore.getState();
+      const currentBoard = boards.find((board) => board.id === currentBoardId);
+      if (currentBoard?.viewport) {
+        setViewportPosition(currentBoard.viewport.x, currentBoard.viewport.y);
+      } else {
+        setViewportPosition(viewport.x, viewport.y);
+      }
+    });
+
     invoke<boolean>('get_pin_mode')
       .then((pinned) => {
         useStore.getState().setPinned(pinned);
@@ -104,6 +135,10 @@ function App() {
     return () => {
       unlistenReset.then(f => f());
       unlistenPin.then(f => f());
+      unlistenQuickCapture.then(f => f());
+      unlistenTrayNewNote.then(f => f());
+      unlistenClipboardNote.then(f => f());
+      unlistenResumeBoard.then(f => f());
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('blur', handleBlur);
@@ -137,6 +172,7 @@ function App() {
 
       <ContextMenu />
       <ShortcutsManager />
+      <QuickCaptureOverlay />
     </>
   );
 }

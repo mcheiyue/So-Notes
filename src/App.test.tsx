@@ -20,6 +20,10 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: listenMock,
 }));
 
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
+  readText: vi.fn(async () => ''),
+}));
+
 vi.mock('./store/db', () => ({
   db: {
     saveWAL: vi.fn(async () => undefined),
@@ -161,6 +165,10 @@ describe('App WindowShell 组合契约', () => {
     expect(shellOverlay?.className).toContain('pointer-events-none');
     expect(listenMock).toHaveBeenCalledWith('reset-viewport', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('pin-state-changed', expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith('open-quick-capture', expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith('create-note-from-clipboard', expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith('tray-new-note', expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith('resume-current-board', expect.any(Function));
     expect(invokeMock).toHaveBeenCalledWith('get_pin_mode');
   });
 
