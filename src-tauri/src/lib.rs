@@ -172,8 +172,7 @@ pub fn run() {
                     if shortcut.matches(Modifiers::CONTROL | Modifiers::ALT, Code::KeyS) {
                         if let Some(window) = app.get_webview_window("main") {
                             let is_visible = window.is_visible().unwrap_or(false);
-                            let is_focused = window.is_focused().unwrap_or(false);
-                            if is_visible && is_focused {
+                            if is_visible {
                                 let _ = window.hide();
                             } else {
                                 show_window_near_tray(&window);
@@ -287,8 +286,7 @@ pub fn run() {
 
                         if let Some(window) = app.get_webview_window("main") {
                             let is_visible = window.is_visible().unwrap_or(false);
-                            let is_focused = window.is_focused().unwrap_or(false);
-                            if is_visible && is_focused {
+                            if is_visible {
                                 let _ = window.hide();
                             } else {
                                 show_window_near_tray(&window);
