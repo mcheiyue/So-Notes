@@ -196,9 +196,8 @@ pub fn run() {
             let quick_capture_i = MenuItem::with_id(app, "quick_capture", "快速捕获", true, None::<&str>)?;
             let clipboard_note_i = MenuItem::with_id(app, "clipboard_note", "从剪贴板创建便签", true, None::<&str>)?;
             let new_note_i = MenuItem::with_id(app, "new_note", "新建空白便签", true, None::<&str>)?;
-            let resume_i = MenuItem::with_id(app, "resume", "回到上次位置", true, None::<&str>)?;
             let reset_i = MenuItem::with_id(app, "reset", "重置窗口", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&pin_i, &quick_capture_i, &clipboard_note_i, &new_note_i, &resume_i, &reset_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&pin_i, &quick_capture_i, &clipboard_note_i, &new_note_i, &reset_i, &quit_i])?;
 
             // 克隆 MenuItem 句柄以便在事件闭包中使用
             let pin_i_clone = pin_i.clone();
@@ -236,7 +235,6 @@ pub fn run() {
                         "quick_capture" => emit_main_window(app, "open-quick-capture"),
                         "clipboard_note" => emit_main_window(app, "create-note-from-clipboard"),
                         "new_note" => emit_main_window(app, "tray-new-note"),
-                        "resume" => emit_main_window(app, "resume-current-board"),
                         "reset" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 // Emit reset-viewport event to frontend

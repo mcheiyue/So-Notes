@@ -168,7 +168,6 @@ describe('App WindowShell 组合契约', () => {
     expect(listenMock).toHaveBeenCalledWith('open-quick-capture', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('create-note-from-clipboard', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('tray-new-note', expect.any(Function));
-    expect(listenMock).toHaveBeenCalledWith('resume-current-board', expect.any(Function));
     expect(invokeMock).toHaveBeenCalledWith('get_pin_mode');
   });
 

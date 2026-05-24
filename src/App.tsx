@@ -115,16 +115,6 @@ function App() {
       }
     });
 
-    const unlistenResumeBoard = listen('resume-current-board', () => {
-      const { boards, currentBoardId, setViewportPosition, viewport } = useStore.getState();
-      const currentBoard = boards.find((board) => board.id === currentBoardId);
-      if (currentBoard?.viewport) {
-        setViewportPosition(currentBoard.viewport.x, currentBoard.viewport.y);
-      } else {
-        setViewportPosition(viewport.x, viewport.y);
-      }
-    });
-
     invoke<boolean>('get_pin_mode')
       .then((pinned) => {
         useStore.getState().setPinned(pinned);
@@ -139,7 +129,6 @@ function App() {
       unlistenQuickCapture.then(f => f());
       unlistenTrayNewNote.then(f => f());
       unlistenClipboardNote.then(f => f());
-      unlistenResumeBoard.then(f => f());
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('blur', handleBlur);
