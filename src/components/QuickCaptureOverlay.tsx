@@ -27,7 +27,7 @@ export const QuickCaptureOverlay: React.FC = () => {
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !event.isComposing) {
         event.preventDefault();
         setQuickCaptureOpen(false);
       }
@@ -56,6 +56,7 @@ export const QuickCaptureOverlay: React.FC = () => {
       role="dialog"
       aria-modal="true"
       aria-label="快速捕获"
+      onContextMenu={(event) => event.preventDefault()}
     >
       <button
         type="button"
@@ -79,6 +80,11 @@ export const QuickCaptureOverlay: React.FC = () => {
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              return;
+            }
+
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
               submit();
