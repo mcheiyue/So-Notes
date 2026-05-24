@@ -194,6 +194,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   
   const isStickyDragging = useStore(state => state.stickyDrag.id === id);
   const isSelected = useStore(state => state.selectedIds.includes(id));
+  const isRecentlyCreated = useStore(state => state.recentlyCreatedIds.includes(id));
+  const clearRecentlyCreated = useStore(state => state.clearRecentlyCreated);
   const isGroupSelection = useStore(state => state.selectedIds.length > 1);
   const isPanMode = useStore(state => state.interaction.isPanMode);
   const isDarkMode = useDarkMode();
@@ -245,6 +247,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       document.removeEventListener('visibilitychange', clearHover);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isRecentlyCreated) return;
+
+    const timer = window.setTimeout(() => clearRecentlyCreated(id), 850);
+    return () => window.clearTimeout(timer);
+  }, [clearRecentlyCreated, id, isRecentlyCreated]);
 
   const worldX = note ? note.x : 0;
   const worldY = note ? note.y : 0;
@@ -538,9 +547,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
            "note-card absolute flex flex-col",
            note.collapsed ? "overflow-hidden" : "h-auto",
            "rounded-xl transition-[box-shadow,border-color,background-color] duration-200 ease-out",
-           "border border-border-subtle",
-           "group",
-           isStickyDragging && "scale-[1.02] cursor-move",
+            "border border-border-subtle",
+            "group",
+            isRecentlyCreated && !isStatic && "note-card-created",
+            isStickyDragging && "scale-[1.02] cursor-move",
            isSelected && !isStickyDragging && !isDarkMode && (
              isGroupSelection
                ? "border-blue-500/60"

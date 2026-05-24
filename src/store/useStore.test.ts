@@ -787,6 +787,25 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('新建空白便签后选中新便签并标记创建反馈', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+      saveToDisk: saveSpy,
+    });
+
+    useStore.getState().addNote(16, 24);
+
+    const state = useStore.getState();
+    const [noteId] = state.allNoteIds;
+    expect(state.selectedIds).toEqual([noteId]);
+    expect(state.recentlyCreatedIds).toEqual([noteId]);
+    expect(state.notesById[noteId]).toMatchObject({ x: 16, y: 24, content: '' });
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('批量创建智能粘贴便签后选中新便签并只保存一次', () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({
@@ -804,11 +823,15 @@ describe('v1.3.0 并发与代际契约', () => {
     const state = useStore.getState();
     expect(ids).toHaveLength(2);
     expect(state.selectedIds).toEqual(ids);
+    expect(state.recentlyCreatedIds).toEqual(ids);
     expect(state.allNoteIds).toEqual(ids);
     expect(state.config.maxZ).toBe(5);
     expect(state.notesById[ids[0]].content).toBe('Alpha');
     expect(state.notesById[ids[1]].z).toBe(5);
     expect(saveSpy).toHaveBeenCalledTimes(1);
+
+    useStore.getState().clearRecentlyCreated(ids[0]);
+    expect(useStore.getState().recentlyCreatedIds).toEqual([ids[1]]);
   });
 
   it('智能粘贴拆分气泡确认后复用原便签并追加剩余便签', () => {
@@ -839,6 +862,7 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(state.notesById[selectedIds[1]]).toMatchObject({ content: '第二行', x: 42, y: 48 });
     expect(state.notesById[selectedIds[2]]).toMatchObject({ content: '第三行', x: 74, y: 76 });
     expect(state.selectedIds).toEqual(selectedIds);
+    expect(state.recentlyCreatedIds).toEqual(selectedIds);
     expect(state.smartPasteSplitPanel).toBeNull();
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });

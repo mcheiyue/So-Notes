@@ -71,6 +71,7 @@ interface State {
   isSpotlightOpen: boolean;
   isQuickCaptureOpen: boolean;
   smartPasteSplitPanel: SmartPasteSplitPanelState | null;
+  recentlyCreatedIds: string[];
 
   // Actions
   init: () => Promise<void>;
@@ -81,6 +82,8 @@ interface State {
   openSmartPasteSplitPanel: (panel: SmartPasteSplitPanelState) => void;
   closeSmartPasteSplitPanel: () => void;
   applySmartPasteSplit: (optionId: SmartPasteOptionId) => string[];
+  markRecentlyCreated: (ids: string[]) => void;
+  clearRecentlyCreated: (id: string) => void;
   setPinned: (pinned: boolean) => void;
   setViewportSize: (w: number, h: number) => void;
   setShellRect: (rect: ShellRectState) => void;
@@ -299,6 +302,7 @@ export const useStore = create<State>()(
     isSpotlightOpen: false,
     isQuickCaptureOpen: false,
     smartPasteSplitPanel: null,
+    recentlyCreatedIds: [],
 
     init: async () => {
       let finalData: StorageData = { 
@@ -607,6 +611,12 @@ export const useStore = create<State>()(
 
     closeSmartPasteSplitPanel: () => set({ smartPasteSplitPanel: null }),
 
+    markRecentlyCreated: (ids) => set({ recentlyCreatedIds: ids }),
+
+    clearRecentlyCreated: (id) => set((state) => {
+      state.recentlyCreatedIds = state.recentlyCreatedIds.filter((createdId) => createdId !== id);
+    }),
+
     applySmartPasteSplit: (optionId) => {
       const panel = get().smartPasteSplitPanel;
       if (!panel) {
@@ -670,6 +680,7 @@ export const useStore = create<State>()(
 
         state.config.maxZ += splitInputs.length;
         state.selectedIds = selectedIds;
+        state.recentlyCreatedIds = selectedIds;
         state.smartPasteSplitPanel = null;
       });
 
@@ -697,6 +708,8 @@ export const useStore = create<State>()(
       set((state) => {
         appendNoteToNormalizedState(state, newNote);
         state.config.maxZ += 1;
+        state.selectedIds = [newNote.id];
+        state.recentlyCreatedIds = [newNote.id];
       });
 
       get().saveToDisk();
@@ -720,6 +733,8 @@ export const useStore = create<State>()(
       set((state) => {
         appendNoteToNormalizedState(state, newNote);
         state.config.maxZ += 1;
+        state.selectedIds = [newNote.id];
+        state.recentlyCreatedIds = [newNote.id];
       });
 
       get().saveToDisk();
@@ -760,6 +775,7 @@ export const useStore = create<State>()(
 
         state.config.maxZ += normalizedNotes.length;
         state.selectedIds = createdIds;
+        state.recentlyCreatedIds = createdIds;
       });
 
       get().saveToDisk();
