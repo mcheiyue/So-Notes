@@ -58,7 +58,8 @@ const ContextMenuContent: React.FC = () => {
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleArrangeAction = (strategy: 'position' | 'updatedAt' | 'color' = 'position') => {
-    const arrangeAtMenuPoint = () => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y), strategy);
+    const arrangeScope = contextMenu.type === 'CANVAS' && selectedIds.length <= 1 ? 'board' : 'selection';
+    const arrangeAtMenuPoint = () => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y), strategy, arrangeScope);
 
     if (selectedIds.length > 1) {
       handleAction(arrangeAtMenuPoint);

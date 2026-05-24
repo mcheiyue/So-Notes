@@ -30,6 +30,7 @@ interface SmartPasteSplitPanelState {
 }
 
 type ArrangeNotesStrategy = 'position' | 'updatedAt' | 'color';
+type ArrangeNotesScope = 'auto' | 'board' | 'selection';
 
 interface ArrangeUndoPosition {
   id: string;
@@ -129,7 +130,7 @@ interface State {
   moveNote: (id: string, x: number, y: number) => void;
   moveSelectedNotes: (dx: number, dy: number, excludeId?: string) => void;
   finalizeLayoutChange: (noteIds: string[]) => void;
-  arrangeNotes: (startX?: number, startY?: number, strategy?: ArrangeNotesStrategy) => void;
+  arrangeNotes: (startX?: number, startY?: number, strategy?: ArrangeNotesStrategy, scope?: ArrangeNotesScope) => void;
   undoLastArrange: () => boolean;
   dismissArrangeUndoToast: () => void;
   bringToFront: (id: string) => void;
@@ -187,6 +188,58 @@ const WAL_THROTTLE = 100;    // 100ms throttle for IndexedDB
 let lastWALSave = 0;
 let noteHighlightSequence = 0;
 let arrangeUndoSequence = 0;
+const noteHighlightTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+const recentlyCreatedTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+
+const getNoteHighlightDuration = (reason: NoteHighlightReason): number => (reason === 'located' ? 1100 : 900);
+
+const clearNoteHighlightTimer = (id: string) => {
+  const timer = noteHighlightTimeouts.get(id);
+  if (!timer) return;
+
+  clearTimeout(timer);
+  noteHighlightTimeouts.delete(id);
+};
+
+const clearRecentlyCreatedTimer = (id: string) => {
+  const timer = recentlyCreatedTimeouts.get(id);
+  if (!timer) return;
+
+  clearTimeout(timer);
+  recentlyCreatedTimeouts.delete(id);
+};
+
+const scheduleNoteHighlightCleanup = (id: string, highlight: NoteHighlight) => {
+  clearNoteHighlightTimer(id);
+
+  const timer = setTimeout(() => {
+    noteHighlightTimeouts.delete(id);
+    useStore.getState().clearNoteHighlight(id, highlight.token);
+  }, getNoteHighlightDuration(highlight.reason));
+
+  noteHighlightTimeouts.set(id, timer);
+};
+
+const scheduleRecentlyCreatedCleanup = (id: string) => {
+  clearRecentlyCreatedTimer(id);
+
+  const timer = setTimeout(() => {
+    recentlyCreatedTimeouts.delete(id);
+    useStore.getState().clearRecentlyCreated(id);
+  }, 850);
+
+  recentlyCreatedTimeouts.set(id, timer);
+};
+
+const clearTransientNoteState = (
+  state: Pick<State, 'noteHighlights' | 'recentlyCreatedIds'>,
+  noteId: string,
+) => {
+  clearNoteHighlightTimer(noteId);
+  clearRecentlyCreatedTimer(noteId);
+  delete state.noteHighlights[noteId];
+  state.recentlyCreatedIds = state.recentlyCreatedIds.filter((id) => id !== noteId);
+};
 
 const createNoteHighlight = (reason: NoteHighlightReason): NoteHighlight => ({
   reason,
@@ -203,6 +256,10 @@ const assignNoteHighlights = (
   const highlight = createNoteHighlight(reason);
   ids.forEach((id) => {
     state.noteHighlights[id] = highlight;
+    scheduleNoteHighlightCleanup(id, highlight);
+    if (reason === 'created') {
+      scheduleRecentlyCreatedCleanup(id);
+    }
   });
 };
 
@@ -361,12 +418,13 @@ const moveNoteBetweenBoards = (state: Pick<State, 'notesById' | 'boardNoteIds' |
 };
 
 
-const removeNoteFromNormalizedState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds' | 'layoutNotesById'>, noteId: string) => {
+const removeNoteFromNormalizedState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds' | 'layoutNotesById' | 'noteHighlights' | 'recentlyCreatedIds'>, noteId: string) => {
   const note = state.notesById[noteId];
   if (!note) {
     return;
   }
 
+  clearTransientNoteState(state, noteId);
   removeNoteIdFromBoard(state, note.boardId, noteId);
   delete state.notesById[noteId];
   state.allNoteIds = state.allNoteIds.filter((id) => id !== noteId);
@@ -750,6 +808,7 @@ export const useStore = create<State>()(
     }),
 
     clearRecentlyCreated: (id) => set((state) => {
+      clearRecentlyCreatedTimer(id);
       state.recentlyCreatedIds = state.recentlyCreatedIds.filter((createdId) => createdId !== id);
     }),
 
@@ -762,6 +821,7 @@ export const useStore = create<State>()(
       if (!current) return;
       if (token !== undefined && current.token !== token) return;
 
+      clearNoteHighlightTimer(id);
       delete state.noteHighlights[id];
     }),
 
@@ -1023,7 +1083,12 @@ export const useStore = create<State>()(
         }
     },
 
-    arrangeNotes: (startX?: number, startY?: number, strategy: ArrangeNotesStrategy = 'position') => {
+    arrangeNotes: (
+        startX?: number,
+        startY?: number,
+        strategy: ArrangeNotesStrategy = 'position',
+        scope: ArrangeNotesScope = 'auto',
+    ) => {
         const affectedIds: string[] = [];
         set((state) => {
             const viewport = state.viewport;
@@ -1037,11 +1102,11 @@ export const useStore = create<State>()(
             const COLUMN_WIDTH = 320; // Approx card width (300) + gap (20)
             const ROW_GAP = 20;
             
-            // 1. Determine targets: Selection or All
+            // 1. Determine targets: Selection or current board
             let targetNotes = denormalizeNotes(state);
-            const isGroupArrange = state.selectedIds.length > 0;
+            const shouldArrangeSelection = scope === 'selection' || (scope === 'auto' && state.selectedIds.length > 0);
             
-            if (isGroupArrange) {
+            if (shouldArrangeSelection) {
                 targetNotes = state.selectedIds.flatMap((id) => {
                     const note = state.notesById[id];
                     return note ? [note] : [];
@@ -1162,6 +1227,7 @@ export const useStore = create<State>()(
         if (note) {
           note.deletedAt = Date.now(); // Soft delete
           state.layoutNotesById[note.id] = extractLayoutNote(note);
+          clearTransientNoteState(state, note.id);
         }
         // Remove from selection if deleted
         state.selectedIds = state.selectedIds.filter(selId => selId !== id);
@@ -1346,6 +1412,7 @@ export const useStore = create<State>()(
                 if (note) {
                     note.deletedAt = Date.now();
                     state.layoutNotesById[note.id] = extractLayoutNote(note);
+                    clearTransientNoteState(state, note.id);
                 }
             });
             state.selectedIds = [];

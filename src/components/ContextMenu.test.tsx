@@ -120,7 +120,32 @@ describe('ContextMenu shell 坐标合同', () => {
       updatedButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
 
-    expect(arrangeNotes).toHaveBeenCalledWith(518, 434, 'updatedAt');
+    expect(arrangeNotes).toHaveBeenCalledWith(518, 434, 'updatedAt', 'board');
+  });
+
+  it('单选时画布菜单归拢仍显式整理当前看板全部便签', async () => {
+    const arrangeNotes = vi.fn();
+    useStore.setState({ arrangeNotes, selectedIds: ['note-1'] });
+
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const arrangeButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('一键归拢')) as HTMLButtonElement | undefined;
+    expect(arrangeButton).toBeDefined();
+
+    await act(async () => {
+      arrangeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    const confirmButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('一键归拢')) as HTMLButtonElement | undefined;
+    expect(confirmButton).toBeDefined();
+
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(arrangeNotes).toHaveBeenCalledWith(518, 434, 'position', 'board');
   });
 
   it('贴近壳右边界时子菜单翻到左侧并限制高度', async () => {

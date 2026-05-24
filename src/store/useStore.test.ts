@@ -474,6 +474,15 @@ describe('useStore 布局持久化契约', () => {
     expect(getNote('note-1')).toMatchObject({ x: 100, y: 120 });
     expect(getNote('note-2')).toMatchObject({ x: 420, y: 120 });
   });
+
+  it('arrangeNotes 显式指定 board 作用域时忽略单选并整理当前看板全部便签', () => {
+    useStore.setState({ selectedIds: ['note-1'] });
+
+    useStore.getState().arrangeNotes(100, 120, 'position', 'board');
+
+    expect(getNote('note-1')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('note-2')).toMatchObject({ x: 420, y: 120 });
+  });
 });
 
 describe('useStore 导入契约', () => {
@@ -1011,6 +1020,36 @@ describe('v1.3.0 并发与代际契约', () => {
 
     useStore.getState().clearNoteHighlight('note-1', secondHighlight?.token);
     expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
+  });
+
+  it('临时高亮即使没有便签组件挂载也会按时过期清理', () => {
+    useStore.getState().markNoteHighlights(['note-1'], 'located');
+    expect(useStore.getState().noteHighlights['note-1']?.reason).toBe('located');
+
+    vi.advanceTimersByTime(1100);
+
+    expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
+  });
+
+  it('软删除便签时同步清理临时高亮与新建反馈', () => {
+    useStore.getState().markRecentlyCreated(['note-1']);
+    expect(useStore.getState().recentlyCreatedIds).toEqual(['note-1']);
+    expect(useStore.getState().noteHighlights['note-1']?.reason).toBe('created');
+
+    useStore.getState().deleteNote('note-1');
+
+    expect(useStore.getState().recentlyCreatedIds).toEqual([]);
+    expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
+  });
+
+  it('永久删除便签时同步清理临时高亮与新建反馈', () => {
+    useStore.getState().markRecentlyCreated(['note-1']);
+
+    useStore.getState().deleteNotePermanently('note-1');
+
+    expect(useStore.getState().recentlyCreatedIds).toEqual([]);
+    expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
+    expect(useStore.getState().notesById['note-1']).toBeUndefined();
   });
 
   it('批量创建智能粘贴便签后选中新便签并只保存一次', () => {
