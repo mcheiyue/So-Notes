@@ -2,9 +2,10 @@ use std::{fs, sync::{Mutex, Arc}};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent,
+    Emitter, Manager, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tokio::sync;
 
 mod persistence;
@@ -36,6 +37,30 @@ fn now_millis() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
+}
+
+fn position_window_near_tray(window: &WebviewWindow) {
+    let _ = window.move_window(Position::BottomRight);
+    if let Ok(pos) = window.outer_position() {
+        let new_pos = tauri::PhysicalPosition {
+            x: pos.x - 16,
+            y: pos.y - 48,
+        };
+        let _ = window.set_position(new_pos);
+    }
+}
+
+fn show_window_near_tray(window: &WebviewWindow) {
+    position_window_near_tray(window);
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+fn emit_main_window(app: &tauri::AppHandle, event: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        show_window_near_tray(&window);
+        let _ = window.emit(event, ());
+    }
 }
 
 #[tauri::command]
@@ -130,6 +155,34 @@ pub fn run() {
                 persistence::IntentQueue::consumer_loop(rx).await;
             });
 
+            let quick_capture_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyN);
+            let toggle_window_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyS);
+            app.global_shortcut().on_shortcuts(
+                [quick_capture_shortcut, toggle_window_shortcut],
+                move |app, shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+
+                    if shortcut.matches(Modifiers::CONTROL | Modifiers::ALT, Code::KeyN) {
+                        emit_main_window(app, "open-quick-capture");
+                        return;
+                    }
+
+                    if shortcut.matches(Modifiers::CONTROL | Modifiers::ALT, Code::KeyS) {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let is_visible = window.is_visible().unwrap_or(false);
+                            let is_focused = window.is_focused().unwrap_or(false);
+                            if is_visible && is_focused {
+                                let _ = window.hide();
+                            } else {
+                                show_window_near_tray(&window);
+                            }
+                        }
+                    }
+                },
+            )?;
+
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let pin_i = MenuItem::with_id(app, "pin", "钉住窗口", true, None::<&str>)?;
             
@@ -139,9 +192,13 @@ pub fn run() {
                     *guard = Some(pin_i.clone());
                 }
             }
-            
+
+            let quick_capture_i = MenuItem::with_id(app, "quick_capture", "快速捕获", true, None::<&str>)?;
+            let clipboard_note_i = MenuItem::with_id(app, "clipboard_note", "从剪贴板创建便签", true, None::<&str>)?;
+            let new_note_i = MenuItem::with_id(app, "new_note", "新建空白便签", true, None::<&str>)?;
+            let resume_i = MenuItem::with_id(app, "resume", "回到上次位置", true, None::<&str>)?;
             let reset_i = MenuItem::with_id(app, "reset", "重置窗口", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&pin_i, &reset_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&pin_i, &quick_capture_i, &clipboard_note_i, &new_note_i, &resume_i, &reset_i, &quit_i])?;
 
             // 克隆 MenuItem 句柄以便在事件闭包中使用
             let pin_i_clone = pin_i.clone();
@@ -172,21 +229,14 @@ pub fn run() {
                                 let _ = window.emit("pin-state-changed", is_pinned);
 
                                 if is_pinned {
-                                    // Fix: Ensure window is in correct position before pinning
-                                    let _ = window.move_window(Position::BottomRight);
-                                    if let Ok(pos) = window.outer_position() {
-                                        let new_pos = tauri::PhysicalPosition {
-                                            x: pos.x - 16,
-                                            y: pos.y - 48,
-                                        };
-                                        let _ = window.set_position(new_pos);
-                                    }
-                                    
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
+                                    show_window_near_tray(&window);
                                 }
                             }
                         }
+                        "quick_capture" => emit_main_window(app, "open-quick-capture"),
+                        "clipboard_note" => emit_main_window(app, "create-note-from-clipboard"),
+                        "new_note" => emit_main_window(app, "tray-new-note"),
+                        "resume" => emit_main_window(app, "resume-current-board"),
                         "reset" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 // Emit reset-viewport event to frontend
@@ -238,21 +288,12 @@ pub fn run() {
                         *last = now;
 
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.move_window(Position::BottomRight);
-                            if let Ok(pos) = window.outer_position() {
-                                let new_pos = tauri::PhysicalPosition {
-                                    x: pos.x - 16,
-                                    y: pos.y - 48,
-                                };
-                                let _ = window.set_position(new_pos);
-                            }
                             let is_visible = window.is_visible().unwrap_or(false);
                             let is_focused = window.is_focused().unwrap_or(false);
                             if is_visible && is_focused {
                                 let _ = window.hide();
                             } else {
-                                let _ = window.show();
-                                let _ = window.set_focus();
+                                show_window_near_tray(&window);
                             }
                         }
                     }

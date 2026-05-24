@@ -1,3 +1,19 @@
-{"identifier":"default","description":"Default permissions","windows":["*"],"permissions":["core:default","clipboard-manager:allow-read-text","clipboard-manager:allow-write-text","core:window:allow-start-dragging",    "fs:allow-write-text-file",
+{
+  "identifier": "default",
+  "description": "Default permissions",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
+    "core:window:allow-start-dragging",
+    "fs:allow-write-text-file",
     "fs:allow-read-text-file",
-    "dialog:allow-save","dialog:allow-open"]}
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all",
+    "global-shortcut:allow-is-registered"
+  ]
+}
