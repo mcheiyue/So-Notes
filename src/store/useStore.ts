@@ -29,6 +29,8 @@ interface SmartPasteSplitPanelState {
   result: SmartPasteResult;
 }
 
+type ArrangeNotesStrategy = 'position' | 'updatedAt' | 'color';
+
 interface State {
   notesById: Record<string, Note>;
   allNoteIds: string[];
@@ -114,7 +116,7 @@ interface State {
   moveNote: (id: string, x: number, y: number) => void;
   moveSelectedNotes: (dx: number, dy: number, excludeId?: string) => void;
   finalizeLayoutChange: (noteIds: string[]) => void;
-  arrangeNotes: (startX?: number, startY?: number) => void;
+  arrangeNotes: (startX?: number, startY?: number, strategy?: ArrangeNotesStrategy) => void;
   bringToFront: (id: string) => void;
   deleteNote: (id: string) => void; // Soft delete
   restoreNote: (id: string) => void; // Restore from Trash
@@ -225,6 +227,34 @@ const calculateCurrentBoardNotesViewport = (
     right: bounds.right,
     bottom: bounds.bottom,
   };
+};
+
+const colorOrder = new Map(NOTE_COLORS.map((color, index) => [color.toLowerCase(), index]));
+
+const compareNotesByPosition = (a: Note, b: Note): number => {
+  const dy = a.y - b.y;
+  if (Math.abs(dy) > 50) return dy;
+  return a.x - b.x;
+};
+
+const getColorOrder = (color: string): number => colorOrder.get(color.toLowerCase()) ?? NOTE_COLORS.length;
+
+const sortNotesForArrange = (notes: Note[], strategy: ArrangeNotesStrategy): Note[] => {
+  return [...notes].sort((a, b) => {
+    if (strategy === 'updatedAt') {
+      const updatedDelta = b.updatedAt - a.updatedAt;
+      if (updatedDelta !== 0) return updatedDelta;
+      return compareNotesByPosition(a, b);
+    }
+
+    if (strategy === 'color') {
+      const colorDelta = getColorOrder(a.color) - getColorOrder(b.color);
+      if (colorDelta !== 0) return colorDelta;
+      return compareNotesByPosition(a, b);
+    }
+
+    return compareNotesByPosition(a, b);
+  });
 };
 
 const resolveSaveErrorMessage = (error: unknown): string => {
@@ -970,7 +1000,7 @@ export const useStore = create<State>()(
         }
     },
 
-    arrangeNotes: (startX?: number, startY?: number) => {
+    arrangeNotes: (startX?: number, startY?: number, strategy: ArrangeNotesStrategy = 'position') => {
         const affectedIds: string[] = [];
         set((state) => {
             const viewport = state.viewport;
@@ -1002,16 +1032,7 @@ export const useStore = create<State>()(
 
             affectedIds.push(...targetNotes.map((note) => note.id));
 
-            // 2. Sort by spatial position (Top-Left -> Bottom-Right)
-            // Weight Y more than X to form "reading order"
-            // Primary Sort: Y (bands of 50px? No, precise Y)
-            // Let's use simple Y * 10000 + X score? 
-            // Better: Y then X.
-            const sortedNotes = [...targetNotes].sort((a, b) => {
-                const dy = a.y - b.y;
-                if (Math.abs(dy) > 50) return dy; // If Y differs significantly, sort by Y
-                return a.x - b.x; // Otherwise sort by X (same 'row')
-            });
+            const sortedNotes = sortNotesForArrange(targetNotes, strategy);
 
             // 3. Row-based Layout with Boundary Check
             let currentX = effectiveStartX;

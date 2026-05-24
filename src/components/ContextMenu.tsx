@@ -57,6 +57,22 @@ const ContextMenuContent: React.FC = () => {
   const [activeSubmenu, setActiveSubmenu] = useState<'MOVE' | 'COPY' | null>(null);
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const handleArrangeAction = (strategy: 'position' | 'updatedAt' | 'color' = 'position') => {
+    const arrangeAtMenuPoint = () => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y), strategy);
+
+    if (selectedIds.length > 1) {
+      handleAction(arrangeAtMenuPoint);
+      return;
+    }
+
+    if (!confirmArrange) {
+      setConfirmArrange(true);
+      return;
+    }
+
+    handleAction(arrangeAtMenuPoint);
+  };
+
   const handleSubmenuEnter = (menu: 'MOVE' | 'COPY') => {
       if (closeTimeoutRef.current) {
           clearTimeout(closeTimeoutRef.current);
@@ -212,18 +228,7 @@ const ContextMenuContent: React.FC = () => {
             )}
             onClick={(e) => {
                 e.stopPropagation(); // Prevent menu close on first click
-                // Only treat as Group Mode if > 1 items selected
-                if (selectedIds.length > 1) {
-                    // Group arrange: No confirmation needed (safe operation)
-                    handleAction(() => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y)));
-                } else {
-                    // Global arrange: Require confirmation
-                    if (!confirmArrange) {
-                        setConfirmArrange(true);
-                    } else {
-                        handleAction(() => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y)));
-                    }
-                }
+                handleArrangeAction();
             }}
           >
             <span>🧹</span> 
@@ -232,6 +237,25 @@ const ContextMenuContent: React.FC = () => {
                 : (confirmArrange ? '确认归拢? (Click Again)' : '一键归拢 (Smart Arrange)')
             }
           </MenuItemButton>
+
+          {confirmArrange && selectedIds.length <= 1 && (
+            <>
+              <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                onClick={() => handleArrangeAction('updatedAt')}
+              >
+                <span>🕘</span> 按更新时间归拢
+              </MenuItemButton>
+              <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                onClick={() => handleArrangeAction('color')}
+              >
+                <span>🎨</span> 按颜色归拢
+              </MenuItemButton>
+            </>
+          )}
         </>
       )}
 

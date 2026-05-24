@@ -359,6 +359,84 @@ describe('useStore 布局持久化契约', () => {
     expect(getNote('note-1')?.y).toBe(120);
     expect(getNote('note-2')?.y).toBe(120 + 180 + 20);
   });
+
+  it('arrangeNotes 支持按更新时间从近到远排列', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'old-note',
+          boardId: 'default',
+          x: 10,
+          y: 10,
+          title: '旧便签',
+          content: 'old',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'new-note',
+          boardId: 'default',
+          x: 600,
+          y: 600,
+          title: '新便签',
+          content: 'new',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 900,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 900, h: 720 },
+    });
+
+    useStore.getState().arrangeNotes(100, 120, 'updatedAt');
+
+    expect(getNote('new-note')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('old-note')).toMatchObject({ x: 420, y: 120 });
+  });
+
+  it('arrangeNotes 支持按颜色顺序简单分组排列', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'blue-note',
+          boardId: 'default',
+          x: 10,
+          y: 10,
+          title: '蓝色',
+          content: 'blue',
+          color: '#dbeafe',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'white-note',
+          boardId: 'default',
+          x: 600,
+          y: 600,
+          title: '白色',
+          content: 'white',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 900, h: 720 },
+    });
+
+    useStore.getState().arrangeNotes(100, 120, 'color');
+
+    expect(getNote('white-note')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('blue-note')).toMatchObject({ x: 420, y: 120 });
+  });
 });
 
 describe('useStore 导入契约', () => {
