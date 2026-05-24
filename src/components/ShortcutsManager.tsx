@@ -3,6 +3,7 @@ import { useHotkeys } from 'react-hotkeys-hook';
 import { useStore } from '../store/useStore';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { buildSmartPasteNoteInputs, parseSmartPaste } from '../utils/smartPaste';
+import { getViewportSpawnOrigin } from '../utils/spawnPosition';
 
 export default function ShortcutsManager() {
   const deleteSelectedNotes = useStore((state) => state.deleteSelectedNotes);
@@ -65,10 +66,11 @@ export default function ShortcutsManager() {
     const text = await readText().catch(() => '');
     const { viewport, addNotesWithContentBatch, openSmartPasteSplitPanel } = useStore.getState();
     const result = parseSmartPaste(text);
+    const origin = getViewportSpawnOrigin(viewport);
     const notes = buildSmartPasteNoteInputs(
       result.source ? [result.source] : [],
-      viewport.x + Math.max(24, viewport.w / 2 - 130),
-      viewport.y + 72,
+      origin.x,
+      origin.y,
     );
     if (notes.length > 0) {
       const createdIds = addNotesWithContentBatch(notes) ?? [];

@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { QuickCaptureOverlay } from './QuickCaptureOverlay';
 import { useStore } from '../store/useStore';
+import { resetViewportSpawnSequenceForTests } from '../utils/spawnPosition';
 
 describe('QuickCaptureOverlay 输入事件', () => {
   let container: HTMLDivElement;
@@ -25,6 +26,7 @@ describe('QuickCaptureOverlay 输入事件', () => {
     );
 
     useStore.setState(useStore.getInitialState(), true);
+    resetViewportSpawnSequenceForTests();
     useStore.setState({ isQuickCaptureOpen: true });
 
     container = document.createElement('div');
@@ -63,5 +65,36 @@ describe('QuickCaptureOverlay 输入事件', () => {
     dialog?.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('提交快速捕获时使用统一视口落点', async () => {
+    const addNotesWithContentBatch = vi.fn();
+    useStore.setState({
+      addNotesWithContentBatch,
+      viewport: { x: 40, y: 60, w: 1280, h: 720 },
+    });
+
+    await renderOverlay();
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+
+    await act(async () => {
+      const setTextareaValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setTextareaValue?.call(textarea, '快速捕获内容');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const submitButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('创建'));
+    expect(submitButton).toBeDefined();
+
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(addNotesWithContentBatch).toHaveBeenCalledWith([
+      { content: '快速捕获内容', x: 550, y: 132 },
+    ]);
+    expect(useStore.getState().isQuickCaptureOpen).toBe(false);
   });
 });

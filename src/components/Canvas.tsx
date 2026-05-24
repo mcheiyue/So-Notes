@@ -17,6 +17,7 @@ import { getNoteElement } from "../utils/noteElementRegistry";
 import { resolveDragStopWorldPosition } from "../utils/dragCoordinates";
 import { finalizeActiveNoteDrag } from "../utils/activeNoteDrag";
 import { buildSmartPasteNoteInputs, parseSmartPaste } from "../utils/smartPaste";
+import { getViewportSpawnOrigin } from "../utils/spawnPosition";
 
 
 
@@ -523,11 +524,9 @@ export const Canvas: React.FC = () => {
 
     const text = e.clipboardData.getData('text/plain');
     const vp = useStore.getState().viewport;
-    const boundsWidth = containerRef.current?.getBoundingClientRect().width ?? vp.w;
-    const originX = vp.x + Math.max(24, boundsWidth / 2 - LAYOUT.NOTE_WIDTH / 2);
-    const originY = vp.y + 72;
+    const origin = getViewportSpawnOrigin(vp);
     const result = parseSmartPaste(text);
-    const notes = buildSmartPasteNoteInputs(result.source ? [result.source] : [], originX, originY);
+    const notes = buildSmartPasteNoteInputs(result.source ? [result.source] : [], origin.x, origin.y);
 
     if (notes.length === 0) {
       return;

@@ -83,6 +83,8 @@ vi.mock('./components/ShortcutsManager', () => ({
 
 import App from './App';
 import { useStore } from './store/useStore';
+import { resetViewportSpawnSequenceForTests } from './utils/spawnPosition';
+import { readText } from '@tauri-apps/plugin-clipboard-manager';
 
 describe('App WindowShell 组合契约', () => {
   let container: HTMLDivElement;
@@ -105,6 +107,7 @@ describe('App WindowShell 组合契约', () => {
       return 1;
     }));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    resetViewportSpawnSequenceForTests();
 
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback: ResizeObserverCallback) {
@@ -270,6 +273,44 @@ describe('App WindowShell 组合契约', () => {
     });
 
     expect(useStore.getState().isPinned).toBe(true);
+  });
+
+  it('托盘非鼠标入口使用统一视口落点并连续错位', async () => {
+    let trayNewNoteHandler: (() => void) | null = null;
+    let clipboardNoteHandler: (() => Promise<void>) | null = null;
+    const addNote = vi.fn();
+    const addNotesWithContentBatch = vi.fn();
+
+    vi.mocked(readText).mockResolvedValueOnce('剪贴板内容');
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      const [eventName, handler] = args as [string, () => void | Promise<void>];
+      if (eventName === 'tray-new-note') {
+        trayNewNoteHandler = handler as () => void;
+      }
+      if (eventName === 'create-note-from-clipboard') {
+        clipboardNoteHandler = handler as () => Promise<void>;
+      }
+      return vi.fn();
+    });
+    useStore.setState({
+      viewport: { x: 40, y: 60, w: 1280, h: 720 },
+      addNote,
+      addNotesWithContentBatch,
+    });
+
+    await renderApp();
+
+    await act(async () => {
+      trayNewNoteHandler?.();
+    });
+    await act(async () => {
+      await clipboardNoteHandler?.();
+    });
+
+    expect(addNote).toHaveBeenCalledWith(550, 132);
+    expect(addNotesWithContentBatch).toHaveBeenCalledWith([
+      { content: '剪贴板内容', x: 582, y: 160 },
+    ]);
   });
 
   it('WindowShell 内容矩形变化时同步更新 viewport 与 shellRect', async () => {

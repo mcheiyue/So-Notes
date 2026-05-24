@@ -1,14 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
-import { Z_INDEX, LAYOUT } from '../constants/layout';
+import { Z_INDEX } from '../constants/layout';
 import { createSmartPasteNoteInputs } from '../utils/smartPaste';
+import { getViewportSpawnOrigin } from '../utils/spawnPosition';
 
 const getCaptureOrigin = () => {
   const { viewport } = useStore.getState();
-  return {
-    x: viewport.x + Math.max(24, viewport.w / 2 - LAYOUT.NOTE_WIDTH / 2),
-    y: viewport.y + 72,
-  };
+  return getViewportSpawnOrigin(viewport);
 };
 
 export const QuickCaptureOverlay: React.FC = () => {

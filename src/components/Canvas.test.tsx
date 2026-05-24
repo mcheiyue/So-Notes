@@ -29,6 +29,7 @@ import { useStore } from '../store/useStore';
 import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
 import { Note } from '../store/types';
 import { LAYOUT } from '../constants/layout';
+import { resetViewportSpawnSequenceForTests } from '../utils/spawnPosition';
 import {
   beginEdgePushDragSession,
   setEdgePushDragLeader,
@@ -79,6 +80,7 @@ describe('Canvas 空白命中判定', () => {
     vi.stubGlobal('cancelAnimationFrame', cancelRafMock);
 
     useStore.setState(useStore.getInitialState(), true);
+    resetViewportSpawnSequenceForTests();
     setEdgePushDragLeader(null);
     const normalized = normalizeNotes([createNote()]);
     useStore.setState({

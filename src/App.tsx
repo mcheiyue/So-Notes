@@ -18,6 +18,7 @@ import { useFPSMonitor } from "./utils/performance";
 import { diagnostics } from "./utils/diagnostics";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { createSmartPasteNoteInputs } from "./utils/smartPaste";
+import { getViewportSpawnOrigin } from "./utils/spawnPosition";
 
 function App() {
   const isMouseDownRef = useRef(false);
@@ -117,13 +118,15 @@ function App() {
 
     const unlistenTrayNewNote = listen('tray-new-note', () => {
       const { viewport, addNote } = useStore.getState();
-      addNote(viewport.x + 40, viewport.y + 40);
+      const origin = getViewportSpawnOrigin(viewport);
+      addNote(origin.x, origin.y);
     });
 
     const unlistenClipboardNote = listen('create-note-from-clipboard', async () => {
       const text = await readText().catch(() => '');
       const { viewport, addNotesWithContentBatch } = useStore.getState();
-      const notes = createSmartPasteNoteInputs(text, viewport.x + 40, viewport.y + 40);
+      const origin = getViewportSpawnOrigin(viewport);
+      const notes = createSmartPasteNoteInputs(text, origin.x, origin.y);
       if (notes.length > 0) {
         addNotesWithContentBatch(notes);
       }
