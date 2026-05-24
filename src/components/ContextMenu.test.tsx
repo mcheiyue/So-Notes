@@ -78,6 +78,24 @@ describe('ContextMenu shell 坐标合同', () => {
     expect(addNote).toHaveBeenCalledWith(518, 434);
   });
 
+  it('画布菜单提供显示当前看板全部便签入口', async () => {
+    const bringCurrentBoardNotesIntoView = vi.fn(() => true);
+    useStore.setState({ bringCurrentBoardNotesIntoView });
+
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const bringIntoViewButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('显示全部便签')) as HTMLButtonElement | undefined;
+    expect(bringIntoViewButton).toBeDefined();
+
+    await act(async () => {
+      bringIntoViewButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(bringCurrentBoardNotesIntoView).toHaveBeenCalledTimes(1);
+  });
+
   it('贴近壳右边界时子菜单翻到左侧并限制高度', async () => {
     useStore.setState({
       currentBoardId: 'default',

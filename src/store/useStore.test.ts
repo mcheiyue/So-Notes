@@ -170,6 +170,77 @@ describe('useStore 布局持久化契约', () => {
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('bringCurrentBoardNotesIntoView 只移动视口到当前看板便签包围盒中心', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          boardId: 'default',
+          x: 1000,
+          y: 900,
+          title: '远处 A',
+          content: 'alpha',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'note-2',
+          boardId: 'default',
+          x: 1260,
+          y: 1100,
+          title: '远处 B',
+          content: 'beta',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+        {
+          id: 'note-3',
+          boardId: 'board-2',
+          x: 20,
+          y: 30,
+          title: '其他看板',
+          content: 'gamma',
+          color: '#FFFFFF',
+          z: 3,
+          createdAt: 300,
+          updatedAt: 300,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 400, h: 300 },
+      canvas: { w: 400, h: 300 },
+    });
+
+    const moved = useStore.getState().bringCurrentBoardNotesIntoView();
+    const state = useStore.getState();
+
+    expect(moved).toBe(true);
+    expect(state.viewport).toMatchObject({ x: 1060, y: 900, w: 400, h: 300 });
+    expect(state.notesById['note-1']).toMatchObject({ x: 1000, y: 900 });
+    expect(state.notesById['note-2']).toMatchObject({ x: 1260, y: 1100 });
+    expect(state.canvas.w).toBeGreaterThanOrEqual(1520);
+    expect(state.canvas.h).toBeGreaterThanOrEqual(1200);
+  });
+
+  it('bringCurrentBoardNotesIntoView 在当前看板没有便签时不改变视口', () => {
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      currentBoardId: 'default',
+      viewport: { x: 24, y: 36, w: 400, h: 300 },
+      canvas: { w: 400, h: 300 },
+    });
+
+    const moved = useStore.getState().bringCurrentBoardNotesIntoView();
+
+    expect(moved).toBe(false);
+    expect(useStore.getState().viewport).toEqual({ x: 24, y: 36, w: 400, h: 300 });
+  });
+
   it('arrangeNotes 对折叠便签使用 36px 高度估算下一行起点', () => {
     useStore.setState({
       ...normalizeNotes([
