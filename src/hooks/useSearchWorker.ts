@@ -89,6 +89,13 @@ export function useSearchWorker() {
     workerRef.current.postMessage(msg);
   }, [isReady]);
 
+  const clearSearch = useCallback(() => {
+    pendingQueryRef.current = null;
+    setIsSearching(false);
+    setGroups([]);
+    setTotal(0);
+  }, []);
+
   const updateNotes = useCallback((notes: Note[]) => {
     if (!workerRef.current) return;
 
@@ -115,6 +122,7 @@ export function useSearchWorker() {
     groups,
     total,
     search,
+    clearSearch,
     updateNotes,
     updateBoards,
     currentBoardId,

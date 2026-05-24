@@ -28,6 +28,7 @@ vi.mock('../hooks/useSearchWorker', () => ({
     groups: [],
     total: 0,
     search: vi.fn(),
+    clearSearch: vi.fn(),
     updateNotes: vi.fn(),
     updateBoards: vi.fn(),
     currentBoardId: 'default',

@@ -33,6 +33,7 @@ export const Spotlight = () => {
     groups,
     total,
     search: workerSearch,
+    clearSearch,
   } = useSearchWorker();
 
   const [flatResults, setFlatResults] = useState<Note[]>([]);
@@ -62,8 +63,13 @@ export const Spotlight = () => {
         setSelectedIndex(0);
         setFilter({ scope: 'all-boards' });
       });
+    } else {
+      setQuery("");
+      setSelectedIndex(0);
+      setFlatResults([]);
+      clearSearch();
     }
-  }, [isSpotlightOpen]);
+  }, [clearSearch, isSpotlightOpen]);
 
   useEffect(() => {
     if (!pendingTargetId) return;
