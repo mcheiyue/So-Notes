@@ -77,11 +77,24 @@ export const Spotlight = () => {
     }
 
     if (targetNote.boardId !== currentBoardId) {
-      return;
+      const frameId = requestAnimationFrame(() => {
+        if (useStore.getState().currentBoardId !== targetNote.boardId) {
+          setPendingTargetId(null);
+        }
+      });
+
+      return () => cancelAnimationFrame(frameId);
     }
 
     if (targetNote.collapsed) {
-      return;
+      const frameId = requestAnimationFrame(() => {
+        const latestNote = useStore.getState().notesById[pendingTargetId];
+        if (!latestNote || latestNote.collapsed) {
+          setPendingTargetId(null);
+        }
+      });
+
+      return () => cancelAnimationFrame(frameId);
     }
 
     const nWidth = LAYOUT.NOTE_WIDTH;
@@ -122,7 +135,6 @@ export const Spotlight = () => {
 
   const handleSelect = (note: Note) => {
     setSpotlightOpen(false);
-    setPendingTargetId(note.id);
 
     if (note.boardId !== currentBoardId) {
       switchBoard(note.boardId);
@@ -131,6 +143,8 @@ export const Spotlight = () => {
     if (note.collapsed) {
       toggleCollapse(note.id);
     }
+
+    requestAnimationFrame(() => setPendingTargetId(note.id));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -168,7 +182,11 @@ export const Spotlight = () => {
   if (!isSpotlightOpen) return null;
 
   return (
-    <div className="pointer-events-auto absolute inset-0 flex items-start justify-center pt-[20vh] px-4" style={{ zIndex: Z_INDEX.SPOTLIGHT }}>
+    <div
+      className="pointer-events-auto absolute inset-0 flex items-start justify-center pt-[20vh] px-4"
+      style={{ zIndex: Z_INDEX.SPOTLIGHT }}
+      onContextMenu={(event) => event.preventDefault()}
+    >
       <button 
         type="button"
         className="pointer-events-auto absolute inset-0 bg-black/20 backdrop-blur-sm transition-opacity" 
