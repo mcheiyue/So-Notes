@@ -802,8 +802,29 @@ describe('v1.3.0 并发与代际契约', () => {
     const [noteId] = state.allNoteIds;
     expect(state.selectedIds).toEqual([noteId]);
     expect(state.recentlyCreatedIds).toEqual([noteId]);
+    expect(state.noteHighlights[noteId]?.reason).toBe('created');
     expect(state.notesById[noteId]).toMatchObject({ x: 16, y: 24, content: '' });
     expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('临时定位高亮支持按 token 精确清理，避免旧计时器清掉新高亮', () => {
+    vi.setSystemTime(new Date('2026-03-19T10:20:00.000Z'));
+    useStore.getState().markNoteHighlights(['note-1'], 'located');
+    const firstHighlight = useStore.getState().noteHighlights['note-1'];
+
+    vi.setSystemTime(new Date('2026-03-19T10:20:01.000Z'));
+    useStore.getState().markNoteHighlights(['note-1'], 'edited');
+    const secondHighlight = useStore.getState().noteHighlights['note-1'];
+
+    expect(firstHighlight?.reason).toBe('located');
+    expect(secondHighlight?.reason).toBe('edited');
+    expect(secondHighlight?.token).not.toBe(firstHighlight?.token);
+
+    useStore.getState().clearNoteHighlight('note-1', firstHighlight?.token);
+    expect(useStore.getState().noteHighlights['note-1']).toEqual(secondHighlight);
+
+    useStore.getState().clearNoteHighlight('note-1', secondHighlight?.token);
+    expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
   });
 
   it('批量创建智能粘贴便签后选中新便签并只保存一次', () => {
@@ -824,6 +845,8 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(ids).toHaveLength(2);
     expect(state.selectedIds).toEqual(ids);
     expect(state.recentlyCreatedIds).toEqual(ids);
+    expect(state.noteHighlights[ids[0]]?.reason).toBe('created');
+    expect(state.noteHighlights[ids[1]]?.reason).toBe('created');
     expect(state.allNoteIds).toEqual(ids);
     expect(state.config.maxZ).toBe(5);
     expect(state.notesById[ids[0]].content).toBe('Alpha');

@@ -373,6 +373,32 @@ describe('NoteCard 头部交互边界', () => {
     expect(rootRegion?.style.boxShadow).toContain('0 2px 8px');
   });
 
+  it('编辑正文后在失焦时触发临时编辑高亮', async () => {
+    const markNoteHighlights = vi.fn();
+    useStore.setState({ markNoteHighlights });
+
+    await renderNoteCard();
+
+    const textarea = container.querySelector('textarea[placeholder="记点什么..."]') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+
+    await act(async () => {
+      textarea?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    });
+
+    await act(async () => {
+      const setTextareaValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setTextareaValue?.call(textarea, '内容已更新');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      textarea?.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+
+    expect(markNoteHighlights).toHaveBeenCalledWith(['note-1'], 'edited');
+  });
+
   it('不包含 before: 伪元素高光类（C2 已改用 inline 样式）', async () => {
     await renderNoteCard();
     const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;

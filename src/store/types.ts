@@ -85,6 +85,13 @@ export interface Note {
   deletedAt?: number | null; // Soft delete timestamp. If present, note is in Trash.
 }
 
+export type NoteHighlightReason = 'created' | 'located' | 'edited';
+
+export interface NoteHighlight {
+  reason: NoteHighlightReason;
+  token: number;
+}
+
 export interface Board {
   id: string;
   name: string;

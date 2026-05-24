@@ -112,6 +112,7 @@ export const Spotlight = () => {
       state.setViewportPosition(targetX, targetY);
       state.setSelectedIds([targetNote.id]);
       state.bringToFront(targetNote.id);
+      state.markNoteHighlights([targetNote.id], 'located');
     });
   };
 

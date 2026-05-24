@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { LayoutNote, Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus } from './types';
+import { LayoutNote, Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus, NoteHighlight, NoteHighlightReason } from './types';
 
 import { db } from './db';
 import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes } from './normalization';
@@ -72,6 +72,7 @@ interface State {
   isQuickCaptureOpen: boolean;
   smartPasteSplitPanel: SmartPasteSplitPanelState | null;
   recentlyCreatedIds: string[];
+  noteHighlights: Record<string, NoteHighlight>;
 
   // Actions
   init: () => Promise<void>;
@@ -84,6 +85,8 @@ interface State {
   applySmartPasteSplit: (optionId: SmartPasteOptionId) => string[];
   markRecentlyCreated: (ids: string[]) => void;
   clearRecentlyCreated: (id: string) => void;
+  markNoteHighlights: (ids: string[], reason: NoteHighlightReason) => void;
+  clearNoteHighlight: (id: string, token?: number) => void;
   setPinned: (pinned: boolean) => void;
   setViewportSize: (w: number, h: number) => void;
   setShellRect: (rect: ShellRectState) => void;
@@ -164,6 +167,25 @@ const DEBOUNCE_DELAY = 2000; // 2 seconds lazy save
 const WAL_THROTTLE = 100;    // 100ms throttle for IndexedDB
 
 let lastWALSave = 0;
+let noteHighlightSequence = 0;
+
+const createNoteHighlight = (reason: NoteHighlightReason): NoteHighlight => ({
+  reason,
+  token: Date.now() + (++noteHighlightSequence / 1000),
+});
+
+const assignNoteHighlights = (
+  state: Pick<State, 'noteHighlights'>,
+  ids: string[],
+  reason: NoteHighlightReason,
+) => {
+  if (ids.length === 0) return;
+
+  const highlight = createNoteHighlight(reason);
+  ids.forEach((id) => {
+    state.noteHighlights[id] = highlight;
+  });
+};
 
 const resolveSaveErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -303,6 +325,7 @@ export const useStore = create<State>()(
     isQuickCaptureOpen: false,
     smartPasteSplitPanel: null,
     recentlyCreatedIds: [],
+    noteHighlights: {},
 
     init: async () => {
       let finalData: StorageData = { 
@@ -611,10 +634,25 @@ export const useStore = create<State>()(
 
     closeSmartPasteSplitPanel: () => set({ smartPasteSplitPanel: null }),
 
-    markRecentlyCreated: (ids) => set({ recentlyCreatedIds: ids }),
+    markRecentlyCreated: (ids) => set((state) => {
+      state.recentlyCreatedIds = ids;
+      assignNoteHighlights(state, ids, 'created');
+    }),
 
     clearRecentlyCreated: (id) => set((state) => {
       state.recentlyCreatedIds = state.recentlyCreatedIds.filter((createdId) => createdId !== id);
+    }),
+
+    markNoteHighlights: (ids, reason) => set((state) => {
+      assignNoteHighlights(state, ids, reason);
+    }),
+
+    clearNoteHighlight: (id, token) => set((state) => {
+      const current = state.noteHighlights[id];
+      if (!current) return;
+      if (token !== undefined && current.token !== token) return;
+
+      delete state.noteHighlights[id];
     }),
 
     applySmartPasteSplit: (optionId) => {
@@ -681,6 +719,7 @@ export const useStore = create<State>()(
         state.config.maxZ += splitInputs.length;
         state.selectedIds = selectedIds;
         state.recentlyCreatedIds = selectedIds;
+        assignNoteHighlights(state, selectedIds, 'created');
         state.smartPasteSplitPanel = null;
       });
 
@@ -710,6 +749,7 @@ export const useStore = create<State>()(
         state.config.maxZ += 1;
         state.selectedIds = [newNote.id];
         state.recentlyCreatedIds = [newNote.id];
+        assignNoteHighlights(state, [newNote.id], 'created');
       });
 
       get().saveToDisk();
@@ -735,6 +775,7 @@ export const useStore = create<State>()(
         state.config.maxZ += 1;
         state.selectedIds = [newNote.id];
         state.recentlyCreatedIds = [newNote.id];
+        assignNoteHighlights(state, [newNote.id], 'created');
       });
 
       get().saveToDisk();
@@ -776,6 +817,7 @@ export const useStore = create<State>()(
         state.config.maxZ += normalizedNotes.length;
         state.selectedIds = createdIds;
         state.recentlyCreatedIds = createdIds;
+        assignNoteHighlights(state, createdIds, 'created');
       });
 
       get().saveToDisk();
