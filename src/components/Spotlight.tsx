@@ -83,24 +83,11 @@ export const Spotlight = () => {
     }
 
     if (targetNote.boardId !== currentBoardId) {
-      const frameId = requestAnimationFrame(() => {
-        if (useStore.getState().currentBoardId !== targetNote.boardId) {
-          setPendingTargetId(null);
-        }
-      });
-
-      return () => cancelAnimationFrame(frameId);
+      return;
     }
 
     if (targetNote.collapsed) {
-      const frameId = requestAnimationFrame(() => {
-        const latestNote = useStore.getState().notesById[pendingTargetId];
-        if (!latestNote || latestNote.collapsed) {
-          setPendingTargetId(null);
-        }
-      });
-
-      return () => cancelAnimationFrame(frameId);
+      return;
     }
 
     const nWidth = LAYOUT.NOTE_WIDTH;

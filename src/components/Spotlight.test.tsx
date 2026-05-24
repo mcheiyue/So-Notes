@@ -4,6 +4,26 @@ import { createRoot, Root } from 'react-dom/client';
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
+const searchWorkerMock = vi.hoisted(() => ({
+  groups: [] as Array<{ type: string; label: string; items: Array<{ note: { id: string; title: string; content: string } }> }>,
+  notes: [] as Array<{ id: string; title: string; content: string }>,
+  search: vi.fn((query: string) => {
+    const normalizedQuery = query.trim();
+    const items = normalizedQuery
+      ? searchWorkerMock.notes
+          .filter((note) => `${note.title}\n${note.content}`.includes(normalizedQuery))
+          .map((note) => ({ note }))
+      : [];
+
+    searchWorkerMock.groups = items.length > 0
+      ? [{ type: 'notes', label: '便签', items }]
+      : [];
+  }),
+  clearSearch: vi.fn(() => {
+    searchWorkerMock.groups = [];
+  }),
+}));
+
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async () => null),
 }));
@@ -25,10 +45,10 @@ vi.mock('../hooks/useSearchWorker', () => ({
   useSearchWorker: () => ({
     isReady: true,
     isSearching: false,
-    groups: [],
-    total: 0,
-    search: vi.fn(),
-    clearSearch: vi.fn(),
+    groups: searchWorkerMock.groups,
+    total: searchWorkerMock.groups.reduce((sum, group) => sum + group.items.length, 0),
+    search: searchWorkerMock.search,
+    clearSearch: searchWorkerMock.clearSearch,
     updateNotes: vi.fn(),
     updateBoards: vi.fn(),
     currentBoardId: 'default',
@@ -73,6 +93,10 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
       return 1;
     }));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    searchWorkerMock.groups = [];
+    searchWorkerMock.notes = [createNote()];
+    searchWorkerMock.search.mockClear();
+    searchWorkerMock.clearSearch.mockClear();
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
@@ -157,6 +181,72 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
     );
     expect(setSelectedIds).toHaveBeenCalledWith(['note-1']);
     expect(bringToFront).toHaveBeenCalledWith('note-1');
+    expect(clearSelection).toHaveBeenCalled();
+  });
+
+  it('跨看板搜索结果会等待目标看板生效后再聚焦', async () => {
+    const remoteNote = createNote({
+      id: 'remote-note',
+      boardId: 'board-2',
+      title: '跨板目标',
+      content: '等待看板切换后再聚焦',
+      x: 420,
+      y: 240,
+    });
+    const setViewportPosition = vi.fn();
+    const clearSelection = vi.fn();
+    const setSelectedIds = vi.fn();
+    const bringToFront = vi.fn();
+    const switchBoard = vi.fn();
+
+    searchWorkerMock.notes = [remoteNote];
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } },
+        { id: 'board-2', name: '二号看板', icon: '🧭', createdAt: 1, viewport: { x: 0, y: 0 } },
+      ],
+      currentBoardId: 'default',
+      ...normalizeNotes([remoteNote]),
+      setViewportPosition,
+      clearSelection,
+      setSelectedIds,
+      bringToFront,
+      switchBoard,
+    });
+
+    await renderSpotlight();
+
+    const input = container.querySelector('input[placeholder="搜索便签..."]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+
+    await act(async () => {
+      const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setInputValue?.call(input, '跨板');
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => undefined);
+
+    const resultButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('跨板目标')) as HTMLButtonElement | undefined;
+    expect(resultButton).toBeDefined();
+
+    await act(async () => {
+      resultButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(switchBoard).toHaveBeenCalledWith('board-2');
+    expect(setViewportPosition).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useStore.setState({ currentBoardId: 'board-2' });
+    });
+
+    expect(setViewportPosition).toHaveBeenCalledWith(
+      (420 + LAYOUT.NOTE_WIDTH / 2) - 160,
+      (240 + LAYOUT.NOTE_MIN_HEIGHT / 2) - 120,
+    );
+    expect(setSelectedIds).toHaveBeenCalledWith(['remote-note']);
+    expect(bringToFront).toHaveBeenCalledWith('remote-note');
     expect(clearSelection).toHaveBeenCalled();
   });
 });

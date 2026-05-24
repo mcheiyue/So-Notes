@@ -11,45 +11,56 @@ export default function ShortcutsManager() {
   const setViewportPosition = useStore((state) => state.setViewportPosition);
 
   const isSpotlightOpen = useStore((state) => state.isSpotlightOpen);
+  const isQuickCaptureOpen = useStore((state) => state.isQuickCaptureOpen);
   const setSpotlightOpen = useStore((state) => state.setSpotlightOpen);
+  const areCanvasShortcutsBlocked = isSpotlightOpen || isQuickCaptureOpen;
 
   // Ctrl + P / Cmd + P: 全局搜索
   useHotkeys('mod+p', (e) => {
+    if (isQuickCaptureOpen) {
+      e.preventDefault();
+      return;
+    }
+
     e.preventDefault();
     setSpotlightOpen(!isSpotlightOpen);
   }, { enableOnFormTags: true }); // 输入框内也可唤起
 
   // Ctrl + A / Cmd + A: 全选
   useHotkeys('mod+a', (e) => {
-    if (isSpotlightOpen) return;
+    if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
     selectAllNotes();
   }, { enableOnFormTags: false });
 
   // Delete / Backspace: 删除选中笔记
   useHotkeys(['delete', 'backspace'], (e) => {
-    if (isSpotlightOpen) return;
+    if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
     deleteSelectedNotes();
   }, { enableOnFormTags: false });
 
   // Ctrl + D / Cmd + D: 复制副本
   useHotkeys('mod+d', (e) => {
-    if (isSpotlightOpen) return;
+    if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
     duplicateSelectedNotes();
   }, { enableOnFormTags: false });
 
   // Ctrl + 0 / Cmd + 0: 重置视图
   useHotkeys('mod+0', (e) => {
-    if (isSpotlightOpen) return;
+    if (areCanvasShortcutsBlocked) {
+      e.preventDefault();
+      return;
+    }
+
     e.preventDefault();
     setViewportPosition(0, 0);
   }, { enableOnFormTags: true }); // 视图操作允许在任何地方触发
 
   // Ctrl + V / Cmd + V: 画布级智能粘贴（输入框内不拦截）
   useHotkeys('mod+v', async (e) => {
-    if (isSpotlightOpen) return;
+    if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
     const text = await readText().catch(() => '');
     const { viewport, addNotesWithContentBatch, openSmartPasteSplitPanel } = useStore.getState();
