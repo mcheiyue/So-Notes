@@ -11,6 +11,7 @@ import { MiniMap } from "./components/MiniMap";
 import ShortcutsManager from "./components/ShortcutsManager";
 import { Spotlight } from "./components/Spotlight";
 import { QuickCaptureOverlay } from "./components/QuickCaptureOverlay";
+import { SmartPasteSplitBubble } from "./components/SmartPasteSplitBubble";
 import { WindowShell, WindowShellContentRect } from "./components/WindowShell";
 import { Z_INDEX } from "./constants/layout";
 import { useFPSMonitor } from "./utils/performance";
@@ -172,6 +173,7 @@ function App() {
 
       <ContextMenu />
       <ShortcutsManager />
+      <SmartPasteSplitBubble />
       <QuickCaptureOverlay />
     </>
   );

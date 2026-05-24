@@ -24,6 +24,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { createEmptyNormalizedNotesState, denormalizeNotes, normalizeNotes } from './normalization';
 import { LAYOUT } from '../constants/layout';
 import { registerActiveNoteDragFinalizer } from '../utils/activeNoteDrag';
+import { parseSmartPaste } from '../utils/smartPaste';
 
 const flushMicrotasks = async () => {
   await Promise.resolve();
@@ -807,6 +808,38 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(state.config.maxZ).toBe(5);
     expect(state.notesById[ids[0]].content).toBe('Alpha');
     expect(state.notesById[ids[1]].z).toBe(5);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('智能粘贴拆分气泡确认后复用原便签并追加剩余便签', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 3 },
+      saveToDisk: saveSpy,
+    });
+
+    const [noteId] = useStore.getState().addNotesWithContentBatch([
+      { x: 10, y: 20, content: '第一行\n第二行\n第三行' },
+    ]);
+    saveSpy.mockClear();
+
+    useStore.getState().openSmartPasteSplitPanel({
+      noteId,
+      result: parseSmartPaste('第一行\n第二行\n第三行'),
+    });
+
+    const selectedIds = useStore.getState().applySmartPasteSplit('split-lines');
+    const state = useStore.getState();
+
+    expect(selectedIds).toHaveLength(3);
+    expect(selectedIds[0]).toBe(noteId);
+    expect(state.notesById[noteId].content).toBe('第一行');
+    expect(state.notesById[selectedIds[1]]).toMatchObject({ content: '第二行', x: 42, y: 48 });
+    expect(state.notesById[selectedIds[2]]).toMatchObject({ content: '第三行', x: 74, y: 76 });
+    expect(state.selectedIds).toEqual(selectedIds);
+    expect(state.smartPasteSplitPanel).toBeNull();
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 

@@ -4,7 +4,7 @@ import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
 import { ChevronRight } from 'lucide-react';
 import { Z_INDEX } from '../constants/layout';
-import { createSmartPasteNoteInputs } from '../utils/smartPaste';
+import { buildSmartPasteNoteInputs, parseSmartPaste } from '../utils/smartPaste';
 
 type MenuItemButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement>;
 
@@ -29,6 +29,7 @@ const ContextMenuContent: React.FC = () => {
     bringToFront, 
     addNote, 
     addNotesWithContentBatch,
+    openSmartPasteSplitPanel,
     setStickyDrag, 
     deleteSelectedNotes, 
     selectedIds, 
@@ -169,12 +170,20 @@ const ContextMenuContent: React.FC = () => {
                     role="menuitem"
                     className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                      onClick={() => handleAction(async () => {
-                          const text = await readText();
-                          const notes = createSmartPasteNoteInputs(text, toWorldX(contextMenu.x), toWorldY(contextMenu.y));
-                          if (notes.length > 0) {
-                              addNotesWithContentBatch(notes);
-                          }
-                      })}
+                           const text = await readText();
+                           const result = parseSmartPaste(text);
+                           const notes = buildSmartPasteNoteInputs(
+                               result.source ? [result.source] : [],
+                               toWorldX(contextMenu.x),
+                               toWorldY(contextMenu.y),
+                           );
+                           if (notes.length > 0) {
+                               const createdIds = addNotesWithContentBatch(notes) ?? [];
+                               if (createdIds.length > 0 && result.options.length > 1) {
+                                   openSmartPasteSplitPanel({ noteId: createdIds[0], result });
+                               }
+                           }
+                       })}
                   >
                      <span>📋</span> 粘贴并新建
                   </MenuItemButton>

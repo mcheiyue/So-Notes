@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useStore } from '../store/useStore';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
-import { createSmartPasteNoteInputs } from '../utils/smartPaste';
+import { buildSmartPasteNoteInputs, parseSmartPaste } from '../utils/smartPaste';
 
 export default function ShortcutsManager() {
   const deleteSelectedNotes = useStore((state) => state.deleteSelectedNotes);
@@ -52,14 +52,18 @@ export default function ShortcutsManager() {
     if (isSpotlightOpen) return;
     e.preventDefault();
     const text = await readText().catch(() => '');
-    const { viewport, addNotesWithContentBatch } = useStore.getState();
-    const notes = createSmartPasteNoteInputs(
-      text,
+    const { viewport, addNotesWithContentBatch, openSmartPasteSplitPanel } = useStore.getState();
+    const result = parseSmartPaste(text);
+    const notes = buildSmartPasteNoteInputs(
+      result.source ? [result.source] : [],
       viewport.x + Math.max(24, viewport.w / 2 - 130),
       viewport.y + 72,
     );
     if (notes.length > 0) {
-      addNotesWithContentBatch(notes);
+      const createdIds = addNotesWithContentBatch(notes) ?? [];
+      if (createdIds.length > 0 && result.options.length > 1) {
+        openSmartPasteSplitPanel({ noteId: createdIds[0], result });
+      }
     }
   }, { enableOnFormTags: false });
 

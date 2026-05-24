@@ -141,8 +141,9 @@ describe('Canvas 空白命中判定', () => {
   });
 
   it('画布获得粘贴事件时默认保留为一张便签', async () => {
-    const addNotesWithContentBatch = vi.fn();
-    useStore.setState({ addNotesWithContentBatch });
+    const addNotesWithContentBatch = vi.fn(() => ['new-note']);
+    const openSmartPasteSplitPanel = vi.fn();
+    useStore.setState({ addNotesWithContentBatch, openSmartPasteSplitPanel });
 
     await renderCanvas();
 
@@ -171,6 +172,10 @@ describe('Canvas 空白命中判定', () => {
     expect(addNotesWithContentBatch).toHaveBeenCalledWith([
       { content: '第一行\n第二行', x: 550, y: 132 },
     ]);
+    expect(openSmartPasteSplitPanel).toHaveBeenCalledWith({
+      noteId: 'new-note',
+      result: expect.objectContaining({ kind: 'lines', source: '第一行\n第二行' }),
+    });
   });
 
   it('双击 NoteCard 头部不会被误判为空白画布', async () => {

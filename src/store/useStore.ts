@@ -11,7 +11,8 @@ import { saveFile, openFile } from '../utils/fileSystem';
 import { diagnostics } from '../utils/diagnostics';
 import { getNoteVisualHeight } from '../utils/noteVisualMetrics';
 import { finalizeActiveNoteDrag } from '../utils/activeNoteDrag';
-import type { SmartPasteNoteInput } from '../utils/smartPaste';
+import { buildSmartPasteNoteInputs } from '../utils/smartPaste';
+import type { SmartPasteNoteInput, SmartPasteOptionId, SmartPasteResult } from '../utils/smartPaste';
 
 interface ImportFromFileResult {
   status: 'cancelled' | 'success' | 'error';
@@ -22,6 +23,11 @@ interface ImportFromFileResult {
 }
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+interface SmartPasteSplitPanelState {
+  noteId: string;
+  result: SmartPasteResult;
+}
 
 interface State {
   notesById: Record<string, Note>;
@@ -64,6 +70,7 @@ interface State {
   isDockVisible: boolean;
   isSpotlightOpen: boolean;
   isQuickCaptureOpen: boolean;
+  smartPasteSplitPanel: SmartPasteSplitPanelState | null;
 
   // Actions
   init: () => Promise<void>;
@@ -71,6 +78,9 @@ interface State {
   // Viewport Actions
   setSpotlightOpen: (isOpen: boolean) => void;
   setQuickCaptureOpen: (isOpen: boolean) => void;
+  openSmartPasteSplitPanel: (panel: SmartPasteSplitPanelState) => void;
+  closeSmartPasteSplitPanel: () => void;
+  applySmartPasteSplit: (optionId: SmartPasteOptionId) => string[];
   setPinned: (pinned: boolean) => void;
   setViewportSize: (w: number, h: number) => void;
   setShellRect: (rect: ShellRectState) => void;
@@ -288,6 +298,7 @@ export const useStore = create<State>()(
     isDockVisible: false,
     isSpotlightOpen: false,
     isQuickCaptureOpen: false,
+    smartPasteSplitPanel: null,
 
     init: async () => {
       let finalData: StorageData = { 
@@ -591,6 +602,80 @@ export const useStore = create<State>()(
     setSpotlightOpen: (isOpen) => set({ isSpotlightOpen: isOpen }),
 
     setQuickCaptureOpen: (isOpen) => set({ isQuickCaptureOpen: isOpen }),
+
+    openSmartPasteSplitPanel: (panel) => set({ smartPasteSplitPanel: panel }),
+
+    closeSmartPasteSplitPanel: () => set({ smartPasteSplitPanel: null }),
+
+    applySmartPasteSplit: (optionId) => {
+      const panel = get().smartPasteSplitPanel;
+      if (!panel) {
+        return [];
+      }
+
+      const option = panel.result.options.find((candidate) => candidate.id === optionId);
+      if (!option || option.id === 'keep') {
+        set({ smartPasteSplitPanel: null });
+        return [panel.noteId];
+      }
+
+      const targetNote = get().notesById[panel.noteId];
+      if (!targetNote) {
+        set({ smartPasteSplitPanel: null });
+        return [];
+      }
+
+      const contents = option.contents
+        .map((content) => content.trim())
+        .filter((content) => content.length > 0);
+
+      if (contents.length === 0) {
+        set({ smartPasteSplitPanel: null });
+        return [];
+      }
+
+      const splitInputs = buildSmartPasteNoteInputs(contents, targetNote.x, targetNote.y).slice(1);
+      const createdAt = Date.now();
+      const startZ = get().config.maxZ;
+      const createdIds = splitInputs.map(() => crypto.randomUUID());
+      const selectedIds = [panel.noteId, ...createdIds];
+
+      set((state) => {
+        const existingNote = state.notesById[panel.noteId];
+        if (!existingNote) {
+          state.smartPasteSplitPanel = null;
+          return;
+        }
+
+        existingNote.content = contents[0];
+        existingNote.updatedAt = createdAt;
+
+        splitInputs.forEach((input, index) => {
+          const newNote: Note = {
+            id: createdIds[index],
+            boardId: existingNote.boardId,
+            title: '',
+            content: input.content,
+            x: input.x,
+            y: input.y,
+            z: startZ + index + 1,
+            color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
+            collapsed: false,
+            createdAt,
+            updatedAt: createdAt,
+          };
+
+          appendNoteToNormalizedState(state, newNote);
+        });
+
+        state.config.maxZ += splitInputs.length;
+        state.selectedIds = selectedIds;
+        state.smartPasteSplitPanel = null;
+      });
+
+      get().saveToDisk();
+      return selectedIds;
+    },
 
     setPinned: (pinned) => set({ isPinned: pinned }),
 

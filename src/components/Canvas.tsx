@@ -16,7 +16,7 @@ import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetr
 import { getNoteElement } from "../utils/noteElementRegistry";
 import { resolveDragStopWorldPosition } from "../utils/dragCoordinates";
 import { finalizeActiveNoteDrag } from "../utils/activeNoteDrag";
-import { createSmartPasteNoteInputs } from "../utils/smartPaste";
+import { buildSmartPasteNoteInputs, parseSmartPaste } from "../utils/smartPaste";
 
 
 
@@ -526,14 +526,19 @@ export const Canvas: React.FC = () => {
     const boundsWidth = containerRef.current?.getBoundingClientRect().width ?? vp.w;
     const originX = vp.x + Math.max(24, boundsWidth / 2 - LAYOUT.NOTE_WIDTH / 2);
     const originY = vp.y + 72;
-    const notes = createSmartPasteNoteInputs(text, originX, originY);
+    const result = parseSmartPaste(text);
+    const notes = buildSmartPasteNoteInputs(result.source ? [result.source] : [], originX, originY);
 
     if (notes.length === 0) {
       return;
     }
 
     e.preventDefault();
-    useStore.getState().addNotesWithContentBatch(notes);
+    const state = useStore.getState();
+    const createdIds = state.addNotesWithContentBatch(notes) ?? [];
+    if (createdIds.length > 0 && result.options.length > 1) {
+      state.openSmartPasteSplitPanel({ noteId: createdIds[0], result });
+    }
   };
   
     const handleGlobalDown = (e: React.MouseEvent) => {
