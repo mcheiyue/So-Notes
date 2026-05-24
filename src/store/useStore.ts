@@ -31,6 +31,18 @@ interface SmartPasteSplitPanelState {
 
 type ArrangeNotesStrategy = 'position' | 'updatedAt' | 'color';
 
+interface ArrangeUndoPosition {
+  id: string;
+  x: number;
+  y: number;
+}
+
+interface ArrangeUndoToastState {
+  token: number;
+  noteCount: number;
+  positions: ArrangeUndoPosition[];
+}
+
 interface State {
   notesById: Record<string, Note>;
   allNoteIds: string[];
@@ -75,6 +87,7 @@ interface State {
   smartPasteSplitPanel: SmartPasteSplitPanelState | null;
   recentlyCreatedIds: string[];
   noteHighlights: Record<string, NoteHighlight>;
+  arrangeUndoToast: ArrangeUndoToastState | null;
 
   // Actions
   init: () => Promise<void>;
@@ -117,6 +130,8 @@ interface State {
   moveSelectedNotes: (dx: number, dy: number, excludeId?: string) => void;
   finalizeLayoutChange: (noteIds: string[]) => void;
   arrangeNotes: (startX?: number, startY?: number, strategy?: ArrangeNotesStrategy) => void;
+  undoLastArrange: () => boolean;
+  dismissArrangeUndoToast: () => void;
   bringToFront: (id: string) => void;
   deleteNote: (id: string) => void; // Soft delete
   restoreNote: (id: string) => void; // Restore from Trash
@@ -171,6 +186,7 @@ const WAL_THROTTLE = 100;    // 100ms throttle for IndexedDB
 
 let lastWALSave = 0;
 let noteHighlightSequence = 0;
+let arrangeUndoSequence = 0;
 
 const createNoteHighlight = (reason: NoteHighlightReason): NoteHighlight => ({
   reason,
@@ -256,6 +272,12 @@ const sortNotesForArrange = (notes: Note[], strategy: ArrangeNotesStrategy): Not
     return compareNotesByPosition(a, b);
   });
 };
+
+const createArrangeUndoToast = (positions: ArrangeUndoPosition[]): ArrangeUndoToastState => ({
+  token: Date.now() + (++arrangeUndoSequence / 1000),
+  noteCount: positions.length,
+  positions,
+});
 
 const resolveSaveErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -396,6 +418,7 @@ export const useStore = create<State>()(
     smartPasteSplitPanel: null,
     recentlyCreatedIds: [],
     noteHighlights: {},
+    arrangeUndoToast: null,
 
     init: async () => {
       let finalData: StorageData = { 
@@ -1031,6 +1054,9 @@ export const useStore = create<State>()(
             if (targetNotes.length === 0) return;
 
             affectedIds.push(...targetNotes.map((note) => note.id));
+            state.arrangeUndoToast = createArrangeUndoToast(
+                targetNotes.map((note) => ({ id: note.id, x: note.x, y: note.y })),
+            );
 
             const sortedNotes = sortNotesForArrange(targetNotes, strategy);
 
@@ -1084,6 +1110,40 @@ export const useStore = create<State>()(
         if (affectedIds.length > 0) {
             get().finalizeLayoutChange(affectedIds);
         }
+    },
+
+    undoLastArrange: () => {
+        const restoredIds: string[] = [];
+
+        set((state) => {
+            const snapshot = state.arrangeUndoToast;
+            if (!snapshot) return;
+
+            snapshot.positions.forEach((position) => {
+                const note = getNoteById(state, position.id);
+                if (!note || note.deletedAt) return;
+
+                note.x = position.x;
+                note.y = position.y;
+                state.layoutNotesById[note.id] = extractLayoutNote(note);
+                restoredIds.push(note.id);
+            });
+
+            state.arrangeUndoToast = null;
+        });
+
+        if (restoredIds.length > 0) {
+            get().finalizeLayoutChange(restoredIds);
+            return true;
+        }
+
+        return false;
+    },
+
+    dismissArrangeUndoToast: () => {
+        set((state) => {
+            state.arrangeUndoToast = null;
+        });
     },
 
     bringToFront: (id) => {

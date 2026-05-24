@@ -437,6 +437,43 @@ describe('useStore 布局持久化契约', () => {
     expect(getNote('white-note')).toMatchObject({ x: 100, y: 120 });
     expect(getNote('blue-note')).toMatchObject({ x: 420, y: 120 });
   });
+
+  it('arrangeNotes 记录最近一次归拢前位置并支持一次性撤销', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    useStore.getState().arrangeNotes(100, 120);
+
+    const toast = useStore.getState().arrangeUndoToast;
+    expect(toast?.noteCount).toBe(2);
+    expect(toast?.positions).toEqual([
+      { id: 'note-1', x: 10, y: 20 },
+      { id: 'note-2', x: 30, y: 40 },
+    ]);
+    expect(getNote('note-1')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('note-2')).toMatchObject({ x: 420, y: 120 });
+
+    const undone = useStore.getState().undoLastArrange();
+
+    expect(undone).toBe(true);
+    expect(useStore.getState().arrangeUndoToast).toBeNull();
+    expect(getNote('note-1')).toMatchObject({ x: 10, y: 20 });
+    expect(getNote('note-2')).toMatchObject({ x: 30, y: 40 });
+
+    vi.advanceTimersByTime(3000);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('dismissArrangeUndoToast 只关闭最近一次归拢提示，不移动便签', () => {
+    useStore.getState().arrangeNotes(100, 120);
+    expect(useStore.getState().arrangeUndoToast).not.toBeNull();
+
+    useStore.getState().dismissArrangeUndoToast();
+
+    expect(useStore.getState().arrangeUndoToast).toBeNull();
+    expect(getNote('note-1')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('note-2')).toMatchObject({ x: 420, y: 120 });
+  });
 });
 
 describe('useStore 导入契约', () => {
