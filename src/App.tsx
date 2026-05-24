@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store/useStore";
@@ -21,6 +21,7 @@ import { createSmartPasteNoteInputs } from "./utils/smartPaste";
 
 function App() {
   const isMouseDownRef = useRef(false);
+  const [globalShortcutError, setGlobalShortcutError] = useState<string | null>(null);
   const viewMode = useStore(state => state.viewMode);
   const isSpotlightOpen = useStore(state => state.isSpotlightOpen);
   const notesById = useStore(state => state.notesById);
@@ -115,6 +116,10 @@ function App() {
       }
     });
 
+    const unlistenGlobalShortcutError = listen<string>('global-shortcut-register-failed', (event) => {
+      setGlobalShortcutError(event.payload);
+    });
+
     invoke<boolean>('get_pin_mode')
       .then((pinned) => {
         useStore.getState().setPinned(pinned);
@@ -123,12 +128,21 @@ function App() {
         console.warn('Failed to sync pin mode on startup:', error);
       });
 
+    invoke<string | null>('get_global_shortcut_error')
+      .then((error) => {
+        setGlobalShortcutError(error ?? null);
+      })
+      .catch((error) => {
+        console.warn('Failed to sync global shortcut status on startup:', error);
+      });
+
     return () => {
       unlistenReset.then(f => f());
       unlistenPin.then(f => f());
       unlistenQuickCapture.then(f => f());
       unlistenTrayNewNote.then(f => f());
       unlistenClipboardNote.then(f => f());
+      unlistenGlobalShortcutError.then(f => f());
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('blur', handleBlur);
@@ -164,6 +178,18 @@ function App() {
       <ShortcutsManager />
       <SmartPasteSplitBubble />
       <QuickCaptureOverlay />
+      {globalShortcutError && (
+        <div
+          className="fixed left-1/2 top-4 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-xl"
+          style={{ zIndex: Z_INDEX.QUICK_CAPTURE + 1 }}
+          role="status"
+        >
+          <div className="font-medium">全局快捷键不可用</div>
+          <div className="mt-1 text-xs leading-relaxed">
+            {globalShortcutError}。请检查快捷键是否被其他应用占用，或系统是否限制了全局快捷键权限。
+          </div>
+        </div>
+      )}
     </>
   );
 }

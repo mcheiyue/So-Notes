@@ -14,6 +14,7 @@ struct AppState {
     is_pinned: Mutex<bool>,
     last_toggle_time: Mutex<u128>,
     pin_menu_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    global_shortcut_error: Mutex<Option<String>>,
     queue: persistence::IntentQueue,
     rx: Arc<sync::Mutex<sync::mpsc::UnboundedReceiver<persistence::WriteIntent>>>,
 }
@@ -28,6 +29,15 @@ fn set_pin_mode(state: tauri::State<AppState>, pinned: bool) {
 #[tauri::command]
 fn get_pin_mode(state: tauri::State<AppState>) -> bool {
     state.is_pinned.lock().map(|p| *p).unwrap_or(false)
+}
+
+#[tauri::command]
+fn get_global_shortcut_error(state: tauri::State<AppState>) -> Option<String> {
+    state
+        .global_shortcut_error
+        .lock()
+        .ok()
+        .and_then(|error| error.clone())
 }
 
 // Helper to get current millis
@@ -144,6 +154,7 @@ pub fn run() {
                 is_pinned: Mutex::new(false),
                 last_toggle_time: Mutex::new(0),
                 pin_menu_item: Mutex::new(None),
+                global_shortcut_error: Mutex::new(None),
                 queue,
                 rx,
             });
@@ -157,7 +168,7 @@ pub fn run() {
 
             let quick_capture_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyN);
             let toggle_window_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyS);
-            app.global_shortcut().on_shortcuts(
+            if let Err(error) = app.global_shortcut().on_shortcuts(
                 [quick_capture_shortcut, toggle_window_shortcut],
                 move |app, shortcut, event| {
                     if event.state != ShortcutState::Pressed {
@@ -180,7 +191,18 @@ pub fn run() {
                         }
                     }
                 },
-            )?;
+            ) {
+                let message = format!("全局快捷键注册失败：{error}");
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Ok(mut global_shortcut_error) = state.global_shortcut_error.lock() {
+                        *global_shortcut_error = Some(message.clone());
+                    }
+                }
+
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("global-shortcut-register-failed", message);
+                }
+            }
 
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let pin_i = MenuItem::with_id(app, "pin", "钉住窗口", true, None::<&str>)?;
@@ -317,6 +339,7 @@ pub fn run() {
             greet,
             set_pin_mode,
             get_pin_mode,
+            get_global_shortcut_error,
             save_content,
             load_content,
             check_hide_on_leave,

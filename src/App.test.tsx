@@ -7,6 +7,9 @@ const { invokeMock, listenMock } = vi.hoisted(() => ({
     if (command === 'get_pin_mode') {
       return false;
     }
+    if (command === 'get_global_shortcut_error') {
+      return null;
+    }
     return null;
   }),
   listenMock: vi.fn(async (..._args: unknown[]) => vi.fn()),
@@ -168,7 +171,31 @@ describe('App WindowShell 组合契约', () => {
     expect(listenMock).toHaveBeenCalledWith('open-quick-capture', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('create-note-from-clipboard', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('tray-new-note', expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith('global-shortcut-register-failed', expect.any(Function));
     expect(invokeMock).toHaveBeenCalledWith('get_pin_mode');
+    expect(invokeMock).toHaveBeenCalledWith('get_global_shortcut_error');
+  });
+
+  it('收到全局快捷键注册失败事件后显示提示', async () => {
+    let shortcutFailedHandler: ((event: { payload: string }) => void) | null = null;
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      const [eventName, handler] = args as [string, (event: { payload: string }) => void];
+      if (eventName === 'global-shortcut-register-failed') {
+        shortcutFailedHandler = handler;
+      }
+      return vi.fn();
+    });
+
+    await renderApp();
+
+    expect(container.textContent).not.toContain('全局快捷键不可用');
+
+    await act(async () => {
+      shortcutFailedHandler?.({ payload: 'Ctrl+Alt+N 已被占用' });
+    });
+
+    expect(container.textContent).toContain('全局快捷键不可用');
+    expect(container.textContent).toContain('Ctrl+Alt+N 已被占用');
   });
 
   it('切换到 TRASH 时保留同一个 WindowShell，只替换内容槽', async () => {
