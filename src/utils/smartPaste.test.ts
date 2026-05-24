@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildSmartPasteNoteInputs, createSmartPasteNoteInputs, parseSmartPaste } from './smartPaste';
+import {
+  buildSmartPasteNoteInputs,
+  createSmartPasteNoteInputs,
+  getDefaultSmartPasteOption,
+  parseSmartPaste,
+} from './smartPaste';
 
 describe('Smart Paste Lite 解析', () => {
   it('空白文本不产生选项', () => {
@@ -14,19 +19,20 @@ describe('Smart Paste Lite 解析', () => {
     expect(result.options[0].contents).toEqual(['https://example.com/page']);
   });
 
-  it('多行文本默认按行拆分', () => {
+  it('多行文本默认保留为一张便签', () => {
     const notes = createSmartPasteNoteInputs('第一行\n第二行\n\n', 100, 200);
 
     expect(notes).toEqual([
-      { content: '第一行', x: 100, y: 200 },
-      { content: '第二行', x: 132, y: 228 },
+      { content: '第一行\n第二行', x: 100, y: 200 },
     ]);
   });
 
-  it('多段文本优先按段拆分并保留段内换行', () => {
+  it('多段文本默认保留为一张，同时提供按段拆分选项', () => {
     const result = parseSmartPaste('第一段 A\n第一段 B\n\n第二段');
 
     expect(result.kind).toBe('paragraphs');
+    expect(getDefaultSmartPasteOption(result)?.id).toBe('keep');
+    expect(getDefaultSmartPasteOption(result)?.contents).toEqual(['第一段 A\n第一段 B\n\n第二段']);
     expect(result.options.find((option) => option.id === 'split-paragraphs')?.contents).toEqual([
       '第一段 A\n第一段 B',
       '第二段',

@@ -88,7 +88,7 @@ export const QuickCaptureOverlay: React.FC = () => {
           placeholder="输入内容后按 Enter 创建便签，Shift+Enter 换行"
         />
         <div className="flex items-center justify-between border-t border-border-subtle px-4 py-3 text-xs text-text-tertiary">
-          <span>多行或多段内容会自动拆成多张便签</span>
+          <span>多行内容会保留在同一张便签里</span>
           <div className="flex gap-2">
             <button
               type="button"

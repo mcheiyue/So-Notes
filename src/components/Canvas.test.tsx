@@ -140,7 +140,7 @@ describe('Canvas 空白命中判定', () => {
     expect(addNote).toHaveBeenCalledWith(210, 260);
   });
 
-  it('画布获得粘贴事件时按 Smart Paste Lite 批量创建便签', async () => {
+  it('画布获得粘贴事件时默认保留为一张便签', async () => {
     const addNotesWithContentBatch = vi.fn();
     useStore.setState({ addNotesWithContentBatch });
 
@@ -169,8 +169,7 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(addNotesWithContentBatch).toHaveBeenCalledWith([
-      { content: '第一行', x: 550, y: 132 },
-      { content: '第二行', x: 582, y: 160 },
+      { content: '第一行\n第二行', x: 550, y: 132 },
     ]);
   });
 

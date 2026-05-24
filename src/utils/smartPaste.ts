@@ -90,15 +90,7 @@ export const parseSmartPaste = (text: string): SmartPasteResult => {
 };
 
 export const getDefaultSmartPasteOption = (result: SmartPasteResult): SmartPasteOption | null => {
-  if (result.kind === 'paragraphs') {
-    return result.options.find((option) => option.id === 'split-paragraphs') ?? result.options[0] ?? null;
-  }
-
-  if (result.kind === 'lines') {
-    return result.options.find((option) => option.id === 'split-lines') ?? result.options[0] ?? null;
-  }
-
-  return result.options[0] ?? null;
+  return result.options.find((option) => option.id === 'keep') ?? result.options[0] ?? null;
 };
 
 export const buildSmartPasteNoteInputs = (
