@@ -157,7 +157,6 @@ const ContextMenuContent: React.FC = () => {
       aria-label="上下文菜单"
       className="fixed bg-secondary-bg text-text-primary rounded-lg shadow-xl border border-border-subtle py-1 min-w-[160px] select-none"
       style={{ left: menuX, top: menuY, zIndex: Z_INDEX.MENU }}
-      onMouseDown={(e) => e.stopPropagation()} // Prevent closing immediately or triggering canvas click
     >
       {contextMenu.type === 'CANVAS' && (
         <>

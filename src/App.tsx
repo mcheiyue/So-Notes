@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store/useStore";
@@ -21,7 +21,6 @@ import { createSmartPasteNoteInputs } from "./utils/smartPaste";
 import { getViewportSpawnOrigin } from "./utils/spawnPosition";
 
 function App() {
-  const isMouseDownRef = useRef(false);
   const [globalShortcutError, setGlobalShortcutError] = useState<string | null>(null);
   const viewMode = useStore(state => state.viewMode);
   const isSpotlightOpen = useStore(state => state.isSpotlightOpen);
@@ -85,22 +84,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const handleMouseDown = () => { isMouseDownRef.current = true; };
-    const handleMouseUp = () => { isMouseDownRef.current = false; };
-    
-    const handleBlur = () => {
-      if (!isMouseDownRef.current) {
-        invoke('check_hide_on_leave');
-      }
-    };
-
     const handleMouseLeave = () => {
        invoke('check_hide_on_leave');
     };
 
-    window.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('blur', handleBlur);
     document.addEventListener('mouseleave', handleMouseLeave);
 
     // Listen for reset-viewport event from backend tray menu
@@ -159,9 +146,6 @@ function App() {
       unlistenTrayNewNote.then(f => f());
       unlistenClipboardNote.then(f => f());
       unlistenGlobalShortcutError.then(f => f());
-      window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('blur', handleBlur);
       document.removeEventListener('mouseleave', handleMouseLeave);
     };
   }, []);

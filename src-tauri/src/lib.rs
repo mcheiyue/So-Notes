@@ -322,15 +322,18 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::Focused(focused) = event {
+                let state = window.state::<AppState>();
                 if *focused {
-                    let state = window.state::<AppState>();
-                    {
-                        if let Ok(mut last_time) = state.last_toggle_time.lock() {
-                            *last_time = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_millis();
-                        };
+                    if let Ok(mut last_time) = state.last_toggle_time.lock() {
+                        *last_time = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis();
+                    };
+                } else {
+                    let is_pinned = state.is_pinned.lock().map(|p| *p).unwrap_or(false);
+                    if !is_pinned {
+                        let _ = window.hide();
                     }
                 }
             }
