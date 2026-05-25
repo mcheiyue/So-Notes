@@ -3,7 +3,7 @@ import type { ViewportState } from '../store/types';
 
 const SPAWN_OFFSET_X = 32;
 const SPAWN_OFFSET_Y = 28;
-const SPAWN_OFFSET_STEPS = 6;
+const SPAWN_OFFSET_STEPS = 15;
 
 let viewportSpawnSequence = 0;
 
