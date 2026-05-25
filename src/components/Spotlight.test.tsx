@@ -182,6 +182,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
     expect(setSelectedIds).toHaveBeenCalledWith(['note-1']);
     expect(bringToFront).toHaveBeenCalledWith('note-1');
     expect(clearSelection).toHaveBeenCalled();
+    expect(useStore.getState().noteHighlights['note-1']?.reason).toBe('located');
   });
 
   it('跨看板搜索结果会在关闭搜索后继续聚焦目标便签', async () => {
@@ -243,5 +244,6 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
     expect(setSelectedIds).toHaveBeenCalledWith(['remote-note']);
     expect(bringToFront).toHaveBeenCalledWith('remote-note');
     expect(clearSelection).toHaveBeenCalled();
+    expect(useStore.getState().noteHighlights['remote-note']?.reason).toBe('located');
   });
 });

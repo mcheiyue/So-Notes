@@ -17,6 +17,7 @@ import { getNoteElement } from "../utils/noteElementRegistry";
 import { resolveDragStopWorldPosition } from "../utils/dragCoordinates";
 import { finalizeActiveNoteDrag } from "../utils/activeNoteDrag";
 import { buildSmartPasteNoteInputs, parseSmartPaste } from "../utils/smartPaste";
+import { getViewportSpawnOrigin } from "../utils/spawnPosition";
 
 
 
@@ -521,23 +522,33 @@ export const Canvas: React.FC = () => {
       return;
     }
 
+    // 如果粘贴事件来自输入框（便签编辑、Spotlight 搜索等），不拦截
+    const target = getEventTargetElement(e.target);
+    if (target && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable)) {
+      return;
+    }
+
+    // 如果有模态 UI 打开，不拦截
+    const state = useStore.getState();
+    if (state.isSpotlightOpen || state.isQuickCaptureOpen || state.smartPasteSplitPanel || state.contextMenu.isOpen) {
+      return;
+    }
+
     const text = e.clipboardData.getData('text/plain');
     const vp = useStore.getState().viewport;
-    const boundsWidth = containerRef.current?.getBoundingClientRect().width ?? vp.w;
-    const originX = vp.x + Math.max(24, boundsWidth / 2 - LAYOUT.NOTE_WIDTH / 2);
-    const originY = vp.y + 72;
+    const origin = getViewportSpawnOrigin(vp);
     const result = parseSmartPaste(text);
-    const notes = buildSmartPasteNoteInputs(result.source ? [result.source] : [], originX, originY);
+    const notes = buildSmartPasteNoteInputs(result.source ? [result.source] : [], origin.x, origin.y);
 
     if (notes.length === 0) {
       return;
     }
 
     e.preventDefault();
-    const state = useStore.getState();
-    const createdIds = state.addNotesWithContentBatch(notes) ?? [];
+    const store = useStore.getState();
+    const createdIds = store.addNotesWithContentBatch(notes) ?? [];
     if (createdIds.length > 0 && result.options.length > 1) {
-      state.openSmartPasteSplitPanel({ noteId: createdIds[0], result });
+      store.openSmartPasteSplitPanel({ noteId: createdIds[0], result });
     }
   };
   

@@ -52,9 +52,10 @@ fn now_millis() -> u128 {
 fn position_window_near_tray(window: &WebviewWindow) {
     let _ = window.move_window(Position::BottomRight);
     if let Ok(pos) = window.outer_position() {
+        let scale_factor = window.scale_factor().unwrap_or(1.0);
         let new_pos = tauri::PhysicalPosition {
-            x: pos.x - 16,
-            y: pos.y - 48,
+            x: pos.x - (16.0 * scale_factor).round() as i32,
+            y: pos.y - (48.0 * scale_factor).round() as i32,
         };
         let _ = window.set_position(new_pos);
     }
@@ -68,7 +69,13 @@ fn show_window_near_tray(window: &WebviewWindow) {
 
 fn emit_main_window(app: &tauri::AppHandle, event: &str) {
     if let Some(window) = app.get_webview_window("main") {
-        show_window_near_tray(&window);
+        let is_visible = window.is_visible().unwrap_or(false);
+        if is_visible {
+            let _ = window.show();
+            let _ = window.set_focus();
+        } else {
+            show_window_near_tray(&window);
+        }
         let _ = window.emit(event, ());
     }
 }
@@ -271,13 +278,15 @@ pub fn run() {
                                 if let Ok(Some(monitor)) = window.current_monitor() {
                                     let screen_size = monitor.size();
                                     let scale_factor = monitor.scale_factor();
+                                    let monitor_pos = monitor.position();
 
                                     let screen_w = screen_size.width as f64 / scale_factor;
                                     let screen_h = screen_size.height as f64 / scale_factor;
+                                    let offset_x = monitor_pos.x as f64 / scale_factor;
+                                    let offset_y = monitor_pos.y as f64 / scale_factor;
 
-                                    // Calculate position: Bottom-Right with margin
-                                    let new_x = screen_w - 400.0 - 20.0;
-                                    let new_y = screen_h - 600.0 - 50.0; // 50px for taskbar safety
+                                    let new_x = offset_x + screen_w - 400.0 - 20.0;
+                                    let new_y = offset_y + screen_h - 600.0 - 50.0;
 
                                     let _ = window.set_position(tauri::Position::Logical(
                                         tauri::LogicalPosition { x: new_x, y: new_y },
@@ -322,15 +331,24 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::Focused(focused) = event {
+                let state = window.state::<AppState>();
                 if *focused {
-                    let state = window.state::<AppState>();
-                    {
-                        if let Ok(mut last_time) = state.last_toggle_time.lock() {
-                            *last_time = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_millis();
-                        };
+                    if let Ok(mut last_time) = state.last_toggle_time.lock() {
+                        *last_time = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis();
+                    };
+                } else {
+                    let is_pinned = state.is_pinned.lock().map(|p| *p).unwrap_or(false);
+                    if !is_pinned {
+                        let window_handle = window.clone();
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                            if let Ok(false) = window_handle.is_focused() {
+                                let _ = window_handle.hide();
+                            }
+                        });
                     }
                 }
             }

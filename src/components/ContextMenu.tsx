@@ -56,6 +56,23 @@ const ContextMenuContent: React.FC = () => {
   const [activeSubmenu, setActiveSubmenu] = useState<'MOVE' | 'COPY' | null>(null);
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const handleArrangeAction = (strategy: 'position' | 'updatedAt' | 'color' = 'position') => {
+    const arrangeScope = contextMenu.type === 'CANVAS' && selectedIds.length <= 1 ? 'board' : 'selection';
+    const arrangeAtMenuPoint = () => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y), strategy, arrangeScope);
+
+    if (selectedIds.length > 1) {
+      handleAction(arrangeAtMenuPoint);
+      return;
+    }
+
+    if (!confirmArrange) {
+      setConfirmArrange(true);
+      return;
+    }
+
+    handleAction(arrangeAtMenuPoint);
+  };
+
   const handleSubmenuEnter = (menu: 'MOVE' | 'COPY') => {
       if (closeTimeoutRef.current) {
           clearTimeout(closeTimeoutRef.current);
@@ -139,7 +156,6 @@ const ContextMenuContent: React.FC = () => {
       aria-label="上下文菜单"
       className="fixed bg-secondary-bg text-text-primary rounded-lg shadow-xl border border-border-subtle py-1 min-w-[160px] select-none"
       style={{ left: menuX, top: menuY, zIndex: Z_INDEX.MENU }}
-      onMouseDown={(e) => e.stopPropagation()} // Prevent closing immediately or triggering canvas click
     >
       {contextMenu.type === 'CANVAS' && (
         <>
@@ -157,15 +173,15 @@ const ContextMenuContent: React.FC = () => {
                  <span>📑</span> 显示菜单
                </MenuItemButton>
                
-               <MenuItemButton
-                role="menuitem"
-                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
-                 onClick={() => handleAction(() => addNote(toWorldX(contextMenu.x), toWorldY(contextMenu.y)))}
+                <MenuItemButton
+                 role="menuitem"
+                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                  onClick={() => handleAction(() => addNote(toWorldX(contextMenu.x), toWorldY(contextMenu.y)))}
                >
-                 <span>📝</span> 新建便签
-               </MenuItemButton>
-               
-               {hasClipboardText && (
+                  <span>📝</span> 新建便签
+                </MenuItemButton>
+
+                {hasClipboardText && (
                   <MenuItemButton
                     role="menuitem"
                     className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
@@ -203,18 +219,7 @@ const ContextMenuContent: React.FC = () => {
             )}
             onClick={(e) => {
                 e.stopPropagation(); // Prevent menu close on first click
-                // Only treat as Group Mode if > 1 items selected
-                if (selectedIds.length > 1) {
-                    // Group arrange: No confirmation needed (safe operation)
-                    handleAction(() => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y)));
-                } else {
-                    // Global arrange: Require confirmation
-                    if (!confirmArrange) {
-                        setConfirmArrange(true);
-                    } else {
-                        handleAction(() => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y)));
-                    }
-                }
+                handleArrangeAction();
             }}
           >
             <span>🧹</span> 
@@ -223,6 +228,25 @@ const ContextMenuContent: React.FC = () => {
                 : (confirmArrange ? '确认归拢? (Click Again)' : '一键归拢 (Smart Arrange)')
             }
           </MenuItemButton>
+
+          {confirmArrange && selectedIds.length <= 1 && (
+            <>
+              <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                onClick={() => handleArrangeAction('updatedAt')}
+              >
+                <span>🕘</span> 按更新时间归拢
+              </MenuItemButton>
+              <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                onClick={() => handleArrangeAction('color')}
+              >
+                <span>🎨</span> 按颜色归拢
+              </MenuItemButton>
+            </>
+          )}
         </>
       )}
 

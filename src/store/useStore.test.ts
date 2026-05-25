@@ -288,6 +288,130 @@ describe('useStore 布局持久化契约', () => {
     expect(getNote('note-1')?.y).toBe(120);
     expect(getNote('note-2')?.y).toBe(120 + 180 + 20);
   });
+
+  it('arrangeNotes 支持按更新时间从近到远排列', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'old-note',
+          boardId: 'default',
+          x: 10,
+          y: 10,
+          title: '旧便签',
+          content: 'old',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'new-note',
+          boardId: 'default',
+          x: 600,
+          y: 600,
+          title: '新便签',
+          content: 'new',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 900,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 900, h: 720 },
+    });
+
+    useStore.getState().arrangeNotes(100, 120, 'updatedAt');
+
+    expect(getNote('new-note')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('old-note')).toMatchObject({ x: 420, y: 120 });
+  });
+
+  it('arrangeNotes 支持按颜色顺序简单分组排列', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'blue-note',
+          boardId: 'default',
+          x: 10,
+          y: 10,
+          title: '蓝色',
+          content: 'blue',
+          color: '#dbeafe',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'white-note',
+          boardId: 'default',
+          x: 600,
+          y: 600,
+          title: '白色',
+          content: 'white',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 900, h: 720 },
+    });
+
+    useStore.getState().arrangeNotes(100, 120, 'color');
+
+    expect(getNote('white-note')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('blue-note')).toMatchObject({ x: 420, y: 120 });
+  });
+
+  it('arrangeNotes 记录最近一次归拢前位置并支持一次性撤销', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    useStore.getState().arrangeNotes(100, 120);
+
+    const toast = useStore.getState().arrangeUndoToast;
+    expect(toast?.noteCount).toBe(2);
+    expect(toast?.positions).toEqual([
+      { id: 'note-1', x: 10, y: 20 },
+      { id: 'note-2', x: 30, y: 40 },
+    ]);
+    expect(getNote('note-1')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('note-2')).toMatchObject({ x: 420, y: 120 });
+
+    const undone = useStore.getState().undoLastArrange();
+
+    expect(undone).toBe(true);
+    expect(useStore.getState().arrangeUndoToast).toBeNull();
+    expect(getNote('note-1')).toMatchObject({ x: 10, y: 20 });
+    expect(getNote('note-2')).toMatchObject({ x: 30, y: 40 });
+
+    vi.advanceTimersByTime(3000);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('dismissArrangeUndoToast 只关闭最近一次归拢提示，不移动便签', () => {
+    useStore.getState().arrangeNotes(100, 120);
+    expect(useStore.getState().arrangeUndoToast).not.toBeNull();
+
+    useStore.getState().dismissArrangeUndoToast();
+
+    expect(useStore.getState().arrangeUndoToast).toBeNull();
+    expect(getNote('note-1')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('note-2')).toMatchObject({ x: 420, y: 120 });
+  });
+
+  it('arrangeNotes 显式指定 board 作用域时忽略单选并整理当前看板全部便签', () => {
+    useStore.setState({ selectedIds: ['note-1'] });
+
+    useStore.getState().arrangeNotes(100, 120, 'position', 'board');
+
+    expect(getNote('note-1')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('note-2')).toMatchObject({ x: 420, y: 120 });
+  });
 });
 
 describe('useStore 导入契约', () => {
@@ -802,8 +926,59 @@ describe('v1.3.0 并发与代际契约', () => {
     const [noteId] = state.allNoteIds;
     expect(state.selectedIds).toEqual([noteId]);
     expect(state.recentlyCreatedIds).toEqual([noteId]);
+    expect(state.noteHighlights[noteId]?.reason).toBe('created');
     expect(state.notesById[noteId]).toMatchObject({ x: 16, y: 24, content: '' });
     expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('临时定位高亮支持按 token 精确清理，避免旧计时器清掉新高亮', () => {
+    vi.setSystemTime(new Date('2026-03-19T10:20:00.000Z'));
+    useStore.getState().markNoteHighlights(['note-1'], 'located');
+    const firstHighlight = useStore.getState().noteHighlights['note-1'];
+
+    vi.setSystemTime(new Date('2026-03-19T10:20:01.000Z'));
+    useStore.getState().markNoteHighlights(['note-1'], 'edited');
+    const secondHighlight = useStore.getState().noteHighlights['note-1'];
+
+    expect(firstHighlight?.reason).toBe('located');
+    expect(secondHighlight?.reason).toBe('edited');
+    expect(secondHighlight?.token).not.toBe(firstHighlight?.token);
+
+    useStore.getState().clearNoteHighlight('note-1', firstHighlight?.token);
+    expect(useStore.getState().noteHighlights['note-1']).toEqual(secondHighlight);
+
+    useStore.getState().clearNoteHighlight('note-1', secondHighlight?.token);
+    expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
+  });
+
+  it('临时高亮即使没有便签组件挂载也会按时过期清理', () => {
+    useStore.getState().markNoteHighlights(['note-1'], 'located');
+    expect(useStore.getState().noteHighlights['note-1']?.reason).toBe('located');
+
+    vi.advanceTimersByTime(1100);
+
+    expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
+  });
+
+  it('软删除便签时同步清理临时高亮与新建反馈', () => {
+    useStore.getState().markRecentlyCreated(['note-1']);
+    expect(useStore.getState().recentlyCreatedIds).toEqual(['note-1']);
+    expect(useStore.getState().noteHighlights['note-1']?.reason).toBe('created');
+
+    useStore.getState().deleteNote('note-1');
+
+    expect(useStore.getState().recentlyCreatedIds).toEqual([]);
+    expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
+  });
+
+  it('永久删除便签时同步清理临时高亮与新建反馈', () => {
+    useStore.getState().markRecentlyCreated(['note-1']);
+
+    useStore.getState().deleteNotePermanently('note-1');
+
+    expect(useStore.getState().recentlyCreatedIds).toEqual([]);
+    expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
+    expect(useStore.getState().notesById['note-1']).toBeUndefined();
   });
 
   it('批量创建智能粘贴便签后选中新便签并只保存一次', () => {
@@ -824,6 +999,8 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(ids).toHaveLength(2);
     expect(state.selectedIds).toEqual(ids);
     expect(state.recentlyCreatedIds).toEqual(ids);
+    expect(state.noteHighlights[ids[0]]?.reason).toBe('created');
+    expect(state.noteHighlights[ids[1]]?.reason).toBe('created');
     expect(state.allNoteIds).toEqual(ids);
     expect(state.config.maxZ).toBe(5);
     expect(state.notesById[ids[0]].content).toBe('Alpha');

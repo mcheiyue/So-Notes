@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store/useStore";
@@ -18,9 +18,9 @@ import { useFPSMonitor } from "./utils/performance";
 import { diagnostics } from "./utils/diagnostics";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { createSmartPasteNoteInputs } from "./utils/smartPaste";
+import { getViewportSpawnOrigin } from "./utils/spawnPosition";
 
 function App() {
-  const isMouseDownRef = useRef(false);
   const [globalShortcutError, setGlobalShortcutError] = useState<string | null>(null);
   const viewMode = useStore(state => state.viewMode);
   const isSpotlightOpen = useStore(state => state.isSpotlightOpen);
@@ -29,6 +29,9 @@ function App() {
   const boardNoteIds = useStore(state => state.boardNoteIds);
   const currentBoardId = useStore(state => state.currentBoardId);
   const selectedIds = useStore(state => state.selectedIds);
+  const arrangeUndoToast = useStore(state => state.arrangeUndoToast);
+  const undoLastArrange = useStore(state => state.undoLastArrange);
+  const dismissArrangeUndoToast = useStore(state => state.dismissArrangeUndoToast);
 
   const { start: startFPS, stop: stopFPS } = useFPSMonitor();
 
@@ -45,6 +48,16 @@ function App() {
     const trashNotes = allNoteIds.filter((id) => notesById[id]?.deletedAt).length;
     diagnostics.updateNoteStats(totalNotes, currentBoardNotes, selectedIds.length, trashNotes);
   }, [allNoteIds, boardNoteIds, currentBoardId, notesById, selectedIds]);
+
+  useEffect(() => {
+    if (!arrangeUndoToast) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      dismissArrangeUndoToast();
+    }, 6000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [arrangeUndoToast, dismissArrangeUndoToast]);
 
   const syncViewportToShell = useCallback((rect: WindowShellContentRect) => {
     const nextWidth = Math.max(0, rect.width);
@@ -71,22 +84,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const handleMouseDown = () => { isMouseDownRef.current = true; };
-    const handleMouseUp = () => { isMouseDownRef.current = false; };
-    
-    const handleBlur = () => {
-      if (!isMouseDownRef.current) {
-        invoke('check_hide_on_leave');
-      }
-    };
-
     const handleMouseLeave = () => {
        invoke('check_hide_on_leave');
     };
 
-    window.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('blur', handleBlur);
     document.addEventListener('mouseleave', handleMouseLeave);
 
     // Listen for reset-viewport event from backend tray menu
@@ -104,13 +105,15 @@ function App() {
 
     const unlistenTrayNewNote = listen('tray-new-note', () => {
       const { viewport, addNote } = useStore.getState();
-      addNote(viewport.x + 40, viewport.y + 40);
+      const origin = getViewportSpawnOrigin(viewport);
+      addNote(origin.x, origin.y);
     });
 
     const unlistenClipboardNote = listen('create-note-from-clipboard', async () => {
       const text = await readText().catch(() => '');
       const { viewport, addNotesWithContentBatch } = useStore.getState();
-      const notes = createSmartPasteNoteInputs(text, viewport.x + 40, viewport.y + 40);
+      const origin = getViewportSpawnOrigin(viewport);
+      const notes = createSmartPasteNoteInputs(text, origin.x, origin.y);
       if (notes.length > 0) {
         addNotesWithContentBatch(notes);
       }
@@ -143,9 +146,6 @@ function App() {
       unlistenTrayNewNote.then(f => f());
       unlistenClipboardNote.then(f => f());
       unlistenGlobalShortcutError.then(f => f());
-      window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('blur', handleBlur);
       document.removeEventListener('mouseleave', handleMouseLeave);
     };
   }, []);
@@ -178,6 +178,34 @@ function App() {
       <ShortcutsManager />
       <SmartPasteSplitBubble />
       <QuickCaptureOverlay />
+      {arrangeUndoToast && (
+        <div
+          className="fixed left-1/2 bottom-5 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-sky-200/70 bg-secondary-bg/95 px-4 py-3 text-sm text-text-primary shadow-2xl backdrop-blur-md dark:border-sky-400/25 dark:bg-secondary-bg/90"
+          style={{ zIndex: Z_INDEX.QUICK_CAPTURE + 2 }}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="min-w-0">
+            <div className="font-medium">已归拢 {arrangeUndoToast.noteCount} 个便签</div>
+            <div className="mt-0.5 text-xs text-text-tertiary">可恢复到本次归拢前的位置。</div>
+          </div>
+          <button
+            type="button"
+            className="shrink-0 rounded-full bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-300"
+            onClick={undoLastArrange}
+          >
+            撤销
+          </button>
+          <button
+            type="button"
+            className="shrink-0 rounded-full px-2 py-1 text-xs text-text-tertiary transition-colors hover:bg-secondary-bg hover:text-text-primary dark:hover:bg-white/10"
+            aria-label="关闭归拢撤销提示"
+            onClick={dismissArrangeUndoToast}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {globalShortcutError && (
         <div
           className="fixed left-1/2 top-4 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-xl"

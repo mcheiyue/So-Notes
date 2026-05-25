@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { LayoutNote, Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus } from './types';
+import { LayoutNote, Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus, NoteHighlight, NoteHighlightReason } from './types';
 
 import { db } from './db';
 import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes } from './normalization';
@@ -9,7 +9,7 @@ import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNote
 import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
 import { diagnostics } from '../utils/diagnostics';
-import { getNoteVisualHeight } from '../utils/noteVisualMetrics';
+import { getNoteVisualHeight, getNoteVisualWidth } from '../utils/noteVisualMetrics';
 import { finalizeActiveNoteDrag } from '../utils/activeNoteDrag';
 import { buildSmartPasteNoteInputs } from '../utils/smartPaste';
 import type { SmartPasteNoteInput, SmartPasteOptionId, SmartPasteResult } from '../utils/smartPaste';
@@ -27,6 +27,21 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 interface SmartPasteSplitPanelState {
   noteId: string;
   result: SmartPasteResult;
+}
+
+type ArrangeNotesStrategy = 'position' | 'updatedAt' | 'color';
+type ArrangeNotesScope = 'auto' | 'board' | 'selection';
+
+interface ArrangeUndoPosition {
+  id: string;
+  x: number;
+  y: number;
+}
+
+interface ArrangeUndoToastState {
+  token: number;
+  noteCount: number;
+  positions: ArrangeUndoPosition[];
 }
 
 interface State {
@@ -72,6 +87,8 @@ interface State {
   isQuickCaptureOpen: boolean;
   smartPasteSplitPanel: SmartPasteSplitPanelState | null;
   recentlyCreatedIds: string[];
+  noteHighlights: Record<string, NoteHighlight>;
+  arrangeUndoToast: ArrangeUndoToastState | null;
 
   // Actions
   init: () => Promise<void>;
@@ -84,6 +101,8 @@ interface State {
   applySmartPasteSplit: (optionId: SmartPasteOptionId) => string[];
   markRecentlyCreated: (ids: string[]) => void;
   clearRecentlyCreated: (id: string) => void;
+  markNoteHighlights: (ids: string[], reason: NoteHighlightReason) => void;
+  clearNoteHighlight: (id: string, token?: number) => void;
   setPinned: (pinned: boolean) => void;
   setViewportSize: (w: number, h: number) => void;
   setShellRect: (rect: ShellRectState) => void;
@@ -110,7 +129,9 @@ interface State {
   moveNote: (id: string, x: number, y: number) => void;
   moveSelectedNotes: (dx: number, dy: number, excludeId?: string) => void;
   finalizeLayoutChange: (noteIds: string[]) => void;
-  arrangeNotes: (startX?: number, startY?: number) => void;
+  arrangeNotes: (startX?: number, startY?: number, strategy?: ArrangeNotesStrategy, scope?: ArrangeNotesScope) => void;
+  undoLastArrange: () => boolean;
+  dismissArrangeUndoToast: () => void;
   bringToFront: (id: string) => void;
   deleteNote: (id: string) => void; // Soft delete
   restoreNote: (id: string) => void; // Restore from Trash
@@ -164,6 +185,116 @@ const DEBOUNCE_DELAY = 2000; // 2 seconds lazy save
 const WAL_THROTTLE = 100;    // 100ms throttle for IndexedDB
 
 let lastWALSave = 0;
+let noteHighlightSequence = 0;
+let arrangeUndoSequence = 0;
+const noteHighlightTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+const recentlyCreatedTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+
+const getNoteHighlightDuration = (reason: NoteHighlightReason): number => (reason === 'located' ? 1100 : 900);
+
+const clearNoteHighlightTimer = (id: string) => {
+  const timer = noteHighlightTimeouts.get(id);
+  if (!timer) return;
+
+  clearTimeout(timer);
+  noteHighlightTimeouts.delete(id);
+};
+
+const clearRecentlyCreatedTimer = (id: string) => {
+  const timer = recentlyCreatedTimeouts.get(id);
+  if (!timer) return;
+
+  clearTimeout(timer);
+  recentlyCreatedTimeouts.delete(id);
+};
+
+const scheduleNoteHighlightCleanup = (id: string, highlight: NoteHighlight) => {
+  clearNoteHighlightTimer(id);
+
+  const timer = setTimeout(() => {
+    noteHighlightTimeouts.delete(id);
+    useStore.getState().clearNoteHighlight(id, highlight.token);
+  }, getNoteHighlightDuration(highlight.reason));
+
+  noteHighlightTimeouts.set(id, timer);
+};
+
+const scheduleRecentlyCreatedCleanup = (id: string) => {
+  clearRecentlyCreatedTimer(id);
+
+  const timer = setTimeout(() => {
+    recentlyCreatedTimeouts.delete(id);
+    useStore.getState().clearRecentlyCreated(id);
+  }, 850);
+
+  recentlyCreatedTimeouts.set(id, timer);
+};
+
+const clearTransientNoteState = (
+  state: Pick<State, 'noteHighlights' | 'recentlyCreatedIds'>,
+  noteId: string,
+) => {
+  clearNoteHighlightTimer(noteId);
+  clearRecentlyCreatedTimer(noteId);
+  delete state.noteHighlights[noteId];
+  state.recentlyCreatedIds = state.recentlyCreatedIds.filter((id) => id !== noteId);
+};
+
+const createNoteHighlight = (reason: NoteHighlightReason): NoteHighlight => ({
+  reason,
+  token: Date.now() + (++noteHighlightSequence / 1000),
+});
+
+const assignNoteHighlights = (
+  state: Pick<State, 'noteHighlights'>,
+  ids: string[],
+  reason: NoteHighlightReason,
+) => {
+  if (ids.length === 0) return;
+
+  const highlight = createNoteHighlight(reason);
+  ids.forEach((id) => {
+    state.noteHighlights[id] = highlight;
+    scheduleNoteHighlightCleanup(id, highlight);
+    if (reason === 'created') {
+      scheduleRecentlyCreatedCleanup(id);
+    }
+  });
+};
+
+const colorOrder = new Map(NOTE_COLORS.map((color, index) => [color.toLowerCase(), index]));
+
+const compareNotesByPosition = (a: Note, b: Note): number => {
+  const dy = a.y - b.y;
+  if (Math.abs(dy) > 50) return dy;
+  return a.x - b.x;
+};
+
+const getColorOrder = (color: string): number => colorOrder.get(color.toLowerCase()) ?? NOTE_COLORS.length;
+
+const sortNotesForArrange = (notes: Note[], strategy: ArrangeNotesStrategy): Note[] => {
+  return [...notes].sort((a, b) => {
+    if (strategy === 'updatedAt') {
+      const updatedDelta = b.updatedAt - a.updatedAt;
+      if (updatedDelta !== 0) return updatedDelta;
+      return compareNotesByPosition(a, b);
+    }
+
+    if (strategy === 'color') {
+      const colorDelta = getColorOrder(a.color) - getColorOrder(b.color);
+      if (colorDelta !== 0) return colorDelta;
+      return compareNotesByPosition(a, b);
+    }
+
+    return compareNotesByPosition(a, b);
+  });
+};
+
+const createArrangeUndoToast = (positions: ArrangeUndoPosition[]): ArrangeUndoToastState => ({
+  token: Date.now() + (++arrangeUndoSequence / 1000),
+  noteCount: positions.length,
+  positions,
+});
 
 const resolveSaveErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -189,7 +320,7 @@ const getNoteById = (state: Pick<State, 'notesById'>, id: string): Note | undefi
 const getBoardNotes = (state: Pick<State, 'notesById' | 'boardNoteIds'>, boardId: string): Note[] => {
   return getBoardNoteIds(state, boardId).flatMap((id) => {
     const note = state.notesById[id];
-    return note ? [note] : [];
+    return note && !note.deletedAt ? [note] : [];
   });
 };
 
@@ -247,12 +378,13 @@ const moveNoteBetweenBoards = (state: Pick<State, 'notesById' | 'boardNoteIds' |
 };
 
 
-const removeNoteFromNormalizedState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds' | 'layoutNotesById'>, noteId: string) => {
+const removeNoteFromNormalizedState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds' | 'layoutNotesById' | 'noteHighlights' | 'recentlyCreatedIds'>, noteId: string) => {
   const note = state.notesById[noteId];
   if (!note) {
     return;
   }
 
+  clearTransientNoteState(state, noteId);
   removeNoteIdFromBoard(state, note.boardId, noteId);
   delete state.notesById[noteId];
   state.allNoteIds = state.allNoteIds.filter((id) => id !== noteId);
@@ -303,6 +435,8 @@ export const useStore = create<State>()(
     isQuickCaptureOpen: false,
     smartPasteSplitPanel: null,
     recentlyCreatedIds: [],
+    noteHighlights: {},
+    arrangeUndoToast: null,
 
     init: async () => {
       let finalData: StorageData = { 
@@ -611,10 +745,27 @@ export const useStore = create<State>()(
 
     closeSmartPasteSplitPanel: () => set({ smartPasteSplitPanel: null }),
 
-    markRecentlyCreated: (ids) => set({ recentlyCreatedIds: ids }),
+    markRecentlyCreated: (ids) => set((state) => {
+      state.recentlyCreatedIds = ids;
+      assignNoteHighlights(state, ids, 'created');
+    }),
 
     clearRecentlyCreated: (id) => set((state) => {
+      clearRecentlyCreatedTimer(id);
       state.recentlyCreatedIds = state.recentlyCreatedIds.filter((createdId) => createdId !== id);
+    }),
+
+    markNoteHighlights: (ids, reason) => set((state) => {
+      assignNoteHighlights(state, ids, reason);
+    }),
+
+    clearNoteHighlight: (id, token) => set((state) => {
+      const current = state.noteHighlights[id];
+      if (!current) return;
+      if (token !== undefined && current.token !== token) return;
+
+      clearNoteHighlightTimer(id);
+      delete state.noteHighlights[id];
     }),
 
     applySmartPasteSplit: (optionId) => {
@@ -681,6 +832,7 @@ export const useStore = create<State>()(
         state.config.maxZ += splitInputs.length;
         state.selectedIds = selectedIds;
         state.recentlyCreatedIds = selectedIds;
+        assignNoteHighlights(state, selectedIds, 'created');
         state.smartPasteSplitPanel = null;
       });
 
@@ -710,6 +862,7 @@ export const useStore = create<State>()(
         state.config.maxZ += 1;
         state.selectedIds = [newNote.id];
         state.recentlyCreatedIds = [newNote.id];
+        assignNoteHighlights(state, [newNote.id], 'created');
       });
 
       get().saveToDisk();
@@ -735,6 +888,7 @@ export const useStore = create<State>()(
         state.config.maxZ += 1;
         state.selectedIds = [newNote.id];
         state.recentlyCreatedIds = [newNote.id];
+        assignNoteHighlights(state, [newNote.id], 'created');
       });
 
       get().saveToDisk();
@@ -776,6 +930,7 @@ export const useStore = create<State>()(
         state.config.maxZ += normalizedNotes.length;
         state.selectedIds = createdIds;
         state.recentlyCreatedIds = createdIds;
+        assignNoteHighlights(state, createdIds, 'created');
       });
 
       get().saveToDisk();
@@ -871,7 +1026,12 @@ export const useStore = create<State>()(
         }
     },
 
-    arrangeNotes: (startX?: number, startY?: number) => {
+    arrangeNotes: (
+        startX?: number,
+        startY?: number,
+        strategy: ArrangeNotesStrategy = 'position',
+        scope: ArrangeNotesScope = 'auto',
+    ) => {
         const affectedIds: string[] = [];
         set((state) => {
             const viewport = state.viewport;
@@ -885,11 +1045,11 @@ export const useStore = create<State>()(
             const COLUMN_WIDTH = 320; // Approx card width (300) + gap (20)
             const ROW_GAP = 20;
             
-            // 1. Determine targets: Selection or All
+            // 1. Determine targets: Selection or current board
             let targetNotes = denormalizeNotes(state);
-            const isGroupArrange = state.selectedIds.length > 0;
+            const shouldArrangeSelection = scope === 'selection' || (scope === 'auto' && state.selectedIds.length > 0);
             
-            if (isGroupArrange) {
+            if (shouldArrangeSelection) {
                 targetNotes = state.selectedIds.flatMap((id) => {
                     const note = state.notesById[id];
                     return note ? [note] : [];
@@ -902,17 +1062,11 @@ export const useStore = create<State>()(
             if (targetNotes.length === 0) return;
 
             affectedIds.push(...targetNotes.map((note) => note.id));
+            state.arrangeUndoToast = createArrangeUndoToast(
+                targetNotes.map((note) => ({ id: note.id, x: note.x, y: note.y })),
+            );
 
-            // 2. Sort by spatial position (Top-Left -> Bottom-Right)
-            // Weight Y more than X to form "reading order"
-            // Primary Sort: Y (bands of 50px? No, precise Y)
-            // Let's use simple Y * 10000 + X score? 
-            // Better: Y then X.
-            const sortedNotes = [...targetNotes].sort((a, b) => {
-                const dy = a.y - b.y;
-                if (Math.abs(dy) > 50) return dy; // If Y differs significantly, sort by Y
-                return a.x - b.x; // Otherwise sort by X (same 'row')
-            });
+            const sortedNotes = sortNotesForArrange(targetNotes, strategy);
 
             // 3. Row-based Layout with Boundary Check
             let currentX = effectiveStartX;
@@ -966,6 +1120,40 @@ export const useStore = create<State>()(
         }
     },
 
+    undoLastArrange: () => {
+        const restoredIds: string[] = [];
+
+        set((state) => {
+            const snapshot = state.arrangeUndoToast;
+            if (!snapshot) return;
+
+            snapshot.positions.forEach((position) => {
+                const note = getNoteById(state, position.id);
+                if (!note || note.deletedAt) return;
+
+                note.x = position.x;
+                note.y = position.y;
+                state.layoutNotesById[note.id] = extractLayoutNote(note);
+                restoredIds.push(note.id);
+            });
+
+            state.arrangeUndoToast = null;
+        });
+
+        if (restoredIds.length > 0) {
+            get().finalizeLayoutChange(restoredIds);
+            return true;
+        }
+
+        return false;
+    },
+
+    dismissArrangeUndoToast: () => {
+        set((state) => {
+            state.arrangeUndoToast = null;
+        });
+    },
+
     bringToFront: (id) => {
       set((state) => {
         const note = getNoteById(state, id);
@@ -982,6 +1170,7 @@ export const useStore = create<State>()(
         if (note) {
           note.deletedAt = Date.now(); // Soft delete
           state.layoutNotesById[note.id] = extractLayoutNote(note);
+          clearTransientNoteState(state, note.id);
         }
         // Remove from selection if deleted
         state.selectedIds = state.selectedIds.filter(selId => selId !== id);
@@ -1145,7 +1334,7 @@ export const useStore = create<State>()(
 
     selectAllNotes: () => {
         set((state) => {
-            const currentBoardNotes = getBoardNotes(state, state.currentBoardId).filter((note) => !note.deletedAt);
+            const currentBoardNotes = getBoardNotes(state, state.currentBoardId);
             state.selectedIds = currentBoardNotes.map(n => n.id);
         });
     },
@@ -1166,6 +1355,7 @@ export const useStore = create<State>()(
                 if (note) {
                     note.deletedAt = Date.now();
                     state.layoutNotesById[note.id] = extractLayoutNote(note);
+                    clearTransientNoteState(state, note.id);
                 }
             });
             state.selectedIds = [];

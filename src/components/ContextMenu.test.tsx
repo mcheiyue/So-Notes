@@ -78,6 +78,58 @@ describe('ContextMenu shell 坐标合同', () => {
     expect(addNote).toHaveBeenCalledWith(518, 434);
   });
 
+  it('确认一键归拢后提供更新时间和颜色归拢入口', async () => {
+    const arrangeNotes = vi.fn();
+    useStore.setState({ arrangeNotes });
+
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const arrangeButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('一键归拢')) as HTMLButtonElement | undefined;
+    expect(arrangeButton).toBeDefined();
+
+    await act(async () => {
+      arrangeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    const updatedButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('按更新时间归拢')) as HTMLButtonElement | undefined;
+    const colorButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('按颜色归拢')) as HTMLButtonElement | undefined;
+    expect(updatedButton).toBeDefined();
+    expect(colorButton).toBeDefined();
+
+    await act(async () => {
+      updatedButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(arrangeNotes).toHaveBeenCalledWith(518, 434, 'updatedAt', 'board');
+  });
+
+  it('单选时画布菜单归拢仍显式整理当前看板全部便签', async () => {
+    const arrangeNotes = vi.fn();
+    useStore.setState({ arrangeNotes, selectedIds: ['note-1'] });
+
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const arrangeButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('一键归拢')) as HTMLButtonElement | undefined;
+    expect(arrangeButton).toBeDefined();
+
+    await act(async () => {
+      arrangeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    const confirmButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('一键归拢')) as HTMLButtonElement | undefined;
+    expect(confirmButton).toBeDefined();
+
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(arrangeNotes).toHaveBeenCalledWith(518, 434, 'position', 'board');
+  });
+
   it('贴近壳右边界时子菜单翻到左侧并限制高度', async () => {
     useStore.setState({
       currentBoardId: 'default',

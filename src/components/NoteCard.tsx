@@ -195,7 +195,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const isStickyDragging = useStore(state => state.stickyDrag.id === id);
   const isSelected = useStore(state => state.selectedIds.includes(id));
   const isRecentlyCreated = useStore(state => state.recentlyCreatedIds.includes(id));
+  const noteHighlight = useStore(state => state.noteHighlights[id]);
   const clearRecentlyCreated = useStore(state => state.clearRecentlyCreated);
+  const markNoteHighlights = useStore(state => state.markNoteHighlights);
+  const clearNoteHighlight = useStore(state => state.clearNoteHighlight);
   const isGroupSelection = useStore(state => state.selectedIds.length > 1);
   const isPanMode = useStore(state => state.interaction.isPanMode);
   const isDarkMode = useDarkMode();
@@ -212,6 +215,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const [isEditing, setIsEditing] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
+  const titleBeforeEditRef = useRef(note?.title ?? '');
+  const contentBeforeEditRef = useRef(note?.content ?? '');
   
   // Drag State (Hybrid Control)
   const isDragging = useRef(false);
@@ -255,6 +260,14 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     return () => window.clearTimeout(timer);
   }, [clearRecentlyCreated, id, isRecentlyCreated]);
 
+  useEffect(() => {
+    if (!noteHighlight) return;
+
+    const duration = noteHighlight.reason === 'located' ? 1100 : 900;
+    const timer = window.setTimeout(() => clearNoteHighlight(id, noteHighlight.token), duration);
+    return () => window.clearTimeout(timer);
+  }, [clearNoteHighlight, id, noteHighlight]);
+
   const worldX = note ? note.x : 0;
   const worldY = note ? note.y : 0;
   const darkSpectrum = getNoteDarkSpectrum(note?.color ?? '#FFFFFF');
@@ -280,7 +293,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const disableHeaderTooltips = isStickyDragging || isDragActive;
   const disableCollapseTooltip = disableHeaderTooltips || isStatic;
   const isHoverActive = isHovered && !isDragActive && !isPanMode && !isStickyDragging;
-  const isMaterialAccentActive = isHoverActive || isDragActive || isStickyDragging || isSelected;
+  const isTemporarilyHighlighted = Boolean(noteHighlight) && !isStatic;
+  const isMaterialAccentActive = isHoverActive || isDragActive || isStickyDragging || isSelected || isTemporarilyHighlighted;
   const darkBorderColor = getDarkBorderColor(
     darkSpectrum.accent,
     darkSpectrum.border,
@@ -528,6 +542,30 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       }
   };
 
+  const handleTitleFocus = () => {
+    titleBeforeEditRef.current = note.title;
+    setIsEditing(true);
+  };
+
+  const handleTitleBlur = (event: React.FocusEvent<HTMLInputElement>) => {
+    setIsEditing(false);
+    if (event.currentTarget.value !== titleBeforeEditRef.current) {
+      markNoteHighlights([note.id], 'edited');
+    }
+  };
+
+  const handleContentFocus = () => {
+    contentBeforeEditRef.current = note.content;
+    setIsEditing(true);
+  };
+
+  const handleContentBlur = (event: React.FocusEvent<HTMLTextAreaElement>) => {
+    setIsEditing(false);
+    if (event.currentTarget.value !== contentBeforeEditRef.current) {
+      markNoteHighlights([note.id], 'edited');
+    }
+  };
+
   return (
       <DraggableCore
         nodeRef={nodeRef}
@@ -550,6 +588,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             "border border-border-subtle",
             "group",
             isRecentlyCreated && !isStatic && "note-card-created",
+            noteHighlight && !isStatic && "note-card-transient-highlight",
+            noteHighlight?.reason === 'created' && !isStatic && "note-card-highlight-created",
+            noteHighlight?.reason === 'located' && !isStatic && "note-card-highlight-located",
+            noteHighlight?.reason === 'edited' && !isStatic && "note-card-highlight-edited",
             isStickyDragging && "scale-[1.02] cursor-move",
            isSelected && !isStickyDragging && !isDarkMode && (
              isGroupSelection
@@ -719,8 +761,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                     placeholder="标题"
                     value={note.title}
                     onChange={(e) => updateTitle(note.id, e.target.value)}
-                    onFocus={() => setIsEditing(true)}
-                    onBlur={() => setIsEditing(false)}
+                    onFocus={handleTitleFocus}
+                    onBlur={handleTitleBlur}
                     onMouseDownCapture={handleMouseDown}
                     readOnly={isStatic}
                 />
@@ -759,8 +801,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                     target.style.height = 'auto';
                     target.style.height = `${target.scrollHeight}px`;
                 }}
-                onFocus={() => setIsEditing(true)}
-                onBlur={() => setIsEditing(false)}
+                onFocus={handleContentFocus}
+                onBlur={handleContentBlur}
                 onMouseDownCapture={handleMouseDown}
                 spellCheck={false}
                 rows={1}

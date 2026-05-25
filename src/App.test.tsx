@@ -83,6 +83,8 @@ vi.mock('./components/ShortcutsManager', () => ({
 
 import App from './App';
 import { useStore } from './store/useStore';
+import { resetViewportSpawnSequenceForTests } from './utils/spawnPosition';
+import { readText } from '@tauri-apps/plugin-clipboard-manager';
 
 describe('App WindowShell 组合契约', () => {
   let container: HTMLDivElement;
@@ -105,6 +107,7 @@ describe('App WindowShell 组合契约', () => {
       return 1;
     }));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    resetViewportSpawnSequenceForTests();
 
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback: ResizeObserverCallback) {
@@ -198,6 +201,32 @@ describe('App WindowShell 组合契约', () => {
     expect(container.textContent).toContain('Ctrl+Alt+N 已被占用');
   });
 
+  it('显示归拢撤销提示并触发最近一次归拢回退', async () => {
+    const undoLastArrange = vi.fn(() => true);
+    useStore.setState({
+      arrangeUndoToast: {
+        token: 1,
+        noteCount: 2,
+        positions: [],
+      },
+      undoLastArrange,
+    });
+
+    await renderApp();
+
+    expect(container.textContent).toContain('已归拢 2 个便签');
+    expect(container.textContent).toContain('可恢复到本次归拢前的位置。');
+
+    const undoButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('撤销')) as HTMLButtonElement | undefined;
+    expect(undoButton).toBeDefined();
+
+    await act(async () => {
+      undoButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(undoLastArrange).toHaveBeenCalledTimes(1);
+  });
+
   it('切换到 TRASH 时保留同一个 WindowShell，只替换内容槽', async () => {
     await renderApp();
 
@@ -244,6 +273,47 @@ describe('App WindowShell 组合契约', () => {
     });
 
     expect(useStore.getState().isPinned).toBe(true);
+  });
+
+  it('托盘非鼠标入口使用统一视口落点并连续错位', async () => {
+    let trayNewNoteHandler: (() => void) | null = null;
+    let clipboardNoteHandler: (() => Promise<void>) | null = null;
+    const addNote = vi.fn();
+    const addNotesWithContentBatch = vi.fn();
+
+    vi.mocked(readText).mockResolvedValueOnce('剪贴板内容');
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      const [eventName, handler] = args as [string, () => void | Promise<void>];
+      if (eventName === 'tray-new-note') {
+        trayNewNoteHandler = handler as () => void;
+      }
+      if (eventName === 'create-note-from-clipboard') {
+        clipboardNoteHandler = handler as () => Promise<void>;
+      }
+      return vi.fn();
+    });
+    useStore.setState({
+      addNote,
+      addNotesWithContentBatch,
+    });
+
+    await renderApp();
+
+    useStore.setState({
+      viewport: { x: 40, y: 60, w: 1280, h: 720 },
+    });
+
+    await act(async () => {
+      trayNewNoteHandler?.();
+    });
+    await act(async () => {
+      await clipboardNoteHandler?.();
+    });
+
+    expect(addNote).toHaveBeenCalledWith(550, 132);
+    expect(addNotesWithContentBatch).toHaveBeenCalledWith([
+      { content: '剪贴板内容', x: 582, y: 160 },
+    ]);
   });
 
   it('WindowShell 内容矩形变化时同步更新 viewport 与 shellRect', async () => {
