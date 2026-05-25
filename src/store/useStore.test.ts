@@ -875,6 +875,7 @@ describe('useStore 保存状态可见性契约', () => {
 
 describe('v1.3.0 并发与代际契约', () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     vi.clearAllMocks();
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
@@ -883,6 +884,10 @@ describe('v1.3.0 并发与代际契约', () => {
       currentBoardId: 'default',
       config: { ...useStore.getState().config, maxZ: 1 },
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('切换看板前先触发活动普通便签拖拽收口', () => {
@@ -961,24 +966,32 @@ describe('v1.3.0 并发与代际契约', () => {
   });
 
   it('软删除便签时同步清理临时高亮与新建反馈', () => {
-    useStore.getState().markRecentlyCreated(['note-1']);
-    expect(useStore.getState().recentlyCreatedIds).toEqual(['note-1']);
-    expect(useStore.getState().noteHighlights['note-1']?.reason).toBe('created');
+    useStore.getState().addNote(100, 100);
+    const state = useStore.getState();
+    const [noteId] = state.allNoteIds;
 
-    useStore.getState().deleteNote('note-1');
+    useStore.getState().markRecentlyCreated([noteId]);
+    expect(useStore.getState().recentlyCreatedIds).toEqual([noteId]);
+    expect(useStore.getState().noteHighlights[noteId]?.reason).toBe('created');
+
+    useStore.getState().deleteNote(noteId);
 
     expect(useStore.getState().recentlyCreatedIds).toEqual([]);
-    expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
+    expect(useStore.getState().noteHighlights[noteId]).toBeUndefined();
   });
 
   it('永久删除便签时同步清理临时高亮与新建反馈', () => {
-    useStore.getState().markRecentlyCreated(['note-1']);
+    useStore.getState().addNote(100, 100);
+    const state = useStore.getState();
+    const [noteId] = state.allNoteIds;
 
-    useStore.getState().deleteNotePermanently('note-1');
+    useStore.getState().markRecentlyCreated([noteId]);
+
+    useStore.getState().deleteNotePermanently(noteId);
 
     expect(useStore.getState().recentlyCreatedIds).toEqual([]);
-    expect(useStore.getState().noteHighlights['note-1']).toBeUndefined();
-    expect(useStore.getState().notesById['note-1']).toBeUndefined();
+    expect(useStore.getState().noteHighlights[noteId]).toBeUndefined();
+    expect(useStore.getState().notesById[noteId]).toBeUndefined();
   });
 
   it('批量创建智能粘贴便签后选中新便签并只保存一次', () => {

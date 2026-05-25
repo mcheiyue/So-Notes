@@ -120,7 +120,7 @@ describe('ContextMenu shell 坐标合同', () => {
       arrangeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
 
-    const confirmButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('一键归拢')) as HTMLButtonElement | undefined;
+    const confirmButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('确认归拢')) as HTMLButtonElement | undefined;
     expect(confirmButton).toBeDefined();
 
     await act(async () => {
