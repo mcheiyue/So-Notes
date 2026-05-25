@@ -293,12 +293,15 @@ describe('App WindowShell 组合契约', () => {
       return vi.fn();
     });
     useStore.setState({
-      viewport: { x: 40, y: 60, w: 1280, h: 720 },
       addNote,
       addNotesWithContentBatch,
     });
 
     await renderApp();
+
+    useStore.setState({
+      viewport: { x: 40, y: 60, w: 1280, h: 720 },
+    });
 
     await act(async () => {
       trayNewNoteHandler?.();

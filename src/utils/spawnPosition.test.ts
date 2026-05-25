@@ -20,9 +20,9 @@ describe('spawnPosition', () => {
     expect(getViewportSpawnOrigin(viewport)).toEqual({ x: 582, y: 160 });
     expect(getViewportSpawnOrigin(viewport)).toEqual({ x: 614, y: 188 });
 
-    getViewportSpawnOrigin(viewport);
-    getViewportSpawnOrigin(viewport);
-    getViewportSpawnOrigin(viewport);
+    for (let i = 0; i < 12; i++) {
+      getViewportSpawnOrigin(viewport);
+    }
 
     expect(getViewportSpawnOrigin(viewport)).toEqual({ x: 550, y: 132 });
   });
