@@ -110,7 +110,6 @@ interface State {
   setEdgePush: (pushState: Partial<{ top: boolean; bottom: boolean; left: boolean; right: boolean }>) => void;
   panViewport: (dx: number, dy: number) => void; // Delta pan
   setViewportPosition: (x: number, y: number) => void; // Absolute pan
-  bringCurrentBoardNotesIntoView: () => boolean;
   setIsDragging: (isDragging: boolean) => void; // Global drag state
   expandCanvas: (w: number, h: number) => void; // Expand world boundaries
 
@@ -263,45 +262,6 @@ const assignNoteHighlights = (
   });
 };
 
-const calculateCurrentBoardNotesViewport = (
-  state: Pick<State, 'notesById' | 'boardNoteIds' | 'layoutNotesById' | 'currentBoardId' | 'viewport'>,
-): { x: number; y: number; right: number; bottom: number } | null => {
-  const liveNotes = getBoardNoteIds(state, state.currentBoardId).flatMap((id) => {
-    const note = state.notesById[id];
-    return note && !note.deletedAt ? [note] : [];
-  });
-
-  if (liveNotes.length === 0) {
-    return null;
-  }
-
-  const bounds = liveNotes.reduce(
-    (acc, note) => {
-      const layout = state.layoutNotesById[note.id] ?? extractLayoutNote(note);
-      const noteWidth = getNoteVisualWidth(note, layout);
-      const noteHeight = getNoteVisualHeight(note, layout);
-
-      return {
-        left: Math.min(acc.left, note.x),
-        top: Math.min(acc.top, note.y),
-        right: Math.max(acc.right, note.x + noteWidth),
-        bottom: Math.max(acc.bottom, note.y + noteHeight),
-      };
-    },
-    { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
-  );
-
-  const centerX = (bounds.left + bounds.right) / 2;
-  const centerY = (bounds.top + bounds.bottom) / 2;
-
-  return {
-    x: Math.max(0, Math.round(centerX - state.viewport.w / 2)),
-    y: Math.max(0, Math.round(centerY - state.viewport.h / 2)),
-    right: bounds.right,
-    bottom: bounds.bottom,
-  };
-};
-
 const colorOrder = new Map(NOTE_COLORS.map((color, index) => [color.toLowerCase(), index]));
 
 const compareNotesByPosition = (a: Note, b: Note): number => {
@@ -360,7 +320,7 @@ const getNoteById = (state: Pick<State, 'notesById'>, id: string): Note | undefi
 const getBoardNotes = (state: Pick<State, 'notesById' | 'boardNoteIds'>, boardId: string): Note[] => {
   return getBoardNoteIds(state, boardId).flatMap((id) => {
     const note = state.notesById[id];
-    return note ? [note] : [];
+    return note && !note.deletedAt ? [note] : [];
   });
 };
 
@@ -766,23 +726,6 @@ export const useStore = create<State>()(
             state.canvas.w = Math.max(state.canvas.w, finalX + state.viewport.w);
             state.canvas.h = Math.max(state.canvas.h, finalY + state.viewport.h);
         });
-    },
-
-    bringCurrentBoardNotesIntoView: () => {
-        const targetViewport = calculateCurrentBoardNotesViewport(get());
-
-        if (!targetViewport) {
-            return false;
-        }
-
-        set((state) => {
-            state.viewport.x = targetViewport.x;
-            state.viewport.y = targetViewport.y;
-            state.canvas.w = Math.max(state.canvas.w, targetViewport.x + state.viewport.w, targetViewport.right);
-            state.canvas.h = Math.max(state.canvas.h, targetViewport.y + state.viewport.h, targetViewport.bottom);
-        });
-
-        return true;
     },
 
     expandCanvas: (w, h) => {
@@ -1391,7 +1334,7 @@ export const useStore = create<State>()(
 
     selectAllNotes: () => {
         set((state) => {
-            const currentBoardNotes = getBoardNotes(state, state.currentBoardId).filter((note) => !note.deletedAt);
+            const currentBoardNotes = getBoardNotes(state, state.currentBoardId);
             state.selectedIds = currentBoardNotes.map(n => n.id);
         });
     },

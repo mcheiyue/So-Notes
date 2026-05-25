@@ -34,7 +34,6 @@ const ContextMenuContent: React.FC = () => {
     deleteSelectedNotes, 
     selectedIds, 
     arrangeNotes,
-    bringCurrentBoardNotesIntoView,
     finalizeLayoutChange,
     setDockVisible,
     boards,
@@ -180,14 +179,6 @@ const ContextMenuContent: React.FC = () => {
                   onClick={() => handleAction(() => addNote(toWorldX(contextMenu.x), toWorldY(contextMenu.y)))}
                >
                   <span>📝</span> 新建便签
-                </MenuItemButton>
-
-                <MenuItemButton
-                 role="menuitem"
-                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
-                  onClick={() => handleAction(() => bringCurrentBoardNotesIntoView())}
-                >
-                  <span>🔎</span> 显示全部便签
                 </MenuItemButton>
 
                 {hasClipboardText && (
