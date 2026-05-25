@@ -522,6 +522,12 @@ export const Canvas: React.FC = () => {
       return;
     }
 
+    // 如果粘贴事件来自输入框（便签编辑、Spotlight 搜索等），不拦截
+    const target = getEventTargetElement(e.target);
+    if (target && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable)) {
+      return;
+    }
+
     const text = e.clipboardData.getData('text/plain');
     const vp = useStore.getState().viewport;
     const origin = getViewportSpawnOrigin(vp);
