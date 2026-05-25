@@ -333,7 +333,13 @@ pub fn run() {
                 } else {
                     let is_pinned = state.is_pinned.lock().map(|p| *p).unwrap_or(false);
                     if !is_pinned {
-                        let _ = window.hide();
+                        let window_handle = window.clone();
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                            if let Ok(false) = window_handle.is_focused() {
+                                let _ = window_handle.hide();
+                            }
+                        });
                     }
                 }
             }
