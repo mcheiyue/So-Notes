@@ -528,6 +528,12 @@ export const Canvas: React.FC = () => {
       return;
     }
 
+    // 如果有模态 UI 打开，不拦截
+    const state = useStore.getState();
+    if (state.isSpotlightOpen || state.isQuickCaptureOpen || state.smartPasteSplitPanel || state.contextMenu.isOpen) {
+      return;
+    }
+
     const text = e.clipboardData.getData('text/plain');
     const vp = useStore.getState().viewport;
     const origin = getViewportSpawnOrigin(vp);
@@ -539,10 +545,10 @@ export const Canvas: React.FC = () => {
     }
 
     e.preventDefault();
-    const state = useStore.getState();
-    const createdIds = state.addNotesWithContentBatch(notes) ?? [];
+    const store = useStore.getState();
+    const createdIds = store.addNotesWithContentBatch(notes) ?? [];
     if (createdIds.length > 0 && result.options.length > 1) {
-      state.openSmartPasteSplitPanel({ noteId: createdIds[0], result });
+      store.openSmartPasteSplitPanel({ noteId: createdIds[0], result });
     }
   };
   
