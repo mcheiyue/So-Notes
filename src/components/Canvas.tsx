@@ -524,7 +524,7 @@ export const Canvas: React.FC = () => {
 
     // 如果粘贴事件来自输入框（便签编辑、Spotlight 搜索等），不拦截
     const target = getEventTargetElement(e.target);
-    if (target && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable)) {
+    if (target && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable))) {
       return;
     }
 
