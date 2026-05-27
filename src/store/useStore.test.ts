@@ -374,6 +374,7 @@ describe('useStore 布局持久化契约', () => {
     useStore.getState().arrangeNotes(100, 120);
 
     const toast = useStore.getState().arrangeUndoToast;
+    expect(toast?.action).toBe('arrange');
     expect(toast?.noteCount).toBe(2);
     expect(toast?.positions).toEqual([
       { id: 'note-1', x: 10, y: 20 },
@@ -402,6 +403,112 @@ describe('useStore 布局持久化契约', () => {
     expect(useStore.getState().arrangeUndoToast).toBeNull();
     expect(getNote('note-1')).toMatchObject({ x: 100, y: 120 });
     expect(getNote('note-2')).toMatchObject({ x: 420, y: 120 });
+  });
+
+  it('mergeSelectedNotes 按画布坐标合并并只选中新便签', () => {
+    const saveSpy = vi.fn(async () => true);
+    vi.setSystemTime(new Date('2026-03-19T10:30:00.000Z'));
+    useStore.setState({ saveToDisk: saveSpy });
+
+    const mergedId = useStore.getState().mergeSelectedNotes();
+    const state = useStore.getState();
+
+    expect(mergedId).toBeTruthy();
+    expect(state.selectedIds).toEqual([mergedId]);
+    expect(state.notesById[mergedId!]).toMatchObject({
+      boardId: 'default',
+      x: 10,
+      y: 20,
+      content: 'alpha\n\nbeta',
+      z: 3,
+    });
+    expect(state.notesById['note-1']).toBeDefined();
+    expect(state.notesById['note-2']).toBeDefined();
+    expect(state.arrangeUndoToast).toMatchObject({
+      action: 'merge',
+      noteCount: 2,
+      createdIds: [mergedId],
+    });
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('undoLastArrange 可撤销合并结果且保留原便签', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    const mergedId = useStore.getState().mergeSelectedNotes();
+    saveSpy.mockClear();
+
+    const undone = useStore.getState().undoLastArrange();
+    const state = useStore.getState();
+
+    expect(undone).toBe(true);
+    expect(mergedId).toBeTruthy();
+    expect(state.notesById[mergedId!]).toBeUndefined();
+    expect(state.notesById['note-1']).toBeDefined();
+    expect(state.notesById['note-2']).toBeDefined();
+    expect(state.arrangeUndoToast).toBeNull();
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('splitNoteByParagraph 按空行拆分并保留原便签内容', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      saveToDisk: saveSpy,
+      notesById: {
+        ...useStore.getState().notesById,
+        'note-1': {
+          ...useStore.getState().notesById['note-1'],
+          content: '第一段\n\n第二段\n\n第三段',
+        },
+      },
+    });
+
+    const selectedIds = useStore.getState().splitNoteByParagraph('note-1');
+    const state = useStore.getState();
+
+    expect(selectedIds).toHaveLength(4);
+    expect(selectedIds[0]).toBe('note-1');
+    expect(state.notesById['note-1'].content).toBe('第一段\n\n第二段\n\n第三段');
+    expect(state.notesById[selectedIds[1]]).toMatchObject({ content: '第一段', x: 42, y: 48 });
+    expect(state.notesById[selectedIds[2]]).toMatchObject({ content: '第二段', x: 74, y: 76 });
+    expect(state.notesById[selectedIds[3]]).toMatchObject({ content: '第三段', x: 106, y: 104 });
+    expect(state.selectedIds).toEqual(selectedIds);
+    expect(state.recentlyCreatedIds).toEqual(selectedIds.slice(1));
+    expect(state.arrangeUndoToast).toMatchObject({
+      action: 'split',
+      noteCount: 3,
+      createdIds: selectedIds.slice(1),
+    });
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('undoLastArrange 可撤销按段拆分新增结果且不改原便签', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      saveToDisk: saveSpy,
+      notesById: {
+        ...useStore.getState().notesById,
+        'note-1': {
+          ...useStore.getState().notesById['note-1'],
+          content: '第一段\n\n第二段',
+        },
+      },
+    });
+
+    const selectedIds = useStore.getState().splitNoteByParagraph('note-1');
+    saveSpy.mockClear();
+
+    const undone = useStore.getState().undoLastArrange();
+    const state = useStore.getState();
+
+    expect(undone).toBe(true);
+    expect(state.notesById['note-1'].content).toBe('第一段\n\n第二段');
+    selectedIds.slice(1).forEach((id) => {
+      expect(state.notesById[id]).toBeUndefined();
+    });
+    expect(state.arrangeUndoToast).toBeNull();
+    expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 
   it('arrangeNotes 显式指定 board 作用域时忽略单选并整理当前看板全部便签', () => {

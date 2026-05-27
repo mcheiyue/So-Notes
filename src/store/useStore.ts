@@ -11,7 +11,7 @@ import { saveFile, openFile } from '../utils/fileSystem';
 import { diagnostics } from '../utils/diagnostics';
 import { getNoteVisualHeight } from '../utils/noteVisualMetrics';
 import { finalizeActiveNoteDrag } from '../utils/activeNoteDrag';
-import { buildSmartPasteNoteInputs } from '../utils/smartPaste';
+import { buildSmartPasteNoteInputs, splitParagraphs } from '../utils/smartPaste';
 import type { SmartPasteNoteInput, SmartPasteOptionId, SmartPasteResult } from '../utils/smartPaste';
 
 interface ImportFromFileResult {
@@ -38,10 +38,14 @@ interface ArrangeUndoPosition {
   y: number;
 }
 
+type OrganizationUndoAction = 'arrange' | 'merge' | 'split';
+
 interface ArrangeUndoToastState {
   token: number;
+  action: OrganizationUndoAction;
   noteCount: number;
-  positions: ArrangeUndoPosition[];
+  positions?: ArrangeUndoPosition[];
+  createdIds?: string[];
 }
 
 interface State {
@@ -130,6 +134,8 @@ interface State {
   moveSelectedNotes: (dx: number, dy: number, excludeId?: string) => void;
   finalizeLayoutChange: (noteIds: string[]) => void;
   arrangeNotes: (startX?: number, startY?: number, strategy?: ArrangeNotesStrategy, scope?: ArrangeNotesScope) => void;
+  mergeSelectedNotes: () => string | null;
+  splitNoteByParagraph: (noteId: string) => string[];
   undoLastArrange: () => boolean;
   dismissArrangeUndoToast: () => void;
   bringToFront: (id: string) => void;
@@ -292,8 +298,16 @@ const sortNotesForArrange = (notes: Note[], strategy: ArrangeNotesStrategy): Not
 
 const createArrangeUndoToast = (positions: ArrangeUndoPosition[]): ArrangeUndoToastState => ({
   token: Date.now() + (++arrangeUndoSequence / 1000),
+  action: 'arrange',
   noteCount: positions.length,
   positions,
+});
+
+const createCreatedNotesUndoToast = (action: Exclude<OrganizationUndoAction, 'arrange'>, createdIds: string[], noteCount: number): ArrangeUndoToastState => ({
+  token: Date.now() + (++arrangeUndoSequence / 1000),
+  action,
+  noteCount,
+  createdIds,
 });
 
 const resolveSaveErrorMessage = (error: unknown): string => {
@@ -1120,28 +1134,145 @@ export const useStore = create<State>()(
         }
     },
 
+    mergeSelectedNotes: () => {
+        const selectedNotes = get().selectedIds
+            .flatMap((id) => {
+                const note = get().notesById[id];
+                return note && !note.deletedAt ? [note] : [];
+            });
+
+        if (selectedNotes.length < 2) {
+            return null;
+        }
+
+        const sortedNotes = [...selectedNotes].sort(compareNotesByPosition);
+        const createdAt = Date.now();
+        const mergedId = crypto.randomUUID();
+        const minX = Math.min(...sortedNotes.map((note) => note.x));
+        const minY = Math.min(...sortedNotes.map((note) => note.y));
+        const mergedContent = sortedNotes
+            .map((note) => note.content.trim())
+            .filter((content) => content.length > 0)
+            .join('\n\n');
+
+        set((state) => {
+            const newNote: Note = {
+                id: mergedId,
+                boardId: sortedNotes[0].boardId,
+                title: '',
+                content: mergedContent,
+                x: minX,
+                y: minY,
+                z: state.config.maxZ + 1,
+                color: sortedNotes[0].color,
+                collapsed: false,
+                createdAt,
+                updatedAt: createdAt,
+            };
+
+            appendNoteToNormalizedState(state, newNote);
+            state.config.maxZ += 1;
+            state.selectedIds = [mergedId];
+            state.recentlyCreatedIds = [mergedId];
+            state.arrangeUndoToast = createCreatedNotesUndoToast('merge', [mergedId], selectedNotes.length);
+            assignNoteHighlights(state, [mergedId], 'created');
+        });
+
+        get().saveToDisk();
+        return mergedId;
+    },
+
+    splitNoteByParagraph: (noteId) => {
+        const targetNote = get().notesById[noteId];
+        if (!targetNote || targetNote.deletedAt) {
+            return [];
+        }
+
+        const paragraphs = splitParagraphs(targetNote.content);
+        if (paragraphs.length < 2) {
+            return [];
+        }
+
+        const splitInputs = buildSmartPasteNoteInputs(['', ...paragraphs], targetNote.x, targetNote.y).slice(1);
+        const createdAt = Date.now();
+        const startZ = get().config.maxZ;
+        const createdIds = splitInputs.map(() => crypto.randomUUID());
+        const selectedIds = [noteId, ...createdIds];
+
+        set((state) => {
+            const existingNote = state.notesById[noteId];
+            if (!existingNote || existingNote.deletedAt) {
+                return;
+            }
+
+            splitInputs.forEach((input, index) => {
+                const newNote: Note = {
+                    id: createdIds[index],
+                    boardId: existingNote.boardId,
+                    title: '',
+                    content: input.content,
+                    x: input.x,
+                    y: input.y,
+                    z: startZ + index + 1,
+                    color: existingNote.color,
+                    collapsed: false,
+                    createdAt,
+                    updatedAt: createdAt,
+                };
+
+                appendNoteToNormalizedState(state, newNote);
+            });
+
+            state.config.maxZ += splitInputs.length;
+            state.selectedIds = selectedIds;
+            state.recentlyCreatedIds = createdIds;
+            state.arrangeUndoToast = createCreatedNotesUndoToast('split', createdIds, createdIds.length);
+            assignNoteHighlights(state, createdIds, 'created');
+        });
+
+        get().saveToDisk();
+        return selectedIds;
+    },
+
     undoLastArrange: () => {
         const restoredIds: string[] = [];
+        const removedIds: string[] = [];
 
         set((state) => {
             const snapshot = state.arrangeUndoToast;
             if (!snapshot) return;
 
-            snapshot.positions.forEach((position) => {
-                const note = getNoteById(state, position.id);
-                if (!note || note.deletedAt) return;
+            if (snapshot.action === 'arrange') {
+                snapshot.positions?.forEach((position) => {
+                    const note = getNoteById(state, position.id);
+                    if (!note || note.deletedAt) return;
 
-                note.x = position.x;
-                note.y = position.y;
-                state.layoutNotesById[note.id] = extractLayoutNote(note);
-                restoredIds.push(note.id);
-            });
+                    note.x = position.x;
+                    note.y = position.y;
+                    state.layoutNotesById[note.id] = extractLayoutNote(note);
+                    restoredIds.push(note.id);
+                });
+            } else {
+                snapshot.createdIds?.forEach((id) => {
+                    if (!state.notesById[id]) return;
+                    removeNoteFromNormalizedState(state, id);
+                    removedIds.push(id);
+                });
+                if (removedIds.length > 0) {
+                    state.selectedIds = state.selectedIds.filter((id) => !removedIds.includes(id));
+                }
+            }
 
             state.arrangeUndoToast = null;
         });
 
         if (restoredIds.length > 0) {
             get().finalizeLayoutChange(restoredIds);
+            return true;
+        }
+
+        if (removedIds.length > 0) {
+            get().saveToDisk();
             return true;
         }
 

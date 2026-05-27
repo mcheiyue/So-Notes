@@ -35,7 +35,7 @@ const isPlainUrl = (text: string) => {
   }
 };
 
-const splitParagraphs = (text: string) => text
+export const splitParagraphs = (text: string) => text
   .split(/\n\s*\n+/)
   .map((part) => part.trim())
   .filter(Boolean);
