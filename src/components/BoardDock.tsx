@@ -261,7 +261,7 @@ export const BoardDock = () => {
       };
   };
 
-  if (!isDockVisible && viewMode !== 'TRASH') return null;
+  if (!isDockVisible) return null;
 
   // Only show overlay when:
   // 1. In BOARD mode and dock is visible (to click-away close dock)

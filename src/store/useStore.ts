@@ -623,6 +623,9 @@ export const useStore = create<State>()(
         set((state) => {
             state.viewMode = mode;
             state.selectedIds = []; // Clear selection on view switch
+            if (mode === 'TRASH') {
+                state.isDockVisible = false; // 进入 TRASH 时默认收起 Dock
+            }
         });
     },
 
