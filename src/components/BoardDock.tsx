@@ -324,26 +324,6 @@ export const BoardDock = () => {
 
                 <button
                     type="button"
-                    onClick={() => {
-                      // Export this specific board (using current logic, we need to temporarily switch or just export by ID)
-                      // Since store only has exportCurrentBoard, we might need to rely on that or add exportBoard(id).
-                      // But for now, let's just use exportCurrentBoard if it matches, or disable it?
-                      // Actually, the store has exportBoard(id). Let's use that if we can access it.
-                      // But we can't easily access non-exported actions from here without exposing them.
-                      // Let's stick to what we have: if right-clicked board is current, we can export.
-                      // If not, we switch then export? That's intrusive.
-                      // Let's just remove export from here for simplicity, or keep it if it's the current board.
-                      // Wait, I previously added exportCurrentBoard to Context Menu.
-                      // Let's REMOVE it from here to simplify. Right click = Manage Board (Rename/Delete).
-                      // Exporting is a "Data" operation, best in Settings or specific menu.
-                      setContextMenuBoard(null);
-                    }}
-                    className="hidden" 
-                >
-                </button>
-
-                <button
-                    type="button"
                     onClick={handleDeleteClick}
                     className={cn(
                         "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors rounded-b-lg",

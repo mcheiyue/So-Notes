@@ -38,6 +38,46 @@ interface SearchIndex {
 
 let index: SearchIndex | null = null;
 
+function removeNoteFromTokenIndex(tokenIndex: Map<string, string[]>, noteId: string): void {
+  for (const [token, noteIds] of tokenIndex.entries()) {
+    const nextNoteIds = noteIds.filter(id => id !== noteId);
+
+    if (nextNoteIds.length === 0) {
+      tokenIndex.delete(token);
+    } else if (nextNoteIds.length !== noteIds.length) {
+      tokenIndex.set(token, nextNoteIds);
+    }
+  }
+}
+
+function addNoteToTokenIndexes(note: Note, searchIndex: SearchIndex): void {
+  const title = (note.title || '').toLowerCase();
+  if (title) {
+    const words = title.split(/\s+/).filter(w => w.length > 0);
+    for (const word of words) {
+      if (!searchIndex.titleIndex.has(word)) {
+        searchIndex.titleIndex.set(word, []);
+      }
+      searchIndex.titleIndex.get(word)!.push(note.id);
+    }
+    if (!searchIndex.titleIndex.has(title)) {
+      searchIndex.titleIndex.set(title, []);
+    }
+    searchIndex.titleIndex.get(title)!.push(note.id);
+  }
+
+  const content = (note.content || '').toLowerCase().slice(0, 1000);
+  if (content) {
+    const words = content.split(/\s+/).filter(w => w.length > 0);
+    for (const word of words) {
+      if (!searchIndex.contentIndex.has(word)) {
+        searchIndex.contentIndex.set(word, []);
+      }
+      searchIndex.contentIndex.get(word)!.push(note.id);
+    }
+  }
+}
+
 function buildIndex(notes: Note[], boards: Board[]): void {
   const notesById = new Map<string, Note>();
   const boardsById = new Map<string, Board>();
@@ -50,32 +90,7 @@ function buildIndex(notes: Note[], boards: Board[]): void {
 
   for (const note of notes) {
     notesById.set(note.id, note);
-
-    const title = (note.title || '').toLowerCase();
-    if (title) {
-      const words = title.split(/\s+/).filter(w => w.length > 0);
-      for (const word of words) {
-        if (!titleIndex.has(word)) {
-          titleIndex.set(word, []);
-        }
-        titleIndex.get(word)!.push(note.id);
-      }
-      if (!titleIndex.has(title)) {
-        titleIndex.set(title, []);
-      }
-      titleIndex.get(title)!.push(note.id);
-    }
-
-    const content = (note.content || '').toLowerCase().slice(0, 1000);
-    if (content) {
-      const words = content.split(/\s+/).filter(w => w.length > 0);
-      for (const word of words) {
-        if (!contentIndex.has(word)) {
-          contentIndex.set(word, []);
-        }
-        contentIndex.get(word)!.push(note.id);
-      }
-    }
+    addNoteToTokenIndexes(note, { notesById, boardsById, titleIndex, contentIndex });
   }
 
   index = { notesById, boardsById, titleIndex, contentIndex };
@@ -168,7 +183,7 @@ function groupResults(items: SearchResultItem[], filter: SearchFilter): SearchRe
 
   if (filter.currentBoardId) {
     const currentBoardItems = items.filter(item => 
-      item.note.boardId === filter.currentBoardId && !item.note.deletedAt
+      item.note.boardId === filter.currentBoardId
     );
     if (currentBoardItems.length > 0) {
       groups.push({
@@ -181,8 +196,7 @@ function groupResults(items: SearchResultItem[], filter: SearchFilter): SearchRe
 
   const titleMatchItems = items.filter(item => 
     item.matchType !== 'content-contains' && 
-    item.note.boardId !== filter.currentBoardId &&
-    !item.note.deletedAt
+    item.note.boardId !== filter.currentBoardId
   );
   if (titleMatchItems.length > 0) {
     groups.push({
@@ -193,8 +207,7 @@ function groupResults(items: SearchResultItem[], filter: SearchFilter): SearchRe
   }
 
   const contentMatchItems = items.filter(item => 
-    item.matchType === 'content-contains' && 
-    !item.note.deletedAt
+    item.matchType === 'content-contains'
   );
   if (contentMatchItems.length > 0) {
     groups.push({
@@ -232,35 +245,10 @@ self.onmessage = (e: MessageEvent<SearchWorkerMessage>) => {
       case 'UPDATE_NOTES': {
         if (index) {
           for (const note of msg.notes) {
+            removeNoteFromTokenIndex(index.titleIndex, note.id);
+            removeNoteFromTokenIndex(index.contentIndex, note.id);
             index.notesById.set(note.id, note);
-            
-            const title = (note.title || '').toLowerCase();
-            if (title) {
-              const words = title.split(/\s+/).filter(w => w.length > 0);
-              for (const word of words) {
-                if (!index.titleIndex.has(word)) {
-                  index.titleIndex.set(word, []);
-                }
-                const ids = index.titleIndex.get(word)!;
-                if (!ids.includes(note.id)) {
-                  ids.push(note.id);
-                }
-              }
-            }
-
-            const content = (note.content || '').toLowerCase().slice(0, 1000);
-            if (content) {
-              const words = content.split(/\s+/).filter(w => w.length > 0);
-              for (const word of words) {
-                if (!index.contentIndex.has(word)) {
-                  index.contentIndex.set(word, []);
-                }
-                const ids = index.contentIndex.get(word)!;
-                if (!ids.includes(note.id)) {
-                  ids.push(note.id);
-                }
-              }
-            }
+            addNoteToTokenIndexes(note, index);
           }
         }
         break;
