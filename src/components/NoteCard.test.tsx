@@ -532,3 +532,85 @@ describe('NoteCard 拖拽坐标换算', () => {
     });
   });
 });
+
+describe('NoteCard TRASH 右键菜单守卫', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...normalizeNotes([createNote()]),
+      currentBoardId: 'default',
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
+      interaction: {
+        isPanMode: false,
+        isDragging: false,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('isStatic=true（TRASH 列表）时右键不打开 NOTE 菜单', async () => {
+    const setContextMenu = vi.fn();
+    useStore.setState({ setContextMenu });
+
+    await act(async () => {
+      root.render(<NoteCard id="note-1" isStatic={true} />);
+    });
+
+    const article = container.querySelector('.note-card') as HTMLElement | null;
+    expect(article).not.toBeNull();
+
+    await act(async () => {
+      article?.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 150,
+        clientY: 250,
+      }));
+    });
+
+    expect(setContextMenu).not.toHaveBeenCalled();
+  });
+
+  it('isStatic=false（BOARD 模式）时右键正常打开 NOTE 菜单', async () => {
+    const setContextMenu = vi.fn();
+    useStore.setState({ setContextMenu });
+
+    await act(async () => {
+      root.render(<NoteCard id="note-1" isStatic={false} />);
+    });
+
+    const article = container.querySelector('.note-card') as HTMLElement | null;
+    expect(article).not.toBeNull();
+
+    await act(async () => {
+      article?.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 150,
+        clientY: 250,
+      }));
+    });
+
+    expect(setContextMenu).toHaveBeenCalledWith({
+      isOpen: true,
+      x: 150,
+      y: 250,
+      type: 'NOTE',
+      targetId: 'note-1',
+    });
+  });
+});

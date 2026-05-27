@@ -499,6 +499,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const handleContextMenu = (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      if (isStatic) return; // TRASH 列表下禁用右键菜单
       setContextMenu({
           isOpen: true,
           x: e.clientX,

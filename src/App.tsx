@@ -125,22 +125,50 @@ function App() {
     });
 
     const unlistenQuickCapture = listen('open-quick-capture', () => {
-      useStore.getState().setQuickCaptureOpen(true);
+      const state = useStore.getState();
+      if (state.viewMode === 'TRASH') {
+        state.setViewMode('BOARD');
+        setTimeout(() => { useStore.getState().setQuickCaptureOpen(true); }, 0);
+        return;
+      }
+      state.setQuickCaptureOpen(true);
     });
 
     const unlistenTrayNewNote = listen('tray-new-note', () => {
-      const { viewport, addNote } = useStore.getState();
-      const origin = getViewportSpawnOrigin(viewport);
-      addNote(origin.x, origin.y);
+      const state = useStore.getState();
+      if (state.viewMode === 'TRASH') {
+        state.setViewMode('BOARD');
+        setTimeout(() => {
+          const { viewport, addNote } = useStore.getState();
+          const origin = getViewportSpawnOrigin(viewport);
+          addNote(origin.x, origin.y);
+        }, 0);
+        return;
+      }
+      const origin = getViewportSpawnOrigin(state.viewport);
+      state.addNote(origin.x, origin.y);
     });
 
     const unlistenClipboardNote = listen('create-note-from-clipboard', async () => {
+      const state = useStore.getState();
+      if (state.viewMode === 'TRASH') {
+        state.setViewMode('BOARD');
+        setTimeout(async () => {
+          const text = await readText().catch(() => '');
+          const { viewport, addNotesWithContentBatch } = useStore.getState();
+          const origin = getViewportSpawnOrigin(viewport);
+          const notes = createSmartPasteNoteInputs(text, origin.x, origin.y);
+          if (notes.length > 0) {
+            addNotesWithContentBatch(notes);
+          }
+        }, 0);
+        return;
+      }
       const text = await readText().catch(() => '');
-      const { viewport, addNotesWithContentBatch } = useStore.getState();
-      const origin = getViewportSpawnOrigin(viewport);
+      const origin = getViewportSpawnOrigin(state.viewport);
       const notes = createSmartPasteNoteInputs(text, origin.x, origin.y);
       if (notes.length > 0) {
-        addNotesWithContentBatch(notes);
+        state.addNotesWithContentBatch(notes);
       }
     });
 

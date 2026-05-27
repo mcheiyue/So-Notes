@@ -1333,3 +1333,57 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(state.saveGenerationId).toBe(20);
   });
 });
+
+describe('v1.3.9 TRASH 安全收口', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+  });
+
+  it('setViewMode 切到 TRASH 时清理残留状态', () => {
+    useStore.setState({
+      selectedIds: ['note-1', 'note-2'],
+      contextMenu: { isOpen: true, x: 100, y: 200, type: 'NOTE', targetId: 'note-1' },
+      smartPasteSplitPanel: { noteId: 'note-1', result: { source: 'text', options: [] } },
+      stickyDrag: { id: 'note-1', offsetX: 5, offsetY: 10, status: 'active' },
+      interaction: { isPanMode: true, isDragging: false, edgePush: { top: false, bottom: false, left: false, right: false } },
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+    });
+
+    useStore.getState().setViewMode('TRASH');
+    const state = useStore.getState();
+
+    expect(state.viewMode).toBe('TRASH');
+    expect(state.selectedIds).toEqual([]);
+    expect(state.contextMenu).toEqual({ isOpen: false, x: 0, y: 0, type: 'CANVAS' });
+    expect(state.smartPasteSplitPanel).toBeNull();
+    expect(state.stickyDrag).toEqual({ id: null, offsetX: 0, offsetY: 0, status: 'active' });
+    expect(state.interaction.isPanMode).toBe(false);
+    expect(state.isSpotlightOpen).toBe(false);
+    expect(state.isQuickCaptureOpen).toBe(false);
+  });
+
+  it('setViewMode 切到 BOARD 时只清 selectedIds，不触碰其他状态', () => {
+    useStore.setState({
+      viewMode: 'TRASH',
+      selectedIds: ['note-1'],
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+    });
+
+    useStore.getState().setViewMode('BOARD');
+    const state = useStore.getState();
+
+    expect(state.viewMode).toBe('BOARD');
+    expect(state.selectedIds).toEqual([]);
+    expect(state.isSpotlightOpen).toBe(true);
+    expect(state.isQuickCaptureOpen).toBe(true);
+  });
+});

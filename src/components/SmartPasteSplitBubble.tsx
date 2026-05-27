@@ -14,6 +14,7 @@ const getSplitOptionPreview = (option: SmartPasteOption) => {
 };
 
 export const SmartPasteSplitBubble: React.FC = () => {
+  const viewMode = useStore((state) => state.viewMode);
   const panel = useStore((state) => state.smartPasteSplitPanel);
   const note = useStore((state) => panel ? state.notesById[panel.noteId] : undefined);
   const viewport = useStore((state) => state.viewport);
@@ -54,7 +55,7 @@ export const SmartPasteSplitBubble: React.FC = () => {
     };
   }, [closeSmartPasteSplitPanel, panel]);
 
-  if (!panel || !note || splitOptions.length === 0) {
+  if (viewMode === 'TRASH' || !panel || !note || splitOptions.length === 0) {
     return null;
   }
 

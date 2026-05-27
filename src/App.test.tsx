@@ -317,6 +317,98 @@ describe('App WindowShell 组合契约', () => {
     ]);
   });
 
+  it('TRASH 下托盘新建先切回 BOARD 再延迟创建便签', async () => {
+    let trayNewNoteHandler: (() => void) | null = null;
+    const addNote = vi.fn();
+
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      const [eventName, handler] = args as [string, () => void | Promise<void>];
+      if (eventName === 'tray-new-note') {
+        trayNewNoteHandler = handler as () => void;
+      }
+      return vi.fn();
+    });
+    useStore.setState({
+      viewMode: 'TRASH',
+      addNote,
+    });
+
+    await renderApp();
+
+    await act(async () => {
+      trayNewNoteHandler?.();
+    });
+
+    expect(useStore.getState().viewMode).toBe('BOARD');
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(addNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('TRASH 下托盘剪贴板先切回 BOARD 再延迟创建便签', async () => {
+    let clipboardNoteHandler: (() => Promise<void>) | null = null;
+    const addNotesWithContentBatch = vi.fn();
+
+    vi.mocked(readText).mockResolvedValueOnce('TRASH剪贴板');
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      const [eventName, handler] = args as [string, () => void | Promise<void>];
+      if (eventName === 'create-note-from-clipboard') {
+        clipboardNoteHandler = handler as () => Promise<void>;
+      }
+      return vi.fn();
+    });
+    useStore.setState({
+      viewMode: 'TRASH',
+      addNotesWithContentBatch,
+    });
+
+    await renderApp();
+
+    await act(async () => {
+      await clipboardNoteHandler?.();
+    });
+
+    expect(useStore.getState().viewMode).toBe('BOARD');
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(addNotesWithContentBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('TRASH 下 open-quick-capture 先切回 BOARD 再延迟打开', async () => {
+    let quickCaptureHandler: (() => void) | null = null;
+
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      const [eventName, handler] = args as [string, () => void | Promise<void>];
+      if (eventName === 'open-quick-capture') {
+        quickCaptureHandler = handler as () => void;
+      }
+      return vi.fn();
+    });
+    useStore.setState({
+      viewMode: 'TRASH',
+    });
+
+    await renderApp();
+
+    await act(async () => {
+      quickCaptureHandler?.();
+    });
+
+    expect(useStore.getState().viewMode).toBe('BOARD');
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(useStore.getState().isQuickCaptureOpen).toBe(true);
+  });
+
   it('WindowShell 内容矩形变化时同步更新 viewport 与 shellRect', async () => {
     await renderApp();
 
