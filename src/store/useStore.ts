@@ -46,6 +46,8 @@ interface ArrangeUndoToastState {
   noteCount: number;
   positions?: ArrangeUndoPosition[];
   createdIds?: string[];
+  originalNotes?: Note[];
+  originalSelectedIds?: string[];
 }
 
 interface State {
@@ -303,11 +305,19 @@ const createArrangeUndoToast = (positions: ArrangeUndoPosition[]): ArrangeUndoTo
   positions,
 });
 
-const createCreatedNotesUndoToast = (action: Exclude<OrganizationUndoAction, 'arrange'>, createdIds: string[], noteCount: number): ArrangeUndoToastState => ({
+const createCreatedNotesUndoToast = (
+  action: Exclude<OrganizationUndoAction, 'arrange'>,
+  createdIds: string[],
+  noteCount: number,
+  originalNotes?: Note[],
+  originalSelectedIds?: string[],
+): ArrangeUndoToastState => ({
   token: Date.now() + (++arrangeUndoSequence / 1000),
   action,
   noteCount,
   createdIds,
+  originalNotes,
+  originalSelectedIds,
 });
 
 const resolveSaveErrorMessage = (error: unknown): string => {
@@ -1145,6 +1155,13 @@ export const useStore = create<State>()(
             return null;
         }
 
+        // 跨看板防护：所有选中未删除便签必须属于同一 boardId
+        const firstBoardId = selectedNotes[0].boardId;
+        const isSameBoard = selectedNotes.every(note => note.boardId === firstBoardId);
+        if (!isSameBoard) {
+            return null;
+        }
+
         const sortedNotes = [...selectedNotes].sort(compareNotesByPosition);
         const createdAt = Date.now();
         const mergedId = crypto.randomUUID();
@@ -1154,6 +1171,10 @@ export const useStore = create<State>()(
             .map((note) => note.content.trim())
             .filter((content) => content.length > 0)
             .join('\n\n');
+
+        // 保存原始便签快照用于撤销恢复
+        const originalNotesSnapshot: Note[] = sortedNotes.map(note => ({ ...note }));
+        const originalSelectedIdsSnapshot = [...get().selectedIds];
 
         set((state) => {
             const newNote: Note = {
@@ -1174,7 +1195,13 @@ export const useStore = create<State>()(
             state.config.maxZ += 1;
             state.selectedIds = [mergedId];
             state.recentlyCreatedIds = [mergedId];
-            state.arrangeUndoToast = createCreatedNotesUndoToast('merge', [mergedId], selectedNotes.length);
+            state.arrangeUndoToast = createCreatedNotesUndoToast(
+                'merge',
+                [mergedId],
+                selectedNotes.length,
+                originalNotesSnapshot,
+                originalSelectedIdsSnapshot,
+            );
             assignNoteHighlights(state, [mergedId], 'created');
         });
 
@@ -1192,6 +1219,10 @@ export const useStore = create<State>()(
         if (paragraphs.length < 2) {
             return [];
         }
+
+        // 保存原始便签快照用于撤销恢复
+        const originalNoteSnapshot: Note = { ...targetNote };
+        const originalSelectedIdsSnapshot = [...get().selectedIds];
 
         const splitInputs = buildSmartPasteNoteInputs(['', ...paragraphs], targetNote.x, targetNote.y).slice(1);
         const createdAt = Date.now();
@@ -1226,7 +1257,13 @@ export const useStore = create<State>()(
             state.config.maxZ += splitInputs.length;
             state.selectedIds = selectedIds;
             state.recentlyCreatedIds = createdIds;
-            state.arrangeUndoToast = createCreatedNotesUndoToast('split', createdIds, createdIds.length);
+            state.arrangeUndoToast = createCreatedNotesUndoToast(
+                'split',
+                createdIds,
+                createdIds.length,
+                [originalNoteSnapshot],
+                originalSelectedIdsSnapshot,
+            );
             assignNoteHighlights(state, createdIds, 'created');
         });
 
@@ -1253,12 +1290,28 @@ export const useStore = create<State>()(
                     restoredIds.push(note.id);
                 });
             } else {
+                // merge/split 撤销：先删除新建便签
                 snapshot.createdIds?.forEach((id) => {
                     if (!state.notesById[id]) return;
                     removeNoteFromNormalizedState(state, id);
                     removedIds.push(id);
                 });
-                if (removedIds.length > 0) {
+
+                // 恢复原始便签（如果快照中保存了原始状态）
+                snapshot.originalNotes?.forEach((oldNote) => {
+                    // 如果便签已不存在，则恢复它
+                    if (!state.notesById[oldNote.id]) {
+                        appendNoteToNormalizedState(state, oldNote);
+                        restoredIds.push(oldNote.id);
+                    }
+                });
+
+                // 恢复选择集
+                if (snapshot.originalSelectedIds) {
+                    state.selectedIds = snapshot.originalSelectedIds.filter(
+                        (id) => state.notesById[id] && !state.notesById[id].deletedAt,
+                    );
+                } else if (removedIds.length > 0) {
                     state.selectedIds = state.selectedIds.filter((id) => !removedIds.includes(id));
                 }
             }

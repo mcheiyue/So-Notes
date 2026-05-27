@@ -519,6 +519,119 @@ describe('useStore 布局持久化契约', () => {
     expect(getNote('note-1')).toMatchObject({ x: 100, y: 120 });
     expect(getNote('note-2')).toMatchObject({ x: 420, y: 120 });
   });
+
+  it('mergeSelectedNotes 跨看板选中时返回 null 且不执行合并', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'alpha',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'note-cross',
+          boardId: 'other-board',
+          x: 50,
+          y: 60,
+          title: 'C',
+          content: 'cross',
+          color: '#FFFFFF',
+          z: 3,
+          createdAt: 300,
+          updatedAt: 300,
+        },
+      ]),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'other-board', name: '其他板', icon: '📋', createdAt: 1 },
+      ],
+      selectedIds: ['note-1', 'note-cross'],
+      config: { ...useStore.getState().config, maxZ: 3 },
+    });
+
+    const result = useStore.getState().mergeSelectedNotes();
+
+    expect(result).toBeNull();
+    expect(useStore.getState().notesById['note-1']).toBeDefined();
+    expect(useStore.getState().notesById['note-cross']).toBeDefined();
+    expect(useStore.getState().arrangeUndoToast).toBeNull();
+  });
+
+  it('undoLastArrange 撤销合并时完整恢复原始便签内容与坐标', () => {
+    const saveSpy = vi.fn(async () => true);
+    vi.setSystemTime(new Date('2026-03-19T11:00:00.000Z'));
+    useStore.setState({ saveToDisk: saveSpy });
+
+    const mergedId = useStore.getState().mergeSelectedNotes();
+    expect(mergedId).toBeTruthy();
+    saveSpy.mockClear();
+
+    const undone = useStore.getState().undoLastArrange();
+    const state = useStore.getState();
+
+    expect(undone).toBe(true);
+    expect(state.notesById[mergedId!]).toBeUndefined();
+    expect(state.notesById['note-1']).toBeDefined();
+    expect(state.notesById['note-1']).toMatchObject({
+      x: 10,
+      y: 20,
+      content: 'alpha',
+      boardId: 'default',
+    });
+    expect(state.notesById['note-2']).toBeDefined();
+    expect(state.notesById['note-2']).toMatchObject({
+      x: 30,
+      y: 40,
+      content: 'beta',
+      boardId: 'default',
+    });
+    expect(state.arrangeUndoToast).toBeNull();
+    expect(state.selectedIds).toEqual(['note-1', 'note-2']);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('undoLastArrange 撤销拆分时完整恢复原始便签', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      saveToDisk: saveSpy,
+      notesById: {
+        ...useStore.getState().notesById,
+        'note-1': {
+          ...useStore.getState().notesById['note-1'],
+          content: '第一段\n\n第二段\n\n第三段',
+        },
+      },
+    });
+
+    const selectedIds = useStore.getState().splitNoteByParagraph('note-1');
+    expect(selectedIds).toHaveLength(4);
+    saveSpy.mockClear();
+
+    const undone = useStore.getState().undoLastArrange();
+    const state = useStore.getState();
+
+    expect(undone).toBe(true);
+    expect(state.notesById['note-1']).toBeDefined();
+    expect(state.notesById['note-1']).toMatchObject({
+      content: '第一段\n\n第二段\n\n第三段',
+      x: 10,
+      y: 20,
+      boardId: 'default',
+    });
+    selectedIds.slice(1).forEach((id) => {
+      expect(state.notesById[id]).toBeUndefined();
+    });
+    expect(state.arrangeUndoToast).toBeNull();
+    expect(state.selectedIds).toEqual(['note-1', 'note-2']);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('useStore 导入契约', () => {
