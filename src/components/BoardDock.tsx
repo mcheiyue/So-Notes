@@ -47,7 +47,7 @@ const formatImportHighlights = (summary: NonNullable<ImportFeedback['summary']>)
 export const BoardDock = () => {
   const store = useStore();
   const { 
-    boards, boardNoteIds, currentBoardId, 
+    boards, boardNoteIds, notesById, currentBoardId, 
     switchBoard, createBoard, deleteBoard, updateBoard, reorderBoard,
     isDockVisible, setDockVisible, 
     viewMode, setViewMode, 
@@ -182,7 +182,7 @@ export const BoardDock = () => {
           setDeleteConfirm(null);
       } else {
           // First click: Check count
-          const count = (boardNoteIds[contextMenuBoard.id] ?? []).length;
+          const count = getBoardActiveNoteCount(contextMenuBoard.id);
           if (count > 0) {
               setDeleteConfirm({ id: contextMenuBoard.id, count });
           } else {
@@ -192,6 +192,11 @@ export const BoardDock = () => {
           }
       }
   };
+
+  const getBoardActiveNoteCount = (boardId: string) => (boardNoteIds[boardId] ?? []).filter((noteId) => {
+      const note = notesById[noteId];
+      return note && !note.deletedAt;
+  }).length;
 
   const handleCreate = () => {
     if (newBoardName.trim()) {
@@ -315,26 +320,6 @@ export const BoardDock = () => {
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 transition-colors border-b border-border-subtle"
                 >
                     <span>✏️</span> 重命名
-                </button>
-
-                <button
-                    type="button"
-                    onClick={() => {
-                      // Export this specific board (using current logic, we need to temporarily switch or just export by ID)
-                      // Since store only has exportCurrentBoard, we might need to rely on that or add exportBoard(id).
-                      // But for now, let's just use exportCurrentBoard if it matches, or disable it?
-                      // Actually, the store has exportBoard(id). Let's use that if we can access it.
-                      // But we can't easily access non-exported actions from here without exposing them.
-                      // Let's stick to what we have: if right-clicked board is current, we can export.
-                      // If not, we switch then export? That's intrusive.
-                      // Let's just remove export from here for simplicity, or keep it if it's the current board.
-                      // Wait, I previously added exportCurrentBoard to Context Menu.
-                      // Let's REMOVE it from here to simplify. Right click = Manage Board (Rename/Delete).
-                      // Exporting is a "Data" operation, best in Settings or specific menu.
-                      setContextMenuBoard(null);
-                    }}
-                    className="hidden" 
-                >
                 </button>
 
                 <button
@@ -598,6 +583,7 @@ export const BoardDock = () => {
             const isActive = currentBoardId === board.id;
             const isEditing = editingBoardId === board.id;
             const isReordering = reorderId === board.id;
+            const activeNoteCount = getBoardActiveNoteCount(board.id);
 
             if (isEditing) {
                 return (
@@ -636,7 +622,7 @@ export const BoardDock = () => {
                     setEditingBoardId(board.id);
                     setEditName(board.name);
                 }}
-                onContextMenu={(e) => {
+                 onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     if (isReordering) return;
@@ -644,9 +630,10 @@ export const BoardDock = () => {
                         const anchor = resolveBoardMenuAnchor(e.currentTarget);
                         setContextMenuBoard({ id: board.id, name: board.name, ...anchor });
                     }
-                }}
-                className={cn(
-                  "relative group flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200",
+                 }}
+                 aria-label={`${board.name}，${activeNoteCount} 个便签`}
+                 className={cn(
+                   "relative group flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200",
                   isActive 
                     ? "bg-secondary-bg text-text-primary" // Active状态的语义化背景和文字
                     : "text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary", // Hover状态的语义化背景和文字
@@ -658,7 +645,7 @@ export const BoardDock = () => {
                     "absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-tertiary-bg text-text-primary text-xs rounded transition-opacity pointer-events-none whitespace-nowrap shadow-sm",
                     isReordering ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                 )} style={{ zIndex: Z_INDEX.TOOLTIP }}>
-                    {isReordering ? "⬅️ 移动 ➡️" : board.name}
+                    {isReordering ? "⬅️ 移动 ➡️" : `${board.name} · ${activeNoteCount} 个便签`}
                     {/* Tiny triangle */}
 <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-tertiary-bg" />
             </div>
@@ -668,7 +655,10 @@ export const BoardDock = () => {
             )}
             
             {/* Board Icon */}
-            <span className="text-lg leading-none filter drop-shadow-sm transform group-hover:scale-110 transition-transform">
+            <span className={cn(
+              "text-lg leading-none filter drop-shadow-sm transform group-hover:scale-110 transition-transform",
+              activeNoteCount === 0 && !isActive && "opacity-55"
+            )}>
               {board.icon}
             </span>
           </button>

@@ -206,6 +206,7 @@ describe('App WindowShell 组合契约', () => {
     useStore.setState({
       arrangeUndoToast: {
         token: 1,
+        action: 'arrange',
         noteCount: 2,
         positions: [],
       },

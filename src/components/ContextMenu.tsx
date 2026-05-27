@@ -4,7 +4,7 @@ import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
 import { ChevronRight } from 'lucide-react';
 import { Z_INDEX } from '../constants/layout';
-import { buildSmartPasteNoteInputs, parseSmartPaste } from '../utils/smartPaste';
+import { buildSmartPasteNoteInputs, parseSmartPaste, splitParagraphs } from '../utils/smartPaste';
 
 type MenuItemButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement>;
 
@@ -32,7 +32,10 @@ const ContextMenuContent: React.FC = () => {
     openSmartPasteSplitPanel,
     setStickyDrag, 
     deleteSelectedNotes, 
+    mergeSelectedNotes,
+    splitNoteByParagraph,
     selectedIds, 
+    notesById,
     arrangeNotes,
     finalizeLayoutChange,
     setDockVisible,
@@ -48,6 +51,7 @@ const ContextMenuContent: React.FC = () => {
     batchSendToBack,
     viewport,
     shellRect,
+    smartPasteSplitPanel,
   } = useStore();
   const menuRef = useRef<HTMLDivElement>(null);
   const [hasClipboardText, setHasClipboardText] = useState(false);
@@ -148,6 +152,8 @@ const ContextMenuContent: React.FC = () => {
                          contextMenu.targetId && 
                          selectedIds.includes(contextMenu.targetId) && 
                          selectedIds.length > 1;
+  const targetNote = contextMenu.type === 'NOTE' && contextMenu.targetId ? notesById[contextMenu.targetId] : undefined;
+  const canSplitTargetNote = !!targetNote && !targetNote.deletedAt && !smartPasteSplitPanel && splitParagraphs(targetNote.content).length > 1;
 
   return (
     <div
@@ -268,6 +274,13 @@ const ContextMenuContent: React.FC = () => {
               <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                onClick={() => handleAction(() => mergeSelectedNotes())}
+              >
+                <span>🧩</span> 合并为一张
+              </MenuItemButton>
+              <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                 onClick={() => handleAction(() => batchToggleCollapse(selectedIds))}
               >
                 <span>📦</span> 批量折叠/展开
@@ -290,7 +303,19 @@ const ContextMenuContent: React.FC = () => {
           )}
           
           <div className="h-px bg-border-subtle my-1" />
-          
+          {!isGroupContext && canSplitTargetNote && (
+            <>
+              <MenuItemButton
+                role="menuitem"
+                className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+                onClick={() => handleAction(() => splitNoteByParagraph(contextMenu.targetId!))}
+              >
+                <span>✂️</span> 按段拆分
+              </MenuItemButton>
+              <div className="h-px bg-border-subtle my-1" />
+            </>
+          )}
+           
           <div className="px-4 py-2 text-xs text-text-tertiary font-semibold">
             {isGroupContext ? '批量改色' : '颜色'}
           </div>

@@ -12,6 +12,7 @@ import ShortcutsManager from "./components/ShortcutsManager";
 import { Spotlight } from "./components/Spotlight";
 import { QuickCaptureOverlay } from "./components/QuickCaptureOverlay";
 import { SmartPasteSplitBubble } from "./components/SmartPasteSplitBubble";
+import { SelectionActionBar } from "./components/SelectionActionBar";
 import { WindowShell, WindowShellContentRect } from "./components/WindowShell";
 import { Z_INDEX } from "./constants/layout";
 import { useFPSMonitor } from "./utils/performance";
@@ -19,6 +20,30 @@ import { diagnostics } from "./utils/diagnostics";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { createSmartPasteNoteInputs } from "./utils/smartPaste";
 import { getViewportSpawnOrigin } from "./utils/spawnPosition";
+
+const getOrganizationUndoToastCopy = (action: 'arrange' | 'merge' | 'split', noteCount: number) => {
+  if (action === 'merge') {
+    return {
+      title: `已合并 ${noteCount} 个便签`,
+      description: '可删除本次新建的合并结果。',
+      closeLabel: '关闭合并撤销提示',
+    };
+  }
+
+  if (action === 'split') {
+    return {
+      title: `已拆分出 ${noteCount} 个便签`,
+      description: '可删除本次新建的拆分结果。',
+      closeLabel: '关闭拆分撤销提示',
+    };
+  }
+
+  return {
+    title: `已归拢 ${noteCount} 个便签`,
+    description: '可恢复到本次归拢前的位置。',
+    closeLabel: '关闭归拢撤销提示',
+  };
+};
 
 function App() {
   const [globalShortcutError, setGlobalShortcutError] = useState<string | null>(null);
@@ -150,6 +175,10 @@ function App() {
     };
   }, []);
 
+  const undoToastCopy = arrangeUndoToast
+    ? getOrganizationUndoToastCopy(arrangeUndoToast.action, arrangeUndoToast.noteCount)
+    : null;
+
   const shellOverlay = (
     <>
       {viewMode === 'BOARD' && (
@@ -177,8 +206,9 @@ function App() {
       <ContextMenu />
       <ShortcutsManager />
       <SmartPasteSplitBubble />
+      <SelectionActionBar />
       <QuickCaptureOverlay />
-      {arrangeUndoToast && (
+      {arrangeUndoToast && undoToastCopy && (
         <div
           className="fixed left-1/2 bottom-5 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-sky-200/70 bg-secondary-bg/95 px-4 py-3 text-sm text-text-primary shadow-2xl backdrop-blur-md dark:border-sky-400/25 dark:bg-secondary-bg/90"
           style={{ zIndex: Z_INDEX.QUICK_CAPTURE + 2 }}
@@ -186,8 +216,8 @@ function App() {
           aria-live="polite"
         >
           <div className="min-w-0">
-            <div className="font-medium">已归拢 {arrangeUndoToast.noteCount} 个便签</div>
-            <div className="mt-0.5 text-xs text-text-tertiary">可恢复到本次归拢前的位置。</div>
+            <div className="font-medium">{undoToastCopy.title}</div>
+            <div className="mt-0.5 text-xs text-text-tertiary">{undoToastCopy.description}</div>
           </div>
           <button
             type="button"
@@ -199,7 +229,7 @@ function App() {
           <button
             type="button"
             className="shrink-0 rounded-full px-2 py-1 text-xs text-text-tertiary transition-colors hover:bg-secondary-bg hover:text-text-primary dark:hover:bg-white/10"
-            aria-label="关闭归拢撤销提示"
+            aria-label={undoToastCopy.closeLabel}
             onClick={dismissArrangeUndoToast}
           >
             ×
