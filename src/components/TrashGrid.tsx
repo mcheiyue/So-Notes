@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useStore } from '../store/useStore';
 import { NoteCard } from './NoteCard';
-import { Trash2, RotateCcw, X } from 'lucide-react';
+import { Trash2, RotateCcw, X, Search } from 'lucide-react';
 
 export const TrashGrid: React.FC = () => {
     const notesById = useStore(state => state.notesById);
@@ -15,6 +15,7 @@ export const TrashGrid: React.FC = () => {
     const deleteSelectedPermanently = useStore(state => state.deleteSelectedPermanently);
 
     const [selectedTrashIds, setSelectedTrashIds] = useState<string[]>([]);
+    const [searchQuery, setSearchQuery] = useState('');
 
     const deletedNotes = allNoteIds
         .flatMap((id) => {
@@ -22,6 +23,16 @@ export const TrashGrid: React.FC = () => {
             return note?.deletedAt ? [note] : [];
         })
         .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
+
+    const filteredNotes = useMemo(() => {
+        const trimmed = searchQuery.trim().toLowerCase();
+        if (!trimmed) return deletedNotes;
+        return deletedNotes.filter(
+            (note) =>
+                note.title.toLowerCase().includes(trimmed) ||
+                note.content.toLowerCase().includes(trimmed),
+        );
+    }, [deletedNotes, searchQuery]);
 
     const getBoardName = (boardId: string) => {
         return boards.find(b => b.id === boardId)?.name || 'Unknown Board';
@@ -145,9 +156,34 @@ export const TrashGrid: React.FC = () => {
                 </div>
             </div>
 
+            {/* Search Bar */}
+            <div className="sticky top-[73px] z-40 bg-secondary-bg/80 backdrop-blur-md border-b border-border-subtle px-8 py-3">
+                <div className="flex items-center gap-3 max-w-xl mx-auto px-4 py-2.5 bg-secondary-bg/60 border border-border-subtle rounded-xl transition-colors focus-within:border-blue-400/50 focus-within:ring-1 focus-within:ring-blue-400/30">
+                    <Search size={16} className="text-text-tertiary shrink-0" />
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="flex-1 bg-transparent border-none outline-none text-sm text-text-primary placeholder:text-text-tertiary"
+                        placeholder="在废纸篓中搜索..."
+                        aria-label="在废纸篓中搜索"
+                    />
+                    {searchQuery && (
+                        <button
+                            type="button"
+                            onClick={() => setSearchQuery('')}
+                            className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors"
+                            aria-label="清除搜索"
+                        >
+                            <X size={14} />
+                        </button>
+                    )}
+                </div>
+            </div>
+
             {/* Grid Content */}
             <div className="p-8 grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-6 pb-32">
-                {deletedNotes.map(note => (
+                {filteredNotes.map(note => (
                     <div 
                         key={note.id} 
                         className={`relative group flex flex-col cursor-pointer rounded-2xl transition-all ${
