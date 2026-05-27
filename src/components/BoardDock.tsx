@@ -661,13 +661,6 @@ export const BoardDock = () => {
             )}>
               {board.icon}
             </span>
-            <span className={cn(
-              "absolute -right-1 -top-1 min-w-4 rounded-full border border-border-subtle bg-primary-bg px-1 text-[10px] leading-4 text-text-tertiary shadow-sm",
-              isActive && "text-text-primary",
-              activeNoteCount === 0 && "opacity-50"
-            )}>
-              {activeNoteCount}
-            </span>
           </button>
             )
           })}

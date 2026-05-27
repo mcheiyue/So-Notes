@@ -206,8 +206,9 @@ function groupResults(items: SearchResultItem[], filter: SearchFilter): SearchRe
     });
   }
 
-  const contentMatchItems = items.filter(item => 
-    item.matchType === 'content-contains'
+  const contentMatchItems = items.filter(item =>
+    item.matchType === 'content-contains' &&
+    item.note.boardId !== filter.currentBoardId
   );
   if (contentMatchItems.length > 0) {
     groups.push({

@@ -439,7 +439,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     const boardButton = container.querySelector('[data-board-id="board-2"]') as HTMLButtonElement | null;
     expect(boardButton?.getAttribute('aria-label')).toBe('实验板，1 个便签');
-    expect(boardButton?.textContent).toContain('1');
+    expect(boardButton?.textContent).toContain('1 个便签');
 
     await act(async () => {
       boardButton?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
