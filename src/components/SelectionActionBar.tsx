@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NOTE_COLORS } from '../store/types';
 import { useStore } from '../store/useStore';
 import { Z_INDEX } from '../constants/layout';
@@ -17,14 +17,22 @@ export const SelectionActionBar: React.FC = () => {
   const arrangeNotes = useStore(state => state.arrangeNotes);
   const duplicateSelectedNotes = useStore(state => state.duplicateSelectedNotes);
 
-  const activeSelectedIds = selectedIds.filter((id) => {
-    const note = notesById[id];
-    return note && !note.deletedAt;
-  });
+  const activeSelectedIds = useMemo(
+    () =>
+      selectedIds.filter((id) => {
+        const note = notesById[id];
+        return note && !note.deletedAt;
+      }),
+    [selectedIds, notesById],
+  );
 
   if (viewMode !== 'BOARD' || activeSelectedIds.length < 2) {
     return null;
   }
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+  };
 
   return (
     <div
@@ -32,6 +40,7 @@ export const SelectionActionBar: React.FC = () => {
       style={{ zIndex: Z_INDEX.MENU - 1 }}
       role="toolbar"
       aria-label={`已选中 ${activeSelectedIds.length} 个便签的快捷操作`}
+      onPointerDown={handlePointerDown}
     >
       <div className="shrink-0 px-2 text-xs font-semibold text-text-tertiary">
         已选 {activeSelectedIds.length}

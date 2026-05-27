@@ -133,4 +133,25 @@ describe('SelectionActionBar', () => {
 
     expect(container.querySelector('[role="toolbar"]')).toBeNull();
   });
+
+  it('pointerdown 阻止默认行为以防止画布焦点抢占', async () => {
+    await act(async () => {
+      root.render(<SelectionActionBar />);
+    });
+
+    const toolbar = container.querySelector('[role="toolbar"]');
+    expect(toolbar).not.toBeNull();
+
+    const pointerDownEvent = new PointerEvent('pointerdown', {
+      bubbles: true,
+      cancelable: true,
+    });
+    const preventDefaultSpy = vi.spyOn(pointerDownEvent, 'preventDefault');
+
+    await act(async () => {
+      toolbar!.dispatchEvent(pointerDownEvent);
+    });
+
+    expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
+  });
 });
