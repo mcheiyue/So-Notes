@@ -23,6 +23,7 @@ vi.mock('../utils/fileSystem', () => ({
 
 import { ContextMenu } from './ContextMenu';
 import { useStore } from '../store/useStore';
+import { normalizeNotes } from '../store/normalization';
 
 describe('ContextMenu shell 坐标合同', () => {
   let container: HTMLDivElement;
@@ -128,6 +129,102 @@ describe('ContextMenu shell 坐标合同', () => {
     });
 
     expect(arrangeNotes).toHaveBeenCalledWith(518, 434, 'position', 'board');
+  });
+
+  it('多选便签右键菜单提供合并入口并复用 store action', async () => {
+    const mergeSelectedNotes = vi.fn(() => 'merged-note');
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '',
+          content: 'alpha',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'note-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: '',
+          content: 'beta',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      selectedIds: ['note-1', 'note-2'],
+      mergeSelectedNotes,
+      contextMenu: {
+        isOpen: true,
+        x: 120,
+        y: 140,
+        type: 'NOTE',
+        targetId: 'note-1',
+      },
+    });
+
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const mergeButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('合并为一张')) as HTMLButtonElement | undefined;
+    expect(mergeButton).toBeDefined();
+
+    await act(async () => {
+      mergeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(mergeSelectedNotes).toHaveBeenCalledTimes(1);
+  });
+
+  it('单张便签右键菜单仅对可按空行拆分内容显示拆分入口', async () => {
+    const splitNoteByParagraph = vi.fn(() => ['note-1', 'part-1']);
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '',
+          content: '第一段\n\n第二段',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+      ]),
+      selectedIds: ['note-1'],
+      splitNoteByParagraph,
+      contextMenu: {
+        isOpen: true,
+        x: 120,
+        y: 140,
+        type: 'NOTE',
+        targetId: 'note-1',
+      },
+    });
+
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const splitButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('按段拆分')) as HTMLButtonElement | undefined;
+    expect(splitButton).toBeDefined();
+
+    await act(async () => {
+      splitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(splitNoteByParagraph).toHaveBeenCalledWith('note-1');
   });
 
   it('贴近壳右边界时子菜单翻到左侧并限制高度', async () => {
