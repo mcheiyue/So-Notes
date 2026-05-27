@@ -131,22 +131,13 @@ export const Spotlight = () => {
     }
   };
 
-  const toggleFilter = () => {
-    setFilter(prev => {
-      const next = prev.scope === 'all-boards'
-        ? { scope: 'current-board' as const, currentBoardId: currentBoardId || undefined }
-        : prev.scope === 'current-board'
-          ? { scope: 'exclude-deleted' as const }
-          : { scope: 'all-boards' as const };
-      return next;
-    });
-  };
+  useEffect(() => {
+    if (!isSpotlightOpen || !query.trim()) {
+      return;
+    }
 
-  const filterLabel = filter.scope === 'all-boards'
-    ? '全部看板'
-    : filter.scope === 'current-board'
-      ? '当前看板'
-      : '已删除';
+    handleSearch(query);
+  }, [filter, handleSearch, isSpotlightOpen, query]);
 
   if (!isSpotlightOpen) return null;
 
@@ -180,19 +171,35 @@ export const Spotlight = () => {
             className="flex-1 h-14 bg-transparent border-none outline-none text-lg text-text-primary placeholder:text-text-tertiary"
             placeholder="搜索便签..."
           />
-          <button
-            type="button"
-            onClick={toggleFilter}
-            className={cn(
-              "flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors",
-              filter.scope === 'all-boards'
-                ? "text-text-tertiary bg-tertiary-bg/50 border-border-subtle/50"
-                : "text-indigo-500 bg-indigo-50/50 border-indigo-200"
-            )}
-          >
-            <Filter className="w-3 h-3" />
-            {filterLabel}
-          </button>
+          <div className="flex items-center gap-1 rounded-lg border border-border-subtle/60 bg-tertiary-bg/40 p-1 text-xs">
+            <Filter className="w-3 h-3 text-text-tertiary" aria-hidden="true" />
+            <button
+              type="button"
+              aria-pressed={filter.scope === 'all-boards'}
+              onClick={() => setFilter({ scope: 'all-boards' })}
+              className={cn(
+                "rounded px-2 py-1 transition-colors",
+                filter.scope === 'all-boards'
+                  ? "bg-secondary-bg text-text-primary shadow-sm"
+                  : "text-text-tertiary hover:text-text-secondary"
+              )}
+            >
+              全部看板
+            </button>
+            <button
+              type="button"
+              aria-pressed={filter.scope === 'current-board'}
+              onClick={() => setFilter({ scope: 'current-board', currentBoardId: currentBoardId || undefined })}
+              className={cn(
+                "rounded px-2 py-1 transition-colors",
+                filter.scope === 'current-board'
+                  ? "bg-indigo-50 text-indigo-600 shadow-sm dark:bg-indigo-500/20 dark:text-indigo-300"
+                  : "text-text-tertiary hover:text-text-secondary"
+              )}
+            >
+              当前看板
+            </button>
+          </div>
           <div className="text-xs text-text-tertiary font-medium px-2 py-1 bg-tertiary-bg/50 rounded border border-border-subtle/50 ml-2">
             ESC
           </div>

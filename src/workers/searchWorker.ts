@@ -14,7 +14,7 @@ export interface SearchResultsGroup {
 }
 
 export interface SearchFilter {
-  scope: 'current-board' | 'all-boards' | 'exclude-deleted';
+  scope: 'current-board' | 'all-boards';
   currentBoardId?: string;
 }
 
@@ -153,7 +153,7 @@ function search(query: string, filter: SearchFilter): { groups: SearchResultsGro
 
 function matchesFilter(note: Note, filter: SearchFilter): boolean {
   if (note.deletedAt) {
-    return filter.scope !== 'exclude-deleted';
+    return false;
   }
 
   if (filter.scope === 'current-board' && filter.currentBoardId) {

@@ -185,6 +185,35 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
     expect(useStore.getState().noteHighlights['note-1']?.reason).toBe('located');
   });
 
+  it('搜索范围只提供全部看板与当前看板两个明确选项', async () => {
+    await renderSpotlight();
+
+    expect(findButtonByText(container, '全部看板')).not.toBeNull();
+    expect(findButtonByText(container, '当前看板')).not.toBeNull();
+    expect(container.textContent).not.toContain('已删除');
+
+    const input = container.querySelector('input[placeholder="搜索便签..."]') as HTMLInputElement | null;
+    const currentBoardButton = findButtonByText(container, '当前看板');
+
+    expect(input).not.toBeNull();
+    expect(currentBoardButton).not.toBeNull();
+
+    await act(async () => {
+      const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setInputValue?.call(input, '恢复');
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      currentBoardButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(searchWorkerMock.search).toHaveBeenLastCalledWith('恢复', {
+      scope: 'current-board',
+      currentBoardId: 'default',
+    });
+  });
+
   it('跨看板搜索结果会在关闭搜索后继续聚焦目标便签', async () => {
     const remoteNote = createNote({
       id: 'remote-note',
@@ -247,3 +276,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
     expect(useStore.getState().noteHighlights['remote-note']?.reason).toBe('located');
   });
 });
+
+const findButtonByText = (container: HTMLElement, text: string) => Array.from(container.querySelectorAll('button')).find(
+  button => button.textContent?.includes(text),
+) ?? null;

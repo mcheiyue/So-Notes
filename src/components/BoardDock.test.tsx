@@ -21,7 +21,7 @@ vi.mock('../utils/fileSystem', () => ({
 
 import { BoardDock } from './BoardDock';
 import { Z_INDEX } from '../constants/layout';
-import { createEmptyNormalizedNotesState } from '../store/normalization';
+import { createEmptyNormalizedNotesState, normalizeNotes } from '../store/normalization';
 import { useStore } from '../store/useStore';
 
 describe('BoardDock v1.2.4 最小修复', () => {
@@ -402,5 +402,51 @@ describe('BoardDock v1.2.4 最小修复', () => {
     await clickElement(getSettingsButton());
     await clickElement(findButtonByText('数据管理'));
     expect(getImportFeedback()).toBeNull();
+  });
+
+  it('展示看板活跃便签计数并在删除确认中排除已删除便签', async () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'active-note',
+          boardId: 'board-2',
+          x: 0,
+          y: 0,
+          title: '',
+          content: '活跃便签',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: 'deleted-note',
+          boardId: 'board-2',
+          x: 0,
+          y: 0,
+          title: '',
+          content: '已删除便签',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 2,
+          updatedAt: 2,
+          deletedAt: 3,
+        },
+      ]),
+    });
+
+    await renderBoardDock();
+
+    const boardButton = container.querySelector('[data-board-id="board-2"]') as HTMLButtonElement | null;
+    expect(boardButton?.getAttribute('aria-label')).toBe('实验板，1 个便签');
+    expect(boardButton?.textContent).toContain('1');
+
+    await act(async () => {
+      boardButton?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    });
+
+    await clickElement(findButtonByText('删除看板'));
+
+    expect(container.textContent).toContain('确认删除? (1便签)');
   });
 });
