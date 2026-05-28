@@ -1183,6 +1183,46 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('switchBoard 目标看板无 viewport 时恢复到 0,0', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-2', name: '二号板', icon: '🧩', createdAt: 1 },
+      ],
+      currentBoardId: 'default',
+      viewport: { x: 24, y: 36, w: 1280, h: 720 },
+      config: { ...useStore.getState().config, maxZ: 1 },
+      saveToDisk: saveSpy,
+    });
+
+    useStore.getState().switchBoard('board-2');
+
+    expect(useStore.getState().viewport.x).toBe(0);
+    expect(useStore.getState().viewport.y).toBe(0);
+  });
+
+  it('switchBoard 目标看板有 viewport 时恢复到该 viewport', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-2', name: '二号板', icon: '🧩', createdAt: 1, viewport: { x: 500, y: 600 } },
+      ],
+      currentBoardId: 'default',
+      viewport: { x: 24, y: 36, w: 1280, h: 720 },
+      config: { ...useStore.getState().config, maxZ: 1 },
+      saveToDisk: saveSpy,
+    });
+
+    useStore.getState().switchBoard('board-2');
+
+    expect(useStore.getState().viewport.x).toBe(500);
+    expect(useStore.getState().viewport.y).toBe(600);
+  });
+
   it('新建空白便签后选中新便签并标记创建反馈', () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({

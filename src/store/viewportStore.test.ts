@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createInitialViewportState, useViewportStore, viewportSelectors } from './viewportStore';
 import { useStore } from './useStore';
 
@@ -222,5 +222,119 @@ describe('viewportStore 同步桥', () => {
     expect(useViewportStore.getState().viewport.x).toBe(500);
     expect(useStore.getState().viewport.x).toBe(500);
     expect(useStore.getState().viewport.y).toBe(600);
+  });
+});
+
+describe('viewportStore 切板过渡桥接验证（Commit 09）', () => {
+  const setupTwoBoardState = () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-2', name: '二号板', icon: '🧩', createdAt: 1, viewport: { x: 500, y: 600 } },
+      ],
+      currentBoardId: 'default',
+      viewport: { x: 100, y: 200, w: 1280, h: 720 },
+      shellRect: { left: 0, top: 0, right: 1280, bottom: 720 },
+      canvas: { w: 1280, h: 720 },
+      interaction: {
+        isPanMode: false,
+        isDragging: false,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+      stickyDrag: { id: null, offsetX: 0, offsetY: 0, status: 'active' },
+      saveToDisk: saveSpy,
+    });
+    useViewportStore.getState().replaceViewportState({
+      viewport: { x: 100, y: 200, w: 1280, h: 720 },
+      shellRect: { left: 0, top: 0, right: 1280, bottom: 720 },
+      canvas: { w: 1280, h: 720 },
+      interaction: {
+        isPanMode: false,
+        isDragging: false,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+      stickyDrag: { id: null, offsetX: 0, offsetY: 0, status: 'active' },
+    });
+    return saveSpy;
+  };
+
+  it('switchBoard 保存旧看板 viewport 到 Board 数据', () => {
+    setupTwoBoardState();
+
+    useStore.getState().switchBoard('board-2');
+
+    const oldBoard = useStore.getState().boards.find((b) => b.id === 'default');
+    expect(oldBoard?.viewport).toEqual({ x: 100, y: 200 });
+  });
+
+  it('switchBoard 从目标看板恢复 viewport 到 useStore.viewport', () => {
+    setupTwoBoardState();
+
+    useStore.getState().switchBoard('board-2');
+
+    expect(useStore.getState().viewport.x).toBe(500);
+    expect(useStore.getState().viewport.y).toBe(600);
+  });
+
+  it('switchBoard 目标看板无 viewport 时恢复到 0,0', () => {
+    setupTwoBoardState();
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-2', name: '二号板', icon: '🧩', createdAt: 1 },
+      ],
+    });
+
+    useStore.getState().switchBoard('board-2');
+
+    expect(useStore.getState().viewport.x).toBe(0);
+    expect(useStore.getState().viewport.y).toBe(0);
+  });
+
+  it('switchBoard 恢复的 viewport 通过过渡同步桥可见于 useViewportStore', () => {
+    setupTwoBoardState();
+
+    useStore.getState().switchBoard('board-2');
+
+    expect(useViewportStore.getState().viewport.x).toBe(500);
+    expect(useViewportStore.getState().viewport.y).toBe(600);
+  });
+
+  it('switchBoard 目标看板无 viewport 时 viewportStore 也恢复到 0,0', () => {
+    setupTwoBoardState();
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-2', name: '二号板', icon: '🧩', createdAt: 1 },
+      ],
+    });
+
+    useStore.getState().switchBoard('board-2');
+
+    expect(useViewportStore.getState().viewport.x).toBe(0);
+    expect(useViewportStore.getState().viewport.y).toBe(0);
+  });
+
+  it('switchBoard 回切看板后恢复该看板之前保存的 viewport，viewportStore 也同步', () => {
+    setupTwoBoardState();
+
+    useStore.getState().switchBoard('board-2');
+    expect(useStore.getState().viewport.x).toBe(500);
+    expect(useViewportStore.getState().viewport.x).toBe(500);
+
+    useStore.getState().setViewportPosition(700, 800);
+    expect(useViewportStore.getState().viewport.x).toBe(700);
+
+    useStore.getState().switchBoard('default');
+
+    expect(useStore.getState().viewport.x).toBe(100);
+    expect(useStore.getState().viewport.y).toBe(200);
+
+    const board2 = useStore.getState().boards.find((b) => b.id === 'board-2');
+    expect(board2?.viewport).toEqual({ x: 700, y: 800 });
+
+    expect(useViewportStore.getState().viewport.x).toBe(100);
+    expect(useViewportStore.getState().viewport.y).toBe(200);
   });
 });
