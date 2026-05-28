@@ -6,21 +6,13 @@ import { LayoutNote, Note, AppConfig, StorageData, StorageDataInput, STORAGE_SCH
 import { db } from './db';
 import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes } from './normalization';
 
-import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
+import { createDataTransferService, type ImportFromFileResult } from '../services/transfer/DataTransferService';
 import { diagnostics } from '../utils/diagnostics';
 import { getNoteVisualHeight } from '../utils/noteVisualMetrics';
 import { finalizeActiveNoteDrag } from '../utils/activeNoteDrag';
 import { buildSmartPasteNoteInputs, splitParagraphs } from '../utils/smartPaste';
 import type { SmartPasteNoteInput, SmartPasteOptionId, SmartPasteResult } from '../utils/smartPaste';
-
-interface ImportFromFileResult {
-  status: 'cancelled' | 'success' | 'error';
-  code?: ImportFailureCode | 'SAVE_FAILED';
-  message?: string;
-  summary?: ImportSummary;
-  rolledBack?: boolean;
-}
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -1872,139 +1864,48 @@ export const useStore = create<State>()(
     },
 
     exportBoard: async (boardId) => {
-        const state = get();
-        const { boards } = state;
-        const board = boards.find(b => b.id === boardId);
-        if (!board) return;
-
-        const json = generateBoardExport(board, denormalizeNotes(state));
-        const fileName = `Board_${board.name.replace(/[^a-z0-9]/gi, '_')}.json`;
-        
-        await saveFile(json, fileName);
+        const service = createDataTransferService({
+            getState: get, set, denormalizeNotes, normalizeNotes, createLayoutNotesById,
+            appendNoteToNormalizedState, normalizeStorageDataMetadata,
+            saveToDisk: get().saveToDisk, saveWAL: db.saveWAL, openFile, saveFile,
+        });
+        await service.exportBoard(boardId);
     },
 
     exportCurrentBoard: async () => {
-        const { currentBoardId } = get();
-        await get().exportBoard(currentBoardId);
+        const service = createDataTransferService({
+            getState: get, set, denormalizeNotes, normalizeNotes, createLayoutNotesById,
+            appendNoteToNormalizedState, normalizeStorageDataMetadata,
+            saveToDisk: get().saveToDisk, saveWAL: db.saveWAL, openFile, saveFile,
+        });
+        await service.exportCurrentBoard();
     },
 
     exportAll: async () => {
-        const state = get();
-        const { boards, config, currentBoardId } = state;
-        const notes = denormalizeNotes(state);
-        const json = generateFullBackup(boards, notes, config, currentBoardId);
-        const fileName = `SoNotes_Backup_${new Date().toISOString().split('T')[0]}.json`;
-        
-        await saveFile(json, fileName);
+        const service = createDataTransferService({
+            getState: get, set, denormalizeNotes, normalizeNotes, createLayoutNotesById,
+            appendNoteToNormalizedState, normalizeStorageDataMetadata,
+            saveToDisk: get().saveToDisk, saveWAL: db.saveWAL, openFile, saveFile,
+        });
+        await service.exportAll();
     },
 
     exportSelectedNotes: async () => {
-        const state = get();
-        const { selectedIds, boards, currentBoardId } = state;
-        if (selectedIds.length === 0) return;
-
-        const selectedNotes = selectedIds
-            .map(id => state.notesById[id])
-            .filter((n): n is Note => n !== undefined && !n.deletedAt);
-
-        if (selectedNotes.length === 0) return;
-
-        const currentBoard = boards.find(b => b.id === currentBoardId);
-        if (!currentBoard) return;
-
-        const json = generateBoardExport(currentBoard, selectedNotes);
-        const fileName = `Selected_${selectedNotes.length}_notes.json`;
-        
-        await saveFile(json, fileName);
+        const service = createDataTransferService({
+            getState: get, set, denormalizeNotes, normalizeNotes, createLayoutNotesById,
+            appendNoteToNormalizedState, normalizeStorageDataMetadata,
+            saveToDisk: get().saveToDisk, saveWAL: db.saveWAL, openFile, saveFile,
+        });
+        await service.exportSelectedNotes();
     },
 
     importFromFile: async () => {
-        const jsonContent = await openFile();
-        if (!jsonContent) {
-            return { status: 'cancelled' };
-        }
-
-        const existingBoardNames = get().boards.map(board => board.name);
-        const result = processImport(jsonContent, existingBoardNames);
-        if (result.status === 'error') {
-            console.error(`Import failed: ${result.code} - ${result.message}`);
-            return {
-                status: 'error',
-                code: result.code,
-                message: result.message,
-            };
-        }
-
-        const previousState = get();
-        const snapshot = {
-            boards: previousState.boards,
-            notes: denormalizeNotes(previousState),
-            currentBoardId: previousState.currentBoardId,
-            viewMode: previousState.viewMode,
-            selectedIds: previousState.selectedIds,
-        };
-
-        const { boards: newBoards, notes: newNotes, suggestedCurrentBoardId, summary } = result.data;
-        if (newBoards.length === 0) {
-            return {
-                status: 'error',
-                code: 'INVALID_STRUCTURE',
-                message: '导入失败：备份文件中没有可导入的看板。',
-            };
-        }
-
-        set((state) => {
-            // v1.2.7 约定：导入批次保留内部相对顺序，并整体追加到本地看板末尾。
-            state.boards.push(...newBoards);
-            newNotes.forEach((note) => appendNoteToNormalizedState(state, note));
-            
-            if (suggestedCurrentBoardId) {
-                state.currentBoardId = suggestedCurrentBoardId;
-                state.viewMode = 'BOARD';
-            }
-            state.selectedIds = [];
+        const service = createDataTransferService({
+            getState: get, set, denormalizeNotes, normalizeNotes, createLayoutNotesById,
+            appendNoteToNormalizedState, normalizeStorageDataMetadata,
+            saveToDisk: get().saveToDisk, saveWAL: db.saveWAL, openFile, saveFile,
         });
-        
-        const saved = await get().saveToDisk();
-        if (!saved) {
-            set((state) => {
-                const normalizedSnapshot = normalizeNotes(snapshot.notes);
-                state.boards = snapshot.boards;
-                state.notesById = normalizedSnapshot.notesById;
-                state.allNoteIds = normalizedSnapshot.allNoteIds;
-                state.boardNoteIds = normalizedSnapshot.boardNoteIds;
-                state.layoutNotesById = createLayoutNotesById(normalizedSnapshot.notesById);
-                state.currentBoardId = snapshot.currentBoardId;
-                state.viewMode = snapshot.viewMode;
-                state.selectedIds = snapshot.selectedIds;
-            });
-            await db.saveWAL(normalizeStorageDataMetadata({
-                boards: snapshot.boards,
-                notes: snapshot.notes,
-                currentBoardId: snapshot.currentBoardId,
-                config: get().config,
-            }));
-
-            return {
-                status: 'error',
-                code: 'SAVE_FAILED',
-                message: '导入失败：写入本地存储时出错，已回滚到导入前状态。',
-                summary,
-                rolledBack: true,
-            };
-        }
-
-        const summaryMessage = summary.skippedNotesCount > 0
-            ? `导入完成，已跳过 ${summary.skippedNotesCount} 条异常便签。`
-            : result.compatibility === 'LEGACY'
-                ? '已导入旧版备份，并按当前规则完成兼容处理。'
-                : '导入成功。';
-
-        return {
-            status: 'success',
-            message: summaryMessage,
-            summary,
-        };
+        return service.importFromFile();
     },
 
     setThemeMode: (mode) => {
