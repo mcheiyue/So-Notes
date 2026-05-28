@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback, useMemo, Profiler } from "react";
-import { useStore } from "../store";
+import { useStore, useViewportStore } from "../store";
 import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
@@ -47,20 +47,20 @@ const isBlankCanvasTarget = (target: EventTarget | null): boolean => {
 };
 
 const isDragInteractionLocked = (): boolean => {
-  const state = useStore.getState();
-  return state.interaction.isDragging || getEdgePushDragLeader() !== null || state.stickyDrag.id !== null;
+  const vpState = useViewportStore.getState();
+  return vpState.interaction.isDragging || getEdgePushDragLeader() !== null || vpState.stickyDrag.id !== null;
 };
 
 export const Canvas: React.FC = () => {
-  // 细粒度订阅：只订阅渲染路径真正需要的状态
   const isLoaded = useStore((s) => s.isLoaded);
   const currentBoardId = useStore((s) => s.currentBoardId);
-  const stickyDragId = useStore((s) => s.stickyDrag.id);
-  const stickyDragStatus = useStore((s) => s.stickyDrag.status);
-  const isPanMode = useStore((s) => s.interaction.isPanMode);
-  const isDragging = useStore((s) => s.interaction.isDragging);
-  const edgePush = useStore((s) => s.interaction.edgePush);
-  const viewport = useStore((s) => s.viewport);
+
+  const stickyDragId = useViewportStore((s) => s.stickyDrag.id);
+  const stickyDragStatus = useViewportStore((s) => s.stickyDrag.status);
+  const isPanMode = useViewportStore((s) => s.interaction.isPanMode);
+  const isDragging = useViewportStore((s) => s.interaction.isDragging);
+  const edgePush = useViewportStore((s) => s.interaction.edgePush);
+  const viewport = useViewportStore((s) => s.viewport);
 
   const notesById = useStore((s) => s.notesById);
   const layoutNotesById = useStore((s) => s.layoutNotesById);
@@ -126,40 +126,41 @@ export const Canvas: React.FC = () => {
     return containerRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
   };
 
-  const getStickyDragIds = useCallback((state = useStore.getState()) => {
-    const leaderId = state.stickyDrag.id;
+  const getStickyDragIds = useCallback((legacyState = useStore.getState(), vpState = useViewportStore.getState()) => {
+    const leaderId = vpState.stickyDrag.id;
     if (!leaderId) {
       return [] as string[];
     }
 
-    if (state.selectedIds.includes(leaderId) && state.selectedIds.length > 1) {
-      return state.selectedIds;
+    if (legacyState.selectedIds.includes(leaderId) && legacyState.selectedIds.length > 1) {
+      return legacyState.selectedIds;
     }
 
     return [leaderId];
   }, []);
 
-  const restoreStickyDragPreview = useCallback((state = useStore.getState()) => {
-    const ids = getStickyDragIds(state);
+  const restoreStickyDragPreview = useCallback((legacyState = useStore.getState(), vpState = useViewportStore.getState()) => {
+    const ids = getStickyDragIds(legacyState, vpState);
     ids.forEach((id) => {
       const el = getNoteElement(id);
-      const note = state.notesById[id];
+      const note = legacyState.notesById[id];
       if (!el || !note) return;
       el.style.transform = `translate(${note.x}px, ${note.y}px)`;
     });
   }, [getStickyDragIds]);
 
   const commitStickyDragPlacement = useCallback(() => {
-    const state = useStore.getState();
-    const idsToCommit = getStickyDragIds(state);
+    const legacyState = useStore.getState();
+    const vpState = useViewportStore.getState();
+    const idsToCommit = getStickyDragIds(legacyState, vpState);
     if (idsToCommit.length === 0) {
-      state.setStickyDrag(null);
+      useViewportStore.getState().setStickyDrag(null);
       return;
     }
 
     const rawPositions = Object.fromEntries(
       idsToCommit.flatMap((id) => {
-        const note = state.notesById[id];
+        const note = legacyState.notesById[id];
         if (!note) return [];
 
         const el = getNoteElement(id);
@@ -174,8 +175,8 @@ export const Canvas: React.FC = () => {
 
     const finalPositions = Object.fromEntries(
       idsToCommit.flatMap((id) => {
-        const note = state.notesById[id];
-        const layout = state.layoutNotesById[id];
+        const note = legacyState.notesById[id];
+        const layout = legacyState.layoutNotesById[id];
         const rawPosition = rawPositions[id];
         if (!note || !layout || !rawPosition) {
           return [];
@@ -186,10 +187,10 @@ export const Canvas: React.FC = () => {
           resolveDragStopWorldPosition(
             rawPosition.x,
             rawPosition.y,
-            state.viewport,
+            vpState.viewport,
             getNoteVisualWidth(note, layout),
             getNoteVisualHeight(note, layout),
-            state.interaction.isPanMode,
+            vpState.interaction.isPanMode,
             10,
           ),
         ]];
@@ -217,26 +218,26 @@ export const Canvas: React.FC = () => {
           height: note.height,
         };
       });
-      draft.stickyDrag = { id: null, offsetX: 0, offsetY: 0, status: 'active' };
     });
 
-    state.finalizeLayoutChange(idsToCommit);
+    useViewportStore.getState().setStickyDrag(null);
+    legacyState.finalizeLayoutChange(idsToCommit);
   }, [getStickyDragIds]);
 
   const cancelStickyDrag = useCallback(() => {
-    const state = useStore.getState();
-    if (!state.stickyDrag.id) return;
-    restoreStickyDragPreview(state);
-    state.setStickyDrag(null);
+    const vpState = useViewportStore.getState();
+    if (!vpState.stickyDrag.id) return;
+    restoreStickyDragPreview(useStore.getState(), vpState);
+    useViewportStore.getState().setStickyDrag(null);
   }, [restoreStickyDragPreview]);
 
   const suspendStickyDrag = useCallback(() => {
-    const state = useStore.getState();
-    if (!state.stickyDrag.id || state.stickyDrag.status === 'suspended') return;
-    state.setStickyDrag(
-      state.stickyDrag.id,
-      state.stickyDrag.offsetX,
-      state.stickyDrag.offsetY,
+    const vpState = useViewportStore.getState();
+    if (!vpState.stickyDrag.id || vpState.stickyDrag.status === 'suspended') return;
+    useViewportStore.getState().setStickyDrag(
+      vpState.stickyDrag.id,
+      vpState.stickyDrag.offsetX,
+      vpState.stickyDrag.offsetY,
       'suspended',
     );
   }, []);
@@ -294,7 +295,7 @@ export const Canvas: React.FC = () => {
         worldLayerRef.current.style.transform = `translate3d(${-panOffsetRef.current.x}px, ${-panOffsetRef.current.y}px, 0)`;
       }
 
-      useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
+      useViewportStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
 
       panDeltaRef.current = { dx: 0, dy: 0 };
     };
@@ -334,13 +335,12 @@ export const Canvas: React.FC = () => {
                  const DOUBLE_PRESS_DELAY = 300;
                  
                  if (now - lastSpacePressTime.current < DOUBLE_PRESS_DELAY) {
-                     const s = useStore.getState();
-                     s.setViewportPosition(0, 0);
-                     s.setPanMode(false);
+                     useViewportStore.getState().setViewportPosition(0, 0);
+                     useViewportStore.getState().setPanMode(false);
                      lastSpacePressTime.current = 0;
                  } else {
-                     const currentMode = useStore.getState().interaction.isPanMode;
-                     useStore.getState().setPanMode(!currentMode);
+                     const currentMode = useViewportStore.getState().interaction.isPanMode;
+                     useViewportStore.getState().setPanMode(!currentMode);
                      lastSpacePressTime.current = now;
                  }
              }
@@ -357,19 +357,19 @@ export const Canvas: React.FC = () => {
   }, []);
 
   // Edge Push Animation Loop
-  useEffect(() => {
+    useEffect(() => {
     const { top, bottom, left, right } = edgePush;
     if (!top && !bottom && !left && !right) {
         if (edgePushFrameRef.current) {
             cancelAnimationFrame(edgePushFrameRef.current);
             edgePushFrameRef.current = 0;
-            useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
+            useViewportStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
         }
         return;
     }
 
-    const viewport = useStore.getState().viewport;
-    panOffsetRef.current = { x: viewport.x, y: viewport.y };
+    const vp = useViewportStore.getState().viewport;
+    panOffsetRef.current = { x: vp.x, y: vp.y };
 
     const pushLoop = () => {
         let dx = 0;
@@ -387,7 +387,7 @@ export const Canvas: React.FC = () => {
             if (panOffsetRef.current.x < 0) panOffsetRef.current.x = 0;
             if (panOffsetRef.current.y < 0) panOffsetRef.current.y = 0;
 
-            useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
+            useViewportStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
 
             if (worldLayerRef.current) {
                 worldLayerRef.current.style.transform = `translate3d(${-panOffsetRef.current.x}px, ${-panOffsetRef.current.y}px, 0)`;
@@ -441,17 +441,18 @@ export const Canvas: React.FC = () => {
       // 1. Sticky Drag Logic
       if (stickyDragId) {
           const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
-          const state = useStore.getState();
-          if (state.stickyDrag.status === 'suspended') {
+          const vpState = useViewportStore.getState();
+          const legacyState = useStore.getState();
+          if (vpState.stickyDrag.status === 'suspended') {
             return;
           }
-          const vp = state.viewport;
-          const newX = (localPoint.x - state.stickyDrag.offsetX) / scale + vp.x;
-          const newY = (localPoint.y - state.stickyDrag.offsetY) / scale + vp.y;
+          const vp = vpState.viewport;
+          const newX = (localPoint.x - vpState.stickyDrag.offsetX) / scale + vp.x;
+          const newY = (localPoint.y - vpState.stickyDrag.offsetY) / scale + vp.y;
           
-          const currentNote = state.notesById[stickyDragId];
-          const isSelected = state.selectedIds.includes(stickyDragId);
-          const ids = getStickyDragIds(state);
+          const currentNote = legacyState.notesById[stickyDragId];
+          const isSelected = legacyState.selectedIds.includes(stickyDragId);
+          const ids = getStickyDragIds(legacyState, vpState);
           
           if (isSelected && ids.length > 1 && currentNote) {
               const dx = newX - currentNote.x;
@@ -460,7 +461,7 @@ export const Canvas: React.FC = () => {
                   if (id === stickyDragId) return;
                   const el = getNoteElement(id);
                   if (!el) return;
-                  const note = state.notesById[id];
+                  const note = legacyState.notesById[id];
                   if (!note) return;
                   el.style.transform = `translate(${note.x + dx}px, ${note.y + dy}px)`;
               });
@@ -511,7 +512,7 @@ export const Canvas: React.FC = () => {
     // The click (e.clientX) is in screen space.
     // The note needs to be placed in world space.
     const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
-    const vp = useStore.getState().viewport;
+    const vp = useViewportStore.getState().viewport;
     const x = localPoint.x + vp.x;
     const y = localPoint.y + vp.y;
     useStore.getState().addNote(x, y);
@@ -535,7 +536,7 @@ export const Canvas: React.FC = () => {
     }
 
     const text = e.clipboardData.getData('text/plain');
-    const vp = useStore.getState().viewport;
+    const vp = useViewportStore.getState().viewport;
     const origin = getViewportSpawnOrigin(vp);
     const result = parseSmartPaste(text);
     const notes = buildSmartPasteNoteInputs(result.source ? [result.source] : [], origin.x, origin.y);
@@ -566,15 +567,15 @@ export const Canvas: React.FC = () => {
       }
 
       // 0. Start Panning (Space Mode + Left Click on Background)
-      if (useStore.getState().interaction.isPanMode && e.button === 0 && isBlankTarget) {
+      if (useViewportStore.getState().interaction.isPanMode && e.button === 0 && isBlankTarget) {
           isPanning.current = true;
           panStart.current = { x: e.clientX, y: e.clientY };
-          const vp = useStore.getState().viewport;
+          const vp = useViewportStore.getState().viewport;
           panOffsetRef.current = { x: vp.x, y: vp.y };
           return;
       }
 
-      if (useStore.getState().interaction.isDragging) {
+      if (useViewportStore.getState().interaction.isDragging) {
           return;
       }
 
@@ -603,7 +604,7 @@ export const Canvas: React.FC = () => {
       if (isPanning.current) {
           isPanning.current = false;
           stopPanFlushLoop();
-          useStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
+          useViewportStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
           return;
       }
 
@@ -633,7 +634,7 @@ export const Canvas: React.FC = () => {
               bottom: Math.max(startY, endY)
           };
 
-          const vp = useStore.getState().viewport;
+          const vp = useViewportStore.getState().viewport;
           const worldRect = {
               left: screenRect.left + vp.x,
               top: screenRect.top + vp.y,
@@ -687,8 +688,8 @@ export const Canvas: React.FC = () => {
           isSelecting.current = false;
           panDeltaRef.current = { dx: 0, dy: 0 };
           stopPanFlushLoop();
-          useStore.getState().setEdgePush({ top: false, bottom: false, left: false, right: false });
-          useStore.getState().setIsDragging(false);
+          useViewportStore.getState().setEdgePush({ top: false, bottom: false, left: false, right: false });
+          useViewportStore.getState().setIsDragging(false);
           setEdgePushDragLeader(null);
           suspendStickyDrag();
           if (selectionBoxRef.current) {
@@ -697,7 +698,7 @@ export const Canvas: React.FC = () => {
       };
 
       const handleKeyDown = (event: KeyboardEvent) => {
-          if (event.key === 'Escape' && useStore.getState().stickyDrag.id) {
+          if (event.key === 'Escape' && useViewportStore.getState().stickyDrag.id) {
               event.preventDefault();
               cancelStickyDrag();
           }

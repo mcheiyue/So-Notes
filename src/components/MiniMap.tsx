@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useStore } from '../store';
+import { useStore, useViewportStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
 import { LAYOUT, Z_INDEX } from '../constants/layout';
@@ -15,11 +15,15 @@ interface MiniMapRenderableNote {
 }
 
 export const MiniMap: React.FC = () => {
-    const { notesById, layoutNotesById, currentBoardNoteIds, viewport, interaction, setViewportPosition } = useStore(
+    const { notesById, layoutNotesById, currentBoardNoteIds } = useStore(
         useShallow(state => ({
             notesById: state.notesById,
             layoutNotesById: state.layoutNotesById,
             currentBoardNoteIds: state.boardNoteIds[state.currentBoardId] ?? EMPTY_NOTE_IDS,
+        }))
+    );
+    const { viewport, interaction, setViewportPosition } = useViewportStore(
+        useShallow(state => ({
             viewport: state.viewport,
             interaction: state.interaction,
             setViewportPosition: state.setViewportPosition,
@@ -102,7 +106,7 @@ export const MiniMap: React.FC = () => {
         }, [visibleNotes, viewport]);
 
     // Visibility Logic
-    const edgePush = useStore(state => state.interaction.edgePush);
+    const edgePush = useViewportStore(state => state.interaction.edgePush);
     const isEdgePushing = Object.values(edgePush).some(v => v);
     const isVisible = interaction.isPanMode || isEdgePushing || isHovered;
 
