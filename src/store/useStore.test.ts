@@ -22,6 +22,7 @@ import { db } from './db';
 import { openFile } from '../utils/fileSystem';
 import { invoke } from '@tauri-apps/api/core';
 import { createEmptyNormalizedNotesState, denormalizeNotes, normalizeNotes } from './normalization';
+import { STORAGE_SCHEMA_VERSION } from './types';
 import { LAYOUT } from '../constants/layout';
 import { registerActiveNoteDragFinalizer } from '../utils/activeNoteDrag';
 import { parseSmartPaste } from '../utils/smartPaste';
@@ -32,6 +33,52 @@ const flushMicrotasks = async () => {
 };
 
 const getNote = (id: string) => useStore.getState().notesById[id];
+
+describe('v1.4.0 StorageData 演进契约', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+  });
+
+  it('读取旧版数据时补齐存储元信息，并忽略 UI 与 Viewport 字段', async () => {
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      notes: [{
+        id: 'legacy-note',
+        boardId: 'legacy-board',
+        x: 10,
+        y: 20,
+        title: '旧数据',
+        content: '应正常读取',
+        color: '#FFFFFF',
+        z: 3,
+        createdAt: 100,
+        updatedAt: 123,
+      }],
+      boards: [{ id: 'legacy-board', name: '旧看板', icon: '📦', createdAt: 90 }],
+      currentBoardId: 'legacy-board',
+      config: { version: 2, maxZ: 3, themeMode: 'system' },
+      viewMode: 'TRASH',
+      selectedIds: ['legacy-note'],
+      viewport: { x: 999, y: 888, w: 777, h: 666 },
+    }));
+
+    await useStore.getState().init();
+
+    const state = useStore.getState();
+    expect(state.currentBoardId).toBe('legacy-board');
+    expect(state.notesById['legacy-note']?.title).toBe('旧数据');
+    expect(state.viewMode).toBe('BOARD');
+    expect(state.selectedIds).toEqual([]);
+    expect(state.viewport.x).not.toBe(999);
+
+    const savedWal = vi.mocked(db.saveWAL).mock.calls[0]?.[0];
+    expect(savedWal).toMatchObject({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 123,
+    });
+  });
+});
 
 describe('useStore 布局持久化契约', () => {
   beforeEach(() => {

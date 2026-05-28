@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { LayoutNote, Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus, NoteHighlight, NoteHighlightReason } from './types';
+import { LayoutNote, Note, AppConfig, StorageData, StorageDataInput, STORAGE_SCHEMA_VERSION, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus, NoteHighlight, NoteHighlightReason } from './types';
 
 import { db } from './db';
 import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes } from './normalization';
@@ -331,10 +331,28 @@ const resolveSaveErrorMessage = (error: unknown): string => {
 };
 
 const serializeState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds' | 'boards' | 'currentBoardId' | 'config'>): StorageData => ({
+  schemaVersion: STORAGE_SCHEMA_VERSION,
+  storageUpdatedAt: Date.now(),
   notes: denormalizeNotes(state),
   boards: state.boards,
   currentBoardId: state.currentBoardId,
   config: state.config,
+});
+
+const isFiniteTimestamp = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+const getLegacyStorageUpdatedAt = (notes: Note[]): number => {
+  if (notes.length === 0) {
+    return 0;
+  }
+
+  return Math.max(...notes.map((note) => note.updatedAt || 0));
+};
+
+const normalizeStorageDataMetadata = (data: StorageDataInput): StorageData => ({
+  ...data,
+  schemaVersion: isFiniteTimestamp(data.schemaVersion) ? data.schemaVersion : STORAGE_SCHEMA_VERSION,
+  storageUpdatedAt: isFiniteTimestamp(data.storageUpdatedAt) ? data.storageUpdatedAt : getLegacyStorageUpdatedAt(data.notes),
 });
 
 const getBoardNoteIds = (state: Pick<State, 'boardNoteIds'>, boardId: string): string[] => state.boardNoteIds[boardId] ?? [];
@@ -463,12 +481,12 @@ export const useStore = create<State>()(
     arrangeUndoToast: null,
 
     init: async () => {
-      let finalData: StorageData = { 
+      let finalData: StorageData = normalizeStorageDataMetadata({
         notes: [], 
         boards: [DEFAULT_BOARD], 
         currentBoardId: DEFAULT_BOARD.id, 
         config: DEFAULT_CONFIG 
-      };
+      });
       let source: 'WAL' | 'DISK' | 'NEW' = 'NEW';
 
       // 1. Load both sources in parallel
@@ -482,7 +500,7 @@ export const useStore = create<State>()(
         try {
           const parsed = JSON.parse(diskJson);
           if (parsed && Array.isArray(parsed.notes)) {
-            diskData = parsed;
+            diskData = normalizeStorageDataMetadata(parsed);
           }
         } catch (e) {
           console.warn('Failed to parse disk data:', e);
@@ -491,11 +509,12 @@ export const useStore = create<State>()(
 
       // 2. Conflict Resolution: Timestamp Arbitration
       const getLatestUpdate = (data: StorageData | null | undefined) => {
-        if (!data || data.notes.length === 0) return 0;
-        return Math.max(...data.notes.map(n => n.updatedAt || 0));
+        if (!data) return 0;
+        return isFiniteTimestamp(data.storageUpdatedAt) ? data.storageUpdatedAt : getLegacyStorageUpdatedAt(data.notes);
       };
 
-      const walTime = getLatestUpdate(walData);
+      const normalizedWalData = walData ? normalizeStorageDataMetadata(walData) : undefined;
+      const walTime = getLatestUpdate(normalizedWalData);
       const diskTime = getLatestUpdate(diskData);
 
       // console.log(`Init Arbitration -> WAL: ${walTime}, DISK: ${diskTime}`);
@@ -506,10 +525,10 @@ export const useStore = create<State>()(
         // console.log('Using DISK (Newer content found)');
         finalData = diskData;
         source = 'DISK';
-      } else if (walData && walData.notes.length > 0) {
+      } else if (normalizedWalData && normalizedWalData.notes.length > 0) {
         // WAL is newer or equal -> Use WAL
         // console.log('Using WAL (Cache is active)');
-        finalData = walData;
+        finalData = normalizedWalData;
         source = 'WAL';
       } else if (diskData) {
         // Fallback to Disk if WAL is empty
@@ -1959,12 +1978,12 @@ export const useStore = create<State>()(
                 state.viewMode = snapshot.viewMode;
                 state.selectedIds = snapshot.selectedIds;
             });
-            await db.saveWAL({
+            await db.saveWAL(normalizeStorageDataMetadata({
                 boards: snapshot.boards,
                 notes: snapshot.notes,
                 currentBoardId: snapshot.currentBoardId,
                 config: get().config,
-            });
+            }));
 
             return {
                 status: 'error',
