@@ -53,6 +53,8 @@ export interface AttachOptions {
   readonly writeWAL?: (data: StorageData) => Promise<boolean>;
   /** 自定义磁盘写入器，默认 Tauri invoke save_content */
   readonly writeDisk?: (data: StorageData) => Promise<boolean>;
+  /** 持久化状态变更回调，用于桥接 UI 状态指示器 */
+  readonly onStatusChange?: (status: PersistenceStatus) => void;
 }
 
 /**

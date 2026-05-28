@@ -459,4 +459,43 @@ describe('StorageService.attach', () => {
 
     handle.detach();
   });
+
+  it('onStatusChange 回调在状态变更时被调用', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+    const onStatusChange = vi.fn();
+
+    const handle = attach({ writeWAL, writeDisk, diskDebounceMs: 200, onStatusChange });
+
+    capturedBridgeCallback!(makeDomainState());
+    expect(onStatusChange).toHaveBeenCalledWith('dirty');
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onStatusChange).toHaveBeenCalledWith('writing-wal');
+
+    await vi.advanceTimersByTimeAsync(200);
+    expect(onStatusChange).toHaveBeenCalledWith('writing-disk');
+
+    await vi.runAllTimersAsync();
+    expect(onStatusChange).toHaveBeenCalledWith('idle');
+
+    handle.detach();
+  });
+
+  it('onStatusChange WAL 失败时回调 error 状态', async () => {
+    const writeWAL = vi.fn(async () => false);
+    const writeDisk = vi.fn(async () => true);
+    const onStatusChange = vi.fn();
+
+    const handle = attach({ writeWAL, writeDisk, onStatusChange });
+
+    capturedBridgeCallback!(makeDomainState());
+
+    const result = await handle.flushPersistNow();
+
+    expect(result).toBe(false);
+    expect(onStatusChange).toHaveBeenCalledWith('error');
+
+    handle.detach();
+  });
 });

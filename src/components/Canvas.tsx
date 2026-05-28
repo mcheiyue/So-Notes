@@ -19,6 +19,7 @@ import { resolveDragStopWorldPosition } from "../utils/dragCoordinates";
 import { finalizeActiveNoteDrag } from "../utils/activeNoteDrag";
 import { buildSmartPasteNoteInputs, parseSmartPaste } from "../utils/smartPaste";
 import { getViewportSpawnOrigin } from "../utils/spawnPosition";
+import { attach } from "../services/storage/StorageService";
 
 
 
@@ -121,6 +122,7 @@ export const Canvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const worldLayerRef = useRef<HTMLDivElement>(null);
   const panOffsetRef = useRef({ x: 0, y: 0 });
+  const storageHandleRef = useRef<ReturnType<typeof attach> | null>(null);
   const scale = 1;
 
   const getCanvasBounds = () => {
@@ -311,10 +313,37 @@ export const Canvas: React.FC = () => {
   }, [stopPanFlushLoop]);
 
   useEffect(() => {
+    let cancelled = false;
+
     const bootstrap = async () => {
       await useStore.getState().init();
+      if (cancelled) return;
+
+      const handle = attach({
+        onStatusChange: (status) => {
+          switch (status) {
+            case 'writing-wal':
+            case 'writing-disk':
+              useStore.setState({ isSaving: true, saveStatus: 'saving', saveError: null });
+              break;
+            case 'idle':
+              useStore.setState({ isSaving: false, saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });
+              break;
+            case 'error':
+              useStore.setState({ isSaving: false, saveStatus: 'error', saveError: '持久化写入失败。' });
+              break;
+          }
+        },
+      });
+      storageHandleRef.current = handle;
     };
     bootstrap();
+
+    return () => {
+      cancelled = true;
+      storageHandleRef.current?.detach();
+      storageHandleRef.current = null;
+    };
   }, []);
 
   // Space Key Listener (Pan Mode)

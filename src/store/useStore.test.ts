@@ -157,7 +157,7 @@ describe('useStore 布局持久化契约', () => {
     expect(saveSpy).not.toHaveBeenCalled();
   });
 
-  it('finalizeLayoutChange 只刷新受影响便签并通过 debounce 持久化', async () => {
+  it('finalizeLayoutChange 只刷新受影响便签，不再直接调度持久化', async () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
@@ -172,11 +172,11 @@ describe('useStore 布局持久化契约', () => {
     expect(second?.updatedAt).toBe(200);
     expect(saveSpy).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(2000);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(3000);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
-  it('显式置顶后通过最终提交点刷新 updatedAt 并通过 debounce 持久化', async () => {
+  it('显式置顶后通过最终提交点刷新 updatedAt，不再直接调度持久化', async () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
@@ -192,11 +192,11 @@ describe('useStore 布局持久化契约', () => {
     expect(note?.updatedAt).toBe(expectedTimestamp);
     expect(saveSpy).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(2000);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(3000);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
-  it('arrangeNotes 会通过统一最终提交点刷新 updatedAt 并通过 debounce 持久化', async () => {
+  it('arrangeNotes 会通过统一最终提交点刷新 updatedAt，不再直接调度持久化', async () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy, selectedIds: [] });
 
@@ -213,8 +213,8 @@ describe('useStore 布局持久化契约', () => {
     expect(second?.updatedAt).toBe(expectedTimestamp);
     expect(saveSpy).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(2000);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(3000);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('arrangeNotes 对折叠便签使用 36px 高度估算下一行起点', () => {
@@ -438,7 +438,7 @@ describe('useStore 布局持久化契约', () => {
     expect(getNote('note-2')).toMatchObject({ x: 30, y: 40 });
 
     vi.advanceTimersByTime(3000);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('dismissArrangeUndoToast 只关闭最近一次归拢提示，不移动便签', () => {
@@ -476,7 +476,7 @@ describe('useStore 布局持久化契约', () => {
       noteCount: 2,
       createdIds: [mergedId],
     });
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('undoLastArrange 可撤销合并结果且保留原便签', () => {
@@ -495,7 +495,7 @@ describe('useStore 布局持久化契约', () => {
     expect(state.notesById['note-1']).toBeDefined();
     expect(state.notesById['note-2']).toBeDefined();
     expect(state.arrangeUndoToast).toBeNull();
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('splitNoteByParagraph 按空行拆分并保留原便签内容', () => {
@@ -527,7 +527,7 @@ describe('useStore 布局持久化契约', () => {
       noteCount: 3,
       createdIds: selectedIds.slice(1),
     });
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('undoLastArrange 可撤销按段拆分新增结果且不改原便签', () => {
@@ -555,7 +555,7 @@ describe('useStore 布局持久化契约', () => {
       expect(state.notesById[id]).toBeUndefined();
     });
     expect(state.arrangeUndoToast).toBeNull();
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('arrangeNotes 显式指定 board 作用域时忽略单选并整理当前看板全部便签', () => {
@@ -641,7 +641,7 @@ describe('useStore 布局持久化契约', () => {
     });
     expect(state.arrangeUndoToast).toBeNull();
     expect(state.selectedIds).toEqual(['note-1', 'note-2']);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('undoLastArrange 撤销拆分时完整恢复原始便签', () => {
@@ -677,7 +677,7 @@ describe('useStore 布局持久化契约', () => {
     });
     expect(state.arrangeUndoToast).toBeNull();
     expect(state.selectedIds).toEqual(['note-1', 'note-2']);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -1180,7 +1180,7 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(activeDragFinalizer).toHaveBeenCalledWith('switch-board');
     expect(useStore.getState().currentBoardId).toBe('board-2');
     expect(useStore.getState().boards.find((board) => board.id === 'default')?.viewport).toEqual({ x: 24, y: 36 });
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('switchBoard 目标看板无 viewport 时恢复到 0,0', () => {
@@ -1240,7 +1240,7 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(state.recentlyCreatedIds).toEqual([noteId]);
     expect(state.noteHighlights[noteId]?.reason).toBe('created');
     expect(state.notesById[noteId]).toMatchObject({ x: 16, y: 24, content: '' });
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('临时定位高亮支持按 token 精确清理，避免旧计时器清掉新高亮', () => {
@@ -1325,7 +1325,7 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(state.config.maxZ).toBe(5);
     expect(state.notesById[ids[0]].content).toBe('Alpha');
     expect(state.notesById[ids[1]].z).toBe(5);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
 
     useStore.getState().clearRecentlyCreated(ids[0]);
     expect(useStore.getState().recentlyCreatedIds).toEqual([ids[1]]);
@@ -1361,7 +1361,7 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(state.selectedIds).toEqual(selectedIds);
     expect(state.recentlyCreatedIds).toEqual(selectedIds);
     expect(state.smartPasteSplitPanel).toBeNull();
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('旧 generationId ACK 不得覆盖最新 UI 状态', async () => {

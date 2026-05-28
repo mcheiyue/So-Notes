@@ -178,13 +178,6 @@ interface State {
   setThemeMode: (mode: ThemeMode) => void;
 }
 
-// Helper to debounce disk saves
-let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-
-const DEBOUNCE_DELAY = 2000; // 2 seconds lazy save
-const WAL_THROTTLE = 100;    // 100ms throttle for IndexedDB
-
-let lastWALSave = 0;
 let noteHighlightSequence = 0;
 let arrangeUndoSequence = 0;
 const noteHighlightTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
@@ -627,7 +620,6 @@ export const useStore = create<State>()(
                 }
             }
         });
-        get().saveToDisk();
     },
 
     setViewMode: (mode) => {
@@ -658,7 +650,6 @@ export const useStore = create<State>()(
             state.currentBoardId = newBoard.id; // Auto-switch
             state.selectedIds = [];
         });
-        get().saveToDisk();
     },
 
     deleteBoard: (boardId) => {
@@ -681,7 +672,6 @@ export const useStore = create<State>()(
                 state.selectedIds = state.selectedIds.filter((id) => state.notesById[id]);
             }
         });
-        get().saveToDisk();
     },
     
     updateBoard: (boardId, updates) => {
@@ -691,7 +681,6 @@ export const useStore = create<State>()(
                 Object.assign(board, updates);
             }
         });
-        get().saveToDisk();
     },
 
     // v1.1.5 Viewport Actions
@@ -880,7 +869,6 @@ export const useStore = create<State>()(
         state.smartPasteSplitPanel = null;
       });
 
-      get().saveToDisk();
       return selectedIds;
     },
 
@@ -908,8 +896,6 @@ export const useStore = create<State>()(
         state.recentlyCreatedIds = [newNote.id];
         assignNoteHighlights(state, [newNote.id], 'created');
       });
-
-      get().saveToDisk();
     },
 
     addNoteWithContent: (x, y, content) => {
@@ -934,8 +920,6 @@ export const useStore = create<State>()(
         state.recentlyCreatedIds = [newNote.id];
         assignNoteHighlights(state, [newNote.id], 'created');
       });
-
-      get().saveToDisk();
     },
 
     addNotesWithContentBatch: (notes) => {
@@ -977,7 +961,6 @@ export const useStore = create<State>()(
         assignNoteHighlights(state, createdIds, 'created');
       });
 
-      get().saveToDisk();
       return createdIds;
     },
 
@@ -989,16 +972,6 @@ export const useStore = create<State>()(
           note.updatedAt = Date.now();
         }
       });
-      
-      // Throttle WAL save
-      const now = Date.now();
-      if (now - lastWALSave > WAL_THROTTLE) {
-        lastWALSave = now;
-        db.saveWAL(serializeState(get()));
-      }
-      
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
     updateNote: (id, content) => {
@@ -1009,15 +982,6 @@ export const useStore = create<State>()(
           note.updatedAt = Date.now();
         }
       });
-      
-      const now = Date.now();
-      if (now - lastWALSave > WAL_THROTTLE) {
-        lastWALSave = now;
-        db.saveWAL(serializeState(get()));
-      }
-      
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
     moveNote: (id, x, y) => {
@@ -1052,22 +1016,15 @@ export const useStore = create<State>()(
         if (uniqueIds.length === 0) return;
 
         const timestamp = Date.now();
-        let hasUpdatedNotes = false;
 
         set((state) => {
             uniqueIds.forEach((id) => {
                 const note = getNoteById(state, id);
                 if (note) {
                     note.updatedAt = timestamp;
-                    hasUpdatedNotes = true;
                 }
             });
         });
-
-        if (hasUpdatedNotes) {
-            if (saveTimeout) clearTimeout(saveTimeout);
-            saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
-        }
     },
 
     arrangeNotes: (
@@ -1225,7 +1182,6 @@ export const useStore = create<State>()(
             assignNoteHighlights(state, [mergedId], 'created');
         });
 
-        get().saveToDisk();
         return mergedId;
     },
 
@@ -1287,7 +1243,6 @@ export const useStore = create<State>()(
             assignNoteHighlights(state, createdIds, 'created');
         });
 
-        get().saveToDisk();
         return selectedIds;
     },
 
@@ -1345,7 +1300,6 @@ export const useStore = create<State>()(
         }
 
         if (removedIds.length > 0) {
-            get().saveToDisk();
             return true;
         }
 
@@ -1372,14 +1326,12 @@ export const useStore = create<State>()(
       set((state) => {
         const note = getNoteById(state, id);
         if (note) {
-          note.deletedAt = Date.now(); // Soft delete
+          note.deletedAt = Date.now();
           state.layoutNotesById[note.id] = extractLayoutNote(note);
           clearTransientNoteState(state, note.id);
         }
-        // Remove from selection if deleted
         state.selectedIds = state.selectedIds.filter(selId => selId !== id);
       });
-      get().saveToDisk();
     },
 
     
@@ -1387,21 +1339,18 @@ export const useStore = create<State>()(
         set((state) => {
             const note = getNoteById(state, id);
             if (note) {
-                note.deletedAt = null; // Restore
+                note.deletedAt = null;
                 
-                // Safety Check: Does the target board still exist?
                 const boardExists = state.boards.some(b => b.id === note.boardId);
                 if (!boardExists) {
                     moveNoteBetweenBoards(state, id, state.currentBoardId);
                 }
                 
-                // Visual Feedback: Bring to top so user sees it
                 state.config.maxZ += 1;
                 note.z = state.config.maxZ;
                 state.layoutNotesById[note.id] = extractLayoutNote(note);
             }
         });
-        get().saveToDisk();
     },
 
 
@@ -1410,7 +1359,6 @@ export const useStore = create<State>()(
             removeNoteFromNormalizedState(state, id);
             state.selectedIds = state.selectedIds.filter((selectedId) => selectedId !== id);
         });
-        get().saveToDisk();
     },
 
     emptyTrash: () => {
@@ -1419,7 +1367,6 @@ export const useStore = create<State>()(
             noteIdsToDelete.forEach((noteId) => removeNoteFromNormalizedState(state, noteId));
             state.selectedIds = state.selectedIds.filter((id) => state.notesById[id]);
         });
-        get().saveToDisk();
     },
 
     restoreAllTrash: () => {
@@ -1429,18 +1376,15 @@ export const useStore = create<State>()(
                 if (!note) return;
                 if (note.deletedAt) {
                     note.deletedAt = null;
-                    // Safety Check
                     if (!state.boards.some(b => b.id === note.boardId)) {
                         moveNoteBetweenBoards(state, id, state.currentBoardId);
                     }
-                    // Bring to front
                     state.config.maxZ += 1;
                     note.z = state.config.maxZ;
                     state.layoutNotesById[note.id] = extractLayoutNote(note);
                 }
             });
         });
-        get().saveToDisk();
     },
 
     restoreSelectedTrash: (ids) => {
@@ -1460,7 +1404,6 @@ export const useStore = create<State>()(
                 state.layoutNotesById[note.id] = extractLayoutNote(note);
             });
         });
-        get().saveToDisk();
     },
 
     deleteSelectedPermanently: (ids) => {
@@ -1470,7 +1413,6 @@ export const useStore = create<State>()(
             });
             state.selectedIds = state.selectedIds.filter((selectedId) => !ids.includes(selectedId));
         });
-        get().saveToDisk();
     },
 
     
@@ -1482,7 +1424,6 @@ export const useStore = create<State>()(
            state.layoutNotesById[note.id] = extractLayoutNote(note);
          }
       });
-      get().saveToDisk();
     },
 
     changeSelectedNotesColor: (color) => {
@@ -1495,7 +1436,6 @@ export const useStore = create<State>()(
                 }
             });
         });
-        get().saveToDisk();
     },
 
     toggleCollapse: (id) => {
@@ -1505,7 +1445,6 @@ export const useStore = create<State>()(
           note.collapsed = !note.collapsed;
         }
       });
-      get().saveToDisk();
     },
     
     setStickyDrag: (id, offsetX = 0, offsetY = 0, status: StickyDragStatus = 'active') => {
@@ -1564,7 +1503,6 @@ export const useStore = create<State>()(
             });
             state.selectedIds = [];
         });
-        get().saveToDisk();
     },
 
     duplicateNote: (id) => {
@@ -1579,14 +1517,11 @@ export const useStore = create<State>()(
                     z: state.config.maxZ + 1,
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
-                    // Title copy? Yes.
                 };
                 appendNoteToNormalizedState(state, newNote);
                 state.config.maxZ += 1;
-                // Auto-select the new note? Maybe not, to avoid confusion.
             }
         });
-        get().saveToDisk();
     },
 
     duplicateSelectedNotes: () => {
@@ -1602,7 +1537,7 @@ export const useStore = create<State>()(
                     const newNote: Note = {
                         ...note,
                         id: crypto.randomUUID(),
-                        x: note.x + 20, // Offset slightly
+                        x: note.x + 20,
                         y: note.y + 20,
                         z: state.config.maxZ + 1,
                         createdAt: Date.now(),
@@ -1614,12 +1549,10 @@ export const useStore = create<State>()(
                 }
             });
 
-            // Auto-select the newly created duplicates for UX
             if (newSelectedIds.length > 0) {
                 state.selectedIds = newSelectedIds;
             }
         });
-        get().saveToDisk();
     },
 
     moveNoteToBoard: (id, targetBoardId) => {
@@ -1633,7 +1566,6 @@ export const useStore = create<State>()(
                 state.selectedIds = state.selectedIds.filter(selId => selId !== id);
             }
         });
-        get().saveToDisk();
     },
 
     copyNoteToBoard: (id, targetBoardId) => {
@@ -1655,7 +1587,6 @@ export const useStore = create<State>()(
                 state.config.maxZ += 1;
             }
         });
-        get().saveToDisk();
     },
 
     moveSelectedNotesToBoard: (targetBoardId) => {
@@ -1679,7 +1610,6 @@ export const useStore = create<State>()(
                 state.selectedIds = [];
             }
         });
-        get().saveToDisk();
     },
 
     copySelectedNotesToBoard: (targetBoardId) => {
@@ -1706,7 +1636,6 @@ export const useStore = create<State>()(
                 }
             });
         });
-        get().saveToDisk();
     },
 
     batchToggleCollapse: (ids) => {
@@ -1727,7 +1656,6 @@ export const useStore = create<State>()(
                 }
             });
         });
-        get().saveToDisk();
     },
 
     batchBringToFront: (ids) => {
@@ -1750,7 +1678,6 @@ export const useStore = create<State>()(
             
             state.config.maxZ = currentMaxZ;
         });
-        get().saveToDisk();
     },
 
     batchSendToBack: (ids) => {
@@ -1776,7 +1703,6 @@ export const useStore = create<State>()(
                 }
             });
         });
-        get().saveToDisk();
     },
 
     reorderBoard: (boardId, direction) => {
@@ -1786,15 +1712,12 @@ export const useStore = create<State>()(
 
             const newIndex = direction === 'left' ? index - 1 : index + 1;
             
-            // Boundary Check
             if (newIndex < 0 || newIndex >= state.boards.length) return;
 
-            // Swap
             const temp = state.boards[index];
             state.boards[index] = state.boards[newIndex];
             state.boards[newIndex] = temp;
         });
-        get().saveToDisk();
     },
 
     saveToDisk: async () => {
@@ -1913,7 +1836,6 @@ export const useStore = create<State>()(
             state.config.themeMode = mode;
         });
 
-        // Apply theme immediately
         const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         const shouldBeDark = mode === 'dark' || (mode === 'system' && isSystemDark);
 
@@ -1923,10 +1845,7 @@ export const useStore = create<State>()(
             document.documentElement.classList.remove('dark');
         }
 
-        // Persist to localStorage for index.html script
         localStorage.setItem('theme', mode);
-        
-        get().saveToDisk();
     },
   }))
 );

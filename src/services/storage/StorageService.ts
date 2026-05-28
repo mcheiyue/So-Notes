@@ -135,6 +135,8 @@ export function attach(options?: AttachOptions): AttachResult {
   const writeWAL = options?.writeWAL ?? ((data: StorageData) => db.saveWAL(data));
   const writeDisk = options?.writeDisk ?? defaultWriteDisk;
 
+  const onStatusChange = options?.onStatusChange;
+
   let latestState: DomainState | null = null;
   let status: PersistenceStatus = 'idle';
   let dirty = false;
@@ -149,6 +151,7 @@ export function attach(options?: AttachOptions): AttachResult {
 
   const setStatus = (s: PersistenceStatus) => {
     status = s;
+    onStatusChange?.(s);
   };
 
   const flushWAL = async () => {
