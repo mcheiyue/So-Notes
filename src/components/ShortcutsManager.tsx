@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { useStore } from '../store';
+import { useStore, useUIStore } from '../store';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { buildSmartPasteNoteInputs, parseSmartPaste } from '../utils/smartPaste';
 import { getViewportSpawnOrigin } from '../utils/spawnPosition';
@@ -11,10 +11,10 @@ export default function ShortcutsManager() {
   const duplicateSelectedNotes = useStore((state) => state.duplicateSelectedNotes);
   const setViewportPosition = useStore((state) => state.setViewportPosition);
 
-  const isSpotlightOpen = useStore((state) => state.isSpotlightOpen);
-  const isQuickCaptureOpen = useStore((state) => state.isQuickCaptureOpen);
-  const setSpotlightOpen = useStore((state) => state.setSpotlightOpen);
-  const viewMode = useStore((state) => state.viewMode);
+  const isSpotlightOpen = useUIStore((state) => state.isSpotlightOpen);
+  const isQuickCaptureOpen = useUIStore((state) => state.isQuickCaptureOpen);
+  const setSpotlightOpen = useUIStore((state) => state.setSpotlightOpen);
+  const viewMode = useUIStore((state) => state.viewMode);
   const areCanvasShortcutsBlocked = isSpotlightOpen || isQuickCaptureOpen;
 
   // Ctrl + P / Cmd + P: 全局搜索

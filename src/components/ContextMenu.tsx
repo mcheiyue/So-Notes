@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useStore } from '../store';
+import { useStore, useUIStore } from '../store';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
 import { ChevronRight } from 'lucide-react';
@@ -510,7 +510,7 @@ const ContextMenuContent: React.FC = () => {
 };
 
 export const ContextMenu: React.FC = () => {
-  const isOpen = useStore(state => state.contextMenu.isOpen);
+  const isOpen = useUIStore(state => state.contextMenu.isOpen);
 
   if (!isOpen) return null;
 

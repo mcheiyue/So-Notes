@@ -1,12 +1,12 @@
 import React from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { PinOff } from "lucide-react";
-import { useStore } from "../store";
+import { useUIStore } from "../store";
 import { Z_INDEX } from "../constants/layout";
 import { cn } from "../utils/cn";
 
 export const PinFab = () => {
-  const isPinned = useStore((state) => state.isPinned);
+  const isPinned = useUIStore((state) => state.isPinned);
 
   const handleUnpin = async (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent canvas click events

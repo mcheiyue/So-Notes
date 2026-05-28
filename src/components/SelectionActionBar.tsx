@@ -1,14 +1,14 @@
 import React, { useMemo } from 'react';
 import { NOTE_COLORS } from '../store/types';
-import { useStore } from '../store';
+import { useStore, useUIStore } from '../store';
 import { Z_INDEX } from '../constants/layout';
 import { cn } from '../utils/cn';
 
 const actionButtonClass = 'rounded-full px-3 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:bg-secondary-bg hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-sky-300 dark:hover:bg-white/10';
 
 export const SelectionActionBar: React.FC = () => {
-  const viewMode = useStore(state => state.viewMode);
-  const selectedIds = useStore(state => state.selectedIds);
+  const viewMode = useUIStore(state => state.viewMode);
+  const selectedIds = useUIStore(state => state.selectedIds);
   const notesById = useStore(state => state.notesById);
   const mergeSelectedNotes = useStore(state => state.mergeSelectedNotes);
   const deleteSelectedNotes = useStore(state => state.deleteSelectedNotes);

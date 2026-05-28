@@ -3,7 +3,7 @@ import { DraggableCore, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
 import { NOTE_COLORS, getNoteColor, getNoteDarkSpectrum } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
-import { useDomainStore, useStore } from "../store";
+import { useDomainStore, useStore, useUIStore } from "../store";
 import { useEdgePush } from "../hooks/useEdgePush";
 import { useDarkMode } from "../hooks/useDarkMode";
 import { cn } from "../utils/cn";
@@ -193,13 +193,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const setIsDragging = useStore(state => state.setIsDragging);
   
   const isStickyDragging = useStore(state => state.stickyDrag.id === id);
-  const isSelected = useStore(state => state.selectedIds.includes(id));
-  const isRecentlyCreated = useStore(state => state.recentlyCreatedIds.includes(id));
-  const noteHighlight = useStore(state => state.noteHighlights[id]);
-  const clearRecentlyCreated = useStore(state => state.clearRecentlyCreated);
-  const markNoteHighlights = useStore(state => state.markNoteHighlights);
-  const clearNoteHighlight = useStore(state => state.clearNoteHighlight);
-  const isGroupSelection = useStore(state => state.selectedIds.length > 1);
+  const isSelected = useUIStore(state => state.selectedIds.includes(id));
+  const isRecentlyCreated = useUIStore(state => state.recentlyCreatedIds.includes(id));
+  const noteHighlight = useUIStore(state => state.noteHighlights[id]);
+  const clearRecentlyCreated = useUIStore(state => state.clearRecentlyCreated);
+  const markNoteHighlights = useUIStore(state => state.markNoteHighlights);
+  const clearNoteHighlight = useUIStore(state => state.clearNoteHighlight);
+  const isGroupSelection = useUIStore(state => state.selectedIds.length > 1);
   const isPanMode = useStore(state => state.interaction.isPanMode);
   const isDarkMode = useDarkMode();
   

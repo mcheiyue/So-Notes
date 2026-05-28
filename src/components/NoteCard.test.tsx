@@ -25,7 +25,7 @@ vi.mock('react-draggable', () => ({
 }));
 
 import { NoteCard } from './NoteCard';
-import { useStore } from '../store';
+import { useStore, useUIStore } from '../store';
 import { normalizeNotes } from '../store/normalization';
 import { getNoteColor, getNoteDarkSpectrum, Note } from '../store/types';
 import { getEdgeCheckRect, resolveDragStopWorldPosition } from '../utils/dragCoordinates';
@@ -375,7 +375,7 @@ describe('NoteCard 头部交互边界', () => {
 
   it('编辑正文后在失焦时触发临时编辑高亮', async () => {
     const markNoteHighlights = vi.fn();
-    useStore.setState({ markNoteHighlights });
+    useUIStore.setState({ markNoteHighlights });
 
     await renderNoteCard();
 
