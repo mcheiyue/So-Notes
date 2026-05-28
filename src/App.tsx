@@ -18,8 +18,7 @@ import { Z_INDEX } from "./constants/layout";
 import { useFPSMonitor } from "./utils/performance";
 import { diagnostics } from "./utils/diagnostics";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
-import { createSmartPasteNoteInputs } from "./utils/smartPaste";
-import { getViewportSpawnOrigin } from "./utils/spawnPosition";
+import { appController } from "./controllers/appController";
 
 const getOrganizationUndoToastCopy = (action: 'arrange' | 'merge' | 'split', noteCount: number) => {
   if (action === 'merge') {
@@ -55,8 +54,6 @@ function App() {
   const currentBoardId = useStore(state => state.currentBoardId);
   const selectedIds = useStore(state => state.selectedIds);
   const arrangeUndoToast = useStore(state => state.arrangeUndoToast);
-  const undoLastArrange = useStore(state => state.undoLastArrange);
-  const dismissArrangeUndoToast = useStore(state => state.dismissArrangeUndoToast);
 
   const { start: startFPS, stop: stopFPS } = useFPSMonitor();
 
@@ -78,34 +75,14 @@ function App() {
     if (!arrangeUndoToast) return undefined;
 
     const timeoutId = window.setTimeout(() => {
-      dismissArrangeUndoToast();
+      appController.dismissArrangeUndoToast();
     }, 6000);
 
     return () => window.clearTimeout(timeoutId);
-  }, [arrangeUndoToast, dismissArrangeUndoToast]);
+  }, [arrangeUndoToast]);
 
   const syncViewportToShell = useCallback((rect: WindowShellContentRect) => {
-    const nextWidth = Math.max(0, rect.width);
-    const nextHeight = Math.max(0, rect.height);
-    const { viewport, shellRect, setViewportSize, setShellRect } = useStore.getState();
-
-    if (viewport.w !== nextWidth || viewport.h !== nextHeight) {
-      setViewportSize(nextWidth, nextHeight);
-    }
-
-    if (
-      shellRect.left !== rect.left ||
-      shellRect.top !== rect.top ||
-      shellRect.right !== rect.right ||
-      shellRect.bottom !== rect.bottom
-    ) {
-      setShellRect({
-        left: rect.left,
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
-      });
-    }
+    appController.syncShellViewport(rect);
   }, []);
 
   useEffect(() => {
@@ -117,59 +94,24 @@ function App() {
 
     // Listen for reset-viewport event from backend tray menu
     const unlistenReset = listen('reset-viewport', () => {
-        useStore.getState().setViewportPosition(0, 0);
+        appController.resetViewport();
     });
 
     const unlistenPin = listen<boolean>('pin-state-changed', (event) => {
-      useStore.getState().setPinned(event.payload);
+      appController.setPinned(event.payload);
     });
 
     const unlistenQuickCapture = listen('open-quick-capture', () => {
-      const state = useStore.getState();
-      if (state.viewMode === 'TRASH') {
-        state.setViewMode('BOARD');
-        setTimeout(() => { useStore.getState().setQuickCaptureOpen(true); }, 0);
-        return;
-      }
-      state.setQuickCaptureOpen(true);
+      appController.openQuickCapture();
     });
 
     const unlistenTrayNewNote = listen('tray-new-note', () => {
-      const state = useStore.getState();
-      if (state.viewMode === 'TRASH') {
-        state.setViewMode('BOARD');
-        setTimeout(() => {
-          const { viewport, addNote } = useStore.getState();
-          const origin = getViewportSpawnOrigin(viewport);
-          addNote(origin.x, origin.y);
-        }, 0);
-        return;
-      }
-      const origin = getViewportSpawnOrigin(state.viewport);
-      state.addNote(origin.x, origin.y);
+      appController.createNoteAtViewportOrigin();
     });
 
     const unlistenClipboardNote = listen('create-note-from-clipboard', async () => {
-      const state = useStore.getState();
-      if (state.viewMode === 'TRASH') {
-        state.setViewMode('BOARD');
-        setTimeout(async () => {
-          const text = await readText().catch(() => '');
-          const { viewport, addNotesWithContentBatch } = useStore.getState();
-          const origin = getViewportSpawnOrigin(viewport);
-          const notes = createSmartPasteNoteInputs(text, origin.x, origin.y);
-          if (notes.length > 0) {
-            addNotesWithContentBatch(notes);
-          }
-        }, 0);
-        return;
-      }
       const text = await readText().catch(() => '');
-      const origin = getViewportSpawnOrigin(state.viewport);
-      const notes = createSmartPasteNoteInputs(text, origin.x, origin.y);
-      if (notes.length > 0) {
-        state.addNotesWithContentBatch(notes);
-      }
+      appController.smartPasteFromTextAtViewportOrigin(text);
     });
 
     const unlistenGlobalShortcutError = listen<string>('global-shortcut-register-failed', (event) => {
@@ -178,7 +120,7 @@ function App() {
 
     invoke<boolean>('get_pin_mode')
       .then((pinned) => {
-        useStore.getState().setPinned(pinned);
+        appController.setPinned(pinned);
       })
       .catch((error) => {
         console.warn('Failed to sync pin mode on startup:', error);
@@ -250,7 +192,7 @@ function App() {
           <button
             type="button"
             className="shrink-0 rounded-full bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-300"
-            onClick={undoLastArrange}
+            onClick={() => appController.undoLastArrange()}
           >
             撤销
           </button>
@@ -258,7 +200,7 @@ function App() {
             type="button"
             className="shrink-0 rounded-full px-2 py-1 text-xs text-text-tertiary transition-colors hover:bg-secondary-bg hover:text-text-primary dark:hover:bg-white/10"
             aria-label={undoToastCopy.closeLabel}
-            onClick={dismissArrangeUndoToast}
+            onClick={() => appController.dismissArrangeUndoToast()}
           >
             ×
           </button>

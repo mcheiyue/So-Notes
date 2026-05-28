@@ -5,7 +5,8 @@ import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
 import { ChevronRight } from 'lucide-react';
 import { Z_INDEX } from '../constants/layout';
-import { buildSmartPasteNoteInputs, parseSmartPaste, splitParagraphs } from '../utils/smartPaste';
+import { splitParagraphs } from '../utils/smartPaste';
+import { appController } from '../controllers/appController';
 
 type MenuItemButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement>;
 
@@ -24,32 +25,10 @@ const ContextMenuContent: React.FC = () => {
   const { 
     contextMenu, 
     setContextMenu, 
-    deleteNote, 
-    changeColor, 
-    changeSelectedNotesColor,
-    bringToFront, 
-    addNote, 
-    addNotesWithContentBatch,
-    openSmartPasteSplitPanel,
-    setStickyDrag, 
-    deleteSelectedNotes, 
-    mergeSelectedNotes,
-    splitNoteByParagraph,
     selectedIds, 
     notesById,
-    arrangeNotes,
-    finalizeLayoutChange,
-    setDockVisible,
     boards,
     currentBoardId,
-    duplicateNote,
-    moveNoteToBoard,
-    copyNoteToBoard,
-    moveSelectedNotesToBoard,
-    copySelectedNotesToBoard,
-    batchToggleCollapse,
-    batchBringToFront,
-    batchSendToBack,
     viewport,
     shellRect,
     smartPasteSplitPanel,
@@ -63,7 +42,7 @@ const ContextMenuContent: React.FC = () => {
 
   const handleArrangeAction = (strategy: 'position' | 'updatedAt' | 'color' = 'position') => {
     const arrangeScope = contextMenu.type === 'CANVAS' && selectedIds.length <= 1 ? 'board' : 'selection';
-    const arrangeAtMenuPoint = () => arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y), strategy, arrangeScope);
+    const arrangeAtMenuPoint = () => appController.arrangeNotes(toWorldX(contextMenu.x), toWorldY(contextMenu.y), strategy, arrangeScope);
 
     if (selectedIds.length > 1) {
       handleAction(arrangeAtMenuPoint);
@@ -173,8 +152,7 @@ const ContextMenuContent: React.FC = () => {
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                  onClick={() => handleAction(() => {
-                     setDockVisible(true);
-                     // No need to set isOpen:false manually as handleAction does it
+                   appController.showBoardDock();
                  })}
                >
                  <span>📑</span> 显示菜单
@@ -183,7 +161,10 @@ const ContextMenuContent: React.FC = () => {
                 <MenuItemButton
                  role="menuitem"
                  className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
-                  onClick={() => handleAction(() => addNote(toWorldX(contextMenu.x), toWorldY(contextMenu.y)))}
+                 onClick={() => handleAction(() => appController.createNoteAtWorldPosition({
+                    x: toWorldX(contextMenu.x),
+                    y: toWorldY(contextMenu.y),
+                  }))}
                >
                   <span>📝</span> 新建便签
                 </MenuItemButton>
@@ -192,21 +173,13 @@ const ContextMenuContent: React.FC = () => {
                   <MenuItemButton
                     role="menuitem"
                     className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
-                     onClick={() => handleAction(async () => {
-                           const text = await readText();
-                           const result = parseSmartPaste(text);
-                           const notes = buildSmartPasteNoteInputs(
-                               result.source ? [result.source] : [],
-                               toWorldX(contextMenu.x),
-                               toWorldY(contextMenu.y),
-                           );
-                           if (notes.length > 0) {
-                               const createdIds = addNotesWithContentBatch(notes) ?? [];
-                               if (createdIds.length > 0 && result.options.length > 1) {
-                                   openSmartPasteSplitPanel({ noteId: createdIds[0], result });
-                               }
-                           }
-                       })}
+                    onClick={() => handleAction(async () => {
+                      const text = await readText().catch(() => '');
+                      appController.smartPasteFromText(text, {
+                        x: toWorldX(contextMenu.x),
+                        y: toWorldY(contextMenu.y),
+                      });
+                    })}
                   >
                      <span>📋</span> 粘贴并新建
                   </MenuItemButton>
@@ -263,7 +236,7 @@ const ContextMenuContent: React.FC = () => {
             role="menuitem"
             className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
             onClick={() => handleAction(() => {
-                setStickyDrag(contextMenu.targetId!, 0, 0); 
+                appController.startStickyDrag(contextMenu.targetId!, 0, 0);
             })}
           >
             <span>🧲</span> {isGroupContext ? '群组吸附' : '吸附移动'}
@@ -275,28 +248,28 @@ const ContextMenuContent: React.FC = () => {
               <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
-                onClick={() => handleAction(() => mergeSelectedNotes())}
+                onClick={() => handleAction(() => appController.mergeSelectedNotes())}
               >
                 <span>🧩</span> 合并为一张
               </MenuItemButton>
               <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
-                onClick={() => handleAction(() => batchToggleCollapse(selectedIds))}
+                onClick={() => handleAction(() => appController.toggleSelectedNotesCollapse(selectedIds))}
               >
                 <span>📦</span> 批量折叠/展开
               </MenuItemButton>
               <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
-                onClick={() => handleAction(() => batchBringToFront(selectedIds))}
+                onClick={() => handleAction(() => appController.bringSelectedNotesToFront(selectedIds))}
               >
                 <span>⬆️</span> 置顶
               </MenuItemButton>
               <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
-                onClick={() => handleAction(() => batchSendToBack(selectedIds))}
+                onClick={() => handleAction(() => appController.sendSelectedNotesToBack(selectedIds))}
               >
                 <span>⬇️</span> 置底
               </MenuItemButton>
@@ -309,7 +282,7 @@ const ContextMenuContent: React.FC = () => {
               <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
-                onClick={() => handleAction(() => splitNoteByParagraph(contextMenu.targetId!))}
+                onClick={() => handleAction(() => appController.splitNoteByParagraph(contextMenu.targetId!))}
               >
                 <span>✂️</span> 按段拆分
               </MenuItemButton>
@@ -331,9 +304,9 @@ const ContextMenuContent: React.FC = () => {
                 title={c.name}
                 onClick={() => handleAction(() => {
                     if (isGroupContext) {
-                        changeSelectedNotesColor(c.value);
+                        appController.changeSelectedNotesColor(c.value);
                     } else {
-                        changeColor(contextMenu.targetId!, c.value);
+                        appController.changeNoteColor(contextMenu.targetId!, c.value);
                     }
                 })}
               />
@@ -347,7 +320,7 @@ const ContextMenuContent: React.FC = () => {
              <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
-                onClick={() => handleAction(() => duplicateNote(contextMenu.targetId!))}
+                onClick={() => handleAction(() => appController.duplicateNote(contextMenu.targetId!))}
             >
                 <span>📄</span> 创建副本
             </MenuItemButton>
@@ -388,9 +361,9 @@ const ContextMenuContent: React.FC = () => {
                                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                                 onClick={() => handleAction(() => {
                                     if (isGroupContext) {
-                                        moveSelectedNotesToBoard(b.id);
+                                        appController.moveSelectedNotesToBoard(b.id);
                                     } else {
-                                        moveNoteToBoard(contextMenu.targetId!, b.id);
+                                        appController.moveNoteToBoard(contextMenu.targetId!, b.id);
                                     }
                                 })}
                             >
@@ -437,9 +410,9 @@ const ContextMenuContent: React.FC = () => {
                                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                                 onClick={() => handleAction(() => {
                                     if (isGroupContext) {
-                                        copySelectedNotesToBoard(b.id);
+                                        appController.copySelectedNotesToBoard(b.id);
                                     } else {
-                                        copyNoteToBoard(contextMenu.targetId!, b.id);
+                                        appController.copyNoteToBoard(contextMenu.targetId!, b.id);
                                     }
                                 })}
                             >
@@ -457,8 +430,7 @@ const ContextMenuContent: React.FC = () => {
             role="menuitem"
             className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
             onClick={() => handleAction(() => {
-                bringToFront(contextMenu.targetId!);
-                finalizeLayoutChange([contextMenu.targetId!]);
+                appController.bringNoteToFront(contextMenu.targetId!);
             })}
           >
             <span>🔝</span> 置顶
@@ -468,11 +440,7 @@ const ContextMenuContent: React.FC = () => {
             role="menuitem"
             className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
             onClick={() => handleAction(async () => {
-                const store = useStore.getState();
-                if (!store.selectedIds.includes(contextMenu.targetId!)) {
-                    store.setSelectedIds([contextMenu.targetId!]);
-                }
-                await store.exportSelectedNotes();
+                await appController.exportNoteSelection(contextMenu.targetId!);
             })}
           >
             <span>📤</span> {isGroupContext ? `导出选中 (${selectedIds.length})` : '导出便签'}
@@ -492,10 +460,10 @@ const ContextMenuContent: React.FC = () => {
                     if (!confirmDeleteGroup) {
                         setConfirmDeleteGroup(true);
                     } else {
-                        handleAction(() => deleteSelectedNotes());
+                        handleAction(() => appController.deleteSelectedNotes());
                     }
                 } else {
-                    handleAction(() => deleteNote(contextMenu.targetId!));
+                    handleAction(() => appController.deleteNote(contextMenu.targetId!));
                 }
             }}
           >

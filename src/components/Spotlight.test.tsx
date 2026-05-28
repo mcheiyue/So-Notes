@@ -143,18 +143,6 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
   });
 
   it('选择搜索结果后按 viewport 尺寸而不是 window 尺寸居中', async () => {
-    const setViewportPosition = vi.fn();
-    const clearSelection = vi.fn();
-    const setSelectedIds = vi.fn();
-    const bringToFront = vi.fn();
-
-    useStore.setState({
-      setViewportPosition,
-      clearSelection,
-      setSelectedIds,
-      bringToFront,
-    });
-
     await renderSpotlight();
 
     const input = container.querySelector('input[placeholder="搜索便签..."]') as HTMLInputElement | null;
@@ -175,14 +163,12 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
       resultButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
 
-    expect(setViewportPosition).toHaveBeenCalledWith(
-      (120 + LAYOUT.NOTE_WIDTH / 2) - 160,
-      (160 + LAYOUT.NOTE_MIN_HEIGHT / 2) - 120,
-    );
-    expect(setSelectedIds).toHaveBeenCalledWith(['note-1']);
-    expect(bringToFront).toHaveBeenCalledWith('note-1');
-    expect(clearSelection).toHaveBeenCalled();
-    expect(useStore.getState().noteHighlights['note-1']?.reason).toBe('located');
+    const state = useStore.getState();
+    expect(state.isSpotlightOpen).toBe(false);
+    expect(state.viewport.x).toBe((120 + LAYOUT.NOTE_WIDTH / 2) - 160);
+    expect(state.viewport.y).toBe((160 + LAYOUT.NOTE_MIN_HEIGHT / 2) - 120);
+    expect(state.selectedIds).toEqual(['note-1']);
+    expect(state.noteHighlights['note-1']?.reason).toBe('located');
   });
 
   it('搜索范围只提供全部看板与当前看板两个明确选项', async () => {
@@ -223,11 +209,6 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
       x: 420,
       y: 240,
     });
-    const setViewportPosition = vi.fn();
-    const clearSelection = vi.fn();
-    const setSelectedIds = vi.fn();
-    const bringToFront = vi.fn();
-    const saveToDisk = vi.fn(async () => true);
 
     searchWorkerMock.notes = [remoteNote];
     useStore.setState({
@@ -237,11 +218,6 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
       ],
       currentBoardId: 'default',
       ...normalizeNotes([remoteNote]),
-      setViewportPosition,
-      clearSelection,
-      setSelectedIds,
-      bringToFront,
-      saveToDisk,
     });
 
     await renderSpotlight();
@@ -264,16 +240,13 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
       resultButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
 
-    expect(useStore.getState().currentBoardId).toBe('board-2');
-
-    expect(setViewportPosition).toHaveBeenCalledWith(
-      (420 + LAYOUT.NOTE_WIDTH / 2) - 160,
-      (240 + LAYOUT.NOTE_MIN_HEIGHT / 2) - 120,
-    );
-    expect(setSelectedIds).toHaveBeenCalledWith(['remote-note']);
-    expect(bringToFront).toHaveBeenCalledWith('remote-note');
-    expect(clearSelection).toHaveBeenCalled();
-    expect(useStore.getState().noteHighlights['remote-note']?.reason).toBe('located');
+    const state = useStore.getState();
+    expect(state.currentBoardId).toBe('board-2');
+    expect(state.isSpotlightOpen).toBe(false);
+    expect(state.viewport.x).toBe((420 + LAYOUT.NOTE_WIDTH / 2) - 160);
+    expect(state.viewport.y).toBe((240 + LAYOUT.NOTE_MIN_HEIGHT / 2) - 120);
+    expect(state.selectedIds).toEqual(['remote-note']);
+    expect(state.noteHighlights['remote-note']?.reason).toBe('located');
   });
 });
 

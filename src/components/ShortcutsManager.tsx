@@ -1,24 +1,15 @@
 import { useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { useStore } from '../store/useStore';
 import { useUIStore } from '../store';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
-import { buildSmartPasteNoteInputs, parseSmartPaste } from '../utils/smartPaste';
-import { getViewportSpawnOrigin } from '../utils/spawnPosition';
+import { appController } from '../controllers/appController';
 
 export default function ShortcutsManager() {
-  const deleteSelectedNotes = useStore((state) => state.deleteSelectedNotes);
-  const selectAllNotes = useStore((state) => state.selectAllNotes);
-  const duplicateSelectedNotes = useStore((state) => state.duplicateSelectedNotes);
-  const setViewportPosition = useStore((state) => state.setViewportPosition);
-
   const isSpotlightOpen = useUIStore((state) => state.isSpotlightOpen);
   const isQuickCaptureOpen = useUIStore((state) => state.isQuickCaptureOpen);
-  const setSpotlightOpen = useUIStore((state) => state.setSpotlightOpen);
   const viewMode = useUIStore((state) => state.viewMode);
   const areCanvasShortcutsBlocked = isSpotlightOpen || isQuickCaptureOpen;
 
-  // Ctrl + P / Cmd + P: 全局搜索
   useHotkeys('mod+p', (e) => {
     if (isQuickCaptureOpen) {
       e.preventDefault();
@@ -26,34 +17,30 @@ export default function ShortcutsManager() {
     }
 
     e.preventDefault();
-    setSpotlightOpen(!isSpotlightOpen);
-  }, { enableOnFormTags: true }); // 输入框内也可唤起
+    appController.toggleSpotlight();
+  }, { enableOnFormTags: true });
 
-  // Ctrl + A / Cmd + A: 全选
   useHotkeys('mod+a', (e) => {
     if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
-    selectAllNotes();
+    appController.selectAllNotes();
   }, { enableOnFormTags: false });
 
-  // Delete / Backspace: 删除选中笔记
   useHotkeys(['delete', 'backspace'], (e) => {
     if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
-    deleteSelectedNotes();
+    appController.deleteSelectedNotes();
   }, { enableOnFormTags: false });
 
-  // Ctrl + D / Cmd + D: 复制副本
   useHotkeys('mod+d', (e) => {
     if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
-    duplicateSelectedNotes();
+    appController.duplicateSelectedNotes();
   }, { enableOnFormTags: false });
 
-  // Ctrl + 0 / Cmd + 0: 重置视图
   useHotkeys('mod+0', (e) => {
     if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) {
@@ -62,29 +49,15 @@ export default function ShortcutsManager() {
     }
 
     e.preventDefault();
-    setViewportPosition(0, 0);
-  }, { enableOnFormTags: true }); // 视图操作允许在任何地方触发
+    appController.resetViewport();
+  }, { enableOnFormTags: true });
 
-  // Ctrl + V / Cmd + V: 画布级智能粘贴（输入框内不拦截）
   useHotkeys('mod+v', async (e) => {
     if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
     const text = await readText().catch(() => '');
-    const { viewport, addNotesWithContentBatch, openSmartPasteSplitPanel } = useStore.getState();
-    const result = parseSmartPaste(text);
-    const origin = getViewportSpawnOrigin(viewport);
-    const notes = buildSmartPasteNoteInputs(
-      result.source ? [result.source] : [],
-      origin.x,
-      origin.y,
-    );
-    if (notes.length > 0) {
-      const createdIds = addNotesWithContentBatch(notes) ?? [];
-      if (createdIds.length > 0 && result.options.length > 1) {
-        openSmartPasteSplitPanel({ noteId: createdIds[0], result });
-      }
-    }
+    appController.smartPasteFromText(text);
   }, { enableOnFormTags: false });
 
   // --- Native Behavior Guard (UX Protection) ---
