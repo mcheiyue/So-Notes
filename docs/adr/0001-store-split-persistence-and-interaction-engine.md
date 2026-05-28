@@ -12,3 +12,10 @@
 
 - `StorageData` 收敛为仅包含 **Domain**，并新增 `schemaVersion` 与 `storageUpdatedAt` 以支持迁移与双源仲裁；旧数据中的 UI/Viewport 字段将被忽略，应用启动默认进入 **BOARD**。
 - `switchBoard`、导入/清空等跨层动作将提升到 Controller/用例层编排，Domain/Viewport/UI 各自保持职责单一。
+
+### 实际落地差异（v1.4.0 Commit 16-18）
+
+- **appController** 已接管快捷键、全局菜单与切板/启动/导入等跨层用例入口，但内部仍通过旧 `useStore.getState()` 读写状态；旧 `useStore` 仍是过渡期写入主路径。
+- **Canvas 交互引擎** 已引入每 Canvas 实例的 `CanvasEngine` 与 `useCanvasGlobalListeners`，Canvas 组件内的全局监听与 RAF 循环已迁出；sticky drag 落位不再从 DOM `style.transform` 反推，而以 engine 内存坐标为交互真相。
+- **旧 `useStore.ts` 未删除**：Commit 07 删除门槛尚未满足，仍有控制器、Canvas 引擎、组件与测试依赖旧 store；`legacyDomainBridge` 继续负责旧 `useStore` → `domainStore` 的单向镜像。
+- **后续删除前提**：appController、CanvasEngine 与仍直接引用旧 store 的组件完成迁移后，才能删除旧 `useStore.ts`、桥接层与对应测试路径。
