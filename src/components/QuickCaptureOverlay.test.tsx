@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { QuickCaptureOverlay } from './QuickCaptureOverlay';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { resetViewportSpawnSequenceForTests } from '../utils/spawnPosition';
 
 describe('QuickCaptureOverlay 输入事件', () => {

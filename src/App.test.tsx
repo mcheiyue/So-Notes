@@ -82,7 +82,7 @@ vi.mock('./components/ShortcutsManager', () => ({
 }));
 
 import App from './App';
-import { useStore } from './store/useStore';
+import { useStore } from './store';
 import { resetViewportSpawnSequenceForTests } from './utils/spawnPosition';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 

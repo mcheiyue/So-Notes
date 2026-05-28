@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { useStore } from "../store/useStore";
+import { useStore } from "../store";
 import { cn } from "../utils/cn";
 import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity } from "lucide-react";
 import { Z_INDEX } from "../constants/layout";

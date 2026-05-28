@@ -3,7 +3,7 @@ import { DraggableCore, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
 import { NOTE_COLORS, getNoteColor, getNoteDarkSpectrum } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
-import { useStore } from "../store/useStore";
+import { useStore } from "../store";
 import { useEdgePush } from "../hooks/useEdgePush";
 import { useDarkMode } from "../hooks/useDarkMode";
 import { cn } from "../utils/cn";

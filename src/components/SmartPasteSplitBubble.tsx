@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { LAYOUT, Z_INDEX } from '../constants/layout';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { cn } from '../utils/cn';
 import type { SmartPasteOption } from '../utils/smartPaste';
 

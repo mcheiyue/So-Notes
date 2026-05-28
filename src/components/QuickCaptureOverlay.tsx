@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { Z_INDEX } from '../constants/layout';
 import { createSmartPasteNoteInputs } from '../utils/smartPaste';
 import { getViewportSpawnOrigin } from '../utils/spawnPosition';

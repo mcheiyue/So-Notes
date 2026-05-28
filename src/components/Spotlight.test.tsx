@@ -57,7 +57,7 @@ vi.mock('../hooks/useSearchWorker', () => ({
 
 import { Spotlight } from './Spotlight';
 import { normalizeNotes } from '../store/normalization';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { Note } from '../store/types';
 import { LAYOUT } from '../constants/layout';
 

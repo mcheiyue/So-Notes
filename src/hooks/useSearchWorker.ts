@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { Note, Board } from '../store/types';
 import type {
   SearchWorkerMessage,

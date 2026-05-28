@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
 import { ChevronRight } from 'lucide-react';

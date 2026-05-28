@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
 import { LAYOUT, Z_INDEX } from '../constants/layout';

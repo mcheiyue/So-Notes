@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { NoteCard } from './NoteCard';
 import { Trash2, RotateCcw, X, Search } from 'lucide-react';
 

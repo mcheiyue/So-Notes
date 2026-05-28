@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { LAYOUT } from '../constants/layout';
 
 export const EDGE_PUSH_ACTIVATION_DELAY = 1000;

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { SelectionActionBar } from './SelectionActionBar';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { normalizeNotes } from '../store/normalization';
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);

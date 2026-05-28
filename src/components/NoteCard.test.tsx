@@ -25,7 +25,7 @@ vi.mock('react-draggable', () => ({
 }));
 
 import { NoteCard } from './NoteCard';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { normalizeNotes } from '../store/normalization';
 import { getNoteColor, getNoteDarkSpectrum, Note } from '../store/types';
 import { getEdgeCheckRect, resolveDragStopWorldPosition } from '../utils/dragCoordinates';

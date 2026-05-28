@@ -22,7 +22,7 @@ vi.mock('../utils/fileSystem', () => ({
 }));
 
 import { ContextMenu } from './ContextMenu';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { normalizeNotes } from '../store/normalization';
 
 describe('ContextMenu shell 坐标合同', () => {

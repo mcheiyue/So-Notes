@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useStore } from "../store/useStore";
+import { useStore } from "../store";
 import { Search, CornerDownLeft, Command, FileText, Filter } from "lucide-react";
 import { cn } from "../utils/cn";
 import { Note } from "../store/types";

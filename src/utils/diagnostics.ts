@@ -97,7 +97,7 @@ export const diagnostics = new DiagnosticsCollector();
 // Subscribe to Zustand store changes to sync note stats
 // Use dynamic import to avoid circular dependency
 if (typeof window !== 'undefined') {
-  import('../store/useStore').then(({ useStore }) => {
+  import('../store').then(({ useStore }) => {
     if (!useStore || typeof useStore.subscribe !== 'function') {
       return;
     }

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { useStore } from '../store/useStore';
+import { useStore } from '../store';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { buildSmartPasteNoteInputs, parseSmartPaste } from '../utils/smartPaste';
 import { getViewportSpawnOrigin } from '../utils/spawnPosition';

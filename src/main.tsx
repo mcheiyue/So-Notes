@@ -4,7 +4,7 @@ import App from "./App";
 import "./index.css";
 import { generatePresetSample } from "./test/fixtures/sampleData";
 import { normalizeNotes, createLayoutNotesById } from "./store/normalization";
-import { useStore } from "./store/useStore";
+import { useStore } from "./store";
 
 if (typeof window !== 'undefined') {
   (window as unknown as Record<string, unknown>).__injectTestData = (preset: string) => {

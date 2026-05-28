@@ -1,7 +1,7 @@
 import React from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { PinOff } from "lucide-react";
-import { useStore } from "../store/useStore";
+import { useStore } from "../store";
 import { Z_INDEX } from "../constants/layout";
 import { cn } from "../utils/cn";
 
