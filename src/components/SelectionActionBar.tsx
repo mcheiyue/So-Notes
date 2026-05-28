@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { NOTE_COLORS } from '../store/types';
-import { useStore, useUIStore } from '../store';
+import { useStore } from '../store/useStore';
+import { useUIStore } from '../store';
 import { Z_INDEX } from '../constants/layout';
 import { cn } from '../utils/cn';
 

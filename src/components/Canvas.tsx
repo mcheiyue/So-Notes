@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useCallback, useMemo, Profiler } from "react";
-import { useStore, useViewportStore } from "../store";
+import { useStore } from "../store/useStore";
+import { useViewportStore } from "../store";
 import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
 import { LAYOUT, Z_INDEX } from "../constants/layout";

@@ -22,7 +22,7 @@ vi.mock('../utils/fileSystem', () => ({
 import { BoardDock } from './BoardDock';
 import { Z_INDEX } from '../constants/layout';
 import { createEmptyNormalizedNotesState, normalizeNotes } from '../store/normalization';
-import { useStore } from '../store';
+import { useStore } from '../store/useStore';
 
 describe('BoardDock v1.2.4 最小修复', () => {
   let container: HTMLDivElement;

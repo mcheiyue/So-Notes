@@ -3,7 +3,7 @@ import { diagnostics } from '../utils/diagnostics';
 import DiagnosticsMetric, { DiagnosticsMetricHandle } from './DiagnosticsMetric';
 import { cn } from '../utils/cn';
 import { SAMPLE_PRESETS, generatePresetSample } from '../test/fixtures/sampleData';
-import { useStore } from '../store';
+import { useStore } from '../store/useStore';
 import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
 
 const UPDATE_INTERVAL = 1000;

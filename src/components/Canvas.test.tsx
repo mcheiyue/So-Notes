@@ -25,7 +25,7 @@ vi.mock('react-draggable', () => ({
 }));
 
 import { Canvas } from './Canvas';
-import { useStore } from '../store';
+import { useStore } from '../store/useStore';
 import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
 import { Note } from '../store/types';
 import { LAYOUT } from '../constants/layout';

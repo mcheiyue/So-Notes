@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { useEffect } from 'react';
-import { useStore } from '../store';
+import { useStore } from '../store/useStore';
 import { EDGE_PUSH_ACTIVATION_DELAY, EDGE_PUSH_EXIT_THRESHOLD, useEdgePush } from './useEdgePush';
 import { LAYOUT } from '../constants/layout';
 

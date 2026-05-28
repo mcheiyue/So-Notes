@@ -21,7 +21,7 @@ vi.mock('../utils/fileSystem', () => ({
 
 import { MiniMap } from './MiniMap';
 import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
-import { useStore } from '../store';
+import { useStore } from '../store/useStore';
 
 describe('MiniMap 看板隔离', () => {
   let container: HTMLDivElement;

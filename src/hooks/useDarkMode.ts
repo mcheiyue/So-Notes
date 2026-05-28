@@ -1,4 +1,4 @@
-import { useStore } from '../store';
+import { useDomainStore } from '../store';
 import { useEffect, useState } from 'react';
 
 /**
@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
  * It reacts to both the store's theme configuration and the system's color scheme preference.
  */
 export const useDarkMode = (): boolean => {
-  const themeMode = useStore((state) => state.config.themeMode);
+  const themeMode = useDomainStore((state) => state.config.themeMode);
   
   // Initialize with current system state to avoid hydration mismatch if possible,
   // though for client-side only apps this is fine.

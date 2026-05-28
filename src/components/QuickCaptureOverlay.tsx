@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useStore, useUIStore } from '../store';
+import { useStore } from '../store/useStore';
+import { useUIStore, useViewportStore } from '../store';
 import { Z_INDEX } from '../constants/layout';
 import { createSmartPasteNoteInputs } from '../utils/smartPaste';
 import { getViewportSpawnOrigin } from '../utils/spawnPosition';
 
 const getCaptureOrigin = () => {
-  const { viewport } = useStore.getState();
+  const { viewport } = useViewportStore.getState();
   return getViewportSpawnOrigin(viewport);
 };
 

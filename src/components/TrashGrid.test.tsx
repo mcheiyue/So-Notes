@@ -24,7 +24,7 @@ vi.mock('./NoteCard', () => ({
 }));
 
 import { TrashGrid } from './TrashGrid';
-import { useStore } from '../store';
+import { useStore } from '../store/useStore';
 import { normalizeNotes } from '../store/normalization';
 import { Note } from '../store/types';
 

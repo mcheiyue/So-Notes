@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useStore, useViewportStore } from '../store';
+import { useDomainStore, useViewportStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
 import { LAYOUT, Z_INDEX } from '../constants/layout';
@@ -15,7 +15,7 @@ interface MiniMapRenderableNote {
 }
 
 export const MiniMap: React.FC = () => {
-    const { notesById, layoutNotesById, currentBoardNoteIds } = useStore(
+    const { notesById, layoutNotesById, currentBoardNoteIds } = useDomainStore(
         useShallow(state => ({
             notesById: state.notesById,
             layoutNotesById: state.layoutNotesById,

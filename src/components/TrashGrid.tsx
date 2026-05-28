@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { useDomainStore, useStore } from '../store';
+import { useDomainStore } from '../store';
+import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { NoteCard } from './NoteCard';
 import { Trash2, RotateCcw, X, Search } from 'lucide-react';
