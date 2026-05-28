@@ -70,7 +70,7 @@ describe('TrashGrid 废纸篓搜索', () => {
         ];
         useStore.setState({
             ...normalizeNotes(notes),
-            boards: [{ id: 'default', name: '主看板', icon: '📌', createdAt: 1, order: 0 }],
+            boards: [{ id: 'default', name: '主看板', icon: '📌', createdAt: 1 }],
         });
 
         container = document.createElement('div');

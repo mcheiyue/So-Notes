@@ -1350,7 +1350,7 @@ describe('v1.3.9 TRASH 安全收口', () => {
     useStore.setState({
       selectedIds: ['note-1', 'note-2'],
       contextMenu: { isOpen: true, x: 100, y: 200, type: 'NOTE', targetId: 'note-1' },
-      smartPasteSplitPanel: { noteId: 'note-1', result: { source: 'text', options: [] } },
+      smartPasteSplitPanel: { noteId: 'note-1', result: { kind: 'single', source: 'text', options: [] } },
       stickyDrag: { id: 'note-1', offsetX: 5, offsetY: 10, status: 'active' },
       interaction: { isPanMode: true, isDragging: false, edgePush: { top: false, bottom: false, left: false, right: false } },
       isSpotlightOpen: true,
