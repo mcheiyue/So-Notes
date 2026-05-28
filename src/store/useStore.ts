@@ -622,7 +622,16 @@ export const useStore = create<State>()(
     setViewMode: (mode) => {
         set((state) => {
             state.viewMode = mode;
-            state.selectedIds = []; // Clear selection on view switch
+            state.selectedIds = [];
+            if (mode === 'TRASH') {
+                state.isDockVisible = false; // 进入 TRASH 时默认收起 Dock
+                state.contextMenu = { isOpen: false, x: 0, y: 0, type: 'CANVAS' };
+                state.smartPasteSplitPanel = null;
+                state.stickyDrag = { id: null, offsetX: 0, offsetY: 0, status: 'active' };
+                state.interaction.isPanMode = false;
+                state.isSpotlightOpen = false;
+                state.isQuickCaptureOpen = false;
+            }
         });
     },
 

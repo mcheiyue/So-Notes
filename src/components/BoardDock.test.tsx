@@ -449,4 +449,14 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     expect(container.textContent).toContain('确认删除? (1便签)');
   });
+
+  it('viewMode=TRASH 且 isDockVisible=false 时不渲染 Dock', async () => {
+    useStore.setState({ viewMode: 'TRASH', isDockVisible: false });
+
+    await renderBoardDock();
+
+    expect(container.querySelector('.board-dock-container')).toBeNull();
+    expect(container.querySelector('[data-board-id="default"]')).toBeNull();
+    expect(container.textContent).not.toContain('主板');
+  });
 });

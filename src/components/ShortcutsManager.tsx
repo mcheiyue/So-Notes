@@ -14,6 +14,7 @@ export default function ShortcutsManager() {
   const isSpotlightOpen = useStore((state) => state.isSpotlightOpen);
   const isQuickCaptureOpen = useStore((state) => state.isQuickCaptureOpen);
   const setSpotlightOpen = useStore((state) => state.setSpotlightOpen);
+  const viewMode = useStore((state) => state.viewMode);
   const areCanvasShortcutsBlocked = isSpotlightOpen || isQuickCaptureOpen;
 
   // Ctrl + P / Cmd + P: 全局搜索
@@ -29,6 +30,7 @@ export default function ShortcutsManager() {
 
   // Ctrl + A / Cmd + A: 全选
   useHotkeys('mod+a', (e) => {
+    if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
     selectAllNotes();
@@ -36,6 +38,7 @@ export default function ShortcutsManager() {
 
   // Delete / Backspace: 删除选中笔记
   useHotkeys(['delete', 'backspace'], (e) => {
+    if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
     deleteSelectedNotes();
@@ -43,6 +46,7 @@ export default function ShortcutsManager() {
 
   // Ctrl + D / Cmd + D: 复制副本
   useHotkeys('mod+d', (e) => {
+    if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
     duplicateSelectedNotes();
@@ -50,6 +54,7 @@ export default function ShortcutsManager() {
 
   // Ctrl + 0 / Cmd + 0: 重置视图
   useHotkeys('mod+0', (e) => {
+    if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) {
       e.preventDefault();
       return;
@@ -61,6 +66,7 @@ export default function ShortcutsManager() {
 
   // Ctrl + V / Cmd + V: 画布级智能粘贴（输入框内不拦截）
   useHotkeys('mod+v', async (e) => {
+    if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
     const text = await readText().catch(() => '');
