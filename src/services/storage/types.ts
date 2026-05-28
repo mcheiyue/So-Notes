@@ -26,6 +26,43 @@ export interface BootstrapResult {
   readonly syncAction: SyncAction;
   readonly walTime: number;
   readonly diskTime: number;
-  /** true when both WAL and disk failed to produce usable data and bootstrap fell back to the built-in NEW default domain */
+  /** 双源均未产出可用数据并回退到内置 NEW 默认领域时为 true */
   readonly recovered: boolean;
+}
+
+/**
+ * 持久化引擎运行状态。
+ * - idle: 无待写数据
+ * - dirty: 已标记脏数据，等待调度写入
+ * - writing-wal: 正在写入 WAL
+ * - writing-disk: 正在写入磁盘
+ * - error: 最近一次写入失败
+ */
+export type PersistenceStatus = 'idle' | 'dirty' | 'writing-wal' | 'writing-disk' | 'error';
+
+/**
+ * attach() 的可选配置。
+ * 所有时间参数单位为毫秒；writer 注入用于测试。
+ */
+export interface AttachOptions {
+  /** WAL 写入节流间隔（毫秒），默认 100 */
+  readonly walThrottleMs?: number;
+  /** 磁盘写入防抖间隔（毫秒），默认 2000 */
+  readonly diskDebounceMs?: number;
+  /** 自定义 WAL 写入器，默认 db.saveWAL */
+  readonly writeWAL?: (data: StorageData) => Promise<boolean>;
+  /** 自定义磁盘写入器，默认 Tauri invoke save_content */
+  readonly writeDisk?: (data: StorageData) => Promise<boolean>;
+}
+
+/**
+ * attach() 返回的控制句柄。
+ */
+export interface AttachResult {
+  /** 取消所有注册、清空定时器并断开 bridge 连接 */
+  readonly detach: () => void;
+  /** 立即强制 WAL + 磁盘持久化（取消定时器、合并 in-flight），返回是否全部成功 */
+  readonly flushPersistNow: () => Promise<boolean>;
+  /** 查询当前持久化状态 */
+  readonly getStatus: () => PersistenceStatus;
 }

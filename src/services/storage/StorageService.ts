@@ -1,7 +1,11 @@
-import type { StorageData, Note, Board } from '../../store/types';
-import { DEFAULT_BOARD, DEFAULT_CONFIG } from '../../store/types';
+import { invoke } from '@tauri-apps/api/core';
+import type { StorageData, Note, Board, SaveResult } from '../../store/types';
+import { DEFAULT_BOARD, DEFAULT_CONFIG, STORAGE_SCHEMA_VERSION } from '../../store/types';
 import { db } from '../../store/db';
-import type { BootstrapResult, SyncAction, StorageDataSource } from './types';
+import type { DomainState } from '../../store/domainStore';
+import { setDomainPersistenceBridge } from '../../store/domainStore';
+import { denormalizeNotes } from '../../store/normalization';
+import type { BootstrapResult, SyncAction, StorageDataSource, AttachOptions, AttachResult, PersistenceStatus } from './types';
 import {
   readDiskStorageData,
   normalizeStorageDataMetadata,
@@ -100,4 +104,205 @@ export async function bootstrap(): Promise<BootstrapResult> {
     diskTime,
     recovered: source === 'NEW',
   };
+}
+
+const serializeDomainState = (state: DomainState): StorageData => ({
+  schemaVersion: STORAGE_SCHEMA_VERSION,
+  storageUpdatedAt: Date.now(),
+  notes: denormalizeNotes(state),
+  boards: state.boards,
+  currentBoardId: state.currentBoardId,
+  config: state.config,
+});
+
+const defaultWriteDisk = async (data: StorageData): Promise<boolean> => {
+  try {
+    const jsonString = JSON.stringify(data, null, 2);
+    const result = await invoke<SaveResult>('save_content', {
+      filename: 'data.json',
+      content: jsonString,
+      generationId: data.storageUpdatedAt,
+    });
+    return result?.success ?? false;
+  } catch {
+    return false;
+  }
+};
+
+export function attach(options?: AttachOptions): AttachResult {
+  const walThrottleMs = options?.walThrottleMs ?? 100;
+  const diskDebounceMs = options?.diskDebounceMs ?? 2000;
+  const writeWAL = options?.writeWAL ?? ((data: StorageData) => db.saveWAL(data));
+  const writeDisk = options?.writeDisk ?? defaultWriteDisk;
+
+  let latestState: DomainState | null = null;
+  let status: PersistenceStatus = 'idle';
+  let dirty = false;
+  let detached = false;
+
+  let walTimer: ReturnType<typeof setTimeout> | null = null;
+  let diskTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let diskInFlight = false;
+  let diskPending = false;
+  let diskDonePromise: Promise<boolean> = Promise.resolve(true);
+
+  const setStatus = (s: PersistenceStatus) => {
+    status = s;
+  };
+
+  const flushWAL = async () => {
+    walTimer = null;
+    if (!dirty || !latestState) return;
+
+    setStatus('writing-wal');
+    const data = serializeDomainState(latestState);
+    const success = await writeWAL(data);
+
+    if (!success) {
+      setStatus('error');
+      return;
+    }
+
+    setStatus(dirty ? 'dirty' : 'idle');
+  };
+
+  const executeDiskWrite = (): Promise<boolean> => {
+    if (diskInFlight) {
+      diskPending = true;
+      return diskDonePromise;
+    }
+
+    diskInFlight = true;
+
+    const promise = (async () => {
+      do {
+        diskPending = false;
+        if (!latestState) {
+          diskInFlight = false;
+          return true;
+        }
+
+        setStatus('writing-disk');
+        const data = serializeDomainState(latestState);
+        const success = await writeDisk(data);
+
+        if (!success) {
+          setStatus('error');
+          diskInFlight = false;
+          return false;
+        }
+      } while (diskPending);
+
+      diskInFlight = false;
+
+      dirty = false;
+      setStatus('idle');
+      return true;
+    })();
+
+    diskDonePromise = promise;
+    return promise;
+  };
+
+  const scheduleWAL = () => {
+    if (walTimer !== null) return;
+    walTimer = setTimeout(flushWAL, walThrottleMs);
+  };
+
+  const scheduleDisk = () => {
+    if (diskTimer !== null) {
+      clearTimeout(diskTimer);
+    }
+    diskTimer = setTimeout(() => {
+      diskTimer = null;
+      executeDiskWrite();
+    }, diskDebounceMs);
+  };
+
+  const onDomainStateChanged = (state: DomainState) => {
+    if (detached) return;
+    latestState = state;
+    dirty = true;
+    setStatus('dirty');
+    scheduleWAL();
+    if (diskInFlight) {
+      diskPending = true;
+      if (diskTimer !== null) {
+        clearTimeout(diskTimer);
+        diskTimer = null;
+      }
+      return;
+    }
+    scheduleDisk();
+  };
+
+  const removeBridge = setDomainPersistenceBridge(onDomainStateChanged);
+
+  const onBeforeUnload = () => {
+    if (!dirty || !latestState) return;
+    const data = serializeDomainState(latestState);
+    writeWAL(data);
+    writeDisk(data);
+  };
+
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'hidden' && dirty) {
+      flushPersistNow();
+    }
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+  }
+
+  const flushPersistNow = async (): Promise<boolean> => {
+    if (detached) return false;
+
+    if (walTimer !== null) {
+      clearTimeout(walTimer);
+      walTimer = null;
+    }
+    if (diskTimer !== null) {
+      clearTimeout(diskTimer);
+      diskTimer = null;
+    }
+
+    if (!dirty || !latestState) return true;
+
+    setStatus('writing-wal');
+    const data = serializeDomainState(latestState);
+    const walSuccess = await writeWAL(data);
+    if (!walSuccess) {
+      setStatus('error');
+      return false;
+    }
+
+    const diskSuccess = await executeDiskWrite();
+    return diskSuccess;
+  };
+
+  const detach = () => {
+    if (detached) return;
+    detached = true;
+
+    removeBridge();
+
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    }
+
+    if (walTimer !== null) {
+      clearTimeout(walTimer);
+      walTimer = null;
+    }
+    if (diskTimer !== null) {
+      clearTimeout(diskTimer);
+      diskTimer = null;
+    }
+  };
+
+  return { detach, flushPersistNow, getStatus: () => status };
 }

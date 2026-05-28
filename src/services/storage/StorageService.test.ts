@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+let capturedBridgeCallback: ((state: Record<string, unknown>) => void) | null = null;
+
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async () => null),
 }));
@@ -12,9 +14,17 @@ vi.mock('../../store/db', () => ({
   },
 }));
 
+vi.mock('../../store/domainStore', () => ({
+  setDomainPersistenceBridge: vi.fn((bridge: unknown) => {
+    capturedBridgeCallback = bridge as (state: Record<string, unknown>) => void;
+    return vi.fn();
+  }),
+}));
+
 import { invoke } from '@tauri-apps/api/core';
 import { db } from '../../store/db';
-import { bootstrap } from './StorageService';
+import { setDomainPersistenceBridge } from '../../store/domainStore';
+import { bootstrap, attach } from './StorageService';
 import { STORAGE_SCHEMA_VERSION, DEFAULT_BOARD, DEFAULT_CONFIG } from '../../store/types';
 import type { StorageData } from '../../store/types';
 
@@ -233,5 +243,220 @@ describe('StorageService.bootstrap', () => {
     const result = await bootstrap();
 
     expect(result.data.config.maxZ).toBe(Math.max(50, 2));
+  });
+});
+
+const makeDomainState = () => ({
+  notesById: {},
+  allNoteIds: [],
+  boardNoteIds: {},
+  layoutNotesById: {},
+  boards: [DEFAULT_BOARD],
+  currentBoardId: DEFAULT_BOARD.id,
+  config: { ...DEFAULT_CONFIG },
+});
+
+describe('StorageService.attach', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedBridgeCallback = null;
+    vi.useFakeTimers();
+  });
+
+  it('不写入直到收到 domain bridge 通知', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk });
+
+    expect(writeWAL).not.toHaveBeenCalled();
+    expect(writeDisk).not.toHaveBeenCalled();
+    expect(handle.getStatus()).toBe('idle');
+
+    handle.detach();
+  });
+
+  it('bridge 通知后状态变为 dirty', () => {
+    const handle = attach({ writeWAL: vi.fn(async () => true), writeDisk: vi.fn(async () => true) });
+
+    capturedBridgeCallback!(makeDomainState());
+
+    expect(handle.getStatus()).toBe('dirty');
+
+    handle.detach();
+  });
+
+  it('WAL 节流合并快速变更', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk, walThrottleMs: 100 });
+
+    capturedBridgeCallback!(makeDomainState());
+    capturedBridgeCallback!(makeDomainState());
+    capturedBridgeCallback!(makeDomainState());
+
+    expect(writeWAL).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(writeWAL).toHaveBeenCalledTimes(1);
+
+    handle.detach();
+  });
+
+  it('Disk 防抖合并快速变更', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk, diskDebounceMs: 200 });
+
+    capturedBridgeCallback!(makeDomainState());
+    await vi.advanceTimersByTimeAsync(50);
+
+    capturedBridgeCallback!(makeDomainState());
+    await vi.advanceTimersByTimeAsync(50);
+
+    capturedBridgeCallback!(makeDomainState());
+
+    expect(writeDisk).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(writeDisk).toHaveBeenCalledTimes(1);
+
+    handle.detach();
+  });
+
+  it('flushPersistNow 强制立即写入', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk });
+
+    capturedBridgeCallback!(makeDomainState());
+
+    const result = await handle.flushPersistNow();
+
+    expect(result).toBe(true);
+    expect(writeWAL).toHaveBeenCalledTimes(1);
+    expect(writeDisk).toHaveBeenCalledTimes(1);
+
+    handle.detach();
+  });
+
+  it('flushPersistNow 无脏数据时直接返回 true', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk });
+
+    const result = await handle.flushPersistNow();
+
+    expect(result).toBe(true);
+    expect(writeWAL).not.toHaveBeenCalled();
+    expect(writeDisk).not.toHaveBeenCalled();
+
+    handle.detach();
+  });
+
+  it('flushPersistNow WAL 失败时返回 false', async () => {
+    const writeWAL = vi.fn(async () => false);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk });
+
+    capturedBridgeCallback!(makeDomainState());
+
+    const result = await handle.flushPersistNow();
+
+    expect(result).toBe(false);
+    expect(writeWAL).toHaveBeenCalledTimes(1);
+    expect(writeDisk).not.toHaveBeenCalled();
+    expect(handle.getStatus()).toBe('error');
+
+    handle.detach();
+  });
+
+  it('磁盘 in-flight 时 pending 合并为一次后续写入', async () => {
+    const diskResolvers: Array<(value: boolean) => void> = [];
+    const writeDisk = vi.fn(() => new Promise<boolean>((resolve) => diskResolvers.push(resolve)));
+    const writeWAL = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk, diskDebounceMs: 5000 });
+
+    capturedBridgeCallback!(makeDomainState());
+
+    const flushPromise = handle.flushPersistNow();
+
+    await vi.runAllTimersAsync();
+    expect(writeDisk).toHaveBeenCalledTimes(1);
+
+    capturedBridgeCallback!(makeDomainState());
+
+    diskResolvers[0](true);
+    await vi.runAllTimersAsync();
+
+    expect(writeDisk).toHaveBeenCalledTimes(2);
+
+    diskResolvers[1](true);
+    await vi.runAllTimersAsync();
+
+    const result = await flushPromise;
+    expect(result).toBe(true);
+
+    handle.detach();
+  });
+
+  it('detach 移除 bridge 监听器和定时器', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+    const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
+    const removeEventListenerSpy = vi.spyOn(window, 'removeEventListener');
+    const docRemoveSpy = vi.spyOn(document, 'removeEventListener');
+
+    const handle = attach({ writeWAL, writeDisk });
+
+    expect(addEventListenerSpy).toHaveBeenCalledWith('beforeunload', expect.any(Function));
+    expect(setDomainPersistenceBridge).toHaveBeenCalled();
+
+    capturedBridgeCallback!(makeDomainState());
+
+    handle.detach();
+
+    expect(removeEventListenerSpy).toHaveBeenCalledWith('beforeunload', expect.any(Function));
+    expect(docRemoveSpy).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(writeWAL).not.toHaveBeenCalled();
+    expect(writeDisk).not.toHaveBeenCalled();
+
+    addEventListenerSpy.mockRestore();
+    removeEventListenerSpy.mockRestore();
+    docRemoveSpy.mockRestore();
+  });
+
+  it('visibilitychange hidden 触发 flush', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk });
+
+    capturedBridgeCallback!(makeDomainState());
+
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    if (visibilityDescriptor) {
+      Object.defineProperty(document, 'visibilityState', visibilityDescriptor);
+    }
+
+    await vi.runAllTimersAsync();
+
+    expect(writeWAL).toHaveBeenCalledTimes(1);
+    expect(writeDisk).toHaveBeenCalledTimes(1);
+
+    handle.detach();
   });
 });
