@@ -1,12 +1,15 @@
 import React, { useState, useMemo } from 'react';
-import { useStore } from '../store';
+import { useDomainStore, useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { NoteCard } from './NoteCard';
 import { Trash2, RotateCcw, X, Search } from 'lucide-react';
 
 export const TrashGrid: React.FC = () => {
-    const notesById = useStore(state => state.notesById);
-    const allNoteIds = useStore(state => state.allNoteIds);
-    const boards = useStore(state => state.boards);
+    const { notesById, allNoteIds, boards } = useDomainStore(useShallow(state => ({
+        notesById: state.notesById,
+        allNoteIds: state.allNoteIds,
+        boards: state.boards,
+    })));
     const restoreNote = useStore(state => state.restoreNote);
     const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
     const emptyTrash = useStore(state => state.emptyTrash);
@@ -17,12 +20,14 @@ export const TrashGrid: React.FC = () => {
     const [selectedTrashIds, setSelectedTrashIds] = useState<string[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
 
-    const deletedNotes = allNoteIds
-        .flatMap((id) => {
-            const note = notesById[id];
-            return note?.deletedAt ? [note] : [];
-        })
-        .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
+    const deletedNotes = useMemo(() => allNoteIds
+            .flatMap((id) => {
+                const note = notesById[id];
+                return note?.deletedAt ? [note] : [];
+            })
+            .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0)),
+        [allNoteIds, notesById]
+    );
 
     const filteredNotes = useMemo(() => {
         const trimmed = searchQuery.trim().toLowerCase();

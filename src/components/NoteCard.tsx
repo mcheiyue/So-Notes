@@ -3,7 +3,7 @@ import { DraggableCore, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
 import { NOTE_COLORS, getNoteColor, getNoteDarkSpectrum } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
-import { useStore } from "../store";
+import { useDomainStore, useStore } from "../store";
 import { useEdgePush } from "../hooks/useEdgePush";
 import { useDarkMode } from "../hooks/useDarkMode";
 import { cn } from "../utils/cn";
@@ -176,7 +176,7 @@ function buildNoteMaterialShadow(
 
 export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = false, scale = 1 }) => {
   // Selectors
-  const note = useStore(state => state.notesById[id]);
+  const note = useDomainStore(state => state.notesById[id]);
 
   const updateNote = useStore(state => state.updateNote);
   const updateTitle = useStore(state => state.updateTitle);

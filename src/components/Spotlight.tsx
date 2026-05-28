@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useStore } from "../store";
+import { useDomainStore, useStore } from "../store";
 import { Search, CornerDownLeft, Command, FileText, Filter } from "lucide-react";
 import { cn } from "../utils/cn";
 import { Note } from "../store/types";
@@ -14,8 +14,8 @@ export const Spotlight = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  const boards = useStore((state) => state.boards);
-  const currentBoardId = useStore((state) => state.currentBoardId);
+  const boards = useDomainStore((state) => state.boards);
+  const currentBoardId = useDomainStore((state) => state.currentBoardId);
   const isSpotlightOpen = useStore((state) => state.isSpotlightOpen);
   const setSpotlightOpen = useStore((state) => state.setSpotlightOpen);
   const toggleCollapse = useStore((state) => state.toggleCollapse);
