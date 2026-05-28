@@ -1,5 +1,9 @@
 const noteElements = new Map<string, HTMLElement>();
 
+// 共享策略：这是 NoteCard 与 CanvasEngine 之间的 DOM 索引，按便签 id 全局共享。
+// 清理策略：NoteCard 挂载时注册、卸载时注销；CanvasEngine.dispose 不清空全局索引，
+// 避免在未来多 Canvas 或测试并行挂载场景下误删其他实例仍在使用的便签元素。
+
 export function registerNoteElement(id: string, el: HTMLElement): void {
   noteElements.set(id, el);
 }

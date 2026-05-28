@@ -765,19 +765,40 @@ describe('Canvas 空白命中判定', () => {
       boardNoteIds: { default: ['leader', 'follower'] },
       selectedIds: ['leader', 'follower'],
       stickyDrag: { id: 'leader', offsetX: 20, offsetY: 20, status: 'active' },
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
     });
 
     await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 10,
+      top: 20,
+      right: 1290,
+      bottom: 740,
+      width: 1280,
+      height: 720,
+      x: 10,
+      y: 20,
+      toJSON: () => ({}),
+    } as DOMRect));
 
     const leaderEl = container.querySelector('[data-id="leader"]') as HTMLElement | null;
     const followerEl = container.querySelector('[data-id="follower"]') as HTMLElement | null;
     expect(leaderEl).not.toBeNull();
     expect(followerEl).not.toBeNull();
 
-    leaderEl!.style.transform = 'translate(1100px, 650px)';
-    followerEl!.style.transform = 'translate(1320px, 680px)';
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        buttons: 1,
+        clientX: 1130,
+        clientY: 690,
+      }));
+    });
 
-    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    expect(leaderEl!.style.transform).toBe('translate(1100px, 650px)');
+    expect(followerEl!.style.transform).toBe('translate(1320px, 680px)');
 
     await act(async () => {
       canvasRoot?.dispatchEvent(new MouseEvent('mousedown', {
@@ -1072,5 +1093,150 @@ describe('Canvas 空白命中判定', () => {
     expect(useStore.getState().interaction.isDragging).toBe(false);
     expect(useStore.getState().interaction.edgePush.right).toBe(false);
     expect(document.body.classList.contains('is-dragging')).toBe(false);
+  });
+
+  it('document.visibilitychange hidden 对称清理 dragging、edgePush 与 leader session', async () => {
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        isDragging: true,
+        edgePush: { top: false, bottom: false, left: false, right: true },
+      },
+    });
+
+    beginEdgePushDragSession('note-1', ['note-1'], {
+      'note-1': { x: 120, y: 140 },
+    });
+    updateEdgePushPointerDelta(80, 0);
+
+    await renderCanvas();
+
+    await act(async () => {
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(useStore.getState().interaction.isDragging).toBe(false);
+    expect(useStore.getState().interaction.edgePush.right).toBe(false);
+    expect(getEdgePushDragLeader()).toBeNull();
+
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+  });
+
+  it('document.visibilitychange hidden 会先触发普通便签拖拽收口', async () => {
+    const activeDragFinalizer = vi.fn();
+    registerActiveNoteDragFinalizer(activeDragFinalizer);
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        isDragging: true,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+    });
+
+    await renderCanvas();
+
+    await act(async () => {
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(activeDragFinalizer).toHaveBeenCalledTimes(1);
+    expect(activeDragFinalizer).toHaveBeenCalledWith('window-blur');
+    expect(useStore.getState().interaction.isDragging).toBe(false);
+
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+  });
+
+  it('sticky drag 失焦时进入 suspended 状态 (visibilitychange hidden)', async () => {
+    useStore.setState({
+      stickyDrag: { id: 'note-1', offsetX: 20, offsetY: 20, status: 'active' },
+    });
+
+    await renderCanvas();
+
+    await act(async () => {
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(useStore.getState().stickyDrag).toEqual({
+      id: 'note-1',
+      offsetX: 20,
+      offsetY: 20,
+      status: 'suspended',
+    });
+
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+  });
+
+  it('document.visibilitychange visible 不触发清理', async () => {
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        isDragging: true,
+        edgePush: { top: false, bottom: false, left: false, right: true },
+      },
+    });
+
+    await renderCanvas();
+
+    await act(async () => {
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(useStore.getState().interaction.isDragging).toBe(true);
+    expect(useStore.getState().interaction.edgePush.right).toBe(true);
+  });
+
+  it('Space 双击重置视口到原点并退出平移模式', async () => {
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        isPanMode: true,
+      },
+      viewport: { x: 200, y: 300, w: 1280, h: 720 },
+    });
+
+    await renderCanvas();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ' }));
+    });
+
+    expect(useStore.getState().interaction.isPanMode).toBe(false);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ' }));
+    });
+
+    expect(useStore.getState().interaction.isPanMode).toBe(false);
+    expect(useStore.getState().viewport.x).toBe(0);
+    expect(useStore.getState().viewport.y).toBe(0);
+  });
+
+  it('contextMenu 事件阻止默认行为并打开菜单', async () => {
+    const setContextMenu = vi.fn();
+    useStore.setState({ setContextMenu });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        clientX: 300,
+        clientY: 400,
+      }));
+    });
+
+    expect(setContextMenu).toHaveBeenCalledWith({
+      isOpen: true,
+      x: 300,
+      y: 400,
+      type: 'CANVAS',
+    });
   });
 });

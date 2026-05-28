@@ -3,23 +3,19 @@ import { useStore } from "../store/useStore";
 import { useViewportStore } from "../store";
 import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
-import { LAYOUT, Z_INDEX } from "../constants/layout";
+import { Z_INDEX } from "../constants/layout";
 import { diagnostics } from "../utils/diagnostics";
 import { useFPSMonitor } from "../utils/performance";
 import {
   getEdgePushDragLeader,
-  hasActiveEdgePushDragSession,
-  accumulateEdgePushDelta,
-  applyActiveDragSessionTransforms,
-  setEdgePushDragLeader,
 } from "../utils/edgePushDragCompensation";
 import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetrics";
 import { getNoteElement } from "../utils/noteElementRegistry";
-import { resolveDragStopWorldPosition } from "../utils/dragCoordinates";
-import { finalizeActiveNoteDrag } from "../utils/activeNoteDrag";
 import { buildSmartPasteNoteInputs, parseSmartPaste } from "../utils/smartPaste";
 import { getViewportSpawnOrigin } from "../utils/spawnPosition";
 import { attach } from "../services/storage/StorageService";
+import { CanvasEngine } from "../canvas/CanvasEngine";
+import { useCanvasGlobalListeners } from "../hooks/useCanvasGlobalListeners";
 
 
 
@@ -86,8 +82,6 @@ export const Canvas: React.FC = () => {
   const visibleNoteIds = useMemo(() => {
     const liveNoteIds = currentBoardNoteIds.filter((id) => !layoutNotesById[id]?.deletedAt);
 
-    // v1.3.1 引入视口虚拟化后，持续交互中的便签可能因为旧 layout 位置被裁剪而卸载，
-    // 造成 edgePush 中断、小地图收起、拖拽会话残留。拖拽 / sticky drag 期间必须保留稳定 DOM。
     if (isDragging || stickyDragId || getEdgePushDragLeader()) {
       return liveNoteIds;
     }
@@ -121,129 +115,22 @@ export const Canvas: React.FC = () => {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const worldLayerRef = useRef<HTMLDivElement>(null);
-  const panOffsetRef = useRef({ x: 0, y: 0 });
+  const selectionBoxRef = useRef<HTMLDivElement>(null);
   const storageHandleRef = useRef<ReturnType<typeof attach> | null>(null);
+  const engineRef = useRef<CanvasEngine>(null);
+  if (!engineRef.current) {
+    engineRef.current = new CanvasEngine();
+  }
+  const engine = engineRef.current;
   const scale = 1;
+
+  useEffect(() => {
+    engine.bindRefs(worldLayerRef, selectionBoxRef);
+  }, [engine]);
 
   const getCanvasBounds = () => {
     return containerRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
   };
-
-  const getStickyDragIds = useCallback((legacyState = useStore.getState(), vpState = useViewportStore.getState()) => {
-    const leaderId = vpState.stickyDrag.id;
-    if (!leaderId) {
-      return [] as string[];
-    }
-
-    if (legacyState.selectedIds.includes(leaderId) && legacyState.selectedIds.length > 1) {
-      return legacyState.selectedIds;
-    }
-
-    return [leaderId];
-  }, []);
-
-  const restoreStickyDragPreview = useCallback((legacyState = useStore.getState(), vpState = useViewportStore.getState()) => {
-    const ids = getStickyDragIds(legacyState, vpState);
-    ids.forEach((id) => {
-      const el = getNoteElement(id);
-      const note = legacyState.notesById[id];
-      if (!el || !note) return;
-      el.style.transform = `translate(${note.x}px, ${note.y}px)`;
-    });
-  }, [getStickyDragIds]);
-
-  const commitStickyDragPlacement = useCallback(() => {
-    const legacyState = useStore.getState();
-    const vpState = useViewportStore.getState();
-    const idsToCommit = getStickyDragIds(legacyState, vpState);
-    if (idsToCommit.length === 0) {
-      useViewportStore.getState().setStickyDrag(null);
-      return;
-    }
-
-    const rawPositions = Object.fromEntries(
-      idsToCommit.flatMap((id) => {
-        const note = legacyState.notesById[id];
-        if (!note) return [];
-
-        const el = getNoteElement(id);
-        const match = el?.style.transform.match(/translate\(\s*([-\d.]+)px\s*,\s*([-\d.]+)px\s*\)/);
-        if (match) {
-          return [[id, { x: parseFloat(match[1]), y: parseFloat(match[2]) }]];
-        }
-
-        return [[id, { x: note.x, y: note.y }]];
-      }),
-    ) as Record<string, { x: number; y: number }>;
-
-    const finalPositions = Object.fromEntries(
-      idsToCommit.flatMap((id) => {
-        const note = legacyState.notesById[id];
-        const layout = legacyState.layoutNotesById[id];
-        const rawPosition = rawPositions[id];
-        if (!note || !layout || !rawPosition) {
-          return [];
-        }
-
-        return [[
-          id,
-          resolveDragStopWorldPosition(
-            rawPosition.x,
-            rawPosition.y,
-            vpState.viewport,
-            getNoteVisualWidth(note, layout),
-            getNoteVisualHeight(note, layout),
-            vpState.interaction.isPanMode,
-            10,
-          ),
-        ]];
-      }),
-    ) as Record<string, { x: number; y: number }>;
-
-    const timestamp = Date.now();
-    useStore.setState((draft) => {
-      idsToCommit.forEach((id) => {
-        const note = draft.notesById[id];
-        const position = finalPositions[id];
-        if (!note || !position) return;
-
-        note.x = position.x;
-        note.y = position.y;
-        note.updatedAt = timestamp;
-        draft.layoutNotesById[id] = {
-          id: note.id,
-          x: note.x,
-          y: note.y,
-          boardId: note.boardId,
-          deletedAt: note.deletedAt ?? null,
-          color: note.color,
-          width: note.width,
-          height: note.height,
-        };
-      });
-    });
-
-    useViewportStore.getState().setStickyDrag(null);
-    legacyState.finalizeLayoutChange(idsToCommit);
-  }, [getStickyDragIds]);
-
-  const cancelStickyDrag = useCallback(() => {
-    const vpState = useViewportStore.getState();
-    if (!vpState.stickyDrag.id) return;
-    restoreStickyDragPreview(useStore.getState(), vpState);
-    useViewportStore.getState().setStickyDrag(null);
-  }, [restoreStickyDragPreview]);
-
-  const suspendStickyDrag = useCallback(() => {
-    const vpState = useViewportStore.getState();
-    if (!vpState.stickyDrag.id || vpState.stickyDrag.status === 'suspended') return;
-    useViewportStore.getState().setStickyDrag(
-      vpState.stickyDrag.id,
-      vpState.stickyDrag.offsetX,
-      vpState.stickyDrag.offsetY,
-      'suspended',
-    );
-  }, []);
 
   const toCanvasLocalPoint = (clientX: number, clientY: number) => {
     const bounds = getCanvasBounds();
@@ -253,64 +140,92 @@ export const Canvas: React.FC = () => {
     };
   };
 
-  // Selection Logic Refs
-  const isSelecting = useRef(false);
-  const selectionStart = useRef({ x: 0, y: 0 });
-  const selectionBoxRef = useRef<HTMLDivElement>(null);
-
-  // Pan Logic Refs
-  const isPanning = useRef(false);
-  const panStart = useRef({ x: 0, y: 0 });
-  const panDeltaRef = useRef({ dx: 0, dy: 0 });
-  const panFlushFrameRef = useRef<number>(0);
-  const lastSpacePressTime = useRef<number>(0);
-  
-  // Edge Push Loop
-  const edgePushFrameRef = useRef<number>(0);
-
-  const stopPanFlushLoop = useCallback(() => {
-    if (panFlushFrameRef.current) {
-      cancelAnimationFrame(panFlushFrameRef.current);
-      panFlushFrameRef.current = 0;
-    }
-  }, []);
-
-  const schedulePanFlushLoop = useCallback(() => {
-    if (panFlushFrameRef.current) {
+  const handleGlobalUp = useCallback((e: React.MouseEvent | MouseEvent) => {
+    if (engine.isPanning.current) {
+      engine.isPanning.current = false;
+      engine.stopPanFlushLoop();
+      const vp = useViewportStore.getState().viewport;
+      useViewportStore.getState().setViewportPosition(vp.x, vp.y);
       return;
     }
 
-    const flushPanDelta = () => {
-      panFlushFrameRef.current = 0;
+    if (engine.isSelecting.current) {
+      engine.isSelecting.current = false;
+      if (selectionBoxRef.current) {
+        selectionBoxRef.current.style.display = 'none';
+      }
 
-      const { dx, dy } = panDeltaRef.current;
-      if (dx === 0 && dy === 0) {
+      const bounds = getCanvasBounds();
+      const startX = engine.selectionStart.x - bounds.left;
+      const startY = engine.selectionStart.y - bounds.top;
+      const endX = e.clientX - bounds.left;
+      const endY = e.clientY - bounds.top;
+
+      const dx = Math.abs(endX - startX);
+      const dy = Math.abs(endY - startY);
+      if (dx < 3 && dy < 3) {
         return;
       }
 
-      panOffsetRef.current.x += dx;
-      panOffsetRef.current.y += dy;
+      const screenRect = {
+        left: Math.min(startX, endX),
+        top: Math.min(startY, endY),
+        right: Math.max(startX, endX),
+        bottom: Math.max(startY, endY)
+      };
 
-      if (panOffsetRef.current.x < 0) panOffsetRef.current.x = 0;
-      if (panOffsetRef.current.y < 0) panOffsetRef.current.y = 0;
+      const vp = useViewportStore.getState().viewport;
+      const worldRect = {
+        left: screenRect.left + vp.x,
+        top: screenRect.top + vp.y,
+        right: screenRect.right + vp.x,
+        bottom: screenRect.bottom + vp.y
+      };
 
-      if (worldLayerRef.current) {
-        worldLayerRef.current.style.transform = `translate3d(${-panOffsetRef.current.x}px, ${-panOffsetRef.current.y}px, 0)`;
+      const boardNoteIds = useStore.getState().boardNoteIds[useStore.getState().currentBoardId] ?? [];
+      const layoutNotesById = useStore.getState().layoutNotesById;
+      const notesById = useStore.getState().notesById;
+      const newSelectedIds: string[] = [];
+
+      for (const id of boardNoteIds) {
+        const ln = layoutNotesById[id];
+        if (!ln || ln.deletedAt) continue;
+
+        const note = notesById[id];
+        const noteWidth = getNoteVisualWidth(note, ln);
+        const noteHeight = getNoteVisualHeight(note, ln);
+
+        const isIntersecting = !(
+          worldRect.right < ln.x ||
+          worldRect.left > ln.x + noteWidth ||
+          worldRect.bottom < ln.y ||
+          worldRect.top > ln.y + noteHeight
+        );
+
+        if (isIntersecting) {
+          newSelectedIds.push(id);
+        }
       }
 
-      useViewportStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
+      const existingIds = useStore.getState().selectedIds;
+      if (newSelectedIds.length > 0) {
+        if (e.shiftKey) {
+          const mergedIds = [...new Set([...existingIds, ...newSelectedIds])];
+          useStore.getState().setSelectedIds(mergedIds);
+        } else {
+          useStore.getState().setSelectedIds(newSelectedIds);
+        }
+      }
+    }
+  }, [engine]);
 
-      panDeltaRef.current = { dx: 0, dy: 0 };
-    };
-
-    panFlushFrameRef.current = requestAnimationFrame(flushPanDelta);
-  }, []);
+  useCanvasGlobalListeners({ engine, handleGlobalUp });
 
   useEffect(() => {
     return () => {
-      stopPanFlushLoop();
+      engine.dispose();
     };
-  }, [stopPanFlushLoop]);
+  }, [engine]);
 
   useEffect(() => {
     let cancelled = false;
@@ -346,187 +261,90 @@ export const Canvas: React.FC = () => {
     };
   }, []);
 
-  // Space Key Listener (Pan Mode)
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        const active = document.activeElement;
-        const isInput = active instanceof HTMLInputElement || 
-                        active instanceof HTMLTextAreaElement || 
-                        active?.getAttribute('contenteditable') === 'true';
-        
-        const isSpotlightOpen = useStore.getState().isSpotlightOpen;
-
-          if (!isInput && !isSpotlightOpen) {
-             e.preventDefault(); 
-             
-             if (!e.repeat) {
-                 const now = Date.now();
-                 const DOUBLE_PRESS_DELAY = 300;
-                 
-                 if (now - lastSpacePressTime.current < DOUBLE_PRESS_DELAY) {
-                     useViewportStore.getState().setViewportPosition(0, 0);
-                     useViewportStore.getState().setPanMode(false);
-                     lastSpacePressTime.current = 0;
-                 } else {
-                     const currentMode = useViewportStore.getState().interaction.isPanMode;
-                     useViewportStore.getState().setPanMode(!currentMode);
-                     lastSpacePressTime.current = now;
-                 }
-             }
-          }
-      }
-    };
-
-    window.removeEventListener('keydown', handleKeyDown);
-    window.addEventListener('keydown', handleKeyDown);
-    
+    engine.syncEdgePushLoop();
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      engine.stopEdgePushLoop();
     };
-  }, []);
-
-  // Edge Push Animation Loop
-    useEffect(() => {
-    const { top, bottom, left, right } = edgePush;
-    if (!top && !bottom && !left && !right) {
-        if (edgePushFrameRef.current) {
-            cancelAnimationFrame(edgePushFrameRef.current);
-            edgePushFrameRef.current = 0;
-            useViewportStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
-        }
-        return;
-    }
-
-    const vp = useViewportStore.getState().viewport;
-    panOffsetRef.current = { x: vp.x, y: vp.y };
-
-    const pushLoop = () => {
-        let dx = 0;
-        let dy = 0;
-        const SPEED = LAYOUT.EDGE_PUSH_SPEED;
-
-        if (left) dx -= SPEED;
-        if (right) dx += SPEED;
-        if (top) dy -= SPEED;
-        if (bottom) dy += SPEED;
-
-        if (dx !== 0 || dy !== 0) {
-            panOffsetRef.current.x += dx;
-            panOffsetRef.current.y += dy;
-            if (panOffsetRef.current.x < 0) panOffsetRef.current.x = 0;
-            if (panOffsetRef.current.y < 0) panOffsetRef.current.y = 0;
-
-            useViewportStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
-
-            if (worldLayerRef.current) {
-                worldLayerRef.current.style.transform = `translate3d(${-panOffsetRef.current.x}px, ${-panOffsetRef.current.y}px, 0)`;
-            }
-
-            const leaderId = getEdgePushDragLeader();
-            if (leaderId && hasActiveEdgePushDragSession()) {
-                 accumulateEdgePushDelta(dx, dy);
-                applyActiveDragSessionTransforms();
-            } else {
-                useStore.getState().moveSelectedNotes(dx, dy, leaderId ?? undefined);
-            }
-        }
-        edgePushFrameRef.current = requestAnimationFrame(pushLoop);
-    };
-
-    edgePushFrameRef.current = requestAnimationFrame(pushLoop);
-    return () => {
-        if (edgePushFrameRef.current) {
-            cancelAnimationFrame(edgePushFrameRef.current);
-            edgePushFrameRef.current = 0;
-        }
-    };
-  }, [edgePush]);
+  }, [engine, edgePush]);
 
   const handleMouseMove = (e: React.MouseEvent) => {
-      // Safety check: If no mouse button is pressed, stop any active drag
-      // This fixes the issue where releasing mouse outside window keeps drag active
-      if (e.buttons === 0) {
-          if (isPanning.current) isPanning.current = false;
-          if (isSelecting.current) {
-              isSelecting.current = false;
-              if (selectionBoxRef.current) {
-                  selectionBoxRef.current.style.display = 'none';
-              }
-          }
-      }
+    if (e.buttons === 0) {
+      engine.resetPointerInteractions();
+    }
 
-      // 0. Pan Viewport (Background Drag)
-      if (isPanning.current) {
-          const dx = e.clientX - panStart.current.x;
-          const dy = e.clientY - panStart.current.y;
-          // Dragging background moves viewport in OPPOSITE direction
-          panDeltaRef.current.dx -= dx;
-          panDeltaRef.current.dy -= dy;
-          panStart.current = { x: e.clientX, y: e.clientY };
-          schedulePanFlushLoop();
-          return;
-      }
+    if (engine.isPanning.current) {
+      const dx = e.clientX - engine.panStart.x;
+      const dy = e.clientY - engine.panStart.y;
+      engine.panDelta.x -= dx;
+      engine.panDelta.y -= dy;
+      engine.panStart.x = e.clientX;
+      engine.panStart.y = e.clientY;
+      engine.schedulePanFlushLoop();
+      return;
+    }
 
-      // 1. Sticky Drag Logic
-      if (stickyDragId) {
-          const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
-          const vpState = useViewportStore.getState();
-          const legacyState = useStore.getState();
-          if (vpState.stickyDrag.status === 'suspended') {
-            return;
-          }
-          const vp = vpState.viewport;
-          const newX = (localPoint.x - vpState.stickyDrag.offsetX) / scale + vp.x;
-          const newY = (localPoint.y - vpState.stickyDrag.offsetY) / scale + vp.y;
-          
-          const currentNote = legacyState.notesById[stickyDragId];
-          const isSelected = legacyState.selectedIds.includes(stickyDragId);
-          const ids = getStickyDragIds(legacyState, vpState);
-          
-          if (isSelected && ids.length > 1 && currentNote) {
-              const dx = newX - currentNote.x;
-              const dy = newY - currentNote.y;
-              ids.forEach((id) => {
-                  if (id === stickyDragId) return;
-                  const el = getNoteElement(id);
-                  if (!el) return;
-                  const note = legacyState.notesById[id];
-                  if (!note) return;
-                  el.style.transform = `translate(${note.x + dx}px, ${note.y + dy}px)`;
-              });
-              const leaderEl = getNoteElement(stickyDragId);
-              if (leaderEl) leaderEl.style.transform = `translate(${newX}px, ${newY}px)`;
-          } else {
-              const el = getNoteElement(stickyDragId);
-              if (el) el.style.transform = `translate(${newX}px, ${newY}px)`;
-          }
-          return;
+    if (stickyDragId) {
+      const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
+      const vpState = useViewportStore.getState();
+      const legacyState = useStore.getState();
+      if (vpState.stickyDrag.status === 'suspended') {
+        return;
       }
-      
-      // 2. Marquee Selection Logic
-      if (isSelecting.current && selectionBoxRef.current) {
-           const currentPoint = toCanvasLocalPoint(e.clientX, e.clientY);
-           const startPoint = toCanvasLocalPoint(selectionStart.current.x, selectionStart.current.y);
-           const currentX = currentPoint.x;
-           const currentY = currentPoint.y;
-           const startX = startPoint.x;
-           const startY = startPoint.y;
-          
-          const left = Math.min(startX, currentX);
-          const top = Math.min(startY, currentY);
-          const width = Math.abs(currentX - startX);
-          const height = Math.abs(currentY - startY);
-          
-          selectionBoxRef.current.style.left = `${left}px`;
-          selectionBoxRef.current.style.top = `${top}px`;
-          selectionBoxRef.current.style.width = `${width}px`;
-          selectionBoxRef.current.style.height = `${height}px`;
-          // Ensure it's visible if mouse moves (in case down didn't show it for some reason?)
-          if (selectionBoxRef.current.style.display === 'none') {
-               selectionBoxRef.current.style.display = 'block';
-          }
+      const vp = vpState.viewport;
+      const newX = (localPoint.x - vpState.stickyDrag.offsetX) / scale + vp.x;
+      const newY = (localPoint.y - vpState.stickyDrag.offsetY) / scale + vp.y;
+
+      const currentNote = legacyState.notesById[stickyDragId];
+      const isSelected = legacyState.selectedIds.includes(stickyDragId);
+      const ids = engine.getStickyDragIds();
+
+      if (isSelected && ids.length > 1 && currentNote) {
+        const dx = newX - currentNote.x;
+        const dy = newY - currentNote.y;
+        ids.forEach((id) => {
+          if (id === stickyDragId) return;
+          const el = getNoteElement(id);
+          if (!el) return;
+          const note = legacyState.notesById[id];
+          if (!note) return;
+          const previewX = note.x + dx;
+          const previewY = note.y + dy;
+          el.style.transform = `translate(${previewX}px, ${previewY}px)`;
+          engine.setStickyDragPreviewPosition(id, previewX, previewY);
+        });
+        const leaderEl = getNoteElement(stickyDragId);
+        if (leaderEl) leaderEl.style.transform = `translate(${newX}px, ${newY}px)`;
+        engine.setStickyDragPreviewPosition(stickyDragId, newX, newY);
+      } else {
+        const el = getNoteElement(stickyDragId);
+        if (el) el.style.transform = `translate(${newX}px, ${newY}px)`;
+        engine.setStickyDragPreviewPosition(stickyDragId, newX, newY);
       }
+      return;
+    }
+
+    if (engine.isSelecting.current && selectionBoxRef.current) {
+      const currentPoint = toCanvasLocalPoint(e.clientX, e.clientY);
+      const startPoint = toCanvasLocalPoint(engine.selectionStart.x, engine.selectionStart.y);
+      const currentX = currentPoint.x;
+      const currentY = currentPoint.y;
+      const startX = startPoint.x;
+      const startY = startPoint.y;
+
+      const left = Math.min(startX, currentX);
+      const top = Math.min(startY, currentY);
+      const width = Math.abs(currentX - startX);
+      const height = Math.abs(currentY - startY);
+
+      selectionBoxRef.current.style.left = `${left}px`;
+      selectionBoxRef.current.style.top = `${top}px`;
+      selectionBoxRef.current.style.width = `${width}px`;
+      selectionBoxRef.current.style.height = `${height}px`;
+      if (selectionBoxRef.current.style.display === 'none') {
+        selectionBoxRef.current.style.display = 'block';
+      }
+    }
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
@@ -538,9 +356,6 @@ export const Canvas: React.FC = () => {
       return;
     }
 
-    // Fix: Convert Screen Coordinates to World Coordinates
-    // The click (e.clientX) is in screen space.
-    // The note needs to be placed in world space.
     const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
     const vp = useViewportStore.getState().viewport;
     const x = localPoint.x + vp.x;
@@ -553,13 +368,11 @@ export const Canvas: React.FC = () => {
       return;
     }
 
-    // 如果粘贴事件来自输入框（便签编辑、Spotlight 搜索等），不拦截
     const target = getEventTargetElement(e.target);
     if (target && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable))) {
       return;
     }
 
-    // 如果有模态 UI 打开，不拦截
     const state = useStore.getState();
     if (state.isSpotlightOpen || state.isQuickCaptureOpen || state.smartPasteSplitPanel || state.contextMenu.isOpen) {
       return;
@@ -582,168 +395,49 @@ export const Canvas: React.FC = () => {
       store.openSmartPasteSplitPanel({ noteId: createdIds[0], result });
     }
   };
-  
-    const handleGlobalDown = (e: React.MouseEvent) => {
+
+  const handleGlobalDown = (e: React.MouseEvent) => {
     const isBlankTarget = isBlankCanvasTarget(e.target);
 
-      // 0. Handle Sticky Drag Commit (explicit placement mode)
-      if (e.button !== 2 && stickyDragId) {
-          commitStickyDragPlacement();
-          return;
+    if (e.button !== 2 && stickyDragId) {
+      engine.commitStickyDragPlacement();
+      return;
+    }
+
+    if (isDragInteractionLocked()) {
+      return;
+    }
+
+    if (useViewportStore.getState().interaction.isPanMode && e.button === 0 && isBlankTarget) {
+      engine.isPanning.current = true;
+      engine.panStart.x = e.clientX;
+      engine.panStart.y = e.clientY;
+      return;
+    }
+
+    if (useViewportStore.getState().interaction.isDragging) {
+      return;
+    }
+
+    if (e.button === 0 && !stickyDragId && isBlankTarget) {
+      engine.isSelecting.current = true;
+      engine.selectionStart.x = e.clientX;
+      engine.selectionStart.y = e.clientY;
+      const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
+
+      if (selectionBoxRef.current) {
+        selectionBoxRef.current.style.left = `${localPoint.x}px`;
+        selectionBoxRef.current.style.top = `${localPoint.y}px`;
+        selectionBoxRef.current.style.width = '0px';
+        selectionBoxRef.current.style.height = '0px';
+        selectionBoxRef.current.style.display = 'block';
       }
-
-      if (isDragInteractionLocked()) {
-          return;
-      }
-
-      // 0. Start Panning (Space Mode + Left Click on Background)
-      if (useViewportStore.getState().interaction.isPanMode && e.button === 0 && isBlankTarget) {
-          isPanning.current = true;
-          panStart.current = { x: e.clientX, y: e.clientY };
-          const vp = useViewportStore.getState().viewport;
-          panOffsetRef.current = { x: vp.x, y: vp.y };
-          return;
-      }
-
-      if (useViewportStore.getState().interaction.isDragging) {
-          return;
-      }
-
-      // 2. Start Marquee Selection (Left Click on Canvas)
-      if (e.button === 0 && !stickyDragId && isBlankTarget) {
-          isSelecting.current = true;
-          selectionStart.current = { x: e.clientX, y: e.clientY };
-          const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
-          
-          if (selectionBoxRef.current) {
-              selectionBoxRef.current.style.left = `${localPoint.x}px`;
-              selectionBoxRef.current.style.top = `${localPoint.y}px`;
-              selectionBoxRef.current.style.width = '0px';
-              selectionBoxRef.current.style.height = '0px';
-              selectionBoxRef.current.style.display = 'block';
-          }
-          
-          // Clear existing selection if not holding shift/ctrl (optional, for now simple clear)
-          if (!e.shiftKey && !e.ctrlKey) {
-             useStore.getState().clearSelection();
-          }
-      }
-  };
-
-  const handleGlobalUp = useCallback((e: React.MouseEvent | MouseEvent) => {
-      if (isPanning.current) {
-          isPanning.current = false;
-          stopPanFlushLoop();
-          useViewportStore.getState().setViewportPosition(panOffsetRef.current.x, panOffsetRef.current.y);
-          return;
-      }
-
-      if (isSelecting.current) {
-          isSelecting.current = false;
-          if (selectionBoxRef.current) {
-              selectionBoxRef.current.style.display = 'none';
-          }
-
-          const bounds = getCanvasBounds();
-          const startX = selectionStart.current.x - bounds.left;
-          const startY = selectionStart.current.y - bounds.top;
-          const endX = e.clientX - bounds.left;
-          const endY = e.clientY - bounds.top;
-
-          // 最小位移阈值：小于 3px 视为空白单击，不跑 AABB 命中
-          const dx = Math.abs(endX - startX);
-          const dy = Math.abs(endY - startY);
-          if (dx < 3 && dy < 3) {
-              return;
-          }
-
-          const screenRect = {
-              left: Math.min(startX, endX),
-              top: Math.min(startY, endY),
-              right: Math.max(startX, endX),
-              bottom: Math.max(startY, endY)
-          };
-
-          const vp = useViewportStore.getState().viewport;
-          const worldRect = {
-              left: screenRect.left + vp.x,
-              top: screenRect.top + vp.y,
-              right: screenRect.right + vp.x,
-              bottom: screenRect.bottom + vp.y
-          };
-          
-          const boardNoteIds = useStore.getState().boardNoteIds[useStore.getState().currentBoardId] ?? [];
-          const layoutNotesById = useStore.getState().layoutNotesById;
-          const notesById = useStore.getState().notesById;
-          const newSelectedIds: string[] = [];
-          
-          for (const id of boardNoteIds) {
-              const ln = layoutNotesById[id];
-              if (!ln || ln.deletedAt) continue;
-              
-              const note = notesById[id];
-              const noteWidth = getNoteVisualWidth(note, ln);
-              const noteHeight = getNoteVisualHeight(note, ln);
-              
-              const isIntersecting = !(
-                  worldRect.right < ln.x || 
-                  worldRect.left > ln.x + noteWidth || 
-                  worldRect.bottom < ln.y || 
-                  worldRect.top > ln.y + noteHeight
-              );
-              
-              if (isIntersecting) {
-                  newSelectedIds.push(id);
-              }
-          }
-          
-          const existingIds = useStore.getState().selectedIds;
-          if (newSelectedIds.length > 0) {
-              if (e.shiftKey) {
-                  const mergedIds = [...new Set([...existingIds, ...newSelectedIds])];
-                  useStore.getState().setSelectedIds(mergedIds);
-              } else {
-                  useStore.getState().setSelectedIds(newSelectedIds);
-              }
-          }
-      }
-  }, [stopPanFlushLoop]);
-
-  // Global Mouse Up & Blur Handler to prevent sticky drag
-  useEffect(() => {
-      const handleWindowUp = (e: MouseEvent) => handleGlobalUp(e);
-      const handleWindowBlur = () => {
-          finalizeActiveNoteDrag('window-blur');
-          isPanning.current = false;
-          isSelecting.current = false;
-          panDeltaRef.current = { dx: 0, dy: 0 };
-          stopPanFlushLoop();
-          useViewportStore.getState().setEdgePush({ top: false, bottom: false, left: false, right: false });
-          useViewportStore.getState().setIsDragging(false);
-          setEdgePushDragLeader(null);
-          suspendStickyDrag();
-          if (selectionBoxRef.current) {
-              selectionBoxRef.current.style.display = 'none';
-          }
-      };
-
-      const handleKeyDown = (event: KeyboardEvent) => {
-          if (event.key === 'Escape' && useViewportStore.getState().stickyDrag.id) {
-              event.preventDefault();
-              cancelStickyDrag();
-          }
-      };
-
-      window.addEventListener('mouseup', handleWindowUp);
-      window.addEventListener('blur', handleWindowBlur);
-      window.addEventListener('keydown', handleKeyDown);
       
-      return () => {
-          window.removeEventListener('mouseup', handleWindowUp);
-          window.removeEventListener('blur', handleWindowBlur);
-          window.removeEventListener('keydown', handleKeyDown);
-      };
-  }, [cancelStickyDrag, handleGlobalUp, stopPanFlushLoop, suspendStickyDrag]);
+      if (!e.shiftKey && !e.ctrlKey) {
+        useStore.getState().clearSelection();
+      }
+    }
+  };
 
   if (!isLoaded) return null;
 
@@ -777,21 +471,17 @@ export const Canvas: React.FC = () => {
     >
       <div className="absolute inset-0 pointer-events-none opacity-[0.08]" 
            style={{
-               backgroundImage: `radial-gradient(circle, var(--color-border-subtle) 1px, transparent 1px)`, // 使用语义化边框颜色作为网格点
+               backgroundImage: `radial-gradient(circle, var(--color-border-subtle) 1px, transparent 1px)`,
                backgroundSize: '20px 20px',
                backgroundPosition: `-${viewport.x}px -${viewport.y}px`
            }}
       />
       
-      {/* Edge Push Indicators */}
       <div className={cn("absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", edgePush.top ? "opacity-100" : "opacity-0")} />
       <div className={cn("absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", edgePush.bottom ? "opacity-100" : "opacity-0")} />
       <div className={cn("absolute top-0 bottom-0 left-0 w-8 bg-gradient-to-r from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", edgePush.left ? "opacity-100" : "opacity-0")} />
       <div className={cn("absolute top-0 bottom-0 right-0 w-8 bg-gradient-to-l from-blue-500/20 to-transparent pointer-events-none transition-opacity duration-300", edgePush.right ? "opacity-100" : "opacity-0")} />
-      
-      {/* Board Badge moved to App.tsx for better reactivity */}
 
-      {/* Selection Box */}
       <div
         ref={selectionBoxRef}
         className="absolute bg-blue-500/10 border border-blue-500/55 border-dashed shadow-[0_0_0_1px_rgba(59,130,246,0.12)] pointer-events-none dark:bg-blue-200/15 dark:border-blue-200/80 dark:shadow-[0_0_0_1px_rgba(191,219,254,0.3)]"
@@ -856,9 +546,7 @@ export const Canvas: React.FC = () => {
   );
 };
 
-// Wrapped Canvas with Profiler and FPS Monitor
 export const CanvasWithProfiler: React.FC = () => {
-  // Activate FPS monitoring for the canvas
   useFPSMonitor();
 
   const handleProfilerRender: React.ProfilerOnRenderCallback = useCallback(

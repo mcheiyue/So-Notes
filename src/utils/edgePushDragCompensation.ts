@@ -194,3 +194,7 @@ export function applyLeaderDOMCompensation(): void {
   const { x: tx, y: ty } = getEffectivePosition();
   el.style.transform = `translate(${tx}px, ${ty}px)`;
 }
+
+export function resetEdgePushDragCompensation(): void {
+  resetSessionState();
+}
