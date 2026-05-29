@@ -933,6 +933,7 @@ describe('useStore 导入契约', () => {
     });
     expect(result.summary?.issues.map(issue => issue.code)).toEqual([
       'CREATED_DEFAULT_BOARD',
+      'RENAMED_BOARD',
       'MIGRATED_NOTE',
       'FALLBACK_CURRENT_BOARD',
     ]);
@@ -975,7 +976,7 @@ describe('useStore 导入契约', () => {
     const state = useStore.getState();
 
     expect(result.status).toBe('success');
-    expect(state.boards.map(board => board.name)).toEqual(['主板', '本地二号', '主板 (Main)']);
+    expect(state.boards.map(board => board.name)).toEqual(['主板', '本地二号', '主板（导入）']);
     expect(state.currentBoardId).toBe('56565656-5656-4565-8565-565656565656');
     expect(result.summary?.createdDefaultBoard).toBe(true);
     expect(saveSpy).toHaveBeenCalledTimes(1);

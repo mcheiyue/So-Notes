@@ -30,7 +30,7 @@ export const PinFab = () => {
         "group cursor-pointer"
       )}
       style={{ zIndex: Z_INDEX.PIN_FAB }}
-      title="取消钉住 (Unpin)"
+      title="取消钉住"
     >
       <PinOff size={14} className="group-hover:scale-110 transition-transform" />
     </button>

@@ -60,7 +60,7 @@ describe('PinFab WindowShell 浮层交互合同', () => {
 
     await renderPinFab(<PinFab />);
 
-    const button = container.querySelector('button[title="取消钉住 (Unpin)"]') as HTMLButtonElement | null;
+    const button = container.querySelector('button[title="取消钉住"]') as HTMLButtonElement | null;
 
     expect(button).not.toBeNull();
     expect(button?.className).toContain('pointer-events-auto');
@@ -72,7 +72,7 @@ describe('PinFab WindowShell 浮层交互合同', () => {
 
     await renderPinFab(<PinFab />);
 
-    const button = container.querySelector('button[title="取消钉住 (Unpin)"]') as HTMLButtonElement | null;
+    const button = container.querySelector('button[title="取消钉住"]') as HTMLButtonElement | null;
     expect(button).toBeNull();
   });
 
@@ -87,7 +87,7 @@ describe('PinFab WindowShell 浮层交互合同', () => {
       </form>,
     );
 
-    const button = container.querySelector('button[title="取消钉住 (Unpin)"]') as HTMLButtonElement | null;
+    const button = container.querySelector('button[title="取消钉住"]') as HTMLButtonElement | null;
 
     expect(button).not.toBeNull();
 

@@ -42,7 +42,7 @@ export const TrashGrid: React.FC = () => {
     }, [deletedNotes, searchQuery]);
 
     const getBoardName = (boardId: string) => {
-        return boards.find(b => b.id === boardId)?.name || 'Unknown Board';
+        return boards.find(b => b.id === boardId)?.name || '未知看板';
     };
 
     const handleTrashNoteClick = (noteId: string, e: React.MouseEvent) => {

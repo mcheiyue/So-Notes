@@ -644,11 +644,11 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
           {(!note.collapsed || isStatic) && (
           <div className={cn("flex items-center gap-0.5 z-20", !shouldShowExpandedActions && !isStatic && "pointer-events-none opacity-0") }>
             {isStatic ? (
-                <Tooltip content="还原笔记">
+                <Tooltip content="还原便签">
                     <button
                       type="button"
                       className="note-action p-1.5 rounded-md hover:bg-green-100 dark:hover:bg-green-900/20 hover:text-green-600 transition-colors text-text-tertiary flex-shrink-0"
-                      aria-label="还原笔记"
+                      aria-label="还原便签"
                       onClick={(e) => {
                             e.stopPropagation();
                             restoreNote(note.id);

@@ -230,7 +230,7 @@ const BoardBadge = () => {
     return (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-secondary-bg/50 backdrop-blur-sm rounded-lg text-xs font-medium text-text-tertiary transition-all duration-300 border border-border-subtle/20">
             <span>{board?.icon || '📌'}</span>
-            <span>{board?.name || 'Main'}</span>
+            <span>{board?.name || '主板'}</span>
         </div>
     );
 };

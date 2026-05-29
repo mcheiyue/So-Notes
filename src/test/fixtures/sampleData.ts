@@ -63,8 +63,8 @@ function generateTitle(): string {
 
 export function generateBoard(index: number): Board {
   const names = [
-    '主板 (Main)', '工作 (Work)', '个人 (Personal)', '学习 (Study)',
-    '创意 (Ideas)', '项目 A', '项目 B', '项目 C',
+    '主板', '工作', '个人', '学习',
+    '创意', '项目 A', '项目 B', '项目 C',
     '待办', '归档', '灵感', '计划',
   ];
   

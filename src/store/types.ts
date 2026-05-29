@@ -196,7 +196,7 @@ export interface LayoutNote {
 
 export const DEFAULT_BOARD: Board = {
   id: 'default',
-  name: '主板 (Main)',
+  name: '主板',
   icon: '📌',
   createdAt: 0
 };
