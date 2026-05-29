@@ -334,7 +334,7 @@ export const BoardDock = () => {
                 >
                     <span>🗑️</span> 
                     {deleteConfirm?.id === contextMenuBoard.id 
-                        ? `确认删除? (${deleteConfirm.count}便签)` 
+                        ? `确认删除看板及 ${deleteConfirm.count} 个便签？` 
                         : '删除看板'}
                 </button>
             </div>

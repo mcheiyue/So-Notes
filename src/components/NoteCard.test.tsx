@@ -614,4 +614,26 @@ describe('NoteCard TRASH 右键菜单守卫', () => {
       targetId: 'note-1',
     });
   });
+
+  it('isStatic=true 时永久删除使用统一确认文案', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const deleteNotePermanently = vi.fn();
+    useStore.setState({ deleteNotePermanently });
+
+    await act(async () => {
+      root.render(<NoteCard id="note-1" isStatic={true} />);
+    });
+
+    const deleteButton = container.querySelector('[aria-label="永久删除"]') as HTMLButtonElement | null;
+    expect(deleteButton).not.toBeNull();
+
+    await act(async () => {
+      deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(confirmSpy).toHaveBeenCalledWith('确认永久删除此便签？此操作无法撤销。');
+    expect(deleteNotePermanently).not.toHaveBeenCalled();
+
+    confirmSpy.mockRestore();
+  });
 });

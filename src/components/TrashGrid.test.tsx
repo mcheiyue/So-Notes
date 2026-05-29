@@ -158,4 +158,32 @@ describe('TrashGrid 废纸篓搜索', () => {
         expect(container.querySelector('[data-testid="note-card-note-2"]')).not.toBeNull();
         expect(container.querySelector('[data-testid="note-card-note-3"]')).not.toBeNull();
     });
+
+    it('废纸篓批量操作使用统一确认文案', async () => {
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+        await renderTrashGrid();
+
+        const firstNote = container.querySelector('[data-testid="note-card-note-1"]')?.parentElement?.parentElement as HTMLElement | null;
+        expect(firstNote).not.toBeNull();
+
+        await act(async () => {
+            firstNote?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        });
+
+        const permanentDeleteButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('永久删除选中')) as HTMLButtonElement | undefined;
+        const restoreAllButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('全部还原')) as HTMLButtonElement | undefined;
+        const emptyTrashButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('清空废纸篓')) as HTMLButtonElement | undefined;
+
+        await act(async () => {
+            permanentDeleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            restoreAllButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            emptyTrashButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        });
+
+        expect(confirmSpy).toHaveBeenNthCalledWith(1, '确认永久删除选中的 1 个便签？此操作无法撤销。');
+        expect(confirmSpy).toHaveBeenNthCalledWith(2, '确认还原所有便签？');
+        expect(confirmSpy).toHaveBeenNthCalledWith(3, '确认清空废纸篓？此操作无法撤销。');
+
+        confirmSpy.mockRestore();
+    });
 });

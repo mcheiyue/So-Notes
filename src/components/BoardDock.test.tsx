@@ -447,7 +447,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     await clickElement(findButtonByText('删除看板'));
 
-    expect(container.textContent).toContain('确认删除? (1便签)');
+    expect(container.textContent).toContain('确认删除看板及 1 个便签？');
   });
 
   it('viewMode=TRASH 且 isDockVisible=false 时不渲染 Dock', async () => {

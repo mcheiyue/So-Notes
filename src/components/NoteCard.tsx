@@ -731,7 +731,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                   onClick={(e) => {
                       e.stopPropagation();
                       if (isStatic) {
-                          if (window.confirm("确定要永久删除吗？无法找回。")) {
+                          if (window.confirm("确认永久删除此便签？此操作无法撤销。")) {
                               deleteNotePermanently(note.id);
                           }
                       } else {
