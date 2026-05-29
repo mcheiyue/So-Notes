@@ -252,7 +252,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     await openDataSettings();
 
-    expect(getSaveFeedback()?.textContent).toContain('保存中...');
+    expect(getSaveFeedback()?.textContent).toContain('保存中…');
   });
 
   it('保存失败状态显示失败文案与错误详情', async () => {

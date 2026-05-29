@@ -371,7 +371,7 @@ const ContextMenuContent: React.FC = () => {
                     onMouseLeave={handleSubmenuLeave}
                 >
                     <div className="flex items-center gap-2">
-                        <MoveRight className="w-4 h-4" /> {isGroupContext ? '批量移动到...' : '移动到...'}
+                        <MoveRight className="w-4 h-4" /> {isGroupContext ? '批量移动到…' : '移动到…'}
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
                 </MenuItemButton>
@@ -420,7 +420,7 @@ const ContextMenuContent: React.FC = () => {
                     onMouseLeave={handleSubmenuLeave}
                 >
                     <div className="flex items-center gap-2">
-                        <ExternalLink className="w-4 h-4" /> {isGroupContext ? '批量复制到...' : '复制到...'}
+                        <ExternalLink className="w-4 h-4" /> {isGroupContext ? '批量复制到…' : '复制到…'}
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
                 </MenuItemButton>

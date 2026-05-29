@@ -790,7 +790,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                         ? 'none' 
                         : 'linear-gradient(to bottom, black 0%, black 70%, transparent 100%)'
                 }}
-                placeholder="记点什么..."
+                placeholder="记点什么…"
                 value={note.content}
                 onClick={handleTextareaClick}
                 onChange={(e) => {

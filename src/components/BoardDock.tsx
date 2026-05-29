@@ -133,7 +133,7 @@ export const BoardDock = () => {
 
   const onExportClick = async () => {
     try {
-      setExportStatus('正在导出...');
+      setExportStatus('正在导出…');
       await exportAll();
       setExportStatus('导出成功');
       setTimeout(() => {
@@ -162,7 +162,7 @@ export const BoardDock = () => {
     ? 'mx-3 mt-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-600 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-400'
     : 'mx-3 mt-2 rounded-md border border-border-subtle bg-secondary-bg/70 px-3 py-2 text-xs leading-5 text-text-secondary';
   const saveStatusText = isSaving || saveStatus === 'saving'
-    ? '保存中...'
+    ? '保存中…'
     : saveStatus === 'error'
       ? '保存失败'
       : saveStatus === 'saved'
@@ -553,7 +553,7 @@ export const BoardDock = () => {
              <input
                 ref={inputRef}
                 type="text"
-                placeholder="看板名称..."
+                                  placeholder="看板名称…"
                 className="bg-transparent border-none outline-none text-sm px-2 py-1.5 w-32 text-text-secondary placeholder:text-text-tertiary font-medium"
                 value={newBoardName}
                 onChange={(e) => setNewBoardName(e.target.value)}

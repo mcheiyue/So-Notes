@@ -170,7 +170,7 @@ export const TrashGrid: React.FC = () => {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="flex-1 bg-transparent border-none outline-none text-sm text-text-primary placeholder:text-text-tertiary"
-                        placeholder="在废纸篓中搜索..."
+                        placeholder="在废纸篓中搜索…"
                         aria-label="在废纸篓中搜索"
                     />
                     {searchQuery && (

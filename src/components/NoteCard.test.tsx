@@ -176,7 +176,7 @@ describe('NoteCard 头部交互边界', () => {
 
     const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
     const titleInput = container.querySelector('input[placeholder="标题"]') as HTMLInputElement | null;
-    const textarea = container.querySelector('textarea[placeholder="记点什么..."]') as HTMLTextAreaElement | null;
+    const textarea = container.querySelector('textarea[placeholder="记点什么…"]') as HTMLTextAreaElement | null;
     const spectrum = getNoteDarkSpectrum('#fef9c3');
 
     expect(rootRegion?.style.backgroundColor).toBe(hexToRgbString(getNoteColor('#fef9c3', true)));
@@ -220,7 +220,7 @@ describe('NoteCard 头部交互边界', () => {
   it('仅双击头部才折叠，正文双击不触发折叠', async () => {
     await renderNoteCard();
 
-    const textarea = container.querySelector('textarea[placeholder="记点什么..."]') as HTMLTextAreaElement | null;
+    const textarea = container.querySelector('textarea[placeholder="记点什么…"]') as HTMLTextAreaElement | null;
     const header = container.querySelector('.drag-handle') as HTMLDivElement | null;
 
     expect(useStore.getState().notesById['note-1']?.collapsed).toBe(false);
@@ -380,7 +380,7 @@ describe('NoteCard 头部交互边界', () => {
 
     await renderNoteCard();
 
-    const textarea = container.querySelector('textarea[placeholder="记点什么..."]') as HTMLTextAreaElement | null;
+    const textarea = container.querySelector('textarea[placeholder="记点什么…"]') as HTMLTextAreaElement | null;
     expect(textarea).not.toBeNull();
 
     await act(async () => {

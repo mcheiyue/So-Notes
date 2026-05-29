@@ -123,7 +123,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
     await renderSpotlight();
 
     const backdrop = container.querySelector('button[aria-label="关闭搜索"]') as HTMLButtonElement | null;
-    const input = container.querySelector('input[placeholder="搜索便签..."]') as HTMLInputElement | null;
+    const input = container.querySelector('input[placeholder="搜索便签…"]') as HTMLInputElement | null;
     const panel = input?.closest('div.pointer-events-auto.relative') as HTMLDivElement | null;
     const rootLayer = backdrop?.parentElement as HTMLDivElement | null;
 
@@ -145,7 +145,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
   it('选择搜索结果后按 viewport 尺寸而不是 window 尺寸居中', async () => {
     await renderSpotlight();
 
-    const input = container.querySelector('input[placeholder="搜索便签..."]') as HTMLInputElement | null;
+    const input = container.querySelector('input[placeholder="搜索便签…"]') as HTMLInputElement | null;
     expect(input).not.toBeNull();
 
     await act(async () => {
@@ -178,7 +178,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
     expect(findButtonByText(container, '当前看板')).not.toBeNull();
     expect(container.textContent).not.toContain('已删除');
 
-    const input = container.querySelector('input[placeholder="搜索便签..."]') as HTMLInputElement | null;
+    const input = container.querySelector('input[placeholder="搜索便签…"]') as HTMLInputElement | null;
     const currentBoardButton = findButtonByText(container, '当前看板');
 
     expect(input).not.toBeNull();
@@ -222,7 +222,7 @@ describe('Spotlight WindowShell 浮层交互合同', () => {
 
     await renderSpotlight();
 
-    const input = container.querySelector('input[placeholder="搜索便签..."]') as HTMLInputElement | null;
+    const input = container.querySelector('input[placeholder="搜索便签…"]') as HTMLInputElement | null;
     expect(input).not.toBeNull();
 
     await act(async () => {

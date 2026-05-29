@@ -139,7 +139,7 @@ export const Spotlight = () => {
             }}
             onKeyDown={handleKeyDown}
             className="flex-1 h-14 bg-transparent border-none outline-none text-lg text-text-primary placeholder:text-text-tertiary"
-            placeholder="搜索便签..."
+            placeholder="搜索便签…"
           />
           <div className="flex items-center gap-1 rounded-lg border border-border-subtle/60 bg-tertiary-bg/40 p-1 text-xs">
             <Filter className="w-3 h-3 text-text-tertiary" aria-hidden="true" />
@@ -181,7 +181,7 @@ export const Spotlight = () => {
         >
           {isSearching ? (
             <div className="py-12 text-center text-text-tertiary text-sm">
-              搜索中...
+              搜索中…
             </div>
           ) : groups.length > 0 ? (
             groups.map((group) => (
@@ -251,7 +251,7 @@ export const Spotlight = () => {
             </div>
           ) : (
             <div className="py-12 text-center text-text-tertiary text-sm">
-              输入关键词以搜索...
+              输入关键词以搜索…
             </div>
           )}
         </div>
