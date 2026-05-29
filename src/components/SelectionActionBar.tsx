@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { NOTE_COLORS } from '../store/types';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { NOTE_UI_COLORS } from '../store/types';
 import { useStore } from '../store/useStore';
 import { useUIStore } from '../store';
 import { Z_INDEX } from '../constants/layout';
@@ -18,6 +18,10 @@ export const SelectionActionBar: React.FC = () => {
   const arrangeNotes = useStore(state => state.arrangeNotes);
   const duplicateSelectedNotes = useStore(state => state.duplicateSelectedNotes);
 
+  const [isColorPopoverOpen, setIsColorPopoverOpen] = useState(false);
+  const colorPopoverRef = useRef<HTMLDivElement>(null);
+  const colorTriggerRef = useRef<HTMLButtonElement>(null);
+
   const activeSelectedIds = useMemo(
     () =>
       selectedIds.filter((id) => {
@@ -26,6 +30,33 @@ export const SelectionActionBar: React.FC = () => {
       }),
     [selectedIds, notesById],
   );
+
+  const closeColorPopover = useCallback(() => {
+    setIsColorPopoverOpen(false);
+  }, []);
+
+  const handleColorSelect = useCallback((color: string) => {
+    changeSelectedNotesColor(color);
+    closeColorPopover();
+  }, [changeSelectedNotesColor, closeColorPopover]);
+
+  useEffect(() => {
+    if (!isColorPopoverOpen) return;
+
+    const handleDocumentPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+
+      if (colorPopoverRef.current?.contains(target) || colorTriggerRef.current?.contains(target)) {
+        return;
+      }
+
+      closeColorPopover();
+    };
+
+    document.addEventListener('pointerdown', handleDocumentPointerDown);
+    return () => document.removeEventListener('pointerdown', handleDocumentPointerDown);
+  }, [closeColorPopover, isColorPopoverOpen]);
 
   if (viewMode !== 'BOARD' || activeSelectedIds.length < 2) {
     return null;
@@ -58,17 +89,40 @@ export const SelectionActionBar: React.FC = () => {
 
       <div className="mx-1 h-5 w-px bg-border-subtle self-center" aria-hidden="true" />
 
-      <div className="selection-actionbar__colors flex items-center gap-0.5 px-0.5" aria-label="改色">
-        {NOTE_COLORS.slice(0, 6).map((color) => (
-          <button
-            key={color}
-            type="button"
-            className="h-4 w-4 rounded-full border border-border-subtle shadow-sm transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-sky-300"
-            style={{ backgroundColor: color }}
-            aria-label={`改色为 ${color}`}
-            onClick={() => changeSelectedNotesColor(color)}
-          />
-        ))}
+      <div className="selection-actionbar__colors relative flex items-center px-0.5">
+        <button
+          ref={colorTriggerRef}
+          type="button"
+          className={cn(actionButtonClass, isColorPopoverOpen && 'bg-secondary-bg')}
+          aria-label="改色"
+          aria-expanded={isColorPopoverOpen}
+          onClick={() => setIsColorPopoverOpen((prev) => !prev)}
+        >
+          改色
+        </button>
+        {isColorPopoverOpen && (
+          <div
+            ref={colorPopoverRef}
+            role="listbox"
+            aria-label="选择颜色"
+            className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2 rounded-lg border border-border-subtle bg-primary-bg/95 p-2 shadow-lg backdrop-blur-md dark:bg-secondary-bg/95"
+            style={{ zIndex: Z_INDEX.MENU }}
+          >
+            <div className="flex gap-1.5">
+              {NOTE_UI_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  role="option"
+                  className="h-5 w-5 rounded-full border border-border-subtle shadow-sm transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-sky-300"
+                  style={{ backgroundColor: color }}
+                  aria-label={`改色为 ${color}`}
+                  onClick={() => handleColorSelect(color)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mx-1 h-5 w-px bg-border-subtle self-center" aria-hidden="true" />

@@ -64,6 +64,7 @@ describe('SelectionActionBar', () => {
     expect(container.textContent).toContain('已选 2');
     expect(container.textContent).toContain('合并');
     expect(container.textContent).toContain('删除');
+    expect(container.textContent).toContain('改色');
     expect(container.textContent).toContain('折叠');
     expect(container.textContent).toContain('归拢');
     expect(container.textContent).toContain('复制');
@@ -103,9 +104,16 @@ describe('SelectionActionBar', () => {
     await clickByText('归拢');
     await clickByText('复制');
 
-    const colorButton = buttons.find((button) => button.getAttribute('aria-label')?.startsWith('改色为'));
+    const colorTrigger = container.querySelector('[aria-label="改色"]') as HTMLButtonElement | null;
+    expect(colorTrigger).not.toBeNull();
     await act(async () => {
-      colorButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      colorTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    const colorOption = container.querySelector('[role="option"]') as HTMLButtonElement | null;
+    expect(colorOption).not.toBeNull();
+    await act(async () => {
+      colorOption?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
 
     expect(mergeSelectedNotes).toHaveBeenCalledTimes(1);
@@ -189,10 +197,65 @@ describe('SelectionActionBar', () => {
     expect(primary.textContent).toContain('合并');
     expect(primary.textContent).toContain('删除');
 
-    expect(colors.querySelectorAll('button')).toHaveLength(6);
+    expect(colors.querySelector('[aria-label="改色"]')).not.toBeNull();
 
     expect(trailing.textContent).toContain('折叠');
     expect(trailing.textContent).toContain('归拢');
     expect(trailing.textContent).toContain('复制');
+  });
+
+  it('点击改色触发器打开弹出层，选色后自动关闭', async () => {
+    await act(async () => {
+      root.render(<SelectionActionBar />);
+    });
+
+    const colorTrigger = container.querySelector('[aria-label="改色"]') as HTMLButtonElement | null;
+    expect(colorTrigger).not.toBeNull();
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+
+    await act(async () => {
+      colorTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    const popover = container.querySelector('[role="listbox"]');
+    expect(popover).not.toBeNull();
+    const colorOptions = popover!.querySelectorAll('[role="option"]');
+    expect(colorOptions).toHaveLength(6);
+
+    await act(async () => {
+      (colorOptions[0] as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+  });
+
+  it('改色弹出层默认关闭，不永久渲染色块', async () => {
+    await act(async () => {
+      root.render(<SelectionActionBar />);
+    });
+
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+    expect(container.querySelectorAll('[role="option"]')).toHaveLength(0);
+  });
+
+  it('点击弹出层外部时关闭改色气泡', async () => {
+    await act(async () => {
+      root.render(<SelectionActionBar />);
+    });
+
+    const colorTrigger = container.querySelector('[aria-label="改色"]') as HTMLButtonElement | null;
+    expect(colorTrigger).not.toBeNull();
+
+    await act(async () => {
+      colorTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(container.querySelector('[role="listbox"]')).not.toBeNull();
+
+    await act(async () => {
+      document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    });
+
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
   });
 });
