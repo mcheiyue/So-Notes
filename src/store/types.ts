@@ -24,6 +24,17 @@ export const NOTE_COLORS: NoteColor[] = [
   "#ffe4e6", // Rose-100
 ];
 
+// 6 色 UI 调色板：ContextMenu、SelectionActionBar、NoteCard 共用。
+// 从 NOTE_COLORS 中选取视觉区分度最高的 6 种，其余颜色仅保留持久化兼容。
+export const NOTE_UI_COLORS: NoteColor[] = [
+  "#FFFFFF", // 白
+  "#fef9c3", // 黄
+  "#dcfce7", // 绿
+  "#dbeafe", // 蓝
+  "#fee2e2", // 红
+  "#f3e8ff", // 紫
+];
+
 // NOTE_COLORS 继续作为持久化层的浅色单一事实来源。
 // 深色模式渲染时，再从这里派生出无 backdrop 的 tinted acrylic 光谱参数。
 export const DEFAULT_NOTE_DARK_SPECTRUM: DarkSpectrum = {

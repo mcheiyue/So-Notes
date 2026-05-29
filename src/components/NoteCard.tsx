@@ -1,7 +1,7 @@
 import React, { useRef, useState, useLayoutEffect, useEffect } from "react";
 import { DraggableCore, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
-import { NOTE_COLORS, getNoteColor, getNoteDarkSpectrum } from "../store/types";
+import { NOTE_UI_COLORS, getNoteColor, getNoteDarkSpectrum } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { useDomainStore, useUIStore } from "../store";
 import { useStore } from "../store/useStore";
@@ -512,9 +512,9 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   
   const cycleColor = (e: React.MouseEvent) => {
       e.stopPropagation();
-      const currentIndex = NOTE_COLORS.indexOf(note.color);
-      const nextIndex = (currentIndex + 1) % NOTE_COLORS.length;
-      changeColor(note.id, NOTE_COLORS[nextIndex]);
+      const currentIndex = NOTE_UI_COLORS.indexOf(note.color);
+      const nextIndex = (currentIndex + 1) % NOTE_UI_COLORS.length;
+      changeColor(note.id, NOTE_UI_COLORS[nextIndex]);
   };
 
   const handleCollapseToggle = () => {
