@@ -3,8 +3,27 @@ import { useStore } from '../store/useStore';
 import { useUIStore } from '../store';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
-import { ChevronRight } from 'lucide-react';
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  ChevronRight,
+  ClipboardPaste,
+  Clock,
+  Copy,
+  Download,
+  ExternalLink,
+  FilePlus,
+  Merge,
+  MoveRight,
+  Package,
+  Palette,
+  PanelLeft,
+  Scissors,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import { Z_INDEX } from '../constants/layout';
+import { NOTE_UI_COLORS } from '../store/types';
 import { splitParagraphs } from '../utils/smartPaste';
 import { appController } from '../controllers/appController';
 
@@ -37,7 +56,7 @@ const ContextMenuContent: React.FC = () => {
   const [hasClipboardText, setHasClipboardText] = useState(false);
   const [confirmArrange, setConfirmArrange] = useState(false);
   const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false);
-  const [activeSubmenu, setActiveSubmenu] = useState<'MOVE' | 'COPY' | null>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<'MOVE' | 'COPY' | 'COLOR' | null>(null);
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleArrangeAction = (strategy: 'position' | 'updatedAt' | 'color' = 'position') => {
@@ -57,7 +76,7 @@ const ContextMenuContent: React.FC = () => {
     handleAction(arrangeAtMenuPoint);
   };
 
-  const handleSubmenuEnter = (menu: 'MOVE' | 'COPY') => {
+  const handleSubmenuEnter = (menu: 'MOVE' | 'COPY' | 'COLOR') => {
       if (closeTimeoutRef.current) {
           clearTimeout(closeTimeoutRef.current);
           closeTimeoutRef.current = null;
@@ -118,15 +137,6 @@ const ContextMenuContent: React.FC = () => {
   const submenuOffsetClass = shouldFlipSubmenuLeft ? 'right-full mr-2' : 'left-full ml-2';
   const submenuMaxHeight = Math.max(120, shellRect.bottom - menuY - 8);
 
-  const colors = [
-    { name: 'Yellow', value: '#FEF3C7' },
-    { name: 'Green', value: '#D1FAE5' },
-    { name: 'Blue', value: '#DBEAFE' },
-    { name: 'Red', value: '#FEE2E2' },
-    { name: 'Purple', value: '#E9D5FF' },
-    { name: 'Gray', value: '#F3F4F6' },
-  ];
-
   // Logic: Group Context if target is in selection and we have > 1 items
   const isGroupContext = contextMenu.type === 'NOTE' && 
                          contextMenu.targetId && 
@@ -155,7 +165,7 @@ const ContextMenuContent: React.FC = () => {
                    appController.showBoardDock();
                  })}
                >
-                 <span>📑</span> 显示菜单
+                 <PanelLeft className="w-4 h-4" /> 显示菜单
                </MenuItemButton>
                
                 <MenuItemButton
@@ -166,7 +176,7 @@ const ContextMenuContent: React.FC = () => {
                     y: toWorldY(contextMenu.y),
                   }))}
                >
-                  <span>📝</span> 新建便签
+                 <FilePlus className="w-4 h-4" /> 新建便签
                 </MenuItemButton>
 
                 {hasClipboardText && (
@@ -181,7 +191,7 @@ const ContextMenuContent: React.FC = () => {
                       });
                     })}
                   >
-                     <span>📋</span> 粘贴并新建
+                    <ClipboardPaste className="w-4 h-4" /> 粘贴并新建
                   </MenuItemButton>
                )}
               
@@ -202,10 +212,10 @@ const ContextMenuContent: React.FC = () => {
                 handleArrangeAction();
             }}
           >
-            <span>🧹</span> 
+            <Sparkles className="w-4 h-4" />
             {selectedIds.length > 1 
-                ? '整理选中 (Arrange)' 
-                : (confirmArrange ? '确认归拢? (Click Again)' : '一键归拢 (Smart Arrange)')
+                ? '整理选中' 
+                : (confirmArrange ? '确认归拢？' : '一键归拢')
             }
           </MenuItemButton>
 
@@ -216,14 +226,14 @@ const ContextMenuContent: React.FC = () => {
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                 onClick={() => handleArrangeAction('updatedAt')}
               >
-                <span>🕘</span> 按更新时间归拢
+                <Clock className="w-4 h-4" /> 按更新时间归拢
               </MenuItemButton>
               <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                 onClick={() => handleArrangeAction('color')}
               >
-                <span>🎨</span> 按颜色归拢
+                <Palette className="w-4 h-4" /> 按颜色归拢
               </MenuItemButton>
             </>
           )}
@@ -239,7 +249,7 @@ const ContextMenuContent: React.FC = () => {
                 appController.startStickyDrag(contextMenu.targetId!, 0, 0);
             })}
           >
-            <span>🧲</span> {isGroupContext ? '群组吸附' : '吸附移动'}
+            <Package className="w-4 h-4" /> {isGroupContext ? '群组吸附' : '吸附移动'}
           </MenuItemButton>
           
           {isGroupContext && (
@@ -250,28 +260,28 @@ const ContextMenuContent: React.FC = () => {
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                 onClick={() => handleAction(() => appController.mergeSelectedNotes())}
               >
-                <span>🧩</span> 合并为一张
+                <Merge className="w-4 h-4" /> 合并为一张
               </MenuItemButton>
               <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                 onClick={() => handleAction(() => appController.toggleSelectedNotesCollapse(selectedIds))}
               >
-                <span>📦</span> 批量折叠/展开
+                <Package className="w-4 h-4" /> 批量折叠/展开
               </MenuItemButton>
               <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                 onClick={() => handleAction(() => appController.bringSelectedNotesToFront(selectedIds))}
               >
-                <span>⬆️</span> 置顶
+                <ArrowUpToLine className="w-4 h-4" /> 置顶
               </MenuItemButton>
               <MenuItemButton
                 role="menuitem"
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                 onClick={() => handleAction(() => appController.sendSelectedNotesToBack(selectedIds))}
               >
-                <span>⬇️</span> 置底
+                <ArrowDownToLine className="w-4 h-4" /> 置底
               </MenuItemButton>
             </>
           )}
@@ -284,33 +294,57 @@ const ContextMenuContent: React.FC = () => {
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                 onClick={() => handleAction(() => appController.splitNoteByParagraph(contextMenu.targetId!))}
               >
-                <span>✂️</span> 按段拆分
+                <Scissors className="w-4 h-4" /> 按段拆分
               </MenuItemButton>
               <div className="h-px bg-border-subtle my-1" />
             </>
           )}
            
-          <div className="px-4 py-2 text-xs text-text-tertiary font-semibold">
-            {isGroupContext ? '批量改色' : '颜色'}
-          </div>
-          <div className="px-4 py-1 flex gap-2 flex-wrap">
-            {colors.map((c) => (
-              <button
-                key={c.value}
-                type="button"
-                role="menuitem"
-                className="w-5 h-5 rounded-full cursor-pointer border border-border-subtle hover:scale-110 transition-transform"
-                style={{ backgroundColor: c.value }}
-                title={c.name}
-                onClick={() => handleAction(() => {
-                    if (isGroupContext) {
-                        appController.changeSelectedNotesColor(c.value);
-                    } else {
-                        appController.changeNoteColor(contextMenu.targetId!, c.value);
-                    }
-                })}
-              />
-            ))}
+          <div className="relative">
+            <MenuItemButton
+              role="menuitem"
+              aria-haspopup="menu"
+              className="justify-between text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+              onMouseEnter={() => handleSubmenuEnter('COLOR')}
+              onMouseLeave={handleSubmenuLeave}
+            >
+              <div className="flex items-center gap-2">
+                <Palette className="w-4 h-4" /> {isGroupContext ? '批量改色' : '颜色'}
+              </div>
+              <ChevronRight className="w-4 h-4 text-text-tertiary" />
+            </MenuItemButton>
+
+            {activeSubmenu === 'COLOR' && (
+              <div
+                role="menu"
+                className={cn(
+                  'absolute top-0 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle py-2 px-3 min-w-[120px]',
+                  submenuOffsetClass,
+                )}
+                style={{ zIndex: Z_INDEX.MENU }}
+                onMouseEnter={() => handleSubmenuEnter('COLOR')}
+                onMouseLeave={handleSubmenuLeave}
+              >
+                <div className="flex gap-2 flex-wrap justify-center">
+                  {NOTE_UI_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      role="menuitem"
+                      className="w-6 h-6 rounded-full cursor-pointer border border-border-subtle hover:scale-110 transition-transform"
+                      style={{ backgroundColor: c }}
+                      onClick={() => handleAction(() => {
+                        if (isGroupContext) {
+                          appController.changeSelectedNotesColor(c);
+                        } else {
+                          appController.changeNoteColor(contextMenu.targetId!, c);
+                        }
+                      })}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           
           <div className="h-px bg-border-subtle my-1" />
@@ -322,7 +356,7 @@ const ContextMenuContent: React.FC = () => {
                 className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
                 onClick={() => handleAction(() => appController.duplicateNote(contextMenu.targetId!))}
             >
-                <span>📄</span> 创建副本
+                <Copy className="w-4 h-4" /> 创建副本
             </MenuItemButton>
           )}
 
@@ -337,7 +371,7 @@ const ContextMenuContent: React.FC = () => {
                     onMouseLeave={handleSubmenuLeave}
                 >
                     <div className="flex items-center gap-2">
-                        <span>➡️</span> {isGroupContext ? '批量移动到...' : '移动到...'}
+                        <MoveRight className="w-4 h-4" /> {isGroupContext ? '批量移动到...' : '移动到...'}
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
                 </MenuItemButton>
@@ -386,7 +420,7 @@ const ContextMenuContent: React.FC = () => {
                     onMouseLeave={handleSubmenuLeave}
                 >
                     <div className="flex items-center gap-2">
-                        <span>⤴️</span> {isGroupContext ? '批量复制到...' : '复制到...'}
+                        <ExternalLink className="w-4 h-4" /> {isGroupContext ? '批量复制到...' : '复制到...'}
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
                 </MenuItemButton>
@@ -433,7 +467,7 @@ const ContextMenuContent: React.FC = () => {
                 appController.bringNoteToFront(contextMenu.targetId!);
             })}
           >
-            <span>🔝</span> 置顶
+            <ArrowUpToLine className="w-4 h-4" /> 置顶
           </MenuItemButton>
           
           <MenuItemButton
@@ -443,7 +477,7 @@ const ContextMenuContent: React.FC = () => {
                 await appController.exportNoteSelection(contextMenu.targetId!);
             })}
           >
-            <span>📤</span> {isGroupContext ? `导出选中 (${selectedIds.length})` : '导出便签'}
+            <Download className="w-4 h-4" /> {isGroupContext ? `导出选中 (${selectedIds.length})` : '导出便签'}
           </MenuItemButton>
           
           <div className="h-px bg-border-subtle my-1" />
@@ -467,9 +501,9 @@ const ContextMenuContent: React.FC = () => {
                 }
             }}
           >
-            <span>🗑️</span> 
+            <Trash2 className="w-4 h-4" />
             {isGroupContext 
-                ? (confirmDeleteGroup ? `确认删除 ${selectedIds.length} 个便签?` : `批量删除 (${selectedIds.length})`)
+                ? (confirmDeleteGroup ? `确认删除 ${selectedIds.length} 个便签？` : `批量删除 (${selectedIds.length})`)
                 : '删除'}
           </MenuItemButton>
         </>
