@@ -154,4 +154,45 @@ describe('SelectionActionBar', () => {
 
     expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
   });
+
+  it('操作条包含三个语义分组', async () => {
+    await act(async () => {
+      root.render(<SelectionActionBar />);
+    });
+
+    expect(container.querySelector('.selection-actionbar__primary')).not.toBeNull();
+    expect(container.querySelector('.selection-actionbar__colors')).not.toBeNull();
+    expect(container.querySelector('.selection-actionbar__trailing')).not.toBeNull();
+  });
+
+  it('外层容器启用 flex-wrap 以支持窄窗口分组换行', async () => {
+    await act(async () => {
+      root.render(<SelectionActionBar />);
+    });
+
+    const toolbar = container.querySelector('[role="toolbar"]') as HTMLElement | null;
+    expect(toolbar).not.toBeNull();
+    expect(toolbar!.className).toContain('flex-wrap');
+    expect(toolbar!.className).toContain('selection-actionbar');
+  });
+
+  it('所有操作按钮均在各分组内，不依赖顶层平铺', async () => {
+    await act(async () => {
+      root.render(<SelectionActionBar />);
+    });
+
+    const primary = container.querySelector('.selection-actionbar__primary')!;
+    const colors = container.querySelector('.selection-actionbar__colors')!;
+    const trailing = container.querySelector('.selection-actionbar__trailing')!;
+
+    expect(primary.textContent).toContain('已选');
+    expect(primary.textContent).toContain('合并');
+    expect(primary.textContent).toContain('删除');
+
+    expect(colors.querySelectorAll('button')).toHaveLength(6);
+
+    expect(trailing.textContent).toContain('折叠');
+    expect(trailing.textContent).toContain('归拢');
+    expect(trailing.textContent).toContain('复制');
+  });
 });

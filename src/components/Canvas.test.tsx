@@ -1045,6 +1045,64 @@ describe('Canvas 空白命中判定', () => {
     expect(getEdgePushAccumulatedDelta().x).toBe(LAYOUT.EDGE_PUSH_SPEED);
   });
 
+  it('top-left 边缘推动在 viewport (0,0) 钳位时不累积幻影增量', async () => {
+    useStore.setState({
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
+      interaction: {
+        ...useStore.getState().interaction,
+        edgePush: { top: true, bottom: false, left: true, right: false },
+      },
+    });
+
+    beginEdgePushDragSession('note-1', ['note-1'], {
+      'note-1': { x: 120, y: 140 },
+    });
+
+    await renderCanvas();
+
+    expect(rafMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rafCallbacks[0]?.(0);
+    });
+
+    expect(useStore.getState().viewport.x).toBe(0);
+    expect(useStore.getState().viewport.y).toBe(0);
+    expect(getEdgePushAccumulatedDelta().x).toBe(0);
+    expect(getEdgePushAccumulatedDelta().y).toBe(0);
+
+    await act(async () => {
+      rafCallbacks[1]?.(0);
+    });
+
+    expect(useStore.getState().viewport.x).toBe(0);
+    expect(useStore.getState().viewport.y).toBe(0);
+    expect(getEdgePushAccumulatedDelta().x).toBe(0);
+    expect(getEdgePushAccumulatedDelta().y).toBe(0);
+  });
+
+  it('top-left 边缘推动在 viewport (0,0) 时选中便签不因幻影增量移动', async () => {
+    const moveSelectedNotes = vi.fn();
+    useStore.setState({
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
+      moveSelectedNotes,
+      interaction: {
+        ...useStore.getState().interaction,
+        edgePush: { top: true, bottom: false, left: true, right: false },
+      },
+    });
+
+    await renderCanvas();
+
+    expect(rafMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rafCallbacks[0]?.(0);
+    });
+
+    expect(moveSelectedNotes).toHaveBeenCalledWith(0, 0, undefined);
+  });
+
   it('窗口失焦时对称清理 dragging、edgePush 与 leader session', async () => {
     useStore.setState({
       interaction: {

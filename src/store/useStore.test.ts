@@ -1433,6 +1433,36 @@ describe('v1.3.9 TRASH 安全收口', () => {
     });
   });
 
+  it('setViewMode 切到 TRASH 时保存当前视口到看板', () => {
+    useStore.setState({
+      viewMode: 'BOARD',
+      viewport: { x: 150, y: 250, w: 1280, h: 720 },
+    });
+
+    useStore.getState().setViewMode('TRASH');
+
+    const board = useStore.getState().boards.find(b => b.id === 'default');
+    expect(board?.viewport).toEqual({ x: 150, y: 250 });
+  });
+
+  it('setViewMode 切到 TRASH 再切回 BOARD 时恢复保存的视口', () => {
+    useStore.setState({
+      viewMode: 'BOARD',
+      viewport: { x: 150, y: 250, w: 1280, h: 720 },
+    });
+
+    useStore.getState().setViewMode('TRASH');
+
+    const board = useStore.getState().boards.find(b => b.id === 'default');
+    expect(board?.viewport).toEqual({ x: 150, y: 250 });
+
+    useStore.getState().setViewMode('BOARD');
+
+    const state = useStore.getState();
+    expect(state.viewport.x).toBe(150);
+    expect(state.viewport.y).toBe(250);
+  });
+
   it('setViewMode 切到 TRASH 时清理残留状态', () => {
     useStore.setState({
       selectedIds: ['note-1', 'note-2'],

@@ -231,8 +231,10 @@ export const Canvas: React.FC = () => {
     let cancelled = false;
 
     const bootstrap = async () => {
-      await useStore.getState().init();
-      if (cancelled) return;
+      if (!useStore.getState().isLoaded) {
+        await useStore.getState().init();
+        if (cancelled) return;
+      }
 
       const handle = attach({
         onStatusChange: (status) => {

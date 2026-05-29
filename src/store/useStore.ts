@@ -624,6 +624,14 @@ export const useStore = create<State>()(
 
     setViewMode: (mode) => {
         set((state) => {
+            // 离开看板视图前保存当前视口，避免重新挂载画布时恢复到旧位置。
+            if (mode === 'TRASH' && state.viewMode === 'BOARD') {
+                const currentBoard = state.boards.find(b => b.id === state.currentBoardId);
+                if (currentBoard) {
+                    currentBoard.viewport = { x: state.viewport.x, y: state.viewport.y };
+                }
+            }
+
             state.viewMode = mode;
             state.selectedIds = [];
             if (mode === 'TRASH') {

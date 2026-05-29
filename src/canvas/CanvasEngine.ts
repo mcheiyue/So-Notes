@@ -107,8 +107,12 @@ export class CanvasEngine {
       if (edgePush.bottom) dy += SPEED;
 
       if (dx !== 0 || dy !== 0) {
+        const prevX = currentX;
+        const prevY = currentY;
         currentX = Math.max(0, currentX + dx);
         currentY = Math.max(0, currentY + dy);
+        const actualDx = currentX - prevX;
+        const actualDy = currentY - prevY;
 
         useViewportStore.getState().setViewportPosition(currentX, currentY);
 
@@ -119,10 +123,10 @@ export class CanvasEngine {
 
         const leaderId = getEdgePushDragLeader();
         if (leaderId && hasActiveEdgePushDragSession()) {
-          accumulateEdgePushDelta(dx, dy);
+          accumulateEdgePushDelta(actualDx, actualDy);
           applyActiveDragSessionTransforms();
         } else {
-          useStore.getState().moveSelectedNotes(dx, dy, leaderId ?? undefined);
+          useStore.getState().moveSelectedNotes(actualDx, actualDy, leaderId ?? undefined);
         }
       }
       this.edgePushFrame = requestAnimationFrame(pushLoop);
