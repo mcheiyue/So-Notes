@@ -28,3 +28,9 @@ export function finalizeActiveNoteDrag(reason: NoteDragAbortReason): boolean {
 export function hasActiveNoteDragFinalizer(): boolean {
   return activeFinalizer !== null;
 }
+
+export function resetActiveNoteDrag(reason: NoteDragAbortReason = 'window-blur'): void {
+  if (activeFinalizer) {
+    finalizeActiveNoteDrag(reason);
+  }
+}

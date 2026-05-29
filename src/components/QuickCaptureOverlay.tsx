@@ -1,17 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
+import { useUIStore, useViewportStore } from '../store';
 import { Z_INDEX } from '../constants/layout';
 import { createSmartPasteNoteInputs } from '../utils/smartPaste';
 import { getViewportSpawnOrigin } from '../utils/spawnPosition';
 
 const getCaptureOrigin = () => {
-  const { viewport } = useStore.getState();
+  const { viewport } = useViewportStore.getState();
   return getViewportSpawnOrigin(viewport);
 };
 
 export const QuickCaptureOverlay: React.FC = () => {
-  const isOpen = useStore((state) => state.isQuickCaptureOpen);
-  const setQuickCaptureOpen = useStore((state) => state.setQuickCaptureOpen);
+  const isOpen = useUIStore((state) => state.isQuickCaptureOpen);
+  const setQuickCaptureOpen = useUIStore((state) => state.setQuickCaptureOpen);
   const addNotesWithContentBatch = useStore((state) => state.addNotesWithContentBatch);
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);

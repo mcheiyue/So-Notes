@@ -151,12 +151,18 @@ export interface ContextMenuState {
   targetId?: string;
 }
 
+export const STORAGE_SCHEMA_VERSION = 1;
+
 export interface StorageData {
+  schemaVersion: number;
+  storageUpdatedAt: number;
   notes: Note[];
   boards: Board[];
   currentBoardId: string;
   config: AppConfig;
 }
+
+export type StorageDataInput = Omit<StorageData, 'schemaVersion' | 'storageUpdatedAt'> & Partial<Pick<StorageData, 'schemaVersion' | 'storageUpdatedAt'>>;
 
 export interface NormalizedNotesState {
   notesById: Record<string, Note>;

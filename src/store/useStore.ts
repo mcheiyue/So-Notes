@@ -1,26 +1,18 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { LayoutNote, Note, AppConfig, StorageData, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus, NoteHighlight, NoteHighlightReason } from './types';
+import { LayoutNote, Note, AppConfig, StorageData, StorageDataInput, STORAGE_SCHEMA_VERSION, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus, NoteHighlight, NoteHighlightReason } from './types';
 
 import { db } from './db';
 import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes } from './normalization';
 
-import { generateBoardExport, generateFullBackup, processImport, ImportFailureCode, ImportSummary } from '../utils/dataTransfer';
 import { saveFile, openFile } from '../utils/fileSystem';
+import { createDataTransferService, type ImportFromFileResult } from '../services/transfer/DataTransferService';
 import { diagnostics } from '../utils/diagnostics';
 import { getNoteVisualHeight } from '../utils/noteVisualMetrics';
 import { finalizeActiveNoteDrag } from '../utils/activeNoteDrag';
 import { buildSmartPasteNoteInputs, splitParagraphs } from '../utils/smartPaste';
 import type { SmartPasteNoteInput, SmartPasteOptionId, SmartPasteResult } from '../utils/smartPaste';
-
-interface ImportFromFileResult {
-  status: 'cancelled' | 'success' | 'error';
-  code?: ImportFailureCode | 'SAVE_FAILED';
-  message?: string;
-  summary?: ImportSummary;
-  rolledBack?: boolean;
-}
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -186,13 +178,6 @@ interface State {
   setThemeMode: (mode: ThemeMode) => void;
 }
 
-// Helper to debounce disk saves
-let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-
-const DEBOUNCE_DELAY = 2000; // 2 seconds lazy save
-const WAL_THROTTLE = 100;    // 100ms throttle for IndexedDB
-
-let lastWALSave = 0;
 let noteHighlightSequence = 0;
 let arrangeUndoSequence = 0;
 const noteHighlightTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
@@ -331,10 +316,28 @@ const resolveSaveErrorMessage = (error: unknown): string => {
 };
 
 const serializeState = (state: Pick<State, 'notesById' | 'allNoteIds' | 'boardNoteIds' | 'boards' | 'currentBoardId' | 'config'>): StorageData => ({
+  schemaVersion: STORAGE_SCHEMA_VERSION,
+  storageUpdatedAt: Date.now(),
   notes: denormalizeNotes(state),
   boards: state.boards,
   currentBoardId: state.currentBoardId,
   config: state.config,
+});
+
+const isFiniteTimestamp = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+const getLegacyStorageUpdatedAt = (notes: Note[]): number => {
+  if (notes.length === 0) {
+    return 0;
+  }
+
+  return Math.max(...notes.map((note) => note.updatedAt || 0));
+};
+
+const normalizeStorageDataMetadata = (data: StorageDataInput): StorageData => ({
+  ...data,
+  schemaVersion: isFiniteTimestamp(data.schemaVersion) ? data.schemaVersion : STORAGE_SCHEMA_VERSION,
+  storageUpdatedAt: isFiniteTimestamp(data.storageUpdatedAt) ? data.storageUpdatedAt : getLegacyStorageUpdatedAt(data.notes),
 });
 
 const getBoardNoteIds = (state: Pick<State, 'boardNoteIds'>, boardId: string): string[] => state.boardNoteIds[boardId] ?? [];
@@ -463,12 +466,12 @@ export const useStore = create<State>()(
     arrangeUndoToast: null,
 
     init: async () => {
-      let finalData: StorageData = { 
+      let finalData: StorageData = normalizeStorageDataMetadata({
         notes: [], 
         boards: [DEFAULT_BOARD], 
         currentBoardId: DEFAULT_BOARD.id, 
         config: DEFAULT_CONFIG 
-      };
+      });
       let source: 'WAL' | 'DISK' | 'NEW' = 'NEW';
 
       // 1. Load both sources in parallel
@@ -482,7 +485,7 @@ export const useStore = create<State>()(
         try {
           const parsed = JSON.parse(diskJson);
           if (parsed && Array.isArray(parsed.notes)) {
-            diskData = parsed;
+            diskData = normalizeStorageDataMetadata(parsed);
           }
         } catch (e) {
           console.warn('Failed to parse disk data:', e);
@@ -491,11 +494,12 @@ export const useStore = create<State>()(
 
       // 2. Conflict Resolution: Timestamp Arbitration
       const getLatestUpdate = (data: StorageData | null | undefined) => {
-        if (!data || data.notes.length === 0) return 0;
-        return Math.max(...data.notes.map(n => n.updatedAt || 0));
+        if (!data) return 0;
+        return isFiniteTimestamp(data.storageUpdatedAt) ? data.storageUpdatedAt : getLegacyStorageUpdatedAt(data.notes);
       };
 
-      const walTime = getLatestUpdate(walData);
+      const normalizedWalData = walData ? normalizeStorageDataMetadata(walData) : undefined;
+      const walTime = getLatestUpdate(normalizedWalData);
       const diskTime = getLatestUpdate(diskData);
 
       // console.log(`Init Arbitration -> WAL: ${walTime}, DISK: ${diskTime}`);
@@ -506,10 +510,10 @@ export const useStore = create<State>()(
         // console.log('Using DISK (Newer content found)');
         finalData = diskData;
         source = 'DISK';
-      } else if (walData && walData.notes.length > 0) {
+      } else if (normalizedWalData && normalizedWalData.notes.length > 0) {
         // WAL is newer or equal -> Use WAL
         // console.log('Using WAL (Cache is active)');
-        finalData = walData;
+        finalData = normalizedWalData;
         source = 'WAL';
       } else if (diskData) {
         // Fallback to Disk if WAL is empty
@@ -616,11 +620,18 @@ export const useStore = create<State>()(
                 }
             }
         });
-        get().saveToDisk();
     },
 
     setViewMode: (mode) => {
         set((state) => {
+            // 离开看板视图前保存当前视口，避免重新挂载画布时恢复到旧位置。
+            if (mode === 'TRASH' && state.viewMode === 'BOARD') {
+                const currentBoard = state.boards.find(b => b.id === state.currentBoardId);
+                if (currentBoard) {
+                    currentBoard.viewport = { x: state.viewport.x, y: state.viewport.y };
+                }
+            }
+
             state.viewMode = mode;
             state.selectedIds = [];
             if (mode === 'TRASH') {
@@ -647,7 +658,6 @@ export const useStore = create<State>()(
             state.currentBoardId = newBoard.id; // Auto-switch
             state.selectedIds = [];
         });
-        get().saveToDisk();
     },
 
     deleteBoard: (boardId) => {
@@ -670,7 +680,6 @@ export const useStore = create<State>()(
                 state.selectedIds = state.selectedIds.filter((id) => state.notesById[id]);
             }
         });
-        get().saveToDisk();
     },
     
     updateBoard: (boardId, updates) => {
@@ -680,7 +689,6 @@ export const useStore = create<State>()(
                 Object.assign(board, updates);
             }
         });
-        get().saveToDisk();
     },
 
     // v1.1.5 Viewport Actions
@@ -869,7 +877,6 @@ export const useStore = create<State>()(
         state.smartPasteSplitPanel = null;
       });
 
-      get().saveToDisk();
       return selectedIds;
     },
 
@@ -897,8 +904,6 @@ export const useStore = create<State>()(
         state.recentlyCreatedIds = [newNote.id];
         assignNoteHighlights(state, [newNote.id], 'created');
       });
-
-      get().saveToDisk();
     },
 
     addNoteWithContent: (x, y, content) => {
@@ -923,8 +928,6 @@ export const useStore = create<State>()(
         state.recentlyCreatedIds = [newNote.id];
         assignNoteHighlights(state, [newNote.id], 'created');
       });
-
-      get().saveToDisk();
     },
 
     addNotesWithContentBatch: (notes) => {
@@ -966,7 +969,6 @@ export const useStore = create<State>()(
         assignNoteHighlights(state, createdIds, 'created');
       });
 
-      get().saveToDisk();
       return createdIds;
     },
 
@@ -978,16 +980,6 @@ export const useStore = create<State>()(
           note.updatedAt = Date.now();
         }
       });
-      
-      // Throttle WAL save
-      const now = Date.now();
-      if (now - lastWALSave > WAL_THROTTLE) {
-        lastWALSave = now;
-        db.saveWAL(serializeState(get()));
-      }
-      
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
     updateNote: (id, content) => {
@@ -998,15 +990,6 @@ export const useStore = create<State>()(
           note.updatedAt = Date.now();
         }
       });
-      
-      const now = Date.now();
-      if (now - lastWALSave > WAL_THROTTLE) {
-        lastWALSave = now;
-        db.saveWAL(serializeState(get()));
-      }
-      
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
     },
 
     moveNote: (id, x, y) => {
@@ -1041,22 +1024,15 @@ export const useStore = create<State>()(
         if (uniqueIds.length === 0) return;
 
         const timestamp = Date.now();
-        let hasUpdatedNotes = false;
 
         set((state) => {
             uniqueIds.forEach((id) => {
                 const note = getNoteById(state, id);
                 if (note) {
                     note.updatedAt = timestamp;
-                    hasUpdatedNotes = true;
                 }
             });
         });
-
-        if (hasUpdatedNotes) {
-            if (saveTimeout) clearTimeout(saveTimeout);
-            saveTimeout = setTimeout(() => get().saveToDisk(), DEBOUNCE_DELAY);
-        }
     },
 
     arrangeNotes: (
@@ -1214,7 +1190,6 @@ export const useStore = create<State>()(
             assignNoteHighlights(state, [mergedId], 'created');
         });
 
-        get().saveToDisk();
         return mergedId;
     },
 
@@ -1276,7 +1251,6 @@ export const useStore = create<State>()(
             assignNoteHighlights(state, createdIds, 'created');
         });
 
-        get().saveToDisk();
         return selectedIds;
     },
 
@@ -1334,7 +1308,6 @@ export const useStore = create<State>()(
         }
 
         if (removedIds.length > 0) {
-            get().saveToDisk();
             return true;
         }
 
@@ -1361,14 +1334,12 @@ export const useStore = create<State>()(
       set((state) => {
         const note = getNoteById(state, id);
         if (note) {
-          note.deletedAt = Date.now(); // Soft delete
+          note.deletedAt = Date.now();
           state.layoutNotesById[note.id] = extractLayoutNote(note);
           clearTransientNoteState(state, note.id);
         }
-        // Remove from selection if deleted
         state.selectedIds = state.selectedIds.filter(selId => selId !== id);
       });
-      get().saveToDisk();
     },
 
     
@@ -1376,21 +1347,18 @@ export const useStore = create<State>()(
         set((state) => {
             const note = getNoteById(state, id);
             if (note) {
-                note.deletedAt = null; // Restore
+                note.deletedAt = null;
                 
-                // Safety Check: Does the target board still exist?
                 const boardExists = state.boards.some(b => b.id === note.boardId);
                 if (!boardExists) {
                     moveNoteBetweenBoards(state, id, state.currentBoardId);
                 }
                 
-                // Visual Feedback: Bring to top so user sees it
                 state.config.maxZ += 1;
                 note.z = state.config.maxZ;
                 state.layoutNotesById[note.id] = extractLayoutNote(note);
             }
         });
-        get().saveToDisk();
     },
 
 
@@ -1399,7 +1367,6 @@ export const useStore = create<State>()(
             removeNoteFromNormalizedState(state, id);
             state.selectedIds = state.selectedIds.filter((selectedId) => selectedId !== id);
         });
-        get().saveToDisk();
     },
 
     emptyTrash: () => {
@@ -1408,7 +1375,6 @@ export const useStore = create<State>()(
             noteIdsToDelete.forEach((noteId) => removeNoteFromNormalizedState(state, noteId));
             state.selectedIds = state.selectedIds.filter((id) => state.notesById[id]);
         });
-        get().saveToDisk();
     },
 
     restoreAllTrash: () => {
@@ -1418,18 +1384,15 @@ export const useStore = create<State>()(
                 if (!note) return;
                 if (note.deletedAt) {
                     note.deletedAt = null;
-                    // Safety Check
                     if (!state.boards.some(b => b.id === note.boardId)) {
                         moveNoteBetweenBoards(state, id, state.currentBoardId);
                     }
-                    // Bring to front
                     state.config.maxZ += 1;
                     note.z = state.config.maxZ;
                     state.layoutNotesById[note.id] = extractLayoutNote(note);
                 }
             });
         });
-        get().saveToDisk();
     },
 
     restoreSelectedTrash: (ids) => {
@@ -1449,7 +1412,6 @@ export const useStore = create<State>()(
                 state.layoutNotesById[note.id] = extractLayoutNote(note);
             });
         });
-        get().saveToDisk();
     },
 
     deleteSelectedPermanently: (ids) => {
@@ -1459,7 +1421,6 @@ export const useStore = create<State>()(
             });
             state.selectedIds = state.selectedIds.filter((selectedId) => !ids.includes(selectedId));
         });
-        get().saveToDisk();
     },
 
     
@@ -1471,7 +1432,6 @@ export const useStore = create<State>()(
            state.layoutNotesById[note.id] = extractLayoutNote(note);
          }
       });
-      get().saveToDisk();
     },
 
     changeSelectedNotesColor: (color) => {
@@ -1484,7 +1444,6 @@ export const useStore = create<State>()(
                 }
             });
         });
-        get().saveToDisk();
     },
 
     toggleCollapse: (id) => {
@@ -1494,7 +1453,6 @@ export const useStore = create<State>()(
           note.collapsed = !note.collapsed;
         }
       });
-      get().saveToDisk();
     },
     
     setStickyDrag: (id, offsetX = 0, offsetY = 0, status: StickyDragStatus = 'active') => {
@@ -1553,7 +1511,6 @@ export const useStore = create<State>()(
             });
             state.selectedIds = [];
         });
-        get().saveToDisk();
     },
 
     duplicateNote: (id) => {
@@ -1568,14 +1525,11 @@ export const useStore = create<State>()(
                     z: state.config.maxZ + 1,
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
-                    // Title copy? Yes.
                 };
                 appendNoteToNormalizedState(state, newNote);
                 state.config.maxZ += 1;
-                // Auto-select the new note? Maybe not, to avoid confusion.
             }
         });
-        get().saveToDisk();
     },
 
     duplicateSelectedNotes: () => {
@@ -1591,7 +1545,7 @@ export const useStore = create<State>()(
                     const newNote: Note = {
                         ...note,
                         id: crypto.randomUUID(),
-                        x: note.x + 20, // Offset slightly
+                        x: note.x + 20,
                         y: note.y + 20,
                         z: state.config.maxZ + 1,
                         createdAt: Date.now(),
@@ -1603,12 +1557,10 @@ export const useStore = create<State>()(
                 }
             });
 
-            // Auto-select the newly created duplicates for UX
             if (newSelectedIds.length > 0) {
                 state.selectedIds = newSelectedIds;
             }
         });
-        get().saveToDisk();
     },
 
     moveNoteToBoard: (id, targetBoardId) => {
@@ -1622,7 +1574,6 @@ export const useStore = create<State>()(
                 state.selectedIds = state.selectedIds.filter(selId => selId !== id);
             }
         });
-        get().saveToDisk();
     },
 
     copyNoteToBoard: (id, targetBoardId) => {
@@ -1644,7 +1595,6 @@ export const useStore = create<State>()(
                 state.config.maxZ += 1;
             }
         });
-        get().saveToDisk();
     },
 
     moveSelectedNotesToBoard: (targetBoardId) => {
@@ -1668,7 +1618,6 @@ export const useStore = create<State>()(
                 state.selectedIds = [];
             }
         });
-        get().saveToDisk();
     },
 
     copySelectedNotesToBoard: (targetBoardId) => {
@@ -1695,7 +1644,6 @@ export const useStore = create<State>()(
                 }
             });
         });
-        get().saveToDisk();
     },
 
     batchToggleCollapse: (ids) => {
@@ -1716,7 +1664,6 @@ export const useStore = create<State>()(
                 }
             });
         });
-        get().saveToDisk();
     },
 
     batchBringToFront: (ids) => {
@@ -1739,7 +1686,6 @@ export const useStore = create<State>()(
             
             state.config.maxZ = currentMaxZ;
         });
-        get().saveToDisk();
     },
 
     batchSendToBack: (ids) => {
@@ -1765,7 +1711,6 @@ export const useStore = create<State>()(
                 }
             });
         });
-        get().saveToDisk();
     },
 
     reorderBoard: (boardId, direction) => {
@@ -1775,15 +1720,12 @@ export const useStore = create<State>()(
 
             const newIndex = direction === 'left' ? index - 1 : index + 1;
             
-            // Boundary Check
             if (newIndex < 0 || newIndex >= state.boards.length) return;
 
-            // Swap
             const temp = state.boards[index];
             state.boards[index] = state.boards[newIndex];
             state.boards[newIndex] = temp;
         });
-        get().saveToDisk();
     },
 
     saveToDisk: async () => {
@@ -1853,139 +1795,48 @@ export const useStore = create<State>()(
     },
 
     exportBoard: async (boardId) => {
-        const state = get();
-        const { boards } = state;
-        const board = boards.find(b => b.id === boardId);
-        if (!board) return;
-
-        const json = generateBoardExport(board, denormalizeNotes(state));
-        const fileName = `Board_${board.name.replace(/[^a-z0-9]/gi, '_')}.json`;
-        
-        await saveFile(json, fileName);
+        const service = createDataTransferService({
+            getState: get, set, denormalizeNotes, normalizeNotes, createLayoutNotesById,
+            appendNoteToNormalizedState, normalizeStorageDataMetadata,
+            saveToDisk: get().saveToDisk, saveWAL: db.saveWAL, openFile, saveFile,
+        });
+        await service.exportBoard(boardId);
     },
 
     exportCurrentBoard: async () => {
-        const { currentBoardId } = get();
-        await get().exportBoard(currentBoardId);
+        const service = createDataTransferService({
+            getState: get, set, denormalizeNotes, normalizeNotes, createLayoutNotesById,
+            appendNoteToNormalizedState, normalizeStorageDataMetadata,
+            saveToDisk: get().saveToDisk, saveWAL: db.saveWAL, openFile, saveFile,
+        });
+        await service.exportCurrentBoard();
     },
 
     exportAll: async () => {
-        const state = get();
-        const { boards, config, currentBoardId } = state;
-        const notes = denormalizeNotes(state);
-        const json = generateFullBackup(boards, notes, config, currentBoardId);
-        const fileName = `SoNotes_Backup_${new Date().toISOString().split('T')[0]}.json`;
-        
-        await saveFile(json, fileName);
+        const service = createDataTransferService({
+            getState: get, set, denormalizeNotes, normalizeNotes, createLayoutNotesById,
+            appendNoteToNormalizedState, normalizeStorageDataMetadata,
+            saveToDisk: get().saveToDisk, saveWAL: db.saveWAL, openFile, saveFile,
+        });
+        await service.exportAll();
     },
 
     exportSelectedNotes: async () => {
-        const state = get();
-        const { selectedIds, boards, currentBoardId } = state;
-        if (selectedIds.length === 0) return;
-
-        const selectedNotes = selectedIds
-            .map(id => state.notesById[id])
-            .filter((n): n is Note => n !== undefined && !n.deletedAt);
-
-        if (selectedNotes.length === 0) return;
-
-        const currentBoard = boards.find(b => b.id === currentBoardId);
-        if (!currentBoard) return;
-
-        const json = generateBoardExport(currentBoard, selectedNotes);
-        const fileName = `Selected_${selectedNotes.length}_notes.json`;
-        
-        await saveFile(json, fileName);
+        const service = createDataTransferService({
+            getState: get, set, denormalizeNotes, normalizeNotes, createLayoutNotesById,
+            appendNoteToNormalizedState, normalizeStorageDataMetadata,
+            saveToDisk: get().saveToDisk, saveWAL: db.saveWAL, openFile, saveFile,
+        });
+        await service.exportSelectedNotes();
     },
 
     importFromFile: async () => {
-        const jsonContent = await openFile();
-        if (!jsonContent) {
-            return { status: 'cancelled' };
-        }
-
-        const existingBoardNames = get().boards.map(board => board.name);
-        const result = processImport(jsonContent, existingBoardNames);
-        if (result.status === 'error') {
-            console.error(`Import failed: ${result.code} - ${result.message}`);
-            return {
-                status: 'error',
-                code: result.code,
-                message: result.message,
-            };
-        }
-
-        const previousState = get();
-        const snapshot = {
-            boards: previousState.boards,
-            notes: denormalizeNotes(previousState),
-            currentBoardId: previousState.currentBoardId,
-            viewMode: previousState.viewMode,
-            selectedIds: previousState.selectedIds,
-        };
-
-        const { boards: newBoards, notes: newNotes, suggestedCurrentBoardId, summary } = result.data;
-        if (newBoards.length === 0) {
-            return {
-                status: 'error',
-                code: 'INVALID_STRUCTURE',
-                message: '导入失败：备份文件中没有可导入的看板。',
-            };
-        }
-
-        set((state) => {
-            // v1.2.7 约定：导入批次保留内部相对顺序，并整体追加到本地看板末尾。
-            state.boards.push(...newBoards);
-            newNotes.forEach((note) => appendNoteToNormalizedState(state, note));
-            
-            if (suggestedCurrentBoardId) {
-                state.currentBoardId = suggestedCurrentBoardId;
-                state.viewMode = 'BOARD';
-            }
-            state.selectedIds = [];
+        const service = createDataTransferService({
+            getState: get, set, denormalizeNotes, normalizeNotes, createLayoutNotesById,
+            appendNoteToNormalizedState, normalizeStorageDataMetadata,
+            saveToDisk: get().saveToDisk, saveWAL: db.saveWAL, openFile, saveFile,
         });
-        
-        const saved = await get().saveToDisk();
-        if (!saved) {
-            set((state) => {
-                const normalizedSnapshot = normalizeNotes(snapshot.notes);
-                state.boards = snapshot.boards;
-                state.notesById = normalizedSnapshot.notesById;
-                state.allNoteIds = normalizedSnapshot.allNoteIds;
-                state.boardNoteIds = normalizedSnapshot.boardNoteIds;
-                state.layoutNotesById = createLayoutNotesById(normalizedSnapshot.notesById);
-                state.currentBoardId = snapshot.currentBoardId;
-                state.viewMode = snapshot.viewMode;
-                state.selectedIds = snapshot.selectedIds;
-            });
-            await db.saveWAL({
-                boards: snapshot.boards,
-                notes: snapshot.notes,
-                currentBoardId: snapshot.currentBoardId,
-                config: get().config,
-            });
-
-            return {
-                status: 'error',
-                code: 'SAVE_FAILED',
-                message: '导入失败：写入本地存储时出错，已回滚到导入前状态。',
-                summary,
-                rolledBack: true,
-            };
-        }
-
-        const summaryMessage = summary.skippedNotesCount > 0
-            ? `导入完成，已跳过 ${summary.skippedNotesCount} 条异常便签。`
-            : result.compatibility === 'LEGACY'
-                ? '已导入旧版备份，并按当前规则完成兼容处理。'
-                : '导入成功。';
-
-        return {
-            status: 'success',
-            message: summaryMessage,
-            summary,
-        };
+        return service.importFromFile();
     },
 
     setThemeMode: (mode) => {
@@ -1993,7 +1844,6 @@ export const useStore = create<State>()(
             state.config.themeMode = mode;
         });
 
-        // Apply theme immediately
         const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         const shouldBeDark = mode === 'dark' || (mode === 'system' && isSystemDark);
 
@@ -2003,10 +1853,7 @@ export const useStore = create<State>()(
             document.documentElement.classList.remove('dark');
         }
 
-        // Persist to localStorage for index.html script
         localStorage.setItem('theme', mode);
-        
-        get().saveToDisk();
     },
   }))
 );

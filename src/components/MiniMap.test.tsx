@@ -336,4 +336,67 @@ describe('MiniMap 看板隔离', () => {
     expect(useStore.getState().viewport).toEqual(draggedViewport);
   });
 
+  it('视口拖拽期间禁用 transition，松开后恢复', async () => {
+    useStore.setState({
+      interaction: {
+        isPanMode: true,
+        isDragging: false,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+    });
+    await renderMiniMap();
+
+    const viewportButton = container.querySelector('.minimap-viewport') as HTMLButtonElement | null;
+    expect(viewportButton).not.toBeNull();
+    expect(viewportButton!.classList.contains('transition-none')).toBe(false);
+
+    await act(async () => {
+      viewportButton!.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 100,
+        clientY: 100,
+        buttons: 1,
+      }));
+    });
+
+    expect(viewportButton!.classList.contains('transition-none')).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+
+    expect(viewportButton!.classList.contains('transition-none')).toBe(false);
+  });
+
+  it('视口拖拽期间 blur 清理会恢复 transition', async () => {
+    useStore.setState({
+      interaction: {
+        isPanMode: true,
+        isDragging: false,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+    });
+    await renderMiniMap();
+
+    const viewportButton = container.querySelector('.minimap-viewport') as HTMLButtonElement | null;
+    expect(viewportButton).not.toBeNull();
+
+    await act(async () => {
+      viewportButton!.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 100,
+        clientY: 100,
+        buttons: 1,
+      }));
+    });
+
+    expect(viewportButton!.classList.contains('transition-none')).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    expect(viewportButton!.classList.contains('transition-none')).toBe(false);
+  });
+
 });

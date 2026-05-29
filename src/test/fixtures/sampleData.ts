@@ -1,5 +1,5 @@
 import type { Note, Board, StorageData } from '../../store/types';
-import { NOTE_COLORS, DEFAULT_CONFIG } from '../../store/types';
+import { NOTE_COLORS, DEFAULT_CONFIG, STORAGE_SCHEMA_VERSION } from '../../store/types';
 
 export interface SampleConfig {
   noteCount: number;
@@ -164,6 +164,8 @@ export function generateSampleState(config: SampleConfig): StorageData {
   const notes = generateSampleNotes({ ...config, boards });
   
   return {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    storageUpdatedAt: notes.length > 0 ? Math.max(...notes.map((note) => note.updatedAt || 0)) : 0,
     notes,
     boards,
     currentBoardId: boards[0]?.id || 'default',

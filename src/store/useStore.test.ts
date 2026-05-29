@@ -22,6 +22,7 @@ import { db } from './db';
 import { openFile } from '../utils/fileSystem';
 import { invoke } from '@tauri-apps/api/core';
 import { createEmptyNormalizedNotesState, denormalizeNotes, normalizeNotes } from './normalization';
+import { STORAGE_SCHEMA_VERSION } from './types';
 import { LAYOUT } from '../constants/layout';
 import { registerActiveNoteDragFinalizer } from '../utils/activeNoteDrag';
 import { parseSmartPaste } from '../utils/smartPaste';
@@ -32,6 +33,52 @@ const flushMicrotasks = async () => {
 };
 
 const getNote = (id: string) => useStore.getState().notesById[id];
+
+describe('v1.4.0 StorageData 演进契约', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+  });
+
+  it('读取旧版数据时补齐存储元信息，并忽略 UI 与 Viewport 字段', async () => {
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      notes: [{
+        id: 'legacy-note',
+        boardId: 'legacy-board',
+        x: 10,
+        y: 20,
+        title: '旧数据',
+        content: '应正常读取',
+        color: '#FFFFFF',
+        z: 3,
+        createdAt: 100,
+        updatedAt: 123,
+      }],
+      boards: [{ id: 'legacy-board', name: '旧看板', icon: '📦', createdAt: 90 }],
+      currentBoardId: 'legacy-board',
+      config: { version: 2, maxZ: 3, themeMode: 'system' },
+      viewMode: 'TRASH',
+      selectedIds: ['legacy-note'],
+      viewport: { x: 999, y: 888, w: 777, h: 666 },
+    }));
+
+    await useStore.getState().init();
+
+    const state = useStore.getState();
+    expect(state.currentBoardId).toBe('legacy-board');
+    expect(state.notesById['legacy-note']?.title).toBe('旧数据');
+    expect(state.viewMode).toBe('BOARD');
+    expect(state.selectedIds).toEqual([]);
+    expect(state.viewport.x).not.toBe(999);
+
+    const savedWal = vi.mocked(db.saveWAL).mock.calls[0]?.[0];
+    expect(savedWal).toMatchObject({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 123,
+    });
+  });
+});
 
 describe('useStore 布局持久化契约', () => {
   beforeEach(() => {
@@ -110,7 +157,7 @@ describe('useStore 布局持久化契约', () => {
     expect(saveSpy).not.toHaveBeenCalled();
   });
 
-  it('finalizeLayoutChange 只刷新受影响便签并通过 debounce 持久化', async () => {
+  it('finalizeLayoutChange 只刷新受影响便签，不再直接调度持久化', async () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
@@ -125,11 +172,11 @@ describe('useStore 布局持久化契约', () => {
     expect(second?.updatedAt).toBe(200);
     expect(saveSpy).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(2000);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(3000);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
-  it('显式置顶后通过最终提交点刷新 updatedAt 并通过 debounce 持久化', async () => {
+  it('显式置顶后通过最终提交点刷新 updatedAt，不再直接调度持久化', async () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
@@ -145,11 +192,11 @@ describe('useStore 布局持久化契约', () => {
     expect(note?.updatedAt).toBe(expectedTimestamp);
     expect(saveSpy).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(2000);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(3000);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
-  it('arrangeNotes 会通过统一最终提交点刷新 updatedAt 并通过 debounce 持久化', async () => {
+  it('arrangeNotes 会通过统一最终提交点刷新 updatedAt，不再直接调度持久化', async () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy, selectedIds: [] });
 
@@ -166,8 +213,8 @@ describe('useStore 布局持久化契约', () => {
     expect(second?.updatedAt).toBe(expectedTimestamp);
     expect(saveSpy).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(2000);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(3000);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('arrangeNotes 对折叠便签使用 36px 高度估算下一行起点', () => {
@@ -391,7 +438,7 @@ describe('useStore 布局持久化契约', () => {
     expect(getNote('note-2')).toMatchObject({ x: 30, y: 40 });
 
     vi.advanceTimersByTime(3000);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('dismissArrangeUndoToast 只关闭最近一次归拢提示，不移动便签', () => {
@@ -429,7 +476,7 @@ describe('useStore 布局持久化契约', () => {
       noteCount: 2,
       createdIds: [mergedId],
     });
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('undoLastArrange 可撤销合并结果且保留原便签', () => {
@@ -448,7 +495,7 @@ describe('useStore 布局持久化契约', () => {
     expect(state.notesById['note-1']).toBeDefined();
     expect(state.notesById['note-2']).toBeDefined();
     expect(state.arrangeUndoToast).toBeNull();
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('splitNoteByParagraph 按空行拆分并保留原便签内容', () => {
@@ -480,7 +527,7 @@ describe('useStore 布局持久化契约', () => {
       noteCount: 3,
       createdIds: selectedIds.slice(1),
     });
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('undoLastArrange 可撤销按段拆分新增结果且不改原便签', () => {
@@ -508,7 +555,7 @@ describe('useStore 布局持久化契约', () => {
       expect(state.notesById[id]).toBeUndefined();
     });
     expect(state.arrangeUndoToast).toBeNull();
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('arrangeNotes 显式指定 board 作用域时忽略单选并整理当前看板全部便签', () => {
@@ -594,7 +641,7 @@ describe('useStore 布局持久化契约', () => {
     });
     expect(state.arrangeUndoToast).toBeNull();
     expect(state.selectedIds).toEqual(['note-1', 'note-2']);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('undoLastArrange 撤销拆分时完整恢复原始便签', () => {
@@ -630,7 +677,7 @@ describe('useStore 布局持久化契约', () => {
     });
     expect(state.arrangeUndoToast).toBeNull();
     expect(state.selectedIds).toEqual(['note-1', 'note-2']);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -1133,7 +1180,47 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(activeDragFinalizer).toHaveBeenCalledWith('switch-board');
     expect(useStore.getState().currentBoardId).toBe('board-2');
     expect(useStore.getState().boards.find((board) => board.id === 'default')?.viewport).toEqual({ x: 24, y: 36 });
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it('switchBoard 目标看板无 viewport 时恢复到 0,0', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-2', name: '二号板', icon: '🧩', createdAt: 1 },
+      ],
+      currentBoardId: 'default',
+      viewport: { x: 24, y: 36, w: 1280, h: 720 },
+      config: { ...useStore.getState().config, maxZ: 1 },
+      saveToDisk: saveSpy,
+    });
+
+    useStore.getState().switchBoard('board-2');
+
+    expect(useStore.getState().viewport.x).toBe(0);
+    expect(useStore.getState().viewport.y).toBe(0);
+  });
+
+  it('switchBoard 目标看板有 viewport 时恢复到该 viewport', () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-2', name: '二号板', icon: '🧩', createdAt: 1, viewport: { x: 500, y: 600 } },
+      ],
+      currentBoardId: 'default',
+      viewport: { x: 24, y: 36, w: 1280, h: 720 },
+      config: { ...useStore.getState().config, maxZ: 1 },
+      saveToDisk: saveSpy,
+    });
+
+    useStore.getState().switchBoard('board-2');
+
+    expect(useStore.getState().viewport.x).toBe(500);
+    expect(useStore.getState().viewport.y).toBe(600);
   });
 
   it('新建空白便签后选中新便签并标记创建反馈', () => {
@@ -1153,7 +1240,7 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(state.recentlyCreatedIds).toEqual([noteId]);
     expect(state.noteHighlights[noteId]?.reason).toBe('created');
     expect(state.notesById[noteId]).toMatchObject({ x: 16, y: 24, content: '' });
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('临时定位高亮支持按 token 精确清理，避免旧计时器清掉新高亮', () => {
@@ -1238,7 +1325,7 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(state.config.maxZ).toBe(5);
     expect(state.notesById[ids[0]].content).toBe('Alpha');
     expect(state.notesById[ids[1]].z).toBe(5);
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
 
     useStore.getState().clearRecentlyCreated(ids[0]);
     expect(useStore.getState().recentlyCreatedIds).toEqual([ids[1]]);
@@ -1274,7 +1361,7 @@ describe('v1.3.0 并发与代际契约', () => {
     expect(state.selectedIds).toEqual(selectedIds);
     expect(state.recentlyCreatedIds).toEqual(selectedIds);
     expect(state.smartPasteSplitPanel).toBeNull();
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it('旧 generationId ACK 不得覆盖最新 UI 状态', async () => {
@@ -1344,6 +1431,36 @@ describe('v1.3.9 TRASH 安全收口', () => {
       currentBoardId: 'default',
       config: { ...useStore.getState().config, maxZ: 1 },
     });
+  });
+
+  it('setViewMode 切到 TRASH 时保存当前视口到看板', () => {
+    useStore.setState({
+      viewMode: 'BOARD',
+      viewport: { x: 150, y: 250, w: 1280, h: 720 },
+    });
+
+    useStore.getState().setViewMode('TRASH');
+
+    const board = useStore.getState().boards.find(b => b.id === 'default');
+    expect(board?.viewport).toEqual({ x: 150, y: 250 });
+  });
+
+  it('setViewMode 切到 TRASH 再切回 BOARD 时恢复保存的视口', () => {
+    useStore.setState({
+      viewMode: 'BOARD',
+      viewport: { x: 150, y: 250, w: 1280, h: 720 },
+    });
+
+    useStore.getState().setViewMode('TRASH');
+
+    const board = useStore.getState().boards.find(b => b.id === 'default');
+    expect(board?.viewport).toEqual({ x: 150, y: 250 });
+
+    useStore.getState().setViewMode('BOARD');
+
+    const state = useStore.getState();
+    expect(state.viewport.x).toBe(150);
+    expect(state.viewport.y).toBe(250);
   });
 
   it('setViewMode 切到 TRASH 时清理残留状态', () => {

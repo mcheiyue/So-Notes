@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { useStore } from '../store/useStore';
+import { useDomainStore } from '../store';
 import { Note, Board } from '../store/types';
 import type {
   SearchWorkerMessage,
@@ -16,9 +16,9 @@ export function useSearchWorker() {
   const [isSearching, setIsSearching] = useState(false);
   const pendingQueryRef = useRef<string | null>(null);
 
-  const notesById = useStore((state) => state.notesById);
-  const boards = useStore((state) => state.boards);
-  const currentBoardId = useStore((state) => state.currentBoardId);
+  const notesById = useDomainStore((state) => state.notesById);
+  const boards = useDomainStore((state) => state.boards);
+  const currentBoardId = useDomainStore((state) => state.currentBoardId);
 
   useEffect(() => {
     const worker = new Worker(

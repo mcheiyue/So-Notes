@@ -4,6 +4,7 @@ import { cn } from "../utils/cn";
 import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity } from "lucide-react";
 import { Z_INDEX } from "../constants/layout";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
+import { appController } from "../controllers/appController";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 type StoreState = ReturnType<typeof useStore.getState>;
@@ -48,10 +49,9 @@ export const BoardDock = () => {
   const store = useStore();
   const { 
     boards, boardNoteIds, notesById, currentBoardId, 
-    switchBoard, createBoard, deleteBoard, updateBoard, reorderBoard,
+    createBoard, deleteBoard, updateBoard, reorderBoard,
     isDockVisible, setDockVisible, 
-    viewMode, setViewMode, 
-    clearSelection,
+    viewMode,
     exportAll, importFromFile,
     config, setThemeMode,
     saveStatus, isSaving, saveError, lastSavedAt
@@ -609,13 +609,12 @@ export const BoardDock = () => {
                 key={board.id}
                 data-board-id={board.id}
                 onClick={() => {
-                   if (isReordering) {
-                       setReorderId(null); // Click to confirm
-                       return;
-                   }
-                   switchBoard(board.id);
-                   setViewMode('BOARD');
-                   setContextMenuBoard(null);
+                  if (isReordering) {
+                    setReorderId(null); // Click to confirm
+                    return;
+                  }
+                  appController.switchBoard(board.id);
+                  setContextMenuBoard(null);
                 }}
                 onDoubleClick={() => {
                     if (isReordering) return;
@@ -696,8 +695,7 @@ export const BoardDock = () => {
           <button
             type="button"
             onClick={() => {
-              clearSelection();
-              setViewMode(viewMode === 'TRASH' ? 'BOARD' : 'TRASH');
+              appController.toggleViewMode();
             }}
             className={cn(
               "relative group flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200",

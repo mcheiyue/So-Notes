@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useStore } from "../store/useStore";
+import { useDomainStore, useUIStore } from "../store";
 import { Search, CornerDownLeft, Command, FileText, Filter } from "lucide-react";
 import { cn } from "../utils/cn";
 import { Note } from "../store/types";
-import { LAYOUT, Z_INDEX } from "../constants/layout";
+import { Z_INDEX } from "../constants/layout";
 import { useSearchWorker } from "../hooks/useSearchWorker";
 import type { SearchFilter } from "../workers/searchWorker";
+import { appController } from "../controllers/appController";
 
 export const Spotlight = () => {
   const [query, setQuery] = useState("");
@@ -14,12 +15,9 @@ export const Spotlight = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  const boards = useStore((state) => state.boards);
-  const currentBoardId = useStore((state) => state.currentBoardId);
-  const isSpotlightOpen = useStore((state) => state.isSpotlightOpen);
-  const setSpotlightOpen = useStore((state) => state.setSpotlightOpen);
-  const toggleCollapse = useStore((state) => state.toggleCollapse);
-  const switchBoard = useStore((state) => state.switchBoard);
+  const boards = useDomainStore((state) => state.boards);
+  const currentBoardId = useDomainStore((state) => state.currentBoardId);
+  const isSpotlightOpen = useUIStore((state) => state.isSpotlightOpen);
 
   const {
     isSearching,
@@ -68,12 +66,12 @@ export const Spotlight = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isSpotlightOpen) return;
       if (e.key === "Escape") {
-        setSpotlightOpen(false);
+        appController.closeSpotlight();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isSpotlightOpen, setSpotlightOpen]);
+  }, [isSpotlightOpen]);
 
   useEffect(() => {
     if (resultsRef.current) {
@@ -85,35 +83,7 @@ export const Spotlight = () => {
   }, [selectedIndex]);
 
   const handleSelect = (note: Note) => {
-    setSpotlightOpen(false);
-
-    if (note.boardId !== currentBoardId) {
-      switchBoard(note.boardId);
-    }
-
-    if (note.collapsed) {
-      toggleCollapse(note.id);
-    }
-
-    requestAnimationFrame(() => {
-      const state = useStore.getState();
-      const targetNote = state.notesById[note.id];
-
-      if (!targetNote || targetNote.deletedAt || targetNote.boardId !== state.currentBoardId || targetNote.collapsed) {
-        return;
-      }
-
-      const nWidth = LAYOUT.NOTE_WIDTH;
-      const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, targetNote.height || LAYOUT.NOTE_MIN_HEIGHT);
-      const targetX = (targetNote.x + nWidth / 2) - (state.viewport.w / 2);
-      const targetY = (targetNote.y + nHeight / 2) - (state.viewport.h / 2);
-
-      state.clearSelection();
-      state.setViewportPosition(targetX, targetY);
-      state.setSelectedIds([targetNote.id]);
-      state.bringToFront(targetNote.id);
-      state.markNoteHighlights([targetNote.id], 'located');
-    });
+    appController.locateAndSelectNote(note);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -150,7 +120,7 @@ export const Spotlight = () => {
       <button 
         type="button"
         className="pointer-events-auto absolute inset-0 bg-black/20 backdrop-blur-sm transition-opacity" 
-        onClick={() => setSpotlightOpen(false)}
+        onClick={() => appController.closeSpotlight()}
         aria-label="关闭搜索"
       />
 

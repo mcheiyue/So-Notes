@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useStore } from '../store/useStore';
+import { useDomainStore, useViewportStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../utils/cn';
 import { LAYOUT, Z_INDEX } from '../constants/layout';
@@ -8,6 +8,7 @@ import { useDarkMode } from '../hooks/useDarkMode';
 import { getNoteVisualHeight, getNoteVisualWidth } from '../utils/noteVisualMetrics';
 
 const EMPTY_NOTE_IDS: string[] = [];
+const VIEWPORT_TRANSITION_CLASS = 'transition-all duration-75 ease-linear';
 
 interface MiniMapRenderableNote {
     layout: LayoutNote;
@@ -15,17 +16,22 @@ interface MiniMapRenderableNote {
 }
 
 export const MiniMap: React.FC = () => {
-    const { notesById, layoutNotesById, currentBoardNoteIds, viewport, interaction, setViewportPosition } = useStore(
+    const { notesById, layoutNotesById, currentBoardNoteIds } = useDomainStore(
         useShallow(state => ({
             notesById: state.notesById,
             layoutNotesById: state.layoutNotesById,
             currentBoardNoteIds: state.boardNoteIds[state.currentBoardId] ?? EMPTY_NOTE_IDS,
+        }))
+    );
+    const { viewport, interaction, setViewportPosition } = useViewportStore(
+        useShallow(state => ({
             viewport: state.viewport,
             interaction: state.interaction,
             setViewportPosition: state.setViewportPosition,
         }))
     );
     const [isHovered, setIsHovered] = useState(false);
+    const [isDraggingViewport, setIsDraggingViewport] = useState(false);
     const mapRef = useRef<HTMLDivElement>(null);
     const viewportRef = useRef<HTMLButtonElement>(null);
     const isDarkMode = useDarkMode();
@@ -34,6 +40,7 @@ export const MiniMap: React.FC = () => {
     const clearActiveDrag = useCallback(() => {
         dragCleanupRef.current?.();
         dragCleanupRef.current = null;
+        setIsDraggingViewport(false);
     }, []);
 
     useEffect(() => {
@@ -102,7 +109,7 @@ export const MiniMap: React.FC = () => {
         }, [visibleNotes, viewport]);
 
     // Visibility Logic
-    const edgePush = useStore(state => state.interaction.edgePush);
+    const edgePush = useViewportStore(state => state.interaction.edgePush);
     const isEdgePushing = Object.values(edgePush).some(v => v);
     const isVisible = interaction.isPanMode || isEdgePushing || isHovered;
 
@@ -164,7 +171,9 @@ export const MiniMap: React.FC = () => {
         e.stopPropagation(); // Prevent jumping
         e.preventDefault();
         clearActiveDrag();
-        
+
+        setIsDraggingViewport(true);
+
         const startX = e.clientX;
         const startY = e.clientY;
         
@@ -211,6 +220,7 @@ export const MiniMap: React.FC = () => {
                 cancelAnimationFrame(frameId);
                 frameId = null;
             }
+            setIsDraggingViewport(false);
             window.removeEventListener('mousemove', handleMove);
             window.removeEventListener('mouseup', handleUp);
             if (dragCleanupRef.current === handleUp) {
@@ -337,7 +347,8 @@ export const MiniMap: React.FC = () => {
                     ref={viewportRef}
                     className={cn(
                         "minimap-viewport",
-                        "absolute rounded-lg shadow-sm transition-all duration-75 ease-linear cursor-grab active:cursor-grabbing",
+                        "absolute rounded-lg shadow-sm cursor-grab active:cursor-grabbing",
+                        isDraggingViewport ? "transition-none" : VIEWPORT_TRANSITION_CLASS,
                         "border-2 border-blue-500/60 dark:border-blue-300/60",
                         "bg-blue-500/5 dark:bg-blue-300/5 backdrop-brightness-110",
                         "hover:bg-blue-500/10 dark:hover:bg-blue-300/10 hover:border-blue-500/80 dark:hover:border-blue-300/80",

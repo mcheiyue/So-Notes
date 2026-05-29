@@ -113,5 +113,5 @@ npm run tauri build
 ---
 
 <p align="center">
-  由 Antigravity 强力驱动 · 记录每一个闪光的灵感
+  本地优先 · 记录每一个闪光的灵感
 </p>

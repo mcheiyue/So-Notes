@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { useStore } from '../store/useStore';
+import { useViewportStore } from '../store';
 import { LAYOUT } from '../constants/layout';
 
 export const EDGE_PUSH_ACTIVATION_DELAY = 1000;
@@ -19,8 +19,8 @@ const isSameEdge = (a: EdgeState, b: EdgeState) => (
 );
 
 export const useEdgePush = () => {
-    const setEdgePush = useStore(state => state.setEdgePush);
-    const isDragging = useStore(state => state.interaction.isDragging);
+    const setEdgePush = useViewportStore(state => state.setEdgePush);
+    const isDragging = useViewportStore(state => state.interaction.isDragging);
     
     const edgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const currentEdge = useRef<EdgeState>(EMPTY_EDGE);
@@ -86,8 +86,7 @@ export const useEdgePush = () => {
     }, [isDragging, setEdgePush]);
 
     const checkEdge = (x: number, y: number, width: number, height: number) => {
-        // Access store directly to avoid re-renders on every viewport change
-        const state = useStore.getState();
+        const state = useViewportStore.getState();
         const viewport = state.viewport;
         const isPanMode = state.interaction.isPanMode;
         const hasPendingState = isEdgeActive.current || !!edgeTimer.current || hasAnyEdge(currentEdge.current);
