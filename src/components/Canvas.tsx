@@ -118,9 +118,10 @@ export const Canvas: React.FC = () => {
   const selectionBoxRef = useRef<HTMLDivElement>(null);
   const storageHandleRef = useRef<ReturnType<typeof attach> | null>(null);
   const engineRef = useRef<CanvasEngine>(null);
-  if (!engineRef.current) {
+  if (engineRef.current == null) {
     engineRef.current = new CanvasEngine();
   }
+  // eslint-disable-next-line react-hooks/refs -- CanvasEngine 是命令式实例，非 React 状态
   const engine = engineRef.current;
   const scale = 1;
 
@@ -219,6 +220,7 @@ export const Canvas: React.FC = () => {
     }
   }, [engine]);
 
+  // eslint-disable-next-line react-hooks/refs -- engine 是 useRef 初始化的命令式实例
   useCanvasGlobalListeners({ engine, handleGlobalUp });
 
   useEffect(() => {
