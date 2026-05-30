@@ -140,7 +140,7 @@ describe('App WindowShell 组合契约', () => {
   });
 
   it('BOARD 模式下将壳内内容与壳外浮层分离', async () => {
-    useStore.setState({ isSpotlightOpen: true });
+    useStore.setState({ isSpotlightOpen: true, isQuickCaptureOpen: true });
 
     await renderApp();
 
@@ -152,6 +152,7 @@ describe('App WindowShell 组合契约', () => {
     const spotlight = container.querySelector('[data-testid="spotlight"]') as HTMLElement | null;
     const contextMenu = container.querySelector('[data-testid="context-menu"]') as HTMLElement | null;
     const shellOverlay = container.querySelector('[data-testid="window-shell-overlay"]') as HTMLElement | null;
+    const quickCapture = container.querySelector('[role="dialog"][aria-label="快速捕获"]') as HTMLElement | null;
 
     expect(shell).not.toBeNull();
     expect(canvas).not.toBeNull();
@@ -161,14 +162,18 @@ describe('App WindowShell 组合契约', () => {
     expect(spotlight).not.toBeNull();
     expect(contextMenu).not.toBeNull();
     expect(shellOverlay).not.toBeNull();
+    expect(quickCapture).not.toBeNull();
 
     expect(shell?.contains(canvas)).toBe(true);
     expect(shell?.contains(boardDock)).toBe(true);
     expect(shell?.contains(miniMap)).toBe(true);
     expect(shell?.contains(pinFab)).toBe(true);
     expect(shell?.contains(spotlight)).toBe(true);
+    expect(shell?.contains(quickCapture)).toBe(true);
+    expect(shellOverlay?.contains(quickCapture)).toBe(true);
     expect(shell?.contains(contextMenu)).toBe(false);
     expect(shellOverlay?.className).toContain('pointer-events-none');
+    expect(quickCapture?.className).toContain('pointer-events-auto');
     expect(listenMock).toHaveBeenCalledWith('reset-viewport', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('pin-state-changed', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('open-quick-capture', expect.any(Function));

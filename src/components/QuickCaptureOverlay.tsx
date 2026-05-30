@@ -50,7 +50,7 @@ export const QuickCaptureOverlay: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 flex items-start justify-center bg-black/20 px-4 pt-[18vh] backdrop-blur-sm"
+      className="pointer-events-auto absolute inset-0 flex items-start justify-center bg-black/20 px-4 pt-[18vh] backdrop-blur-sm"
       style={{ zIndex: Z_INDEX.QUICK_CAPTURE }}
       role="dialog"
       aria-modal="true"

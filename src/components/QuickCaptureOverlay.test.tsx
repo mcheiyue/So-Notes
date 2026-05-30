@@ -67,6 +67,16 @@ describe('QuickCaptureOverlay 输入事件', () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  it('根层使用壳内绝对定位，避免突破窗口圆角裁剪域', async () => {
+    await renderOverlay();
+
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.className).toContain('absolute');
+    expect(dialog?.className).toContain('pointer-events-auto');
+    expect(dialog?.className).not.toContain('fixed');
+  });
+
   it('提交快速捕获时使用统一视口落点', async () => {
     const addNotesWithContentBatch = vi.fn();
     useStore.setState({

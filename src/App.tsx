@@ -164,6 +164,7 @@ function App() {
       )}
 
       <BoardDock />
+      <QuickCaptureOverlay />
     </>
   );
 
@@ -177,7 +178,6 @@ function App() {
       <ShortcutsManager />
       <SmartPasteSplitBubble />
       <SelectionActionBar />
-      <QuickCaptureOverlay />
       {arrangeUndoToast && undoToastCopy && (
         <div
           className="fixed left-1/2 bottom-5 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-sky-200/70 bg-secondary-bg/95 px-4 py-3 text-sm text-text-primary shadow-2xl backdrop-blur-md dark:border-sky-400/25 dark:bg-secondary-bg/90"
