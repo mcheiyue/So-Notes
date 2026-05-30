@@ -184,11 +184,11 @@ describe('App WindowShell 组合契约', () => {
     expect(invokeMock).toHaveBeenCalledWith('get_global_shortcut_error');
   });
 
-  it('将当前看板与保存状态同步到托盘 tooltip', async () => {
+  it('将当前看板名称同步到托盘 tooltip，正常状态不附带保存状态', async () => {
     await renderApp();
 
     expect(invokeMock).toHaveBeenCalledWith('set_tray_tooltip', {
-      tooltip: 'SoNotes · 当前看板：主板 · 已保存',
+      tooltip: 'SoNotes · 当前看板：主板',
     });
   });
 
@@ -210,6 +210,18 @@ describe('App WindowShell 组合契约', () => {
 
     expect(invokeMock).toHaveBeenCalledWith('set_tray_tooltip', {
       tooltip: 'SoNotes · 当前看板：项目看板 · 保存失败：持久化写入失败。',
+    });
+  });
+
+  it('保存中时更新托盘 tooltip 状态', async () => {
+    await renderApp();
+
+    await act(async () => {
+      useStore.setState({ saveStatus: 'saving' });
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith('set_tray_tooltip', {
+      tooltip: 'SoNotes · 当前看板：主板 · 保存中',
     });
   });
 

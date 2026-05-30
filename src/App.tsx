@@ -44,7 +44,7 @@ const getOrganizationUndoToastCopy = (action: 'arrange' | 'merge' | 'split', not
   };
 };
 
-const getTraySaveStatusCopy = (saveStatus: string, saveError: string | null) => {
+const getTraySaveStatusCopy = (saveStatus: string, saveError: string | null): string | null => {
   if (saveStatus === 'saving') {
     return '保存中';
   }
@@ -59,12 +59,16 @@ const getTraySaveStatusCopy = (saveStatus: string, saveError: string | null) => 
     return `保存失败：${clippedDetail}`;
   }
 
-  return '已保存';
+  return null;
 };
 
 const buildTrayTooltip = (boardName: string, saveStatus: string, saveError: string | null) => {
   const normalizedBoardName = boardName.trim() || '主板';
-  return `SoNotes · 当前看板：${normalizedBoardName} · ${getTraySaveStatusCopy(saveStatus, saveError)}`;
+  const statusCopy = getTraySaveStatusCopy(saveStatus, saveError);
+  if (!statusCopy) {
+    return `SoNotes · 当前看板：${normalizedBoardName}`;
+  }
+  return `SoNotes · 当前看板：${normalizedBoardName} · ${statusCopy}`;
 };
 
 function App() {

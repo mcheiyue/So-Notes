@@ -5,6 +5,14 @@ import { QuickCaptureOverlay } from './QuickCaptureOverlay';
 import { useStore } from '../store/useStore';
 import { resetViewportSpawnSequenceForTests } from '../utils/spawnPosition';
 
+const { readTextMock } = vi.hoisted(() => ({
+  readTextMock: vi.fn(async () => ''),
+}));
+
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
+  readText: readTextMock,
+}));
+
 describe('QuickCaptureOverlay 输入事件', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -16,6 +24,9 @@ describe('QuickCaptureOverlay 输入事件', () => {
   };
 
   beforeEach(() => {
+    readTextMock.mockReset();
+    readTextMock.mockResolvedValue('');
+
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal(
       'requestAnimationFrame',
@@ -42,17 +53,104 @@ describe('QuickCaptureOverlay 输入事件', () => {
     vi.unstubAllGlobals();
   });
 
-  it('textarea 内按 Escape 不关闭浮层，避免输入法取消组字时丢内容', async () => {
+  it('IME 组合中按 Escape 不关闭浮层', async () => {
     await renderOverlay();
 
     const textarea = container.querySelector('textarea');
     expect(textarea).not.toBeNull();
 
     await act(async () => {
-      textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, isComposing: true }));
     });
 
     expect(useStore.getState().isQuickCaptureOpen).toBe(true);
+  });
+
+  it('非组合状态按 Escape 关闭浮层', async () => {
+    await renderOverlay();
+
+    expect(useStore.getState().isQuickCaptureOpen).toBe(true);
+
+    const textarea = container.querySelector('textarea');
+    expect(textarea).not.toBeNull();
+
+    await act(async () => {
+      textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, isComposing: false }));
+    });
+
+    expect(useStore.getState().isQuickCaptureOpen).toBe(false);
+  });
+
+  it('打开时读取剪贴板内容并预填并全选', async () => {
+    readTextMock.mockResolvedValueOnce('剪贴板中的文本');
+
+    useStore.setState({ isQuickCaptureOpen: false });
+    await renderOverlay();
+
+    const selectSpy = vi.spyOn(HTMLTextAreaElement.prototype, 'select');
+
+    await act(async () => {
+      useStore.setState({ isQuickCaptureOpen: true });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+    expect(textarea?.value).toBe('剪贴板中的文本');
+    expect(selectSpy).toHaveBeenCalled();
+
+    selectSpy.mockRestore();
+  });
+
+  it('剪贴板为空时不覆盖已有状态', async () => {
+    readTextMock.mockResolvedValueOnce('');
+
+    await renderOverlay();
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+    expect(textarea?.value).toBe('');
+  });
+
+  it('Tab 焦点在对话框控件内循环', async () => {
+    readTextMock.mockResolvedValueOnce('可提交内容');
+
+    await renderOverlay();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+    const buttons = Array.from(container.querySelectorAll('button')) as HTMLButtonElement[];
+    const dialogButtons = buttons.filter(
+      (b) => b.textContent?.includes('取消') || b.textContent?.includes('创建'),
+    );
+
+    expect(textarea).not.toBeNull();
+    expect(dialogButtons.length).toBe(2);
+    const [cancelButton, createButton] = dialogButtons;
+
+    textarea?.focus();
+    expect(document.activeElement).toBe(textarea);
+
+    await act(async () => {
+      textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    });
+
+    expect(document.activeElement).toBe(cancelButton);
+
+    await act(async () => {
+      cancelButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    });
+
+    expect(document.activeElement).toBe(createButton);
+
+    await act(async () => {
+      createButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    });
+
+    expect(document.activeElement).toBe(textarea);
   });
 
   it('浮层阻断右键默认菜单', async () => {

@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { useStore } from '../store/useStore';
 import { useUIStore, useViewportStore } from '../store';
 import { Z_INDEX } from '../constants/layout';
@@ -10,16 +11,44 @@ const getCaptureOrigin = () => {
   return getViewportSpawnOrigin(viewport);
 };
 
+const DIALOG_FOCUSABLE_SELECTOR = 'textarea, button:not([disabled])';
+
 export const QuickCaptureOverlay: React.FC = () => {
   const isOpen = useUIStore((state) => state.isQuickCaptureOpen);
   const setQuickCaptureOpen = useUIStore((state) => state.setQuickCaptureOpen);
   const addNotesWithContentBatch = useStore((state) => state.addNotesWithContentBatch);
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
-    if (!isOpen) return;
-    requestAnimationFrame(() => inputRef.current?.focus());
+    if (!isOpen) {
+      setValue('');
+      return;
+    }
+
+    let cancelled = false;
+
+    requestAnimationFrame(() => {
+      if (cancelled) return;
+      inputRef.current?.focus();
+
+      readText()
+        .then((text) => {
+          if (cancelled || !text?.trim()) return;
+          setValue(text);
+          requestAnimationFrame(() => {
+            if (!cancelled && inputRef.current) {
+              inputRef.current.select();
+            }
+          });
+        })
+        .catch(() => {});
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -36,7 +65,7 @@ export const QuickCaptureOverlay: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, setQuickCaptureOpen]);
 
-  const submit = () => {
+  const submit = useCallback(() => {
     const origin = getCaptureOrigin();
     const notes = createSmartPasteNoteInputs(value, origin.x, origin.y);
     if (notes.length === 0) return;
@@ -44,6 +73,22 @@ export const QuickCaptureOverlay: React.FC = () => {
     addNotesWithContentBatch(notes);
     setValue('');
     setQuickCaptureOpen(false);
+  }, [value, addNotesWithContentBatch, setQuickCaptureOpen]);
+
+  const trapDialogFocus = (event: React.KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== 'Tab') return;
+
+    const focusable = Array.from(
+      formRef.current?.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR) ?? [],
+    );
+    if (focusable.length === 0) return;
+
+    event.preventDefault();
+    const activeIndex = focusable.findIndex((element) => element === document.activeElement);
+    const currentIndex = activeIndex >= 0 ? activeIndex : 0;
+    const offset = event.shiftKey ? -1 : 1;
+    const nextIndex = (currentIndex + offset + focusable.length) % focusable.length;
+    focusable[nextIndex]?.focus();
   };
 
   if (!isOpen) return null;
@@ -65,11 +110,13 @@ export const QuickCaptureOverlay: React.FC = () => {
       />
 
       <form
+        ref={formRef}
         className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-border-subtle bg-secondary-bg/95 shadow-2xl"
         onSubmit={(event) => {
           event.preventDefault();
           submit();
         }}
+        onKeyDown={trapDialogFocus}
       >
         <div className="border-b border-border-subtle px-4 py-3 text-sm font-medium text-text-secondary">
           快速捕获
@@ -80,7 +127,13 @@ export const QuickCaptureOverlay: React.FC = () => {
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
+              if (event.nativeEvent.isComposing) {
+                event.stopPropagation();
+                return;
+              }
+              event.preventDefault();
               event.stopPropagation();
+              setQuickCaptureOpen(false);
               return;
             }
 
