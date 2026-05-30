@@ -44,14 +44,40 @@ const getOrganizationUndoToastCopy = (action: 'arrange' | 'merge' | 'split', not
   };
 };
 
+const getTraySaveStatusCopy = (saveStatus: string, saveError: string | null) => {
+  if (saveStatus === 'saving') {
+    return '保存中';
+  }
+
+  if (saveStatus === 'error') {
+    const detail = saveError?.trim();
+    if (!detail) {
+      return '保存失败';
+    }
+
+    const clippedDetail = detail.length > 24 ? `${detail.slice(0, 24)}…` : detail;
+    return `保存失败：${clippedDetail}`;
+  }
+
+  return '已保存';
+};
+
+const buildTrayTooltip = (boardName: string, saveStatus: string, saveError: string | null) => {
+  const normalizedBoardName = boardName.trim() || '主板';
+  return `SoNotes · 当前看板：${normalizedBoardName} · ${getTraySaveStatusCopy(saveStatus, saveError)}`;
+};
+
 function App() {
   const [globalShortcutError, setGlobalShortcutError] = useState<string | null>(null);
   const viewMode = useStore(state => state.viewMode);
+  const boards = useStore(state => state.boards);
   const isSpotlightOpen = useStore(state => state.isSpotlightOpen);
   const notesById = useStore(state => state.notesById);
   const allNoteIds = useStore(state => state.allNoteIds);
   const boardNoteIds = useStore(state => state.boardNoteIds);
   const currentBoardId = useStore(state => state.currentBoardId);
+  const saveStatus = useStore(state => state.saveStatus);
+  const saveError = useStore(state => state.saveError);
   const selectedIds = useStore(state => state.selectedIds);
   const arrangeUndoToast = useStore(state => state.arrangeUndoToast);
 
@@ -80,6 +106,15 @@ function App() {
 
     return () => window.clearTimeout(timeoutId);
   }, [arrangeUndoToast]);
+
+  useEffect(() => {
+    const currentBoard = boards.find(board => board.id === currentBoardId);
+    const tooltip = buildTrayTooltip(currentBoard?.name ?? '主板', saveStatus, saveError);
+
+    invoke('set_tray_tooltip', { tooltip }).catch((error) => {
+      console.warn('Failed to update tray tooltip:', error);
+    });
+  }, [boards, currentBoardId, saveError, saveStatus]);
 
   const syncViewportToShell = useCallback((rect: WindowShellContentRect) => {
     appController.syncShellViewport(rect);

@@ -1,11 +1,14 @@
-use std::{fs, sync::{Mutex, Arc}};
+use std::{
+    fs,
+    sync::{Arc, Mutex},
+};
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WebviewWindow, WindowEvent,
 };
-use tauri_plugin_positioner::{Position, WindowExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_positioner::{Position, WindowExt};
 use tokio::sync;
 
 mod persistence;
@@ -14,6 +17,7 @@ struct AppState {
     is_pinned: Mutex<bool>,
     last_toggle_time: Mutex<u128>,
     pin_menu_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    tray_icon: Mutex<Option<TrayIcon<tauri::Wry>>>,
     global_shortcut_error: Mutex<Option<String>>,
     queue: persistence::IntentQueue,
     rx: Arc<sync::Mutex<sync::mpsc::UnboundedReceiver<persistence::WriteIntent>>>,
@@ -38,6 +42,23 @@ fn get_global_shortcut_error(state: tauri::State<AppState>) -> Option<String> {
         .lock()
         .ok()
         .and_then(|error| error.clone())
+}
+
+#[tauri::command]
+fn set_tray_tooltip(state: tauri::State<AppState>, tooltip: String) -> Result<(), String> {
+    let tray_icon = state
+        .tray_icon
+        .lock()
+        .map_err(|_| "托盘状态不可用".to_string())?
+        .clone();
+
+    if let Some(tray_icon) = tray_icon {
+        tray_icon
+            .set_tooltip(Some(tooltip))
+            .map_err(|error| error.to_string())
+    } else {
+        Err("托盘图标尚未初始化".to_string())
+    }
 }
 
 // Helper to get current millis
@@ -111,7 +132,10 @@ async fn save_content(
         fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
     }
     let file_path = app_dir.join(&filename);
-    state.queue.submit_save(content, file_path, generation_id).await
+    state
+        .queue
+        .submit_save(content, file_path, generation_id)
+        .await
 }
 
 #[tauri::command]
@@ -135,10 +159,10 @@ fn frontend_unpin(app: tauri::AppHandle, state: tauri::State<AppState>) {
     // 2. Update Menu Text
     if let Ok(guard) = state.pin_menu_item.lock() {
         if let Some(item) = guard.as_ref() {
-             let _ = item.set_text("钉住窗口");
+            let _ = item.set_text("钉住窗口");
         }
     }
-    
+
     // 3. Update Window Behavior & Emit Event
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_always_on_top(false);
@@ -161,6 +185,7 @@ pub fn run() {
                 is_pinned: Mutex::new(false),
                 last_toggle_time: Mutex::new(0),
                 pin_menu_item: Mutex::new(None),
+                tray_icon: Mutex::new(None),
                 global_shortcut_error: Mutex::new(None),
                 queue,
                 rx,
@@ -173,8 +198,10 @@ pub fn run() {
                 persistence::IntentQueue::consumer_loop(rx).await;
             });
 
-            let quick_capture_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyN);
-            let toggle_window_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyS);
+            let quick_capture_shortcut =
+                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyN);
+            let toggle_window_shortcut =
+                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyS);
             if let Err(error) = app.global_shortcut().on_shortcuts(
                 [quick_capture_shortcut, toggle_window_shortcut],
                 move |app, shortcut, event| {
@@ -213,7 +240,7 @@ pub fn run() {
 
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let pin_i = MenuItem::with_id(app, "pin", "钉住窗口", true, None::<&str>)?;
-            
+
             // Store the pin menu item in AppState
             if let Some(state) = app.try_state::<AppState>() {
                 if let Ok(mut guard) = state.pin_menu_item.lock() {
@@ -221,17 +248,36 @@ pub fn run() {
                 }
             }
 
-            let quick_capture_i = MenuItem::with_id(app, "quick_capture", "快速捕获", true, None::<&str>)?;
-            let clipboard_note_i = MenuItem::with_id(app, "clipboard_note", "从剪贴板创建便签", true, None::<&str>)?;
-            let new_note_i = MenuItem::with_id(app, "new_note", "新建空白便签", true, None::<&str>)?;
+            let quick_capture_i =
+                MenuItem::with_id(app, "quick_capture", "快速捕获", true, None::<&str>)?;
+            let clipboard_note_i = MenuItem::with_id(
+                app,
+                "clipboard_note",
+                "从剪贴板创建便签",
+                true,
+                None::<&str>,
+            )?;
+            let new_note_i =
+                MenuItem::with_id(app, "new_note", "新建空白便签", true, None::<&str>)?;
             let reset_i = MenuItem::with_id(app, "reset", "重置窗口", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&pin_i, &quick_capture_i, &clipboard_note_i, &new_note_i, &reset_i, &quit_i])?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &pin_i,
+                    &quick_capture_i,
+                    &clipboard_note_i,
+                    &new_note_i,
+                    &reset_i,
+                    &quit_i,
+                ],
+            )?;
 
             // 克隆 MenuItem 句柄以便在事件闭包中使用
             let pin_i_clone = pin_i.clone();
 
-            let _tray = TrayIconBuilder::new()
+            let tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("SoNotes")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| {
@@ -246,7 +292,11 @@ pub fn run() {
                             };
 
                             // Update menu item text
-                            let pin_text = if is_pinned { "取消钉住" } else { "钉住窗口" };
+                            let pin_text = if is_pinned {
+                                "取消钉住"
+                            } else {
+                                "钉住窗口"
+                            };
                             let _ = pin_i_clone.set_text(pin_text);
 
                             // Update window behavior
@@ -327,6 +377,12 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(mut tray_icon) = state.tray_icon.lock() {
+                    *tray_icon = Some(tray);
+                }
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -358,6 +414,7 @@ pub fn run() {
             set_pin_mode,
             get_pin_mode,
             get_global_shortcut_error,
+            set_tray_tooltip,
             save_content,
             load_content,
             check_hide_on_leave,
@@ -366,4 +423,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

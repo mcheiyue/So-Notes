@@ -184,6 +184,35 @@ describe('App WindowShell 组合契约', () => {
     expect(invokeMock).toHaveBeenCalledWith('get_global_shortcut_error');
   });
 
+  it('将当前看板与保存状态同步到托盘 tooltip', async () => {
+    await renderApp();
+
+    expect(invokeMock).toHaveBeenCalledWith('set_tray_tooltip', {
+      tooltip: 'SoNotes · 当前看板：主板 · 已保存',
+    });
+  });
+
+  it('保存失败时更新托盘 tooltip 状态', async () => {
+    await renderApp();
+
+    const state = useStore.getState();
+    const currentBoard = state.boards.find((board) => board.id === state.currentBoardId)!;
+
+    await act(async () => {
+      useStore.setState({
+        boards: state.boards.map((board) => (
+          board.id === currentBoard.id ? { ...board, name: '项目看板' } : board
+        )),
+        saveStatus: 'error',
+        saveError: '持久化写入失败。',
+      });
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith('set_tray_tooltip', {
+      tooltip: 'SoNotes · 当前看板：项目看板 · 保存失败：持久化写入失败。',
+    });
+  });
+
   it('收到全局快捷键注册失败事件后显示提示', async () => {
     let shortcutFailedHandler: ((event: { payload: string }) => void) | null = null;
     listenMock.mockImplementation(async (...args: unknown[]) => {
