@@ -440,6 +440,19 @@ const extractDomainSlice = (state: State): DomainState => ({
   config: state.config,
 });
 
+const resolveRestoreBoardId = (
+  state: Pick<State, 'boards' | 'currentBoardId'>,
+  preferredBoardId: string,
+): string | null => {
+  if (state.boards.some((board) => board.id === preferredBoardId)) {
+    return preferredBoardId;
+  }
+  if (state.boards.some((board) => board.id === state.currentBoardId)) {
+    return state.currentBoardId;
+  }
+  return state.boards[0]?.id ?? null;
+};
+
 const clearDanglingNoteUiRefs = (state: State, removedNoteIds: ReadonlySet<string>) => {
   state.selectedIds = state.selectedIds.filter((id) => !removedNoteIds.has(id));
   state.recentlyCreatedIds = state.recentlyCreatedIds.filter((id) => !removedNoteIds.has(id));
@@ -469,8 +482,13 @@ const extractAffectedNoteFromPatch = (
       const note = currentState.notesById[patch.noteId];
       return note ? { noteId: patch.noteId, boardId: note.boardId } : null;
     }
-    default:
+    case 'compound-patch': {
+      for (const childPatch of patch.patches) {
+        const affected = extractAffectedNoteFromPatch(childPatch, currentState);
+        if (affected) return affected;
+      }
       return null;
+    }
   }
 };
 
@@ -1480,12 +1498,22 @@ export const useStore = create<State>()(
     deleteNote: (id) => {
       set((state) => {
         const note = getNoteById(state, id);
-        if (note) {
-          note.deletedAt = Date.now();
-          state.layoutNotesById[note.id] = extractLayoutNote(note);
-          clearTransientNoteState(state, note.id);
-        }
+        if (!note || note.deletedAt) return;
+
+        const deletedAt = Date.now();
+        note.deletedAt = deletedAt;
+        state.layoutNotesById[note.id] = extractLayoutNote(note);
+        clearTransientNoteState(state, note.id);
         state.selectedIds = state.selectedIds.filter(selId => selId !== id);
+
+        const entry: HistoryEntry<DomainPatch> = {
+          id: crypto.randomUUID(),
+          label: 'soft-delete-note',
+          createdAt: Date.now(),
+          undo: { type: 'update-fields', noteId: id, fields: { deletedAt: null } },
+          redo: { type: 'update-fields', noteId: id, fields: { deletedAt } },
+        };
+        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
       });
     },
 
@@ -1493,18 +1521,31 @@ export const useStore = create<State>()(
     restoreNote: (id) => {
         set((state) => {
             const note = getNoteById(state, id);
-            if (note) {
-                note.deletedAt = null;
-                
-                const boardExists = state.boards.some(b => b.id === note.boardId);
-                if (!boardExists) {
-                    moveNoteBetweenBoards(state, id, state.currentBoardId);
-                }
-                
-                state.config.maxZ += 1;
-                note.z = state.config.maxZ;
-                state.layoutNotesById[note.id] = extractLayoutNote(note);
+            if (!note || !note.deletedAt) return;
+
+            const prevDeletedAt = note.deletedAt;
+            const prevZ = note.z;
+
+            const targetBoardId = resolveRestoreBoardId(state, note.boardId);
+            if (!targetBoardId) return;
+
+            note.deletedAt = null;
+            if (note.boardId !== targetBoardId) {
+                moveNoteBetweenBoards(state, id, targetBoardId);
             }
+
+            state.config.maxZ += 1;
+            note.z = state.config.maxZ;
+            state.layoutNotesById[note.id] = extractLayoutNote(note);
+
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'restore-note',
+                createdAt: Date.now(),
+                undo: { type: 'update-fields', noteId: id, fields: { deletedAt: prevDeletedAt, boardId: targetBoardId, z: prevZ } },
+                redo: { type: 'update-fields', noteId: id, fields: { deletedAt: null, boardId: note.boardId, z: note.z } },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
     },
 
@@ -1526,38 +1567,111 @@ export const useStore = create<State>()(
 
     restoreAllTrash: () => {
         set((state) => {
+            const snapshots: Array<{ id: string; prevDeletedAt: number; undoBoardId: string; prevZ: number }> = [];
+            let maxZ = state.config.maxZ;
+
             state.allNoteIds.forEach((id) => {
                 const note = state.notesById[id];
-                if (!note) return;
-                if (note.deletedAt) {
-                    note.deletedAt = null;
-                    if (!state.boards.some(b => b.id === note.boardId)) {
-                        moveNoteBetweenBoards(state, id, state.currentBoardId);
-                    }
-                    state.config.maxZ += 1;
-                    note.z = state.config.maxZ;
-                    state.layoutNotesById[note.id] = extractLayoutNote(note);
+                if (!note || !note.deletedAt) return;
+
+                const targetBoardId = resolveRestoreBoardId(state, note.boardId);
+                if (!targetBoardId) return;
+
+                snapshots.push({ id, prevDeletedAt: note.deletedAt, undoBoardId: targetBoardId, prevZ: note.z });
+
+                note.deletedAt = null;
+                if (note.boardId !== targetBoardId) {
+                    moveNoteBetweenBoards(state, id, targetBoardId);
                 }
+                maxZ += 1;
+                note.z = maxZ;
+                state.layoutNotesById[note.id] = extractLayoutNote(note);
             });
+
+            state.config.maxZ = maxZ;
+
+            if (snapshots.length === 0) return;
+
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'restore-all-trash',
+                createdAt: Date.now(),
+                undo: {
+                    type: 'compound-patch',
+                    patches: snapshots.map(({ id, prevDeletedAt, undoBoardId, prevZ }) => ({
+                        type: 'update-fields' as const,
+                        noteId: id,
+                        fields: { deletedAt: prevDeletedAt, boardId: undoBoardId, z: prevZ },
+                    })),
+                },
+                redo: {
+                    type: 'compound-patch',
+                    patches: snapshots.map(({ id }) => {
+                        const note = state.notesById[id];
+                        return {
+                            type: 'update-fields' as const,
+                            noteId: id,
+                            fields: { deletedAt: null as number | null, boardId: note?.boardId ?? '', z: note?.z ?? 0 },
+                        };
+                    }),
+                },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
     },
 
     restoreSelectedTrash: (ids) => {
         set((state) => {
+            const snapshots: Array<{ id: string; prevDeletedAt: number; undoBoardId: string; prevZ: number }> = [];
+            let maxZ = state.config.maxZ;
+
             ids.forEach((id) => {
                 const note = state.notesById[id];
                 if (!note || !note.deletedAt) return;
-                
+
+                const targetBoardId = resolveRestoreBoardId(state, note.boardId);
+                if (!targetBoardId) return;
+
+                snapshots.push({ id, prevDeletedAt: note.deletedAt, undoBoardId: targetBoardId, prevZ: note.z });
+
                 note.deletedAt = null;
-                
-                if (!state.boards.some(b => b.id === note.boardId)) {
-                    moveNoteBetweenBoards(state, id, state.currentBoardId);
+                if (note.boardId !== targetBoardId) {
+                    moveNoteBetweenBoards(state, id, targetBoardId);
                 }
-                
-                state.config.maxZ += 1;
-                note.z = state.config.maxZ;
+                maxZ += 1;
+                note.z = maxZ;
                 state.layoutNotesById[note.id] = extractLayoutNote(note);
             });
+
+            state.config.maxZ = maxZ;
+
+            if (snapshots.length === 0) return;
+
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'restore-selected-trash',
+                createdAt: Date.now(),
+                undo: {
+                    type: 'compound-patch',
+                    patches: snapshots.map(({ id, prevDeletedAt, undoBoardId, prevZ }) => ({
+                        type: 'update-fields' as const,
+                        noteId: id,
+                        fields: { deletedAt: prevDeletedAt, boardId: undoBoardId, z: prevZ },
+                    })),
+                },
+                redo: {
+                    type: 'compound-patch',
+                    patches: snapshots.map(({ id }) => {
+                        const note = state.notesById[id];
+                        return {
+                            type: 'update-fields' as const,
+                            noteId: id,
+                            fields: { deletedAt: null as number | null, boardId: note?.boardId ?? '', z: note?.z ?? 0 },
+                        };
+                    }),
+                },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
     },
 
@@ -1748,17 +1862,48 @@ export const useStore = create<State>()(
     deleteSelectedNotes: () => {
         const { selectedIds } = get();
         if (selectedIds.length === 0) return;
-        
+
+        const deletedAt = Date.now();
+
         set((state) => {
+            const snapshots: Array<{ id: string }> = [];
+
             selectedIds.forEach((id) => {
                 const note = state.notesById[id];
-                if (note) {
-                    note.deletedAt = Date.now();
-                    state.layoutNotesById[note.id] = extractLayoutNote(note);
-                    clearTransientNoteState(state, note.id);
-                }
+                if (!note || note.deletedAt) return;
+
+                snapshots.push({ id });
+                note.deletedAt = deletedAt;
+                state.layoutNotesById[note.id] = extractLayoutNote(note);
+                clearTransientNoteState(state, note.id);
             });
+
             state.selectedIds = [];
+
+            if (snapshots.length === 0) return;
+
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'soft-delete-selected',
+                createdAt: Date.now(),
+                undo: {
+                    type: 'compound-patch',
+                    patches: snapshots.map(({ id }) => ({
+                        type: 'update-fields' as const,
+                        noteId: id,
+                        fields: { deletedAt: null as number | null },
+                    })),
+                },
+                redo: {
+                    type: 'compound-patch',
+                    patches: snapshots.map(({ id }) => ({
+                        type: 'update-fields' as const,
+                        noteId: id,
+                        fields: { deletedAt },
+                    })),
+                },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
     },
 

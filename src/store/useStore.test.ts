@@ -2186,3 +2186,332 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     expect(useStore.getState().notesById['visible-note'].color).toBe('#FFFFFF');
   });
 });
+
+describe('v1.4.4 软删除与废纸篓恢复领域撤销/重做契约', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'sd-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '便签甲',
+          content: 'alpha',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'sd-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: '便签乙',
+          content: 'beta',
+          color: '#dbeafe',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+        {
+          id: 'sd-3',
+          boardId: 'default',
+          x: 50,
+          y: 60,
+          title: '便签丙',
+          content: 'gamma',
+          color: '#fef9c3',
+          z: 3,
+          createdAt: 300,
+          updatedAt: 300,
+        },
+      ]),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-b', name: '乙板', icon: '📋', createdAt: 1 },
+      ],
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
+      config: { ...useStore.getState().config, maxZ: 3 },
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('deleteNote 软删除创建历史条目并支持撤销/重做', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.getState().deleteNote('sd-1');
+
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().layoutNotesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(1);
+    expect(useStore.getState().domainHistory.undoStack[0].label).toBe('soft-delete-note');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().layoutNotesById['sd-1'].deletedAt).toBeNull();
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().layoutNotesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+  });
+
+  it('deleteNote 对已在废纸篓中的便签不创建历史', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.getState().deleteNote('sd-1');
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(1);
+
+    useStore.getState().deleteNote('sd-1');
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(1);
+  });
+
+  it('deleteSelectedNotes 将多张便签合并为一条 compound-patch 历史', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.setState({ selectedIds: ['sd-1', 'sd-2'] });
+
+    useStore.getState().deleteSelectedNotes();
+
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().selectedIds).toEqual([]);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(1);
+    expect(useStore.getState().domainHistory.undoStack[0].label).toBe('soft-delete-selected');
+    expect(useStore.getState().domainHistory.undoStack[0].undo.type).toBe('compound-patch');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBeNull();
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+  });
+
+  it('deleteSelectedNotes 选中中含已在废纸篓的便签时跳过并只处理有效便签', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.getState().deleteNote('sd-1');
+
+    useStore.setState({ selectedIds: ['sd-1', 'sd-2'] });
+    useStore.getState().deleteSelectedNotes();
+
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(2);
+  });
+
+  it('deleteSelectedNotes 无有效便签时不创建历史但仍清空选区', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.getState().deleteNote('sd-1');
+    useStore.getState().deleteNote('sd-2');
+
+    useStore.setState({ selectedIds: ['sd-1', 'sd-2'] });
+    useStore.getState().deleteSelectedNotes();
+
+    expect(useStore.getState().selectedIds).toEqual([]);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(2);
+  });
+
+  it('restoreNote 恢复便签创建历史条目并支持撤销/重做', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.getState().deleteNote('sd-1');
+
+    const maxZBeforeRestore = useStore.getState().config.maxZ;
+
+    useStore.getState().restoreNote('sd-1');
+
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-1'].z).toBe(maxZBeforeRestore + 1);
+    expect(useStore.getState().layoutNotesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(2);
+    expect(useStore.getState().domainHistory.undoStack[1].label).toBe('restore-note');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().layoutNotesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-1'].z).toBe(maxZBeforeRestore + 1);
+  });
+
+  it('restoreNote 对不在废纸篓中的便签不创建历史', () => {
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+    useStore.getState().restoreNote('sd-1');
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('restoreSelectedTrash 合并为一条 compound-patch 历史并支持撤销/重做', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.getState().deleteNote('sd-1');
+    useStore.getState().deleteNote('sd-2');
+
+    useStore.getState().restoreSelectedTrash(['sd-1', 'sd-2']);
+
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBeNull();
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(3);
+    expect(useStore.getState().domainHistory.undoStack[2].label).toBe('restore-selected-trash');
+    expect(useStore.getState().domainHistory.undoStack[2].undo.type).toBe('compound-patch');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBeNull();
+  });
+
+  it('restoreSelectedTrash 无有效废纸篓便签时不创建历史', () => {
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+    useStore.getState().restoreSelectedTrash(['sd-1', 'sd-2']);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('restoreAllTrash 合并为一条 compound-patch 历史并支持撤销/重做', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.getState().deleteNote('sd-1');
+    useStore.getState().deleteNote('sd-2');
+    useStore.getState().deleteNote('sd-3');
+
+    useStore.getState().restoreAllTrash();
+
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-3'].deletedAt).toBeNull();
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(4);
+    expect(useStore.getState().domainHistory.undoStack[3].label).toBe('restore-all-trash');
+    expect(useStore.getState().domainHistory.undoStack[3].undo.type).toBe('compound-patch');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().notesById['sd-3'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-3'].deletedAt).toBeNull();
+  });
+
+  it('restoreAllTrash 废纸篓为空时不创建历史', () => {
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+    useStore.getState().restoreAllTrash();
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('deleteNotePermanently 不创建领域历史', () => {
+    useStore.getState().deleteNote('sd-1');
+    const undoCountAfterSoftDelete = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().deleteNotePermanently('sd-1');
+
+    expect(useStore.getState().notesById['sd-1']).toBeUndefined();
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountAfterSoftDelete);
+  });
+
+  it('deleteSelectedPermanently 不创建领域历史', () => {
+    useStore.getState().deleteNote('sd-1');
+    useStore.getState().deleteNote('sd-2');
+    const undoCountAfterSoftDelete = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().deleteSelectedPermanently(['sd-1', 'sd-2']);
+
+    expect(useStore.getState().notesById['sd-1']).toBeUndefined();
+    expect(useStore.getState().notesById['sd-2']).toBeUndefined();
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountAfterSoftDelete);
+  });
+
+  it('emptyTrash 不创建领域历史', () => {
+    useStore.getState().deleteNote('sd-1');
+    useStore.getState().deleteNote('sd-2');
+    const undoCountAfterSoftDelete = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().emptyTrash();
+
+    expect(useStore.getState().notesById['sd-1']).toBeUndefined();
+    expect(useStore.getState().notesById['sd-2']).toBeUndefined();
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountAfterSoftDelete);
+  });
+
+  it('restoreNote 看板已被删除时回退到当前看板，撤销后保持可用看板', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'sd-1',
+          boardId: 'board-b',
+          x: 10,
+          y: 20,
+          title: '便签甲',
+          content: 'alpha',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+      ]),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-b', name: '乙板', icon: '📋', createdAt: 1 },
+      ],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    useStore.getState().deleteNote('sd-1');
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+    });
+
+    useStore.getState().restoreNote('sd-1');
+
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-1'].boardId).toBe('default');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().notesById['sd-1'].boardId).toBe('default');
+  });
+
+  it('选中便签软删除后通过撤销可恢复到原看板并保留选区清理', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.setState({ selectedIds: ['sd-1', 'sd-2', 'sd-3'] });
+
+    useStore.getState().deleteSelectedNotes();
+    expect(useStore.getState().selectedIds).toEqual([]);
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-3'].deletedAt).toBeNull();
+    expect(useStore.getState().notesById['sd-1'].boardId).toBe('default');
+    expect(useStore.getState().layoutNotesById['sd-1'].deletedAt).toBeNull();
+  });
+
+  it('连续软删除和恢复操作在历史栈中正确累积', () => {
+    vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
+    useStore.getState().deleteNote('sd-1');
+    useStore.getState().restoreNote('sd-1');
+    useStore.getState().deleteNote('sd-2');
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(3);
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-2'].deletedAt).toBeNull();
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+  });
+});
