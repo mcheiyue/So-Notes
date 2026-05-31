@@ -231,7 +231,7 @@ export const appController = {
     }
 
     if (note.collapsed) {
-      state.toggleCollapse(note.id);
+      state.toggleCollapse(note.id, { recordHistory: false });
     }
 
     requestAnimationFrame(() => {

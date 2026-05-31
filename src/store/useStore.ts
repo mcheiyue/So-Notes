@@ -150,7 +150,7 @@ interface State {
   deleteSelectedNotes: () => void;
   changeColor: (id: string, color: string) => void;
   changeSelectedNotesColor: (color: string) => void;
-  toggleCollapse: (id: string) => void;
+  toggleCollapse: (id: string, options?: { recordHistory?: boolean }) => void;
   undoDomainChange: () => boolean;
   redoDomainChange: () => boolean;
   commitNoteTextEdit: (noteId: string, beforeTitle: string, beforeContent: string, beforeUpdatedAt: number) => void;
@@ -487,13 +487,27 @@ const navigateToAffectedNote = (
   const note = postApplyNotesById[affected.noteId];
   if (!note || note.deletedAt) return;
 
+  const viewport = useStore.getState().viewport;
+  const nWidth = LAYOUT.NOTE_WIDTH;
+  const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, note.height || LAYOUT.NOTE_MIN_HEIGHT);
+  const noteRight = note.x + nWidth;
+  const noteBottom = note.y + nHeight;
+  const isInCurrentViewport =
+    noteRight >= viewport.x &&
+    note.x <= viewport.x + viewport.w &&
+    noteBottom >= viewport.y &&
+    note.y <= viewport.y + viewport.h;
+  const shouldCenter = affected.boardId !== currentBoardId || !isInCurrentViewport;
+
   if (affected.boardId !== currentBoardId) {
     setFn({ currentBoardId: affected.boardId, viewMode: 'BOARD', selectedIds: [] });
   }
 
-  const nWidth = LAYOUT.NOTE_WIDTH;
-  const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, note.height || LAYOUT.NOTE_MIN_HEIGHT);
-  const viewport = useStore.getState().viewport;
+  if (!shouldCenter) {
+    setFn({ selectedIds: [note.id] });
+    return;
+  }
+
   const targetX = note.x + nWidth / 2 - viewport.w / 2;
   const targetY = note.y + nHeight / 2 - viewport.h / 2;
 
@@ -1589,12 +1603,14 @@ export const useStore = create<State>()(
         });
     },
 
-    toggleCollapse: (id) => {
+    toggleCollapse: (id, options = {}) => {
       set((state) => {
         const note = getNoteById(state, id);
         if (note) {
           const oldCollapsed = note.collapsed ?? false;
           note.collapsed = !oldCollapsed;
+
+          if (options.recordHistory === false) return;
 
           const entry: HistoryEntry<DomainPatch> = {
             id: crypto.randomUUID(),

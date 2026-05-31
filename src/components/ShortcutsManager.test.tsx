@@ -35,8 +35,11 @@ describe('ShortcutsManager 撤销重做快捷键', () => {
 
   const pressModKey = async (key: string, options: KeyboardEventInit = {}) => {
     await act(async () => {
-      document.dispatchEvent(new KeyboardEvent('keydown', {
+      const active = document.activeElement;
+      const target = active instanceof HTMLElement && active !== document.body ? active : document;
+      target.dispatchEvent(new KeyboardEvent('keydown', {
         key,
+        code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
         ctrlKey: true,
         bubbles: true,
         cancelable: true,
@@ -94,6 +97,7 @@ describe('ShortcutsManager 撤销重做快捷键', () => {
     await pressModKey('z');
     await pressModKey('y');
 
+    expect(useStore.getState().domainHistory.redoStack).toHaveLength(0);
     expect(useStore.getState().notesById[noteId]).toMatchObject({ id: noteId, x: 40, y: 80 });
     expect(useStore.getState().layoutNotesById[noteId]).toMatchObject({ id: noteId, x: 40, y: 80 });
   });
@@ -103,6 +107,8 @@ describe('ShortcutsManager 撤销重做快捷键', () => {
     const noteId = addNoteAndReadId();
 
     await pressModKey('z');
+    expect(useStore.getState().notesById[noteId]).toBeUndefined();
+
     await pressModKey('z', { shiftKey: true });
 
     expect(useStore.getState().notesById[noteId]).toMatchObject({ id: noteId, x: 40, y: 80 });

@@ -292,6 +292,7 @@ describe('appController locateAndSelectNote', () => {
     expect(state.notesById['note-collapsed'].collapsed).toBe(false);
     expect(state.selectedIds).toEqual(['note-collapsed']);
     expect(state.noteHighlights['note-collapsed']?.reason).toBe('located');
+    expect(state.domainHistory.undoStack).toHaveLength(0);
   });
 
   it('已删除便签：不执行定位', () => {
