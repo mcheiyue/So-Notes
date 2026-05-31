@@ -182,6 +182,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const updateNote = useStore(state => state.updateNote);
   const updateTitle = useStore(state => state.updateTitle);
   const finalizeLayoutChange = useStore(state => state.finalizeLayoutChange);
+  const commitNoteTextEdit = useStore(state => state.commitNoteTextEdit);
   const deleteNote = useStore(state => state.deleteNote);
   const bringToFront = useStore(state => state.bringToFront);
   const changeColor = useStore(state => state.changeColor);
@@ -218,6 +219,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const [isDragActive, setIsDragActive] = useState(false);
   const titleBeforeEditRef = useRef(note?.title ?? '');
   const contentBeforeEditRef = useRef(note?.content ?? '');
+  const updatedAtBeforeEditRef = useRef(note?.updatedAt ?? 0);
   
   // Drag State (Hybrid Control)
   const isDragging = useRef(false);
@@ -393,6 +395,17 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       const basePositions = Object.fromEntries(
           dragNotes.map((dragNote) => [dragNote.id, { x: dragNote.x, y: dragNote.y }]),
       );
+
+      const moveSnapshotPositions: Record<string, { x: number; y: number; updatedAt: number }> = {};
+      dragNotes.forEach((dragNote) => {
+        moveSnapshotPositions[dragNote.id] = {
+          x: dragNote.x,
+          y: dragNote.y,
+          updatedAt: dragNote.updatedAt,
+        };
+      });
+      useStore.getState().captureMoveSnapshot(moveSnapshotPositions);
+
       beginEdgePushDragSession(note.id, dragIds, basePositions, clientPoint);
       registerActiveNoteDragFinalizer(handleFinalizeDragSession);
 
@@ -546,6 +559,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
   const handleTitleFocus = () => {
     titleBeforeEditRef.current = note.title;
+    contentBeforeEditRef.current = note.content;
+    updatedAtBeforeEditRef.current = note.updatedAt;
     setIsEditing(true);
   };
 
@@ -554,10 +569,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     if (event.currentTarget.value !== titleBeforeEditRef.current) {
       markNoteHighlights([note.id], 'edited');
     }
+    commitNoteTextEdit(note.id, titleBeforeEditRef.current, contentBeforeEditRef.current, updatedAtBeforeEditRef.current);
   };
 
   const handleContentFocus = () => {
     contentBeforeEditRef.current = note.content;
+    titleBeforeEditRef.current = note.title;
+    updatedAtBeforeEditRef.current = note.updatedAt;
     setIsEditing(true);
   };
 
@@ -566,6 +584,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     if (event.currentTarget.value !== contentBeforeEditRef.current) {
       markNoteHighlights([note.id], 'edited');
     }
+    commitNoteTextEdit(note.id, titleBeforeEditRef.current, contentBeforeEditRef.current, updatedAtBeforeEditRef.current);
   };
 
   return (

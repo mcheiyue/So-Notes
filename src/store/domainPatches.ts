@@ -27,6 +27,7 @@ export interface UpdatePositionPatch {
   noteId: string;
   x: number;
   y: number;
+  updatedAt?: number;
 }
 
 export type DomainPatch =
@@ -183,11 +184,11 @@ function applyUpdateFieldsPatch(state: DomainState, patch: UpdateFieldsPatch): D
 }
 
 function applyUpdatePositionPatch(state: DomainState, patch: UpdatePositionPatch): DomainState {
-  const { noteId, x, y } = patch;
+  const { noteId, x, y, updatedAt } = patch;
   const note = state.notesById[noteId];
   if (!note) return state;
 
-  const updatedNote: Note = { ...note, x, y };
+  const updatedNote: Note = { ...note, x, y, ...(updatedAt === undefined ? {} : { updatedAt }) };
   const newNotesById = { ...state.notesById, [noteId]: updatedNote };
   const newLayoutNotesById = {
     ...state.layoutNotesById,

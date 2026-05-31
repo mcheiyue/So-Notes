@@ -1756,4 +1756,373 @@ describe('v1.4.3 领域撤销/重做契约', () => {
   it('redo 栈为空时 redoDomainChange 返回 false', () => {
     expect(useStore.getState().redoDomainChange()).toBe(false);
   });
+
+  it('commitNoteTextEdit 标题编辑撤销/重做会恢复 title 与 updatedAt', () => {
+    vi.setSystemTime(new Date('2026-05-01T10:00:00.000Z'));
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'edit-title',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '旧标题',
+        content: '内容不变',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    vi.setSystemTime(new Date('2026-05-01T10:05:00.000Z'));
+    useStore.getState().updateTitle('edit-title', '新标题');
+    expect(useStore.getState().notesById['edit-title'].title).toBe('新标题');
+
+    useStore.getState().commitNoteTextEdit('edit-title', '旧标题', '内容不变', 100);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(1);
+    expect(useStore.getState().domainHistory.undoStack[0].label).toBe('edit-text');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['edit-title'].title).toBe('旧标题');
+    expect(useStore.getState().notesById['edit-title'].content).toBe('内容不变');
+    expect(useStore.getState().notesById['edit-title'].updatedAt).toBe(100);
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['edit-title'].title).toBe('新标题');
+    expect(useStore.getState().notesById['edit-title'].content).toBe('内容不变');
+    expect(useStore.getState().notesById['edit-title'].updatedAt).toBe(new Date('2026-05-01T10:05:00.000Z').getTime());
+  });
+
+  it('commitNoteTextEdit 内容编辑撤销/重做会恢复 content 与 updatedAt', () => {
+    vi.setSystemTime(new Date('2026-05-01T10:00:00.000Z'));
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'edit-content',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '标题不变',
+        content: '旧内容',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    vi.setSystemTime(new Date('2026-05-01T10:05:00.000Z'));
+    useStore.getState().updateNote('edit-content', '新内容');
+
+    useStore.getState().commitNoteTextEdit('edit-content', '标题不变', '旧内容', 100);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(1);
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['edit-content'].content).toBe('旧内容');
+    expect(useStore.getState().notesById['edit-content'].updatedAt).toBe(100);
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['edit-content'].content).toBe('新内容');
+    expect(useStore.getState().notesById['edit-content'].updatedAt).toBe(new Date('2026-05-01T10:05:00.000Z').getTime());
+  });
+
+  it('commitNoteTextEdit 同时修改标题和内容时创建单条历史', () => {
+    vi.setSystemTime(new Date('2026-05-01T10:00:00.000Z'));
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'edit-both',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '旧标题',
+        content: '旧内容',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    vi.setSystemTime(new Date('2026-05-01T10:05:00.000Z'));
+    useStore.getState().updateTitle('edit-both', '新标题');
+    useStore.getState().updateNote('edit-both', '新内容');
+
+    useStore.getState().commitNoteTextEdit('edit-both', '旧标题', '旧内容', 100);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(1);
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['edit-both']).toMatchObject({
+      title: '旧标题',
+      content: '旧内容',
+      updatedAt: 100,
+    });
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['edit-both']).toMatchObject({
+      title: '新标题',
+      content: '新内容',
+    });
+  });
+
+  it('commitNoteTextEdit 标题和内容均未改变时不创建历史', () => {
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'no-change',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '不变',
+        content: '不变',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().commitNoteTextEdit('no-change', '不变', '不变', 100);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+    expect(useStore.getState().undoDomainChange()).toBe(false);
+  });
+
+  it('commitNoteTextEdit 便签不存在时不创建历史', () => {
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().commitNoteTextEdit('non-existent', 'a', 'b', 100);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('单便签移动后 finalizeLayoutChange 创建位置历史并支持撤销/重做', () => {
+    vi.setSystemTime(new Date('2026-05-01T10:00:00.000Z'));
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'move-note',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '移动',
+        content: 'm',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    useStore.getState().captureMoveSnapshot({
+      'move-note': { x: 10, y: 20, updatedAt: 100 },
+    });
+
+    useStore.getState().moveNote('move-note', 100, 200);
+
+    vi.setSystemTime(new Date('2026-05-01T10:05:00.000Z'));
+    useStore.getState().finalizeLayoutChange(['move-note']);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(1);
+    expect(useStore.getState().domainHistory.undoStack[0].label).toBe('move-note');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['move-note'].x).toBe(10);
+    expect(useStore.getState().notesById['move-note'].y).toBe(20);
+    expect(useStore.getState().notesById['move-note'].updatedAt).toBe(100);
+    expect(useStore.getState().layoutNotesById['move-note'].x).toBe(10);
+    expect(useStore.getState().layoutNotesById['move-note'].y).toBe(20);
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['move-note'].x).toBe(100);
+    expect(useStore.getState().notesById['move-note'].y).toBe(200);
+    expect(useStore.getState().notesById['move-note'].updatedAt).toBe(new Date('2026-05-01T10:05:00.000Z').getTime());
+    expect(useStore.getState().layoutNotesById['move-note'].x).toBe(100);
+    expect(useStore.getState().layoutNotesById['move-note'].y).toBe(200);
+  });
+
+  it('moveNote 单独调用不会创建历史，直到 finalizeLayoutChange', () => {
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'move-only',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '仅移动',
+        content: 'm',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().moveNote('move-only', 100, 200);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+    expect(useStore.getState().notesById['move-only'].x).toBe(100);
+    expect(useStore.getState().notesById['move-only'].y).toBe(200);
+    expect(useStore.getState().notesById['move-only'].updatedAt).toBe(100);
+  });
+
+  it('无快照时 finalizeLayoutChange 不创建移动历史', () => {
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'no-snapshot',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '无快照',
+        content: 'm',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().finalizeLayoutChange(['no-snapshot']);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('位置未变时 finalizeLayoutChange 不创建移动历史', () => {
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'same-pos',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '同位',
+        content: 'm',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    useStore.getState().captureMoveSnapshot({
+      'same-pos': { x: 10, y: 20, updatedAt: 100 },
+    });
+
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().finalizeLayoutChange(['same-pos']);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('多便签移动的 finalizeLayoutChange 不创建移动历史', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'multi-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'multi-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: 'B',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().captureMoveSnapshot({
+      'multi-1': { x: 10, y: 20, updatedAt: 100 },
+      'multi-2': { x: 30, y: 40, updatedAt: 200 },
+    });
+
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().finalizeLayoutChange(['multi-1', 'multi-2']);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('多便签移动后会清理快照，避免后续单便签提交误入历史', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'stale-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'stale-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: 'B',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().captureMoveSnapshot({
+      'stale-1': { x: 10, y: 20, updatedAt: 100 },
+      'stale-2': { x: 30, y: 40, updatedAt: 200 },
+    });
+
+    useStore.getState().moveNote('stale-1', 100, 200);
+    useStore.getState().moveNote('stale-2', 300, 400);
+    useStore.getState().finalizeLayoutChange(['stale-1', 'stale-2']);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(0);
+
+    useStore.getState().moveNote('stale-1', 120, 220);
+    useStore.getState().finalizeLayoutChange(['stale-1']);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(0);
+  });
 });

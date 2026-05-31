@@ -152,6 +152,8 @@ interface State {
   toggleCollapse: (id: string) => void;
   undoDomainChange: () => boolean;
   redoDomainChange: () => boolean;
+  commitNoteTextEdit: (noteId: string, beforeTitle: string, beforeContent: string, beforeUpdatedAt: number) => void;
+  captureMoveSnapshot: (positions: Record<string, { x: number; y: number; updatedAt: number }>) => void;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number, status?: StickyDragStatus) => void;
   
   // New Actions for v1.1.1 & v1.1.2
@@ -190,6 +192,7 @@ let noteHighlightSequence = 0;
 let arrangeUndoSequence = 0;
 const noteHighlightTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 const recentlyCreatedTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingMoveSnapshots = new Map<string, { x: number; y: number; updatedAt: number }>();
 
 const getNoteHighlightDuration = (reason: NoteHighlightReason): number => (reason === 'located' ? 1100 : 900);
 
@@ -1088,6 +1091,25 @@ export const useStore = create<State>()(
                     note.updatedAt = timestamp;
                 }
             });
+
+            if (uniqueIds.length === 1) {
+                const noteId = uniqueIds[0];
+                const snapshot = pendingMoveSnapshots.get(noteId);
+                pendingMoveSnapshots.delete(noteId);
+                const note = getNoteById(state, noteId);
+                if (snapshot && note && (note.x !== snapshot.x || note.y !== snapshot.y)) {
+                    const entry: HistoryEntry<DomainPatch> = {
+                        id: crypto.randomUUID(),
+                        label: 'move-note',
+                        createdAt: Date.now(),
+                        undo: { type: 'update-position', noteId, x: snapshot.x, y: snapshot.y, updatedAt: snapshot.updatedAt },
+                        redo: { type: 'update-position', noteId, x: note.x, y: note.y, updatedAt: note.updatedAt },
+                    };
+                    state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
+                }
+            } else {
+                uniqueIds.forEach((id) => pendingMoveSnapshots.delete(id));
+            }
         });
     },
 
@@ -1529,6 +1551,30 @@ export const useStore = create<State>()(
           state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         }
       });
+    },
+
+    commitNoteTextEdit: (noteId, beforeTitle, beforeContent, beforeUpdatedAt) => {
+      set((state) => {
+        const note = getNoteById(state, noteId);
+        if (!note) return;
+
+        if (note.title === beforeTitle && note.content === beforeContent) return;
+
+        const entry: HistoryEntry<DomainPatch> = {
+          id: crypto.randomUUID(),
+          label: 'edit-text',
+          createdAt: Date.now(),
+          undo: { type: 'update-fields', noteId, fields: { title: beforeTitle, content: beforeContent, updatedAt: beforeUpdatedAt } },
+          redo: { type: 'update-fields', noteId, fields: { title: note.title, content: note.content, updatedAt: note.updatedAt } },
+        };
+        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
+      });
+    },
+
+    captureMoveSnapshot: (positions) => {
+      for (const [id, pos] of Object.entries(positions)) {
+        pendingMoveSnapshots.set(id, pos);
+      }
     },
 
     undoDomainChange: () => {
