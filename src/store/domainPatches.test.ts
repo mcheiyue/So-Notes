@@ -187,6 +187,20 @@ describe('applyDomainPatch', () => {
       expect(next.layoutNotesById[note.id]).toEqual(layoutBefore);
     });
 
+    it('更新 deletedAt 后同步刷新 layoutNotesById', () => {
+      const note = makeNote();
+      const state = seedNote(createInitialDomainState(), note);
+
+      const next = applyDomainPatch(state, {
+        type: 'update-fields',
+        noteId: note.id,
+        fields: { deletedAt: 12345 },
+      });
+
+      expect(next.notesById[note.id]?.deletedAt).toBe(12345);
+      expect(next.layoutNotesById[note.id]?.deletedAt).toBe(12345);
+    });
+
     it('更新不存在的便签时返回原状态引用', () => {
       const state = createInitialDomainState();
       const next = applyDomainPatch(state, {
@@ -196,6 +210,114 @@ describe('applyDomainPatch', () => {
       });
 
       expect(next).toBe(state);
+    });
+  });
+
+  describe('compound-patch：复合变更', () => {
+    it('按 patches 数组顺序原子应用多类 patch', () => {
+      const note1 = makeNote({ id: 'n1', x: 10, y: 20, color: '#FFFFFF' });
+      const note2 = makeNote({ id: 'n2', x: 30, y: 40, color: '#fef9c3' });
+      let state = createInitialDomainState();
+      state = seedNote(state, note1);
+
+      const next = applyDomainPatch(state, {
+        type: 'compound-patch',
+        patches: [
+          { type: 'add-note', note: note2 },
+          { type: 'update-fields', noteId: 'n1', fields: { color: '#dcfce7', deletedAt: 777 } },
+          { type: 'update-position', noteId: 'n2', x: 300, y: 400 },
+        ],
+      });
+
+      expect(next.notesById['n1']?.color).toBe('#dcfce7');
+      expect(next.notesById['n1']?.deletedAt).toBe(777);
+      expect(next.layoutNotesById['n1']?.deletedAt).toBe(777);
+      expect(next.notesById['n2']?.x).toBe(300);
+      expect(next.notesById['n2']?.y).toBe(400);
+      expect(next.allNoteIds).toEqual(['n1', 'n2']);
+      expect(next.boardNoteIds.default).toEqual(['n1', 'n2']);
+    });
+
+    it('后续子 patch 可作用于同一复合 patch 中新加入的便签', () => {
+      const note = makeNote({ id: 'new-note', title: '初始标题' });
+      const state = createInitialDomainState();
+
+      const next = applyDomainPatch(state, {
+        type: 'compound-patch',
+        patches: [
+          { type: 'add-note', note },
+          { type: 'update-fields', noteId: note.id, fields: { title: '更新标题' } },
+        ],
+      });
+
+      expect(next.notesById[note.id]?.title).toBe('更新标题');
+      expect(next.allNoteIds).toEqual([note.id]);
+    });
+
+    it('可混合移除和新增便签，并维护归一化结构一致', () => {
+      const removed = makeNote({ id: 'removed' });
+      const added = makeNote({ id: 'added', x: 300, y: 400 });
+      const state = seedNote(createInitialDomainState(), removed);
+
+      const next = applyDomainPatch(state, {
+        type: 'compound-patch',
+        patches: [
+          { type: 'remove-note', noteId: removed.id },
+          { type: 'add-note', note: added },
+        ],
+      });
+
+      assertNoteAbsent(next, removed.id, removed.boardId);
+      assertNormalizedConsistency(next, added.id, added);
+      expect(next.allNoteIds).toEqual([added.id]);
+    });
+
+    it('任一子 patch 不可应用时返回原状态引用且不部分应用', () => {
+      const note = makeNote({ id: 'n1', title: '原标题' });
+      const state = seedNote(createInitialDomainState(), note);
+      const notesByIdRef = state.notesById;
+      const allNoteIdsRef = state.allNoteIds;
+      const boardNoteIdsRef = state.boardNoteIds;
+      const layoutRef = state.layoutNotesById;
+
+      const next = applyDomainPatch(state, {
+        type: 'compound-patch',
+        patches: [
+          { type: 'update-fields', noteId: note.id, fields: { title: '不应生效' } },
+          { type: 'remove-note', noteId: 'missing-note' },
+        ],
+      });
+
+      expect(next).toBe(state);
+      expect(state.notesById).toBe(notesByIdRef);
+      expect(state.allNoteIds).toBe(allNoteIdsRef);
+      expect(state.boardNoteIds).toBe(boardNoteIdsRef);
+      expect(state.layoutNotesById).toBe(layoutRef);
+      expect(next.notesById[note.id]?.title).toBe('原标题');
+    });
+
+    it('嵌套复合 patch 失败时外层复合 patch 也整体失败', () => {
+      const note = makeNote({ id: 'n1', title: '原标题' });
+      const state = seedNote(createInitialDomainState(), note);
+
+      const next = applyDomainPatch(state, {
+        type: 'compound-patch',
+        patches: [
+          { type: 'update-fields', noteId: note.id, fields: { title: '外层更新' } },
+          {
+            type: 'compound-patch',
+            patches: [
+              { type: 'update-position', noteId: note.id, x: 1, y: 2 },
+              { type: 'add-note', note },
+            ],
+          },
+        ],
+      });
+
+      expect(next).toBe(state);
+      expect(next.notesById[note.id]?.title).toBe('原标题');
+      expect(next.notesById[note.id]?.x).toBe(100);
+      expect(next.notesById[note.id]?.y).toBe(200);
     });
   });
 

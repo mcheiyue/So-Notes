@@ -18,7 +18,7 @@ export interface RemoveNotePatch {
 export interface UpdateFieldsPatch {
   type: 'update-fields';
   noteId: string;
-  fields: Partial<Pick<Note, 'title' | 'content' | 'color' | 'collapsed' | 'updatedAt' | 'z' | 'width' | 'height' | 'boardId'>>;
+  fields: Partial<Pick<Note, 'title' | 'content' | 'color' | 'collapsed' | 'updatedAt' | 'z' | 'width' | 'height' | 'boardId' | 'deletedAt'>>;
 }
 
 /** 更新单张便签的位置 x/y */
@@ -30,11 +30,18 @@ export interface UpdatePositionPatch {
   updatedAt?: number;
 }
 
+/** 将多条领域 patch 合并为一个用户意图，按数组顺序原子应用 */
+export interface CompoundPatch {
+  type: 'compound-patch';
+  patches: DomainPatch[];
+}
+
 export type DomainPatch =
   | AddNotePatch
   | RemoveNotePatch
   | UpdateFieldsPatch
-  | UpdatePositionPatch;
+  | UpdatePositionPatch
+  | CompoundPatch;
 
 const LAYOUT_AFFECTING_FIELDS: ReadonlySet<string> = new Set([
   'x', 'y', 'boardId', 'color', 'width', 'height', 'deletedAt',
@@ -104,7 +111,41 @@ export function applyDomainPatch(state: DomainState, patch: DomainPatch): Domain
       return applyUpdateFieldsPatch(state, patch);
     case 'update-position':
       return applyUpdatePositionPatch(state, patch);
+    case 'compound-patch':
+      return applyCompoundPatch(state, patch);
   }
+}
+
+function canApplyPatch(state: DomainState, patch: DomainPatch): boolean {
+  switch (patch.type) {
+    case 'add-note':
+      return state.notesById[patch.note.id] === undefined;
+    case 'remove-note':
+    case 'update-fields':
+    case 'update-position':
+      return state.notesById[patch.noteId] !== undefined;
+    case 'compound-patch': {
+      let nextState = state;
+      for (const childPatch of patch.patches) {
+        if (!canApplyPatch(nextState, childPatch)) {
+          return false;
+        }
+        nextState = applyDomainPatch(nextState, childPatch);
+      }
+      return true;
+    }
+  }
+}
+
+function applyCompoundPatch(state: DomainState, patch: CompoundPatch): DomainState {
+  let nextState = state;
+  for (const childPatch of patch.patches) {
+    if (!canApplyPatch(nextState, childPatch)) {
+      return state;
+    }
+    nextState = applyDomainPatch(nextState, childPatch);
+  }
+  return nextState;
 }
 
 function applyAddNotePatch(state: DomainState, patch: AddNotePatch): DomainState {
