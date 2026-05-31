@@ -5,6 +5,9 @@ import { LayoutNote, Note, AppConfig, StorageData, StorageDataInput, STORAGE_SCH
 
 import { db } from './db';
 import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes } from './normalization';
+import { createUndoRedoHistory, pushHistoryEntry, undoHistory, redoHistory, type HistoryStack, type HistoryEntry } from './undoRedoHistory';
+import { applyDomainPatch, type DomainPatch } from './domainPatches';
+import type { DomainState } from './domainStore';
 
 import { saveFile, openFile } from '../utils/fileSystem';
 import { createDataTransferService, type ImportFromFileResult } from '../services/transfer/DataTransferService';
@@ -88,6 +91,9 @@ interface State {
   noteHighlights: Record<string, NoteHighlight>;
   arrangeUndoToast: ArrangeUndoToastState | null;
 
+  // 领域撤销/重做历史（v1.4.3）
+  domainHistory: HistoryStack<DomainPatch>;
+
   // Actions
   init: () => Promise<void>;
   
@@ -144,6 +150,8 @@ interface State {
   changeColor: (id: string, color: string) => void;
   changeSelectedNotesColor: (color: string) => void;
   toggleCollapse: (id: string) => void;
+  undoDomainChange: () => boolean;
+  redoDomainChange: () => boolean;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number, status?: StickyDragStatus) => void;
   
   // New Actions for v1.1.1 & v1.1.2
@@ -418,6 +426,35 @@ const removeNoteFromNormalizedState = (state: Pick<State, 'notesById' | 'allNote
   delete state.layoutNotesById[noteId];
 };
 
+const extractDomainSlice = (state: State): DomainState => ({
+  notesById: state.notesById,
+  allNoteIds: state.allNoteIds,
+  boardNoteIds: state.boardNoteIds,
+  layoutNotesById: state.layoutNotesById,
+  boards: state.boards,
+  currentBoardId: state.currentBoardId,
+  config: state.config,
+});
+
+const clearDanglingNoteUiRefs = (state: State, removedNoteIds: ReadonlySet<string>) => {
+  state.selectedIds = state.selectedIds.filter((id) => !removedNoteIds.has(id));
+  state.recentlyCreatedIds = state.recentlyCreatedIds.filter((id) => !removedNoteIds.has(id));
+  for (const id of removedNoteIds) {
+    clearNoteHighlightTimer(id);
+    delete state.noteHighlights[id];
+  }
+};
+
+const toMutableHistoryStack = <T>(stack: HistoryStack<T>): {
+  undoStack: HistoryEntry<T>[];
+  redoStack: HistoryEntry<T>[];
+  capacity: number;
+} => ({
+  undoStack: [...stack.undoStack],
+  redoStack: [...stack.redoStack],
+  capacity: stack.capacity,
+});
+
 
 export const useStore = create<State>()(
   immer((set, get) => ({
@@ -464,6 +501,7 @@ export const useStore = create<State>()(
     recentlyCreatedIds: [],
     noteHighlights: {},
     arrangeUndoToast: null,
+    domainHistory: createUndoRedoHistory<DomainPatch>(),
 
     init: async () => {
       let finalData: StorageData = normalizeStorageDataMetadata({
@@ -885,7 +923,7 @@ export const useStore = create<State>()(
     addNote: (x, y) => {
       const newNote: Note = {
         id: crypto.randomUUID(),
-        boardId: get().currentBoardId, // Assign to current board
+        boardId: get().currentBoardId,
         title: '',
         content: '',
         x,
@@ -903,14 +941,23 @@ export const useStore = create<State>()(
         state.selectedIds = [newNote.id];
         state.recentlyCreatedIds = [newNote.id];
         assignNoteHighlights(state, [newNote.id], 'created');
+
+        const entry: HistoryEntry<DomainPatch> = {
+          id: crypto.randomUUID(),
+          label: 'add-note',
+          createdAt: Date.now(),
+          undo: { type: 'remove-note', noteId: newNote.id },
+          redo: { type: 'add-note', note: { ...newNote } },
+        };
+        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
       });
     },
 
     addNoteWithContent: (x, y, content) => {
       const newNote: Note = {
         id: crypto.randomUUID(),
-        boardId: get().currentBoardId, // Assign to current board
-        title: '', // Optional: extract first line as title? For now empty.
+        boardId: get().currentBoardId,
+        title: '',
         content: content,
         x,
         y,
@@ -927,6 +974,15 @@ export const useStore = create<State>()(
         state.selectedIds = [newNote.id];
         state.recentlyCreatedIds = [newNote.id];
         assignNoteHighlights(state, [newNote.id], 'created');
+
+        const entry: HistoryEntry<DomainPatch> = {
+          id: crypto.randomUUID(),
+          label: 'add-note-with-content',
+          createdAt: Date.now(),
+          undo: { type: 'remove-note', noteId: newNote.id },
+          redo: { type: 'add-note', note: { ...newNote } },
+        };
+        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
       });
     },
 
@@ -1427,9 +1483,19 @@ export const useStore = create<State>()(
     changeColor: (id, color) => {
       set((state) => {
          const note = getNoteById(state, id);
-         if (note) {
+         if (note && note.color !== color) {
+           const oldColor = note.color;
            note.color = color;
            state.layoutNotesById[note.id] = extractLayoutNote(note);
+
+           const entry: HistoryEntry<DomainPatch> = {
+             id: crypto.randomUUID(),
+             label: 'change-color',
+             createdAt: Date.now(),
+             undo: { type: 'update-fields', noteId: id, fields: { color: oldColor } },
+             redo: { type: 'update-fields', noteId: id, fields: { color } },
+           };
+           state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
          }
       });
     },
@@ -1450,9 +1516,71 @@ export const useStore = create<State>()(
       set((state) => {
         const note = getNoteById(state, id);
         if (note) {
-          note.collapsed = !note.collapsed;
+          const oldCollapsed = note.collapsed ?? false;
+          note.collapsed = !oldCollapsed;
+
+          const entry: HistoryEntry<DomainPatch> = {
+            id: crypto.randomUUID(),
+            label: 'toggle-collapse',
+            createdAt: Date.now(),
+            undo: { type: 'update-fields', noteId: id, fields: { collapsed: oldCollapsed } },
+            redo: { type: 'update-fields', noteId: id, fields: { collapsed: !oldCollapsed } },
+          };
+          state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         }
       });
+    },
+
+    undoDomainChange: () => {
+      const currentHistory = get().domainHistory;
+      const result = undoHistory(currentHistory);
+      if (!result.entry) return false;
+
+      const currentDomain = extractDomainSlice(get());
+      const patched = applyDomainPatch(currentDomain, result.entry.undo);
+
+      const removedIds = new Set(
+        Object.keys(currentDomain.notesById).filter((id) => !patched.notesById[id]),
+      );
+
+      set({
+        ...patched,
+        domainHistory: result.stack,
+      });
+
+      if (removedIds.size > 0) {
+        set((state) => {
+          clearDanglingNoteUiRefs(state, removedIds);
+        });
+      }
+
+      return true;
+    },
+
+    redoDomainChange: () => {
+      const currentHistory = get().domainHistory;
+      const result = redoHistory(currentHistory);
+      if (!result.entry) return false;
+
+      const currentDomain = extractDomainSlice(get());
+      const patched = applyDomainPatch(currentDomain, result.entry.redo);
+
+      const removedIds = new Set(
+        Object.keys(currentDomain.notesById).filter((id) => !patched.notesById[id]),
+      );
+
+      set({
+        ...patched,
+        domainHistory: result.stack,
+      });
+
+      if (removedIds.size > 0) {
+        set((state) => {
+          clearDanglingNoteUiRefs(state, removedIds);
+        });
+      }
+
+      return true;
     },
     
     setStickyDrag: (id, offsetX = 0, offsetY = 0, status: StickyDragStatus = 'active') => {

@@ -1505,3 +1505,255 @@ describe('v1.3.9 TRASH 安全收口', () => {
     expect(state.isQuickCaptureOpen).toBe(true);
   });
 });
+
+describe('v1.4.3 领域撤销/重做契约', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+      domainHistory: useStore.getState().domainHistory,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('撤销 addNote 会从 normalized/layout 中移除便签且不进入废纸篓', () => {
+    useStore.getState().addNote(100, 200);
+
+    const state = useStore.getState();
+    const [noteId] = state.allNoteIds;
+    expect(noteId).toBeDefined();
+    expect(state.notesById[noteId]).toBeDefined();
+    expect(state.layoutNotesById[noteId]).toBeDefined();
+
+    const undone = useStore.getState().undoDomainChange();
+    expect(undone).toBe(true);
+
+    const afterUndo = useStore.getState();
+    expect(afterUndo.notesById[noteId]).toBeUndefined();
+    expect(afterUndo.layoutNotesById[noteId]).toBeUndefined();
+    expect(afterUndo.allNoteIds).not.toContain(noteId);
+    expect(afterUndo.boardNoteIds['default'] ?? []).not.toContain(noteId);
+  });
+
+  it('撤销后重做会恢复同一个便签 id', () => {
+    useStore.getState().addNote(100, 200);
+
+    const [noteId] = useStore.getState().allNoteIds;
+    const originalNote = { ...useStore.getState().notesById[noteId] };
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById[noteId]).toBeUndefined();
+
+    const redone = useStore.getState().redoDomainChange();
+    expect(redone).toBe(true);
+
+    const afterRedo = useStore.getState();
+    expect(afterRedo.notesById[noteId]).toBeDefined();
+    expect(afterRedo.notesById[noteId]).toMatchObject({
+      id: originalNote.id,
+      x: originalNote.x,
+      y: originalNote.y,
+      content: originalNote.content,
+      color: originalNote.color,
+      boardId: originalNote.boardId,
+    });
+    expect(afterRedo.allNoteIds).toContain(noteId);
+    expect(afterRedo.layoutNotesById[noteId]).toBeDefined();
+  });
+
+  it('addNoteWithContent 撤销/重做会保留正文与 id', () => {
+    useStore.getState().addNoteWithContent(50, 60, 'hello world');
+
+    const [noteId] = useStore.getState().allNoteIds;
+    expect(useStore.getState().notesById[noteId].content).toBe('hello world');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById[noteId]).toBeUndefined();
+
+    useStore.getState().redoDomainChange();
+    const afterRedo = useStore.getState();
+    expect(afterRedo.notesById[noteId]).toBeDefined();
+    expect(afterRedo.notesById[noteId].content).toBe('hello world');
+    expect(afterRedo.notesById[noteId].x).toBe(50);
+    expect(afterRedo.notesById[noteId].y).toBe(60);
+  });
+
+  it('changeColor 撤销/重做会同步切换 note 与 layout 颜色', () => {
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'color-note',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '改色',
+        content: 'c',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    useStore.getState().changeColor('color-note', '#dbeafe');
+
+    expect(useStore.getState().notesById['color-note'].color).toBe('#dbeafe');
+    expect(useStore.getState().layoutNotesById['color-note'].color).toBe('#dbeafe');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['color-note'].color).toBe('#FFFFFF');
+    expect(useStore.getState().layoutNotesById['color-note'].color).toBe('#FFFFFF');
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['color-note'].color).toBe('#dbeafe');
+    expect(useStore.getState().layoutNotesById['color-note'].color).toBe('#dbeafe');
+  });
+
+  it('changeColor 设置相同颜色不会创建历史记录', () => {
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'same-color-note',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '同色',
+        content: 'c',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    const historyBefore = useStore.getState().domainHistory;
+    const undoCountBefore = historyBefore.undoStack.length;
+
+    useStore.getState().changeColor('same-color-note', '#FFFFFF');
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+    expect(useStore.getState().undoDomainChange()).toBe(false);
+  });
+
+  it('toggleCollapse 撤销/重做会恢复折叠状态', () => {
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'collapse-note',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '折叠',
+        content: 'c',
+        color: '#FFFFFF',
+        z: 1,
+        collapsed: false,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    expect(useStore.getState().notesById['collapse-note'].collapsed).toBe(false);
+
+    useStore.getState().toggleCollapse('collapse-note');
+    expect(useStore.getState().notesById['collapse-note'].collapsed).toBe(true);
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['collapse-note'].collapsed).toBe(false);
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['collapse-note'].collapsed).toBe(true);
+  });
+
+  it('撤销后执行新操作会清空 redo 栈', () => {
+    useStore.getState().addNote(10, 20);
+    const [firstId] = useStore.getState().allNoteIds;
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().domainHistory.redoStack.length).toBe(1);
+
+    useStore.getState().addNote(30, 40);
+    expect(useStore.getState().domainHistory.redoStack.length).toBe(0);
+
+    const redone = useStore.getState().redoDomainChange();
+    expect(redone).toBe(false);
+    expect(useStore.getState().notesById[firstId]).toBeUndefined();
+  });
+
+  it('undoLastArrange 仍保持独立可用', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'arrange-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'arrange-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: 'B',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().arrangeNotes(100, 120);
+    expect(useStore.getState().arrangeUndoToast).not.toBeNull();
+
+    const undone = useStore.getState().undoLastArrange();
+    expect(undone).toBe(true);
+    expect(useStore.getState().arrangeUndoToast).toBeNull();
+    expect(useStore.getState().notesById['arrange-1']).toMatchObject({ x: 10, y: 20 });
+    expect(useStore.getState().notesById['arrange-2']).toMatchObject({ x: 30, y: 40 });
+  });
+
+  it('撤销 addNote 会清理悬挂的选区与新建高亮引用', () => {
+    useStore.getState().addNote(100, 200);
+
+    const [noteId] = useStore.getState().allNoteIds;
+    expect(useStore.getState().selectedIds).toEqual([noteId]);
+    expect(useStore.getState().recentlyCreatedIds).toEqual([noteId]);
+
+    useStore.getState().undoDomainChange();
+
+    expect(useStore.getState().selectedIds).not.toContain(noteId);
+    expect(useStore.getState().recentlyCreatedIds).not.toContain(noteId);
+    expect(useStore.getState().noteHighlights[noteId]).toBeUndefined();
+  });
+
+  it('历史为空时 undoDomainChange 返回 false', () => {
+    expect(useStore.getState().undoDomainChange()).toBe(false);
+  });
+
+  it('redo 栈为空时 redoDomainChange 返回 false', () => {
+    expect(useStore.getState().redoDomainChange()).toBe(false);
+  });
+});
