@@ -2125,4 +2125,34 @@ describe('v1.4.3 领域撤销/重做契约', () => {
 
     expect(useStore.getState().domainHistory.undoStack.length).toBe(0);
   });
+
+  it('跨看板撤销时自动切换视口到便签所在看板并居中', () => {
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '默认', icon: '📋', createdAt: 1 },
+        { id: 'board-a', name: '看板A', icon: '📌', createdAt: 2 },
+      ],
+      currentBoardId: 'board-a',
+      viewMode: 'BOARD',
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
+      config: { ...useStore.getState().config, maxZ: 0 },
+    });
+
+    useStore.getState().addNote(500, 600);
+    const noteId = useStore.getState().allNoteIds[useStore.getState().allNoteIds.length - 1];
+
+    useStore.getState().deleteNotePermanently(noteId);
+    expect(useStore.getState().notesById[noteId]).toBeUndefined();
+
+    useStore.getState().switchBoard('default');
+    expect(useStore.getState().currentBoardId).toBe('default');
+
+    useStore.getState().undoDomainChange();
+
+    expect(useStore.getState().currentBoardId).toBe('board-a');
+    expect(useStore.getState().notesById[noteId]).toBeDefined();
+    expect(useStore.getState().selectedIds).toContain(noteId);
+    expect(useStore.getState().viewport.x).toBeCloseTo(500 + 260 / 2 - 1280 / 2);
+    expect(useStore.getState().viewport.y).toBeCloseTo(600 + 100 / 2 - 720 / 2);
+  });
 });

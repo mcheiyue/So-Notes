@@ -16,6 +16,7 @@ import { getNoteVisualHeight } from '../utils/noteVisualMetrics';
 import { finalizeActiveNoteDrag } from '../utils/activeNoteDrag';
 import { buildSmartPasteNoteInputs, splitParagraphs } from '../utils/smartPaste';
 import type { SmartPasteNoteInput, SmartPasteOptionId, SmartPasteResult } from '../utils/smartPaste';
+import { LAYOUT } from '../constants/layout';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -446,6 +447,60 @@ const clearDanglingNoteUiRefs = (state: State, removedNoteIds: ReadonlySet<strin
     clearNoteHighlightTimer(id);
     delete state.noteHighlights[id];
   }
+};
+
+const extractAffectedNoteFromPatch = (
+  patch: DomainPatch,
+  currentState: DomainState,
+): { noteId: string; boardId: string } | null => {
+  switch (patch.type) {
+    case 'add-note':
+      return { noteId: patch.note.id, boardId: patch.note.boardId };
+    case 'remove-note': {
+      const note = currentState.notesById[patch.noteId];
+      return note ? { noteId: patch.noteId, boardId: note.boardId } : null;
+    }
+    case 'update-fields': {
+      const note = currentState.notesById[patch.noteId];
+      if (!note) return null;
+      return { noteId: patch.noteId, boardId: patch.fields.boardId ?? note.boardId };
+    }
+    case 'update-position': {
+      const note = currentState.notesById[patch.noteId];
+      return note ? { noteId: patch.noteId, boardId: note.boardId } : null;
+    }
+    default:
+      return null;
+  }
+};
+
+const navigateToAffectedNote = (
+  patch: DomainPatch,
+  preApplyDomain: DomainState,
+  postApplyNotesById: Record<string, Note>,
+  currentBoardId: string,
+  setFn: (partial: Partial<State>) => void,
+): void => {
+  const affected = extractAffectedNoteFromPatch(patch, preApplyDomain);
+  if (!affected) return;
+
+  const note = postApplyNotesById[affected.noteId];
+  if (!note || note.deletedAt) return;
+
+  if (affected.boardId !== currentBoardId) {
+    setFn({ currentBoardId: affected.boardId, viewMode: 'BOARD', selectedIds: [] });
+  }
+
+  const nWidth = LAYOUT.NOTE_WIDTH;
+  const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, note.height || LAYOUT.NOTE_MIN_HEIGHT);
+  const viewport = useStore.getState().viewport;
+  const targetX = note.x + nWidth / 2 - viewport.w / 2;
+  const targetY = note.y + nHeight / 2 - viewport.h / 2;
+
+  setFn({
+    viewport: { ...viewport, x: targetX, y: targetY },
+    selectedIds: [note.id],
+  });
 };
 
 const toMutableHistoryStack = <T>(stack: HistoryStack<T>): {
@@ -1600,6 +1655,8 @@ export const useStore = create<State>()(
         });
       }
 
+      navigateToAffectedNote(result.entry.undo, currentDomain, patched.notesById, currentDomain.currentBoardId, (partial) => set(partial));
+
       return true;
     },
 
@@ -1625,6 +1682,8 @@ export const useStore = create<State>()(
           clearDanglingNoteUiRefs(state, removedIds);
         });
       }
+
+      navigateToAffectedNote(result.entry.redo, currentDomain, patched.notesById, currentDomain.currentBoardId, (partial) => set(partial));
 
       return true;
     },
