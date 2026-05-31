@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useUIStore } from '../store';
+import { useStore } from '../store/useStore';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { appController } from '../controllers/appController';
 
@@ -58,6 +59,20 @@ export default function ShortcutsManager() {
     e.preventDefault();
     const text = await readText().catch(() => '');
     appController.smartPasteFromText(text);
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+z', (e) => {
+    if (viewMode === 'TRASH') return;
+    if (areCanvasShortcutsBlocked) return;
+    e.preventDefault();
+    useStore.getState().undoDomainChange();
+  }, { enableOnFormTags: false });
+
+  useHotkeys(['mod+y', 'mod+shift+z'], (e) => {
+    if (viewMode === 'TRASH') return;
+    if (areCanvasShortcutsBlocked) return;
+    e.preventDefault();
+    useStore.getState().redoDomainChange();
   }, { enableOnFormTags: false });
 
   // --- Native Behavior Guard (UX Protection) ---
