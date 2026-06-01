@@ -2118,12 +2118,292 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.getState().moveNote('stale-1', 100, 200);
     useStore.getState().moveNote('stale-2', 300, 400);
     useStore.getState().finalizeLayoutChange(['stale-1', 'stale-2']);
-    expect(useStore.getState().domainHistory.undoStack.length).toBe(0);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(1);
+    expect(useStore.getState().domainHistory.undoStack[0].label).toBe('move-selected-notes');
+    expect(useStore.getState().domainHistory.undoStack[0].undo.type).toBe('compound-patch');
 
     useStore.getState().moveNote('stale-1', 120, 220);
     useStore.getState().finalizeLayoutChange(['stale-1']);
 
-    expect(useStore.getState().domainHistory.undoStack.length).toBe(0);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(1);
+  });
+
+  it('多便签移动后 finalizeLayoutChange 创建 compound-patch 历史并支持撤销/重做', () => {
+    vi.setSystemTime(new Date('2026-05-01T10:00:00.000Z'));
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'mm-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'mm-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: 'B',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().captureMoveSnapshot({
+      'mm-1': { x: 10, y: 20, updatedAt: 100 },
+      'mm-2': { x: 30, y: 40, updatedAt: 200 },
+    });
+
+    useStore.getState().moveNote('mm-1', 100, 200);
+    useStore.getState().moveNote('mm-2', 300, 400);
+
+    vi.setSystemTime(new Date('2026-05-01T10:05:00.000Z'));
+    useStore.getState().finalizeLayoutChange(['mm-1', 'mm-2']);
+
+    const undoStack = useStore.getState().domainHistory.undoStack;
+    expect(undoStack.length).toBe(1);
+    expect(undoStack[0].label).toBe('move-selected-notes');
+    expect(undoStack[0].undo.type).toBe('compound-patch');
+    expect(undoStack[0].redo.type).toBe('compound-patch');
+
+    const expectedUpdatedAt = new Date('2026-05-01T10:05:00.000Z').getTime();
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['mm-1'].x).toBe(10);
+    expect(useStore.getState().notesById['mm-1'].y).toBe(20);
+    expect(useStore.getState().notesById['mm-1'].updatedAt).toBe(100);
+    expect(useStore.getState().layoutNotesById['mm-1'].x).toBe(10);
+    expect(useStore.getState().layoutNotesById['mm-1'].y).toBe(20);
+    expect(useStore.getState().notesById['mm-2'].x).toBe(30);
+    expect(useStore.getState().notesById['mm-2'].y).toBe(40);
+    expect(useStore.getState().notesById['mm-2'].updatedAt).toBe(200);
+    expect(useStore.getState().layoutNotesById['mm-2'].x).toBe(30);
+    expect(useStore.getState().layoutNotesById['mm-2'].y).toBe(40);
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['mm-1'].x).toBe(100);
+    expect(useStore.getState().notesById['mm-1'].y).toBe(200);
+    expect(useStore.getState().notesById['mm-1'].updatedAt).toBe(expectedUpdatedAt);
+    expect(useStore.getState().layoutNotesById['mm-1'].x).toBe(100);
+    expect(useStore.getState().layoutNotesById['mm-1'].y).toBe(200);
+    expect(useStore.getState().notesById['mm-2'].x).toBe(300);
+    expect(useStore.getState().notesById['mm-2'].y).toBe(400);
+    expect(useStore.getState().notesById['mm-2'].updatedAt).toBe(expectedUpdatedAt);
+    expect(useStore.getState().layoutNotesById['mm-2'].x).toBe(300);
+    expect(useStore.getState().layoutNotesById['mm-2'].y).toBe(400);
+  });
+
+  it('多便签 finalize 中已在废纸篓的便签被跳过', () => {
+    vi.setSystemTime(new Date('2026-05-01T10:00:00.000Z'));
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'md-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'md-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: 'B',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().captureMoveSnapshot({
+      'md-1': { x: 10, y: 20, updatedAt: 100 },
+      'md-2': { x: 30, y: 40, updatedAt: 200 },
+    });
+
+    useStore.getState().moveNote('md-1', 100, 200);
+    useStore.getState().deleteNote('md-2');
+
+    vi.setSystemTime(new Date('2026-05-01T10:05:00.000Z'));
+    useStore.getState().finalizeLayoutChange(['md-1', 'md-2']);
+
+    const undoStack = useStore.getState().domainHistory.undoStack;
+    const moveEntry = undoStack.find((e) => e.label === 'move-selected-notes');
+    expect(moveEntry).toBeDefined();
+
+    const undoPatch = moveEntry!.undo as { type: 'compound-patch'; patches: Array<{ type: string; noteId: string; x: number; y: number }> };
+    expect(undoPatch.patches).toHaveLength(1);
+    expect(undoPatch.patches[0].noteId).toBe('md-1');
+    expect(undoPatch.patches[0].x).toBe(10);
+    expect(undoPatch.patches[0].y).toBe(20);
+  });
+
+  it('多便签 finalize 中无快照的便签被跳过', () => {
+    vi.setSystemTime(new Date('2026-05-01T10:00:00.000Z'));
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'mn-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'mn-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: 'B',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().captureMoveSnapshot({
+      'mn-1': { x: 10, y: 20, updatedAt: 100 },
+    });
+
+    useStore.getState().moveNote('mn-1', 100, 200);
+    useStore.getState().moveNote('mn-2', 300, 400);
+
+    vi.setSystemTime(new Date('2026-05-01T10:05:00.000Z'));
+    useStore.getState().finalizeLayoutChange(['mn-1', 'mn-2']);
+
+    const undoStack = useStore.getState().domainHistory.undoStack;
+    expect(undoStack.length).toBe(1);
+    expect(undoStack[0].label).toBe('move-selected-notes');
+
+    const undoPatch = undoStack[0].undo as { type: 'compound-patch'; patches: Array<{ type: string; noteId: string }> };
+    expect(undoPatch.patches).toHaveLength(1);
+    expect(undoPatch.patches[0].noteId).toBe('mn-1');
+  });
+
+  it('多便签 finalize 所有便签位置均未变时不创建历史', () => {
+    vi.setSystemTime(new Date('2026-05-01T10:00:00.000Z'));
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'ms-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'ms-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: 'B',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().captureMoveSnapshot({
+      'ms-1': { x: 10, y: 20, updatedAt: 100 },
+      'ms-2': { x: 30, y: 40, updatedAt: 200 },
+    });
+
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().finalizeLayoutChange(['ms-1', 'ms-2']);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('多便签 finalize 后快照被清理，后续单便签 finalize 不会误入历史', () => {
+    vi.setSystemTime(new Date('2026-05-01T10:00:00.000Z'));
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'mc-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'mc-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: 'B',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().captureMoveSnapshot({
+      'mc-1': { x: 10, y: 20, updatedAt: 100 },
+      'mc-2': { x: 30, y: 40, updatedAt: 200 },
+    });
+
+    useStore.getState().moveNote('mc-1', 100, 200);
+    useStore.getState().moveNote('mc-2', 300, 400);
+    useStore.getState().finalizeLayoutChange(['mc-1', 'mc-2']);
+
+    useStore.getState().moveNote('mc-1', 120, 220);
+    const undoCountBeforeSecond = useStore.getState().domainHistory.undoStack.length;
+    useStore.getState().finalizeLayoutChange(['mc-1']);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBeforeSecond);
   });
 
   it('跨看板重做时自动切换视口到便签所在看板并居中', () => {
@@ -2513,5 +2793,147 @@ describe('v1.4.4 软删除与废纸篓恢复领域撤销/重做契约', () => {
 
     useStore.getState().undoDomainChange();
     expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
+  });
+
+  it('changeSelectedNotesColor 创建 compound-patch 历史并支持撤销/重做', () => {
+    useStore.setState({ selectedIds: ['sd-1', 'sd-2'] });
+
+    useStore.getState().changeSelectedNotesColor('#fef9c3');
+
+    expect(useStore.getState().notesById['sd-1'].color).toBe('#fef9c3');
+    expect(useStore.getState().notesById['sd-2'].color).toBe('#fef9c3');
+    expect(useStore.getState().layoutNotesById['sd-1'].color).toBe('#fef9c3');
+    expect(useStore.getState().layoutNotesById['sd-2'].color).toBe('#fef9c3');
+
+    const undoStack = useStore.getState().domainHistory.undoStack;
+    expect(undoStack.length).toBe(1);
+    expect(undoStack[0].label).toBe('change-selected-color');
+    expect(undoStack[0].undo.type).toBe('compound-patch');
+    expect(undoStack[0].redo.type).toBe('compound-patch');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].color).toBe('#FFFFFF');
+    expect(useStore.getState().notesById['sd-2'].color).toBe('#dbeafe');
+    expect(useStore.getState().layoutNotesById['sd-1'].color).toBe('#FFFFFF');
+    expect(useStore.getState().layoutNotesById['sd-2'].color).toBe('#dbeafe');
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].color).toBe('#fef9c3');
+    expect(useStore.getState().notesById['sd-2'].color).toBe('#fef9c3');
+    expect(useStore.getState().layoutNotesById['sd-1'].color).toBe('#fef9c3');
+    expect(useStore.getState().layoutNotesById['sd-2'].color).toBe('#fef9c3');
+  });
+
+  it('changeSelectedNotesColor 跳过已在废纸篓的便签', () => {
+    useStore.getState().deleteNote('sd-2');
+    useStore.setState({ selectedIds: ['sd-1', 'sd-2'] });
+
+    useStore.getState().changeSelectedNotesColor('#fef9c3');
+
+    expect(useStore.getState().notesById['sd-1'].color).toBe('#fef9c3');
+    expect(useStore.getState().notesById['sd-2'].color).toBe('#dbeafe');
+
+    const colorEntry = useStore.getState().domainHistory.undoStack.find(
+      (e) => e.label === 'change-selected-color',
+    );
+    expect(colorEntry).toBeDefined();
+    expect(colorEntry!.undo.type).toBe('compound-patch');
+    const undoPatch = colorEntry!.undo as { type: 'compound-patch'; patches: Array<{ type: string; noteId: string; fields: Record<string, unknown> }> };
+    expect(undoPatch.patches).toHaveLength(1);
+    expect(undoPatch.patches[0].noteId).toBe('sd-1');
+    expect(undoPatch.patches[0].fields.color).toBe('#FFFFFF');
+  });
+
+  it('changeSelectedNotesColor 跳过颜色相同的便签', () => {
+    useStore.setState({ selectedIds: ['sd-1', 'sd-2'] });
+    useStore.getState().changeSelectedNotesColor('#dbeafe');
+
+    expect(useStore.getState().notesById['sd-1'].color).toBe('#dbeafe');
+    expect(useStore.getState().notesById['sd-2'].color).toBe('#dbeafe');
+
+    const colorEntry = useStore.getState().domainHistory.undoStack.find(
+      (e) => e.label === 'change-selected-color',
+    );
+    expect(colorEntry).toBeDefined();
+    const undoPatch = colorEntry!.undo as { type: 'compound-patch'; patches: Array<{ noteId: string }> };
+    expect(undoPatch.patches).toHaveLength(1);
+    expect(undoPatch.patches[0].noteId).toBe('sd-1');
+  });
+
+  it('changeSelectedNotesColor 空选区不创建历史', () => {
+    useStore.setState({ selectedIds: [] });
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().changeSelectedNotesColor('#dbeafe');
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('changeSelectedNotesColor 所有选中便签颜色已相同时不创建历史', () => {
+    useStore.setState({ selectedIds: ['sd-1', 'sd-3'] });
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().changeSelectedNotesColor('#dbeafe');
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore + 1);
+
+    const undoCountAfterFirst = useStore.getState().domainHistory.undoStack.length;
+    useStore.getState().changeSelectedNotesColor('#dbeafe');
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountAfterFirst);
+  });
+
+  it('changeSelectedNotesColor 选区含不存在的便签时跳过', () => {
+    useStore.setState({ selectedIds: ['sd-1', 'nonexistent-id'] });
+
+    useStore.getState().changeSelectedNotesColor('#fef9c3');
+
+    expect(useStore.getState().notesById['sd-1'].color).toBe('#fef9c3');
+
+    const colorEntry = useStore.getState().domainHistory.undoStack.find(
+      (e) => e.label === 'change-selected-color',
+    );
+    expect(colorEntry).toBeDefined();
+    const undoPatch = colorEntry!.undo as { type: 'compound-patch'; patches: Array<{ noteId: string }> };
+    expect(undoPatch.patches).toHaveLength(1);
+    expect(undoPatch.patches[0].noteId).toBe('sd-1');
+  });
+
+  it('changeSelectedNotesColor 混合场景只处理有效便签并支持撤销/重做', () => {
+    useStore.getState().deleteNote('sd-2');
+    useStore.setState({ selectedIds: ['sd-1', 'sd-2', 'sd-3'] });
+
+    useStore.getState().changeSelectedNotesColor('#fef9c3');
+
+    expect(useStore.getState().notesById['sd-1'].color).toBe('#fef9c3');
+    expect(useStore.getState().notesById['sd-2'].color).toBe('#dbeafe');
+    expect(useStore.getState().notesById['sd-3'].color).toBe('#fef9c3');
+
+    const colorEntry = useStore.getState().domainHistory.undoStack.find(
+      (e) => e.label === 'change-selected-color',
+    );
+    expect(colorEntry).toBeDefined();
+    const undoPatch = colorEntry!.undo as { type: 'compound-patch'; patches: Array<{ noteId: string; fields: Record<string, unknown> }> };
+    expect(undoPatch.patches).toHaveLength(1);
+    expect(undoPatch.patches[0].noteId).toBe('sd-1');
+    expect(undoPatch.patches[0].fields.color).toBe('#FFFFFF');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].color).toBe('#FFFFFF');
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].color).toBe('#fef9c3');
+  });
+
+  it('changeSelectedNotesColor 不影响选区与视口状态', () => {
+    useStore.setState({ selectedIds: ['sd-1', 'sd-2'] });
+    const viewportBefore = useStore.getState().viewport;
+    const selectedBefore = useStore.getState().selectedIds;
+
+    useStore.getState().changeSelectedNotesColor('#fef9c3');
+
+    expect(useStore.getState().viewport).toEqual(viewportBefore);
+    expect(useStore.getState().selectedIds).toEqual(selectedBefore);
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().viewport).toEqual(viewportBefore);
   });
 });

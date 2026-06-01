@@ -1184,7 +1184,7 @@ export const useStore = create<State>()(
                 const snapshot = pendingMoveSnapshots.get(noteId);
                 pendingMoveSnapshots.delete(noteId);
                 const note = getNoteById(state, noteId);
-                if (snapshot && note && (note.x !== snapshot.x || note.y !== snapshot.y)) {
+                if (snapshot && note && !note.deletedAt && (note.x !== snapshot.x || note.y !== snapshot.y)) {
                     const entry: HistoryEntry<DomainPatch> = {
                         id: crypto.randomUUID(),
                         label: 'move-note',
@@ -1195,7 +1195,32 @@ export const useStore = create<State>()(
                     state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
                 }
             } else {
-                uniqueIds.forEach((id) => pendingMoveSnapshots.delete(id));
+                const undoPatches: DomainPatch[] = [];
+                const redoPatches: DomainPatch[] = [];
+
+                for (const id of uniqueIds) {
+                    const snapshot = pendingMoveSnapshots.get(id);
+                    pendingMoveSnapshots.delete(id);
+                    if (!snapshot) continue;
+
+                    const note = getNoteById(state, id);
+                    if (!note || note.deletedAt) continue;
+                    if (note.x === snapshot.x && note.y === snapshot.y) continue;
+
+                    undoPatches.push({ type: 'update-position', noteId: id, x: snapshot.x, y: snapshot.y, updatedAt: snapshot.updatedAt });
+                    redoPatches.push({ type: 'update-position', noteId: id, x: note.x, y: note.y, updatedAt: note.updatedAt });
+                }
+
+                if (undoPatches.length > 0) {
+                    const entry: HistoryEntry<DomainPatch> = {
+                        id: crypto.randomUUID(),
+                        label: 'move-selected-notes',
+                        createdAt: Date.now(),
+                        undo: { type: 'compound-patch', patches: undoPatches },
+                        redo: { type: 'compound-patch', patches: redoPatches },
+                    };
+                    state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
+                }
             }
         });
     },
@@ -1707,13 +1732,42 @@ export const useStore = create<State>()(
 
     changeSelectedNotesColor: (color) => {
         set((state) => {
+            const changes: Array<{ noteId: string; oldColor: string }> = [];
+
             state.selectedIds.forEach(id => {
                 const note = getNoteById(state, id);
-                if (note) {
-                    note.color = color;
-                    state.layoutNotesById[note.id] = extractLayoutNote(note);
-                }
+                if (!note || note.deletedAt) return;
+                if (note.color === color) return;
+
+                changes.push({ noteId: id, oldColor: note.color });
+                note.color = color;
+                state.layoutNotesById[note.id] = extractLayoutNote(note);
             });
+
+            if (changes.length === 0) return;
+
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'change-selected-color',
+                createdAt: Date.now(),
+                undo: {
+                    type: 'compound-patch',
+                    patches: changes.map(({ noteId, oldColor }) => ({
+                        type: 'update-fields' as const,
+                        noteId,
+                        fields: { color: oldColor },
+                    })),
+                },
+                redo: {
+                    type: 'compound-patch',
+                    patches: changes.map(({ noteId }) => ({
+                        type: 'update-fields' as const,
+                        noteId,
+                        fields: { color },
+                    })),
+                },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
     },
 
