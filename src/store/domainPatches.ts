@@ -43,6 +43,7 @@ export type DomainPatch =
   | UpdatePositionPatch
   | CompoundPatch;
 
+// layout 影响字段：width/height 仅为旧数据兼容保留，新代码写入编辑尺寸须使用 editingWidth/editingHeight。
 const LAYOUT_AFFECTING_FIELDS: ReadonlySet<string> = new Set([
   'x', 'y', 'boardId', 'color', 'width', 'height', 'deletedAt',
 ]);

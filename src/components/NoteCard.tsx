@@ -366,8 +366,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     const effectivePos = getEffectiveLeaderPosition();
     const dragIds = sessionIds.length > 0 ? sessionIds : [note.id];
     const viewport = useStore.getState().viewport;
-    const noteWidth = nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH;
-    const noteHeight = nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT;
+    // 逻辑边界使用常量，不读取 DOM offsetWidth/offsetHeight，
+    // 因为选中态可能渲染编辑尺寸而拖拽边界应使用布局尺寸。
+    const noteWidth = LAYOUT.NOTE_WIDTH;
+    const noteHeight = note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT;
     const margin = 10;
 
     const finalPosition = resolveDragStopWorldPosition(
@@ -504,8 +506,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             effectivePos.x,
             effectivePos.y,
             viewport,
-            nodeRef.current?.offsetWidth || LAYOUT.NOTE_WIDTH,
-            nodeRef.current?.offsetHeight || LAYOUT.NOTE_MIN_HEIGHT,
+            LAYOUT.NOTE_WIDTH,
+            note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT,
             groupBoundsRef.current,
         );
 
@@ -723,6 +725,11 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
   const shouldShowResizeHandle = !isStatic && !note.collapsed && (isSelected || isEditing);
 
+  // 拖拽时禁用尺寸过渡，避免 CSS transition 与 JS transform 拖拽产生冲突。
+  const transitionClass = isDragActive || isStickyDragging
+    ? 'transition-[box-shadow,border-color,background-color]'
+    : 'transition-[box-shadow,border-color,background-color,width,height]';
+
   return (
       <DraggableCore
         nodeRef={nodeRef}
@@ -741,7 +748,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
            className={cn(
            "note-card absolute flex flex-col",
            note.collapsed ? "overflow-hidden" : "h-auto",
-           "rounded-xl transition-[box-shadow,border-color,background-color] duration-200 ease-out",
+            'rounded-xl duration-200 ease-out',
+            transitionClass,
             "border border-border-subtle",
             "group",
             isRecentlyCreated && !isStatic && "note-card-created",
