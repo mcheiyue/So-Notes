@@ -430,3 +430,274 @@ describe('DetachedNoteOverlay 按钮行为', () => {
     expect(pinBtn?.getAttribute('aria-label')).toBe('取消置顶');
   });
 });
+
+describe('DetachedNoteOverlay Note 同步', () => {
+  let container: HTMLDivElement;
+  let overlayRoot: HTMLDivElement;
+  let root: Root;
+
+  const renderOverlay = async () => {
+    await act(async () => {
+      root.render(<DetachedNoteOverlay />);
+    });
+  };
+
+  beforeEach(() => {
+    resetUIStore();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+
+    overlayRoot = document.createElement('div');
+    overlayRoot.id = 'overlay-root';
+    document.body.appendChild(overlayRoot);
+
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    overlayRoot.remove();
+  });
+
+  it('标题变更后撕下视图同步更新', async () => {
+    const note = createTestNote();
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
+
+    await renderOverlay();
+
+    const titleEl = overlayRoot.querySelector(
+      `[data-testid="detached-note-shell-${note.id}"]`,
+    );
+    expect(titleEl?.textContent).toContain('测试标题');
+
+    await act(async () => {
+      useStore.setState({
+        notesById: {
+          [note.id]: { ...note, title: '更新后的标题' },
+        },
+      });
+    });
+
+    expect(titleEl?.textContent).toContain('更新后的标题');
+  });
+
+  it('内容变更后撕下视图同步更新', async () => {
+    const note = createTestNote();
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
+
+    await renderOverlay();
+
+    const shell = overlayRoot.querySelector(
+      `[data-testid="detached-note-shell-${note.id}"]`,
+    );
+    expect(shell?.textContent).toContain('测试正文内容');
+
+    await act(async () => {
+      useStore.setState({
+        notesById: {
+          [note.id]: { ...note, content: '新的正文' },
+        },
+      });
+    });
+
+    expect(shell?.textContent).toContain('新的正文');
+  });
+
+  it('颜色变更后撕下视图同步更新', async () => {
+    const note = createTestNote({ color: '#FF0000' });
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
+
+    await renderOverlay();
+
+    await act(async () => {
+      useStore.setState({
+        notesById: {
+          [note.id]: { ...note, color: '#00FF00' },
+        },
+      });
+    });
+
+    const shell = overlayRoot.querySelector(
+      `[data-testid="detached-note-shell-${note.id}"]`,
+    );
+    expect(shell).not.toBeNull();
+
+    const visuals = shell?.querySelector('[data-note-visuals="true"]') as HTMLElement | null;
+    expect(visuals?.style.backgroundColor).toBe('rgb(0, 255, 0)');
+  });
+
+  it('折叠状态变更后撕下视图同步更新', async () => {
+    const note = createTestNote({ collapsed: false, content: '折叠后应隐藏的正文' });
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
+
+    await renderOverlay();
+
+    await act(async () => {
+      useStore.setState({
+        notesById: {
+          [note.id]: { ...note, collapsed: true },
+        },
+      });
+    });
+
+    const shell = overlayRoot.querySelector(
+      `[data-testid="detached-note-shell-${note.id}"]`,
+    );
+    expect(shell).not.toBeNull();
+    expect(shell?.textContent).toContain('测试标题');
+    expect(shell?.textContent).not.toContain('折叠后应隐藏的正文');
+  });
+});
+
+describe('DetachedNoteOverlay 自动关闭', () => {
+  let container: HTMLDivElement;
+  let overlayRoot: HTMLDivElement;
+  let root: Root;
+
+  const renderOverlay = async () => {
+    await act(async () => {
+      root.render(<DetachedNoteOverlay />);
+    });
+  };
+
+  beforeEach(() => {
+    resetUIStore();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+
+    overlayRoot = document.createElement('div');
+    overlayRoot.id = 'overlay-root';
+    document.body.appendChild(overlayRoot);
+
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    overlayRoot.remove();
+  });
+
+  it('便签从 notesById 移除后撕下视图自动关闭', async () => {
+    const note = createTestNote();
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
+
+    await renderOverlay();
+
+    const shell = overlayRoot.querySelector(
+      `[data-testid="detached-note-shell-${note.id}"]`,
+    );
+    expect(shell).not.toBeNull();
+    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
+
+    await act(async () => {
+      useStore.setState({
+        notesById: {},
+        allNoteIds: [],
+      });
+    });
+
+    expect(useUIStore.getState().detachedNotes).toHaveLength(0);
+    const shellAfter = overlayRoot.querySelector(
+      `[data-testid="detached-note-shell-${note.id}"]`,
+    );
+    expect(shellAfter).toBeNull();
+  });
+
+  it('软删除便签后撕下视图自动关闭', async () => {
+    const note = createTestNote();
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
+
+    await renderOverlay();
+
+    const shell = overlayRoot.querySelector(
+      `[data-testid="detached-note-shell-${note.id}"]`,
+    );
+    expect(shell).not.toBeNull();
+    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
+
+    await act(async () => {
+      useStore.setState({
+        notesById: {
+          [note.id]: { ...note, deletedAt: Date.now() },
+        },
+      });
+    });
+
+    expect(useUIStore.getState().detachedNotes).toHaveLength(0);
+    const shellAfter = overlayRoot.querySelector(
+      `[data-testid="detached-note-shell-${note.id}"]`,
+    );
+    expect(shellAfter).toBeNull();
+  });
+
+  it('多个撕下视图中只有一个因便签消失而关闭', async () => {
+    const note1 = createTestNote({ id: 'n1' });
+    const note2 = createTestNote({ id: 'n2' });
+    useStore.setState({
+      notesById: { [note1.id]: note1, [note2.id]: note2 },
+      allNoteIds: [note1.id, note2.id],
+    });
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+    useUIStore.getState().addDetachedNote('n2', { x: 300, y: 400 });
+
+    await renderOverlay();
+
+    expect(useUIStore.getState().detachedNotes).toHaveLength(2);
+
+    await act(async () => {
+      useStore.setState({
+        notesById: { [note2.id]: note2 },
+        allNoteIds: [note2.id],
+      });
+    });
+
+    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
+    expect(useUIStore.getState().detachedNotes[0].noteId).toBe('n2');
+  });
+});

@@ -1,6 +1,7 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Crosshair, Pin, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useUIStore, uiSelectors } from '../store/uiStore';
 import { useStore } from '../store/useStore';
 import { appController } from '../controllers/appController';
@@ -87,12 +88,40 @@ const DetachedNoteShell: React.FC<{
     e.stopPropagation();
   }, []);
 
-  const note = useStore((s) => s.notesById[noteId]);
+  const noteSnapshot = useStore(
+    useShallow((state) => {
+      const note = state.notesById[noteId];
+      if (!note) {
+        return {
+          available: false,
+          title: '',
+          content: '',
+          color: '',
+          isCollapsed: false,
+        };
+      }
+      return {
+        available: note.deletedAt == null,
+        title: note.title,
+        content: note.content,
+        color: note.color,
+        isCollapsed: note.collapsed ?? false,
+      };
+    }),
+  );
+
+  const removeDetachedNote = useUIStore((s) => s.removeDetachedNote);
+  useEffect(() => {
+    if (!noteSnapshot.available) {
+      removeDetachedNote(noteId);
+    }
+  }, [noteSnapshot.available, noteId, removeDetachedNote]);
+
   const isDark =
     typeof document !== 'undefined' &&
     document.documentElement.classList.contains('dark');
 
-  if (!note) return null;
+  if (!noteSnapshot.available) return null;
 
   return (
     <div
@@ -155,10 +184,10 @@ const DetachedNoteShell: React.FC<{
           )}
         </div>
         <NoteVisuals
-          title={note.title}
-          content={note.content}
-          color={note.color}
-          isCollapsed={note.collapsed ?? false}
+          title={noteSnapshot.title}
+          content={noteSnapshot.content}
+          color={noteSnapshot.color}
+          isCollapsed={noteSnapshot.isCollapsed}
           isDark={isDark}
         />
       </div>
