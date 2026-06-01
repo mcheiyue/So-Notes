@@ -1,7 +1,7 @@
 import React, { useRef, useState, useLayoutEffect, useEffect } from "react";
 import { DraggableCore, DraggableEvent } from "react-draggable";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
-import { NOTE_UI_COLORS, getNoteColor, getNoteDarkSpectrum } from "../store/types";
+import { NOTE_UI_COLORS } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { useDomainStore, useUIStore } from "../store";
 import { useStore } from "../store/useStore";
@@ -21,6 +21,7 @@ import {
   getEdgePushDragSessionPosition,
   applyActiveDragSessionTransforms,
 } from "../utils/edgePushDragCompensation";
+import { NoteVisuals } from "./note-render/NoteVisuals";
 
 interface NoteCardProps {
   id: string;
@@ -37,143 +38,6 @@ const getClientPoint = (event: DraggableEvent): { x: number; y: number } | null 
   const touch = touchEvent.touches[0] ?? touchEvent.changedTouches[0];
   return touch ? { x: touch.clientX, y: touch.clientY } : null;
 };
-
-function hexToRgbChannels(hex: string): { red: number; green: number; blue: number } {
-  const normalized = hex.replace('#', '');
-  const expanded = normalized.length === 3
-    ? normalized
-        .split('')
-        .map((channel) => `${channel}${channel}`)
-        .join('')
-    : normalized;
-
-  if (expanded.length !== 6) {
-    return { red: 59, green: 130, blue: 246 };
-  }
-
-  const red = Number.parseInt(expanded.slice(0, 2), 16);
-  const green = Number.parseInt(expanded.slice(2, 4), 16);
-  const blue = Number.parseInt(expanded.slice(4, 6), 16);
-
-  if (Number.isNaN(red) || Number.isNaN(green) || Number.isNaN(blue)) {
-    return { red: 59, green: 130, blue: 246 };
-  }
-
-  return { red, green, blue };
-}
-
-function toRgba(hex: string, alpha: number): string {
-  const { red, green, blue } = hexToRgbChannels(hex);
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
-
-function buildNoteSurfaceBackground(
-  isDark: boolean,
-  accentHex: string,
-  isEmphasized: boolean,
-): string {
-  if (!isDark) {
-    return 'linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 50%)';
-  }
-
-  const radialLead = isEmphasized ? 0.28 : 0.22;
-  const radialMid = isEmphasized ? 0.1 : 0.075;
-
-  return [
-    `radial-gradient(138% 112% at 15% 0%, ${toRgba(accentHex, radialLead)} 0%, ${toRgba(accentHex, radialMid)} 36%, ${toRgba(accentHex, 0.018)} 62%, transparent 82%)`,
-    'linear-gradient(155deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.034) 20%, transparent 54%)',
-    'linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(0,0,0,0.045) 76%, rgba(0,0,0,0.15) 100%)',
-  ].join(', ');
-}
-
-function getDarkBorderColor(
-  accentHex: string,
-  fallbackBorder: string,
-  isActive: boolean,
-  isDragging: boolean,
-  isSelected: boolean,
-  isGroupSelection: boolean,
-): string {
-  if (isDragging) {
-    return toRgba(accentHex, 0.64);
-  }
-
-  if (isSelected) {
-    return toRgba(accentHex, isGroupSelection ? 0.58 : 0.48);
-  }
-
-  if (isActive) {
-    return toRgba(accentHex, 0.4);
-  }
-
-  return fallbackBorder;
-}
-
-function buildNoteMaterialShadow(
-  isDark: boolean,
-  accentHex: string,
-  isActive: boolean,
-  isDragging: boolean,
-  isSelected: boolean,
-  isGroupSelection: boolean,
-): string {
-  if (!isDark) {
-    const inset = isActive
-      ? 'inset 0 1px 1px rgba(255,255,255,0.4)'
-      : 'inset 0 1px 1px rgba(255,255,255,0.3)';
-    const outer = isDragging
-      ? '0 12px 24px rgba(0,0,0,0.08)'
-      : isActive
-        ? '0 4px 14px rgba(0,0,0,0.08)'
-        : '0 2px 8px rgba(0,0,0,0.05)';
-
-    let shadow = `${inset}, ${outer}`;
-
-    if (isSelected && !isDragging) {
-      const ringColor = isGroupSelection ? 'rgba(59,130,246,0.55)' : 'rgba(59,130,246,0.3)';
-      const glowColor = isGroupSelection ? 'rgba(59,130,246,0.12)' : 'rgba(59,130,246,0.08)';
-      shadow += `, 0 0 0 2px ${ringColor}, 0 0 0 1px ${glowColor}`;
-    }
-
-    return shadow;
-  }
-
-  const outer = isDragging
-    ? '0 14px 30px -14px rgba(0,0,0,0.82)'
-    : isActive || isSelected
-      ? '0 10px 24px -12px rgba(0,0,0,0.78)'
-      : '0 8px 20px -12px rgba(0,0,0,0.72)';
-
-  const accentEdgeAlpha = isDragging
-    ? 0.18
-    : isSelected
-      ? (isGroupSelection ? 0.2 : 0.14)
-      : isActive
-        ? 0.1
-        : 0.035;
-
-  const accentGlowAlpha = isDragging
-    ? 0.28
-    : isSelected
-      ? (isGroupSelection ? 0.36 : 0.28)
-      : isActive
-        ? 0.22
-        : 0;
-
-  const layers = [
-    `inset 0 1px 0 ${isActive || isSelected ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.14)'}`,
-    'inset 1px 0 0 rgba(255,255,255,0.045)',
-    'inset 0 -1px 0 rgba(0,0,0,0.3)',
-    outer,
-    `0 0 0 1px ${toRgba(accentHex, accentEdgeAlpha)}`,
-  ];
-
-  if (accentGlowAlpha > 0) {
-    layers.push(`0 0 24px -10px ${toRgba(accentHex, accentGlowAlpha)}`);
-  }
-
-  return layers.join(', ');
-}
 
 export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = false, scale = 1 }) => {
   // Selectors
@@ -306,7 +170,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
   const worldX = note ? note.x : 0;
   const worldY = note ? note.y : 0;
-  const darkSpectrum = getNoteDarkSpectrum(note?.color ?? '#FFFFFF');
 
   // Auto-resize textarea
   useLayoutEffect(() => {
@@ -343,14 +206,6 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const isTemporarilyHighlighted = Boolean(noteHighlight) && !isStatic;
   const isMaterialAccentActive = isHoverActive || isDragActive || isStickyDragging || isSelected || isTemporarilyHighlighted;
   const shouldUseEditingSize = (isSelected || isEditing) && !isStatic && !note.collapsed;
-  const darkBorderColor = getDarkBorderColor(
-    darkSpectrum.accent,
-    darkSpectrum.border,
-    isHoverActive,
-    isDragActive || isStickyDragging,
-    isSelected,
-    isGroupSelection,
-  );
 
   const handleFinalizeDragSession = (reason: 'stop' | 'window-blur' | 'switch-board' | 'unmount') => {
     if (!isDragging.current) return;
@@ -731,62 +586,54 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     : 'transition-[box-shadow,border-color,background-color,width,height]';
 
   return (
-      <DraggableCore
-        nodeRef={nodeRef}
-        handle=".drag-handle"
-        cancel={'.note-action, input, textarea, [data-note-no-drag="true"]'}
-        scale={scale}
-        onStart={handleStart}
-        onDrag={handleDrag}
-        onStop={handleStop}
-        disabled={isStickyDragging || isStatic}
-      >
-      <article
-         ref={nodeRef}
-          data-id={note.id}
-          data-canvas-hit="blocked"
-           className={cn(
-           "note-card absolute flex flex-col",
-           note.collapsed ? "overflow-hidden" : "h-auto",
-            'rounded-xl duration-200 ease-out',
-            transitionClass,
-            "border border-border-subtle",
-            "group",
-            isRecentlyCreated && !isStatic && "note-card-created",
-            noteHighlight && !isStatic && "note-card-transient-highlight",
-            noteHighlight?.reason === 'created' && !isStatic && "note-card-highlight-created",
-            noteHighlight?.reason === 'located' && !isStatic && "note-card-highlight-located",
-            noteHighlight?.reason === 'edited' && !isStatic && "note-card-highlight-edited",
-            isStickyDragging && "scale-[1.02] cursor-move",
-           isSelected && !isStickyDragging && !isDarkMode && (
-             isGroupSelection
-               ? "border-blue-500/60"
-               : "border-blue-500/40"
-           ),
-           isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto",
-           isPanMode && "pointer-events-none"
+    <DraggableCore
+      nodeRef={nodeRef}
+      handle=".drag-handle"
+      cancel={'.note-action, input, textarea, [data-note-no-drag="true"]'}
+      scale={scale}
+      onStart={handleStart}
+      onDrag={handleDrag}
+      onStop={handleStop}
+      disabled={isStickyDragging || isStatic}
+    >
+      <NoteVisuals
+        ref={nodeRef}
+        data-id={note.id}
+        data-canvas-hit="blocked"
+        title={note.title}
+        content={note.content}
+        color={note.color}
+        isCollapsed={Boolean(note.collapsed)}
+        isDark={isDarkMode}
+        isActive={isMaterialAccentActive}
+        isDragging={isDragActive || isStickyDragging}
+        isSelected={isSelected}
+        isGroupSelection={isGroupSelection}
+        editingWidth={note.editingWidth}
+        editingHeight={note.editingHeight}
+        shouldUseEditingSize={shouldUseEditingSize}
+        className={cn(
+          "note-card absolute",
+          'duration-200 ease-out',
+          transitionClass,
+          "group",
+          isRecentlyCreated && !isStatic && "note-card-created",
+          noteHighlight && !isStatic && "note-card-transient-highlight",
+          noteHighlight?.reason === 'created' && !isStatic && "note-card-highlight-created",
+          noteHighlight?.reason === 'located' && !isStatic && "note-card-highlight-located",
+          noteHighlight?.reason === 'edited' && !isStatic && "note-card-highlight-edited",
+          isStickyDragging && "scale-[1.02] cursor-move",
+          isSelected && !isStickyDragging && !isDarkMode && (
+            isGroupSelection
+              ? "border-blue-500/60"
+              : "border-blue-500/40"
+          ),
+          isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto",
+          isPanMode && "pointer-events-none"
         )}
-        style={{ 
-             width: shouldUseEditingSize ? (note.editingWidth ?? LAYOUT.NOTE_WIDTH) : LAYOUT.NOTE_WIDTH,
-             height: note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : (shouldUseEditingSize ? (note.editingHeight ?? 'auto') : 'auto'),
-             minHeight: note.collapsed ? undefined : LAYOUT.NOTE_MIN_HEIGHT,
-             backgroundColor: getNoteColor(note.color, isDarkMode),
-             borderColor: isDarkMode ? darkBorderColor : undefined,
-             zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
-             transform: isStatic ? undefined : `translate(${worldX}px, ${worldY}px)`,
-             backgroundImage: buildNoteSurfaceBackground(
-               isDarkMode,
-               darkSpectrum.accent,
-               isMaterialAccentActive,
-             ),
-             boxShadow: buildNoteMaterialShadow(
-               isDarkMode,
-               darkSpectrum.accent,
-               isHoverActive,
-               isDragActive || isStickyDragging,
-               isSelected,
-               isGroupSelection,
-             ),
+        style={{
+          zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
+          transform: isStatic ? undefined : `translate(${worldX}px, ${worldY}px)`,
         }}
         onMouseDownCapture={handleMouseDown}
         onMouseUpCapture={handleMouseUpCapture}
@@ -997,7 +844,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             </svg>
           </div>
         )}
-      </article>
+      </NoteVisuals>
     </DraggableCore>
   );
 });

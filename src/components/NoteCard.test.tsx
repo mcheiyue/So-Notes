@@ -407,6 +407,36 @@ describe('NoteCard 头部交互边界', () => {
     expect(rootRegion?.className).not.toContain('before:bg-gradient');
   });
 
+  it('article 元素带有 data-note-visuals 属性，证明通过 NoteVisuals 渲染', async () => {
+    await renderNoteCard();
+    const article = container.querySelector('[data-note-visuals]') as HTMLElement | null;
+    expect(article).not.toBeNull();
+    expect(article?.getAttribute('data-note-visuals')).toBe('true');
+    expect(article?.className).toContain('note-card');
+  });
+
+  it('深色模式视觉样式与 NoteVisuals 独立渲染一致（共享视觉渲染能力）', async () => {
+    useStore.setState({
+      ...normalizeNotes([createNote({ color: '#fef9c3' })]),
+      config: {
+        ...useStore.getState().config,
+        themeMode: 'dark',
+      },
+    });
+
+    await renderNoteCard();
+
+    const article = container.querySelector('[data-note-visuals]') as HTMLElement | null;
+    const spectrum = getNoteDarkSpectrum('#fef9c3');
+
+    expect(article).not.toBeNull();
+    expect(article?.style.backgroundColor).toBe(hexToRgbString(getNoteColor('#fef9c3', true)));
+    expect(article?.style.backgroundImage).toContain('radial-gradient');
+    expect(article?.style.backgroundImage).toContain('245, 158, 11');
+    expect(article?.style.boxShadow).toContain('0 8px 20px -12px');
+    expect(article?.style.borderColor).toBe(hexToRgbString(spectrum.border));
+  });
+
   it('inline backgroundImage 提供静态亚克力表面光泽', async () => {
     await renderNoteCard();
     const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
