@@ -163,6 +163,29 @@ describe('DetachedNoteOverlay 渲染', () => {
     expect(shell).toBeNull();
   });
 
+  it('主题切换后撕下视图同步更新深色便签材质', async () => {
+    const note = createTestNote({ color: '#FFFFFF' });
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+      config: { ...useStore.getState().config, themeMode: 'light' },
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 150, y: 250 });
+
+    await renderOverlay();
+
+    const visuals = overlayRoot.querySelector('[data-note-visuals="true"]') as HTMLElement | null;
+    expect(visuals?.style.backgroundColor).toBe('rgb(255, 255, 255)');
+
+    await act(async () => {
+      useStore.setState({
+        config: { ...useStore.getState().config, themeMode: 'dark' },
+      });
+    });
+
+    expect(visuals?.style.backgroundColor).toBe('rgb(19, 30, 49)');
+  });
+
   it('#overlay-root 不存在时组件不崩溃', async () => {
     overlayRoot.remove();
 
@@ -251,6 +274,48 @@ describe('DetachedNoteOverlay 拖拽移动', () => {
 
     const afterUp = useUIStore.getState().detachedNotes.find((d) => d.noteId === note.id);
     expect(afterUp?.position).toEqual({ x: 150, y: 260 });
+  });
+
+  it('在浮层上松开鼠标后停止拖拽', async () => {
+    const note = createTestNote();
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
+
+    await renderOverlay();
+
+    const handle = overlayRoot.querySelector(
+      `[data-testid="detached-note-drag-handle-${note.id}"]`,
+    ) as HTMLElement | null;
+    const shell = overlayRoot.querySelector(
+      `[data-testid="detached-note-shell-${note.id}"]`,
+    ) as HTMLElement | null;
+    expect(handle).not.toBeNull();
+    expect(shell).not.toBeNull();
+
+    await act(async () => {
+      handle!.dispatchEvent(
+        new MouseEvent('mousedown', { clientX: 150, clientY: 220, bubbles: true }),
+      );
+      document.dispatchEvent(
+        new MouseEvent('mousemove', { clientX: 180, clientY: 250, bubbles: true }),
+      );
+      shell!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+
+    const afterShellUp = useUIStore.getState().detachedNotes.find((d) => d.noteId === note.id);
+    expect(afterShellUp?.position).toEqual({ x: 130, y: 230 });
+
+    await act(async () => {
+      document.dispatchEvent(
+        new MouseEvent('mousemove', { clientX: 230, clientY: 300, bubbles: true }),
+      );
+    });
+
+    const afterExtraMove = useUIStore.getState().detachedNotes.find((d) => d.noteId === note.id);
+    expect(afterExtraMove?.position).toEqual({ x: 130, y: 230 });
   });
 
   it('拖拽只影响被拖拽记录的位置，不影响其他记录', async () => {
@@ -419,6 +484,47 @@ describe('DetachedNoteOverlay 按钮行为', () => {
 
     const entry = useUIStore.getState().detachedNotes.find((d) => d.noteId === 'note-test-1');
     expect(entry?.position).toEqual({ x: 100, y: 200 });
+  });
+
+  it('浮层内容事件不会通过 Portal 冒泡到 React 祖先', async () => {
+    const ancestorMouseDown = vi.fn();
+    const ancestorClick = vi.fn();
+    const ancestorContextMenu = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <div
+          onMouseDown={ancestorMouseDown}
+          onClick={ancestorClick}
+          onContextMenu={ancestorContextMenu}
+        >
+          <DetachedNoteOverlay />
+        </div>,
+      );
+    });
+
+    const shell = overlayRoot.querySelector(
+      '[data-testid="detached-note-shell-note-test-1"]',
+    ) as HTMLElement | null;
+    expect(shell).not.toBeNull();
+
+    await act(async () => {
+      shell!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      shell!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const contextMenuEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      shell!.dispatchEvent(contextMenuEvent);
+    });
+
+    expect(ancestorMouseDown).not.toHaveBeenCalled();
+    expect(ancestorClick).not.toHaveBeenCalled();
+    expect(ancestorContextMenu).not.toHaveBeenCalled();
+    expect(contextMenuEvent.defaultPrevented).toBe(true);
   });
 
   it('置顶状态时 pin 按钮 aria-label 变为取消置顶', async () => {

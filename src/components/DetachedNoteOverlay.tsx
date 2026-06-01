@@ -8,6 +8,7 @@ import { appController } from '../controllers/appController';
 import { NoteVisuals } from './note-render/NoteVisuals';
 import { Z_INDEX } from '../constants/layout';
 import { cn } from '../utils/cn';
+import { useDarkMode } from '../hooks/useDarkMode';
 
 interface DragState {
   noteId: string;
@@ -50,12 +51,12 @@ const DetachedNoteShell: React.FC<{
 
       const handleMouseUp = () => {
         dragRef.current = null;
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
+        document.removeEventListener('mousemove', handleMouseMove, true);
+        document.removeEventListener('mouseup', handleMouseUp, true);
       };
 
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
+      document.addEventListener('mousemove', handleMouseMove, true);
+      document.addEventListener('mouseup', handleMouseUp, true);
     },
     [noteId, position.x, position.y, updatePosition],
   );
@@ -88,6 +89,15 @@ const DetachedNoteShell: React.FC<{
     e.stopPropagation();
   }, []);
 
+  const stopOverlayEvent = useCallback((e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  }, []);
+
+  const handleOverlayContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
   const noteSnapshot = useStore(
     useShallow((state) => {
       const note = state.notesById[noteId];
@@ -117,9 +127,7 @@ const DetachedNoteShell: React.FC<{
     }
   }, [noteSnapshot.available, noteId, removeDetachedNote]);
 
-  const isDark =
-    typeof document !== 'undefined' &&
-    document.documentElement.classList.contains('dark');
+  const isDark = useDarkMode();
 
   if (!noteSnapshot.available) return null;
 
@@ -127,21 +135,24 @@ const DetachedNoteShell: React.FC<{
     <div
       data-testid={`detached-note-shell-${noteId}`}
       className="absolute"
+      onMouseDown={stopOverlayEvent}
+      onMouseUp={stopOverlayEvent}
+      onClick={stopOverlayEvent}
+      onDoubleClick={stopOverlayEvent}
+      onContextMenu={handleOverlayContextMenu}
       style={{
         left: position.x,
         top: position.y,
         zIndex: isPinned ? Z_INDEX.DETACHED_NOTE + 1 : Z_INDEX.DETACHED_NOTE,
       }}
     >
-      <div
-        className={cn(
-          'rounded-xl border border-border-subtle bg-secondary-bg/80 shadow-xl',
-          'pointer-events-auto',
-        )}
-      >
+      <div className="pointer-events-auto">
         <div
           data-testid={`detached-note-drag-handle-${noteId}`}
-          className="flex h-9 cursor-grab items-center justify-between px-2 active:cursor-grabbing"
+          className={cn(
+            'mb-1.5 flex h-8 w-fit cursor-grab items-center justify-between gap-1 rounded-lg border border-border-subtle px-1.5',
+            'bg-secondary-bg/95 shadow-lg backdrop-blur-md active:cursor-grabbing',
+          )}
           onMouseDown={handleMouseDown}
         >
           <div className="flex items-center gap-0.5">
@@ -179,9 +190,7 @@ const DetachedNoteShell: React.FC<{
               <X size={14} />
             </button>
           </div>
-          {isPinned && (
-            <span className="text-xs text-accent select-none">📌</span>
-          )}
+          {isPinned && <Pin size={12} className="text-accent" />}
         </div>
         <NoteVisuals
           title={noteSnapshot.title}
@@ -189,6 +198,7 @@ const DetachedNoteShell: React.FC<{
           color={noteSnapshot.color}
           isCollapsed={noteSnapshot.isCollapsed}
           isDark={isDark}
+          className="shadow-xl"
         />
       </div>
     </div>
