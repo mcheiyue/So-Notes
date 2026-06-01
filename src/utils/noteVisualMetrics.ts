@@ -8,7 +8,8 @@ export const getNoteVisualWidth = (
   note: NoteVisualSource,
   layout?: LayoutVisualSource,
 ): number => {
-  return layout?.width ?? note?.width ?? LAYOUT.NOTE_WIDTH;
+  const rawWidth = layout?.width ?? note?.width ?? LAYOUT.NOTE_WIDTH;
+  return Math.max(LAYOUT.NOTE_MIN_WIDTH, rawWidth);
 };
 
 export const getNoteVisualHeight = (

@@ -193,6 +193,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const restoreNote = useStore(state => state.restoreNote);
   const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
   const setIsDragging = useStore(state => state.setIsDragging);
+  const commitNoteResize = useStore(state => state.commitNoteResize);
   
   const isStickyDragging = useStore(state => state.stickyDrag.id === id);
   const isSelected = useUIStore(state => state.selectedIds.includes(id));
@@ -220,6 +221,22 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const titleBeforeEditRef = useRef(note?.title ?? '');
   const contentBeforeEditRef = useRef(note?.content ?? '');
   const updatedAtBeforeEditRef = useRef(note?.updatedAt ?? 0);
+
+  const resizeStateRef = useRef<{
+    startWidth: number;
+    startHeight: number;
+    startNoteWidth: number | undefined;
+    startNoteHeight: number | undefined;
+    startClientX: number;
+    startClientY: number;
+    startUpdatedAt: number;
+    currentWidth: number;
+    currentHeight: number;
+    noteId: string;
+    pointerId: number;
+    handleElement: Element;
+  } | null>(null);
+  const isResizingRef = useRef(false);
   
   // Drag State (Hybrid Control)
   const isDragging = useRef(false);
@@ -232,6 +249,21 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
   // P0: 缓存 DOM 引用，避免组拖拽时每帧 querySelector
   const noteId = note?.id;
+
+  const cancelResize = () => {
+    const state = resizeStateRef.current;
+    if (!state || !nodeRef.current) {
+      resizeStateRef.current = null;
+      isResizingRef.current = false;
+      return;
+    }
+
+    nodeRef.current.style.width = `${state.startWidth}px`;
+    nodeRef.current.style.height = state.startNoteHeight === undefined ? 'auto' : `${state.startHeight}px`;
+    resizeStateRef.current = null;
+    isResizingRef.current = false;
+  };
+
   useEffect(() => {
     const el = nodeRef.current;
     if (el && noteId) {
@@ -240,6 +272,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         if (isDragging.current) {
           finalizeActiveNoteDrag('unmount');
         }
+        cancelResize();
         unregisterNoteElement(noteId);
       };
     }
@@ -282,6 +315,17 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [note, note?.content, note?.collapsed]);
+
+  useEffect(() => {
+    const handleResizeKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isResizingRef.current) {
+        cancelResize();
+      }
+    };
+
+    window.addEventListener('keydown', handleResizeKeyDown);
+    return () => window.removeEventListener('keydown', handleResizeKeyDown);
+  }, []);
 
   if (!note) return null;
 
@@ -587,6 +631,97 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     commitNoteTextEdit(note.id, titleBeforeEditRef.current, contentBeforeEditRef.current, updatedAtBeforeEditRef.current);
   };
 
+  const commitResize = () => {
+    const state = resizeStateRef.current;
+    if (!state) return;
+
+    const clampedW = Math.max(LAYOUT.NOTE_MIN_WIDTH, state.currentWidth);
+    const clampedH = Math.max(LAYOUT.NOTE_MIN_HEIGHT, state.currentHeight);
+
+    commitNoteResize(
+      state.noteId,
+      clampedW,
+      clampedH,
+      {
+        width: state.startNoteWidth,
+        height: state.startNoteHeight,
+        renderedWidth: state.startWidth,
+        renderedHeight: state.startHeight,
+        updatedAt: state.startUpdatedAt,
+      },
+    );
+
+    resizeStateRef.current = null;
+    isResizingRef.current = false;
+  };
+
+  const handleResizePointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const currentNote = useDomainStore.getState().notesById[note.id];
+    if (!currentNote || currentNote.deletedAt || currentNote.collapsed) return;
+
+    const el = nodeRef.current;
+    if (!el) return;
+
+    const startWidth = currentNote.width ?? LAYOUT.NOTE_WIDTH;
+    const startHeight = currentNote.height ?? el.offsetHeight;
+    const handleElement = e.currentTarget;
+
+    resizeStateRef.current = {
+      startWidth,
+      startHeight,
+      startNoteWidth: currentNote.width,
+      startNoteHeight: currentNote.height,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startUpdatedAt: currentNote.updatedAt,
+      currentWidth: startWidth,
+      currentHeight: startHeight,
+      noteId: note.id,
+      pointerId: e.pointerId,
+      handleElement,
+    };
+    isResizingRef.current = true;
+
+    handleElement.setPointerCapture(e.pointerId);
+  };
+
+  const handleResizePointerMove = (e: React.PointerEvent) => {
+    const state = resizeStateRef.current;
+    if (!state || !nodeRef.current) return;
+
+    const scaleValue = scale || 1;
+    const dx = (e.clientX - state.startClientX) / scaleValue;
+    const dy = (e.clientY - state.startClientY) / scaleValue;
+
+    const newWidth = Math.max(LAYOUT.NOTE_MIN_WIDTH, state.startWidth + dx);
+    const newHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, state.startHeight + dy);
+
+    state.currentWidth = newWidth;
+    state.currentHeight = newHeight;
+
+    nodeRef.current.style.width = `${newWidth}px`;
+    nodeRef.current.style.height = `${newHeight}px`;
+  };
+
+  const handleResizePointerUp = (e: React.PointerEvent) => {
+    if (!isResizingRef.current) return;
+
+    const state = resizeStateRef.current;
+    if (state?.handleElement.hasPointerCapture(e.pointerId)) {
+      state.handleElement.releasePointerCapture(e.pointerId);
+    }
+    commitResize();
+  };
+
+  const handleResizePointerCancel = () => {
+    cancelResize();
+  };
+
+  const shouldShowResizeHandle = !isStatic && !note.collapsed;
+
   return (
       <DraggableCore
         nodeRef={nodeRef}
@@ -623,8 +758,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
            isPanMode && "pointer-events-none"
         )}
         style={{ 
-             width: LAYOUT.NOTE_WIDTH,
-             height: note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : 'auto',
+             width: note.width ?? LAYOUT.NOTE_WIDTH,
+             height: note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : (note.height ?? 'auto'),
              minHeight: note.collapsed ? undefined : LAYOUT.NOTE_MIN_HEIGHT,
              backgroundColor: getNoteColor(note.color, isDarkMode),
              borderColor: isDarkMode ? darkBorderColor : undefined,
@@ -830,6 +965,28 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 readOnly={isStatic}
               />
             </div>
+        )}
+
+        {shouldShowResizeHandle && (
+          <div
+            data-note-no-drag="true"
+            className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize z-30 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+            onPointerDown={handleResizePointerDown}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={handleResizePointerUp}
+            onPointerCancel={handleResizePointerCancel}
+          >
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              className="w-4 h-4 text-text-tertiary/50"
+              aria-hidden="true"
+            >
+              <path d="M14 2L2 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M14 7L7 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M14 12L12 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </div>
         )}
       </article>
     </DraggableCore>

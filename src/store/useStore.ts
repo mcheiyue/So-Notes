@@ -25,6 +25,14 @@ interface SmartPasteSplitPanelState {
   result: SmartPasteResult;
 }
 
+interface NoteResizeSnapshot {
+  width: number | undefined;
+  height: number | undefined;
+  renderedWidth: number;
+  renderedHeight: number;
+  updatedAt: number;
+}
+
 type ArrangeNotesStrategy = 'position' | 'updatedAt' | 'color';
 type ArrangeNotesScope = 'auto' | 'board' | 'selection';
 
@@ -133,6 +141,7 @@ interface State {
   undoDomainChange: () => boolean;
   redoDomainChange: () => boolean;
   commitNoteTextEdit: (noteId: string, beforeTitle: string, beforeContent: string, beforeUpdatedAt: number) => void;
+  commitNoteResize: (noteId: string, newWidth: number, newHeight: number, beforeResize: NoteResizeSnapshot) => void;
   captureMoveSnapshot: (positions: Record<string, { x: number; y: number; updatedAt: number }>) => void;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number, status?: StickyDragStatus) => void;
   
@@ -1737,6 +1746,36 @@ export const useStore = create<State>()(
           createdAt: Date.now(),
           undo: { type: 'update-fields', noteId, fields: { title: beforeTitle, content: beforeContent, updatedAt: beforeUpdatedAt } },
           redo: { type: 'update-fields', noteId, fields: { title: note.title, content: note.content, updatedAt: note.updatedAt } },
+        };
+        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
+      });
+    },
+
+    commitNoteResize: (noteId, newWidth, newHeight, beforeResize) => {
+      set((state) => {
+        const note = getNoteById(state, noteId);
+        if (!note || note.deletedAt) return;
+
+        const clampedWidth = Math.max(LAYOUT.NOTE_MIN_WIDTH, newWidth);
+        const clampedHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, newHeight);
+
+        const effectiveStartWidth = Math.max(LAYOUT.NOTE_MIN_WIDTH, beforeResize.renderedWidth);
+        const effectiveStartHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, beforeResize.renderedHeight);
+
+        if (clampedWidth === effectiveStartWidth && clampedHeight === effectiveStartHeight) return;
+
+        const updatedAt = Date.now();
+        note.width = clampedWidth;
+        note.height = clampedHeight;
+        note.updatedAt = updatedAt;
+        state.layoutNotesById[noteId] = extractLayoutNote(note);
+
+        const entry: HistoryEntry<DomainPatch> = {
+          id: crypto.randomUUID(),
+          label: 'resize-note',
+          createdAt: updatedAt,
+          undo: { type: 'update-fields', noteId, fields: { width: beforeResize.width, height: beforeResize.height, updatedAt: beforeResize.updatedAt } },
+          redo: { type: 'update-fields', noteId, fields: { width: clampedWidth, height: clampedHeight, updatedAt } },
         };
         state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
       });
