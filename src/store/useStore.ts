@@ -1413,6 +1413,21 @@ export const useStore = create<State>()(
                 originalSelectedIdsSnapshot,
             );
             assignNoteHighlights(state, [mergedId], 'created');
+
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'merge-notes',
+                createdAt: Date.now(),
+                undo: {
+                    type: 'compound-patch',
+                    patches: [{ type: 'remove-note', noteId: newNote.id }],
+                },
+                redo: {
+                    type: 'compound-patch',
+                    patches: [{ type: 'add-note', note: newNote }],
+                },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
 
         return mergedId;
@@ -1474,6 +1489,24 @@ export const useStore = create<State>()(
                 originalSelectedIdsSnapshot,
             );
             assignNoteHighlights(state, createdIds, 'created');
+
+            const splitNotes = createdIds
+                .map((id) => state.notesById[id])
+                .filter((n): n is Note => n !== undefined);
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'split-note',
+                createdAt: Date.now(),
+                undo: {
+                    type: 'compound-patch',
+                    patches: splitNotes.map((n) => ({ type: 'remove-note' as const, noteId: n.id })),
+                },
+                redo: {
+                    type: 'compound-patch',
+                    patches: splitNotes.map((n) => ({ type: 'add-note' as const, note: n })),
+                },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
 
         return selectedIds;

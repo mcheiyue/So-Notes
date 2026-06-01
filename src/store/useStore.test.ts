@@ -3146,3 +3146,335 @@ describe('v1.4.4 归拢领域撤销/重做契约', () => {
     expect(useStore.getState().layoutNotesById['ar-2']).toMatchObject(arrangedPos['ar-2']);
   });
 });
+
+describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'sm-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'alpha',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'sm-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: 'B',
+          content: 'beta',
+          color: '#dbeafe',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+        {
+          id: 'sm-3',
+          boardId: 'default',
+          x: 50,
+          y: 60,
+          title: '',
+          content: '第一段\n\n第二段\n\n第三段',
+          color: '#fef3c7',
+          z: 3,
+          createdAt: 300,
+          updatedAt: 300,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: ['sm-1', 'sm-2'],
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
+      config: { ...useStore.getState().config, maxZ: 3 },
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('mergeSelectedNotes 创建 merge-notes history 条目', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    useStore.getState().mergeSelectedNotes();
+
+    const undoStack = useStore.getState().domainHistory.undoStack;
+    const mergeEntry = undoStack.find((e) => e.label === 'merge-notes');
+    expect(mergeEntry).toBeDefined();
+    expect(mergeEntry!.undo.type).toBe('compound-patch');
+    expect(mergeEntry!.redo.type).toBe('compound-patch');
+  });
+
+  it('mergeSelectedNotes undo 移除合并便签，redo 恢复同一 UUID', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    const mergedId = useStore.getState().mergeSelectedNotes();
+    expect(mergedId).toBeTruthy();
+
+    const mergedNote = getNote(mergedId!);
+    expect(mergedNote).toBeDefined();
+    expect(mergedNote!.content).toBe('alpha\n\nbeta');
+
+    useStore.getState().undoDomainChange();
+    expect(getNote(mergedId!)).toBeUndefined();
+    expect(getNote('sm-1')).toBeDefined();
+    expect(getNote('sm-2')).toBeDefined();
+
+    useStore.getState().redoDomainChange();
+    const restored = getNote(mergedId!);
+    expect(restored).toBeDefined();
+    expect(restored!.id).toBe(mergedId);
+    expect(restored!.content).toBe('alpha\n\nbeta');
+    expect(restored!.boardId).toBe('default');
+  });
+
+  it('mergeSelectedNotes undo/redo 保持 notesById、allNoteIds、boardNoteIds、layoutNotesById 一致', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    const mergedId = useStore.getState().mergeSelectedNotes();
+    expect(mergedId).toBeTruthy();
+
+    const afterMerge = useStore.getState();
+    expect(afterMerge.notesById[mergedId!]).toBeDefined();
+    expect(afterMerge.allNoteIds).toContain(mergedId);
+    expect(afterMerge.boardNoteIds['default']).toContain(mergedId);
+    expect(afterMerge.layoutNotesById[mergedId!]).toBeDefined();
+    expect(afterMerge.layoutNotesById[mergedId!].x).toBe(afterMerge.notesById[mergedId!].x);
+    expect(afterMerge.layoutNotesById[mergedId!].y).toBe(afterMerge.notesById[mergedId!].y);
+
+    useStore.getState().undoDomainChange();
+    const afterUndo = useStore.getState();
+    expect(afterUndo.notesById[mergedId!]).toBeUndefined();
+    expect(afterUndo.allNoteIds).not.toContain(mergedId);
+    expect(afterUndo.boardNoteIds['default'] ?? []).not.toContain(mergedId);
+    expect(afterUndo.layoutNotesById[mergedId!]).toBeUndefined();
+
+    useStore.getState().redoDomainChange();
+    const afterRedo = useStore.getState();
+    expect(afterRedo.notesById[mergedId!]).toBeDefined();
+    expect(afterRedo.allNoteIds).toContain(mergedId);
+    expect(afterRedo.boardNoteIds['default']).toContain(mergedId);
+    expect(afterRedo.layoutNotesById[mergedId!]).toBeDefined();
+    expect(afterRedo.layoutNotesById[mergedId!].x).toBe(afterRedo.notesById[mergedId!].x);
+    expect(afterRedo.layoutNotesById[mergedId!].y).toBe(afterRedo.notesById[mergedId!].y);
+  });
+
+  it('mergeSelectedNotes 跨看板合并不创建 domainHistory 条目', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'cross-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'alpha',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'cross-2',
+          boardId: 'other-board',
+          x: 50,
+          y: 60,
+          title: 'C',
+          content: 'cross',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 300,
+          updatedAt: 300,
+        },
+      ]),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'other-board', name: '其他板', icon: '📋', createdAt: 1 },
+      ],
+      selectedIds: ['cross-1', 'cross-2'],
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+    const result = useStore.getState().mergeSelectedNotes();
+
+    expect(result).toBeNull();
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('mergeSelectedNotes 旧 undoLastArrange 仍可撤销合并', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    const mergedId = useStore.getState().mergeSelectedNotes();
+    expect(mergedId).toBeTruthy();
+    expect(useStore.getState().arrangeUndoToast).not.toBeNull();
+
+    const undone = useStore.getState().undoLastArrange();
+
+    expect(undone).toBe(true);
+    expect(getNote(mergedId!)).toBeUndefined();
+    expect(getNote('sm-1')).toBeDefined();
+    expect(getNote('sm-2')).toBeDefined();
+    expect(useStore.getState().arrangeUndoToast).toBeNull();
+  });
+
+  it('splitNoteByParagraph 创建 split-note history 条目', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    useStore.getState().splitNoteByParagraph('sm-3');
+
+    const undoStack = useStore.getState().domainHistory.undoStack;
+    const splitEntry = undoStack.find((e) => e.label === 'split-note');
+    expect(splitEntry).toBeDefined();
+    expect(splitEntry!.undo.type).toBe('compound-patch');
+    expect(splitEntry!.redo.type).toBe('compound-patch');
+  });
+
+  it('splitNoteByParagraph undo 移除拆分便签，redo 恢复同一 UUID', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    const selectedIds = useStore.getState().splitNoteByParagraph('sm-3');
+    expect(selectedIds).toHaveLength(4);
+    const splitIds = selectedIds.slice(1);
+
+    splitIds.forEach((id) => {
+      expect(getNote(id)).toBeDefined();
+    });
+    expect(getNote('sm-3')).toBeDefined();
+
+    useStore.getState().undoDomainChange();
+    splitIds.forEach((id) => {
+      expect(getNote(id)).toBeUndefined();
+    });
+    expect(getNote('sm-3')).toBeDefined();
+
+    useStore.getState().redoDomainChange();
+    splitIds.forEach((id) => {
+      const note = getNote(id);
+      expect(note).toBeDefined();
+      expect(note!.id).toBe(id);
+    });
+    expect(getNote('sm-3')).toBeDefined();
+  });
+
+  it('splitNoteByParagraph undo/redo 保持 notesById、allNoteIds、boardNoteIds、layoutNotesById 一致', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    const selectedIds = useStore.getState().splitNoteByParagraph('sm-3');
+    const splitIds = selectedIds.slice(1);
+
+    const afterSplit = useStore.getState();
+    splitIds.forEach((id) => {
+      expect(afterSplit.notesById[id]).toBeDefined();
+      expect(afterSplit.allNoteIds).toContain(id);
+      expect(afterSplit.boardNoteIds['default']).toContain(id);
+      expect(afterSplit.layoutNotesById[id]).toBeDefined();
+      expect(afterSplit.layoutNotesById[id].x).toBe(afterSplit.notesById[id].x);
+      expect(afterSplit.layoutNotesById[id].y).toBe(afterSplit.notesById[id].y);
+    });
+
+    useStore.getState().undoDomainChange();
+    const afterUndo = useStore.getState();
+    splitIds.forEach((id) => {
+      expect(afterUndo.notesById[id]).toBeUndefined();
+      expect(afterUndo.allNoteIds).not.toContain(id);
+      expect(afterUndo.boardNoteIds['default'] ?? []).not.toContain(id);
+      expect(afterUndo.layoutNotesById[id]).toBeUndefined();
+    });
+    expect(afterUndo.notesById['sm-3']).toBeDefined();
+
+    useStore.getState().redoDomainChange();
+    const afterRedo = useStore.getState();
+    splitIds.forEach((id) => {
+      expect(afterRedo.notesById[id]).toBeDefined();
+      expect(afterRedo.allNoteIds).toContain(id);
+      expect(afterRedo.boardNoteIds['default']).toContain(id);
+      expect(afterRedo.layoutNotesById[id]).toBeDefined();
+      expect(afterRedo.layoutNotesById[id].x).toBe(afterRedo.notesById[id].x);
+      expect(afterRedo.layoutNotesById[id].y).toBe(afterRedo.notesById[id].y);
+    });
+    expect(afterRedo.notesById['sm-3']).toBeDefined();
+  });
+
+  it('splitNoteByParagraph 内容不足两段时不创建 domainHistory 条目', () => {
+    useStore.setState({
+      notesById: {
+        ...useStore.getState().notesById,
+        'sm-3': { ...useStore.getState().notesById['sm-3'], content: '单段内容' },
+      },
+    });
+
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+    const result = useStore.getState().splitNoteByParagraph('sm-3');
+
+    expect(result).toHaveLength(0);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+  });
+
+  it('splitNoteByParagraph 旧 undoLastArrange 仍可撤销拆分', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    const selectedIds = useStore.getState().splitNoteByParagraph('sm-3');
+    const splitIds = selectedIds.slice(1);
+    expect(splitIds.length).toBeGreaterThan(0);
+    expect(useStore.getState().arrangeUndoToast).not.toBeNull();
+
+    const undone = useStore.getState().undoLastArrange();
+
+    expect(undone).toBe(true);
+    splitIds.forEach((id) => {
+      expect(getNote(id)).toBeUndefined();
+    });
+    expect(getNote('sm-3')).toBeDefined();
+    expect(useStore.getState().arrangeUndoToast).toBeNull();
+  });
+
+  it('merge undo 后 redo 不重新生成 UUID', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    const mergedId = useStore.getState().mergeSelectedNotes();
+    expect(mergedId).toBeTruthy();
+
+    useStore.getState().undoDomainChange();
+    useStore.getState().redoDomainChange();
+
+    const redoStack = useStore.getState().domainHistory.redoStack;
+    expect(redoStack).toHaveLength(0);
+
+    const undoStack = useStore.getState().domainHistory.undoStack;
+    const mergeEntry = undoStack.find((e) => e.label === 'merge-notes');
+    expect(mergeEntry).toBeDefined();
+
+    const redoPatch = mergeEntry!.redo;
+    expect(redoPatch.type).toBe('compound-patch');
+    if (redoPatch.type !== 'compound-patch') throw new Error('redo patch 应为 compound-patch');
+
+    const addPatch = redoPatch.patches[0];
+    expect(addPatch.type).toBe('add-note');
+    if (addPatch.type !== 'add-note') throw new Error('redo 子 patch 应为 add-note');
+    expect(addPatch.note.id).toBe(mergedId);
+  });
+
+  it('split undo 后 redo 不重新生成 UUID', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    const selectedIds = useStore.getState().splitNoteByParagraph('sm-3');
+    const splitIds = selectedIds.slice(1);
+
+    useStore.getState().undoDomainChange();
+    useStore.getState().redoDomainChange();
+
+    const undoStack = useStore.getState().domainHistory.undoStack;
+    const splitEntry = undoStack.find((e) => e.label === 'split-note');
+    expect(splitEntry).toBeDefined();
+
+    const redoPatch = splitEntry!.redo;
+    expect(redoPatch.type).toBe('compound-patch');
+    if (redoPatch.type !== 'compound-patch') throw new Error('redo patch 应为 compound-patch');
+
+    redoPatch.patches.forEach((patch, i) => {
+      expect(patch.type).toBe('add-note');
+      if (patch.type !== 'add-note') throw new Error('redo 子 patch 应为 add-note');
+      expect(patch.note.id).toBe(splitIds[i]);
+    });
+  });
+});
