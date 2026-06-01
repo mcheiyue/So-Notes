@@ -4,6 +4,7 @@ import { LAYOUT } from '../constants/layout';
 import type { Note, ShellRectState, StickyDragStatus } from '../store/types';
 import { parseSmartPaste, buildSmartPasteNoteInputs } from '../utils/smartPaste';
 import { getViewportSpawnOrigin } from '../utils/spawnPosition';
+import { getNoteElement } from '../utils/noteElementRegistry';
 
 type ArrangeNotesStrategy = 'position' | 'updatedAt' | 'color';
 type ArrangeNotesScope = 'auto' | 'board' | 'selection';
@@ -298,6 +299,62 @@ export const appController = {
 
   toggleDetachedNotePin: (noteId: string): void => {
     useUIStore.getState().toggleDetachedNotePin(noteId);
+  },
+
+  /**
+   * locateDetachedNote 编排顺序（与 locateAndSelectNote 对齐）：
+   * 检查撕下记录存在 → switchBoard（跨看板）→ toggleCollapse（折叠时）
+   * → rAF 轮询 DOM 就绪 → 验证有效性 → clearSelection → setViewportPosition
+   * → setSelectedIds → bringToFront → markNoteHighlights('located')
+   */
+  locateDetachedNote: (noteId: string): void => {
+    const domainState = useStore.getState();
+    const note = domainState.notesById[noteId];
+    if (!note || note.deletedAt) return;
+
+    if (!useUIStore.getState().detachedNotes.some((d) => d.noteId === noteId)) return;
+
+    if (domainState.viewMode === 'TRASH') {
+      enterBoardMode();
+    }
+
+    if (note.boardId !== useStore.getState().currentBoardId) {
+      switchBoard(note.boardId);
+    }
+
+    if (note.collapsed) {
+      useStore.getState().toggleCollapse(noteId, { recordHistory: false });
+    }
+
+    const MAX_DOM_READINESS_FRAMES = 5;
+
+    const tryLocate = (frame: number): void => {
+      if (frame >= MAX_DOM_READINESS_FRAMES) return;
+
+      const element = getNoteElement(noteId);
+      if (!element) {
+        requestAnimationFrame(() => tryLocate(frame + 1));
+        return;
+      }
+
+      const current = useStore.getState();
+      const target = current.notesById[noteId];
+      if (!target || target.deletedAt || target.boardId !== current.currentBoardId) return;
+      if (!useUIStore.getState().detachedNotes.some((d) => d.noteId === noteId)) return;
+
+      const nWidth = LAYOUT.NOTE_WIDTH;
+      const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, target.height || LAYOUT.NOTE_MIN_HEIGHT);
+      const targetX = target.x + nWidth / 2 - current.viewport.w / 2;
+      const targetY = target.y + nHeight / 2 - current.viewport.h / 2;
+
+      current.clearSelection();
+      current.setViewportPosition(targetX, targetY);
+      current.setSelectedIds([noteId]);
+      current.bringToFront(noteId);
+      current.markNoteHighlights([noteId], 'located');
+    };
+
+    requestAnimationFrame(() => tryLocate(0));
   },
 } as const;
 

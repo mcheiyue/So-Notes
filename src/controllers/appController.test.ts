@@ -17,12 +17,22 @@ vi.mock('../utils/fileSystem', () => ({
   openFile: vi.fn(async () => null),
 }));
 
+vi.mock('../utils/noteElementRegistry', () => {
+  const mockGetNoteElement = vi.fn(() => document.createElement('div'));
+  return {
+    getNoteElement: mockGetNoteElement,
+    registerNoteElement: vi.fn(),
+    unregisterNoteElement: vi.fn(),
+  };
+});
+
 import { appController } from './appController';
 import { useStore } from '../store/useStore';
 import { useUIStore, createInitialUIState } from '../store/uiStore';
 import { normalizeNotes } from '../store/normalization';
 import { LAYOUT } from '../constants/layout';
 import type { Note } from '../store/types';
+import { getNoteElement } from '../utils/noteElementRegistry';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
@@ -406,5 +416,160 @@ describe('appController 撕下便签方法', () => {
     const d2 = useUIStore.getState().detachedNotes.find((d) => d.noteId === 'n2');
     expect(d1?.isPinned).toBe(true);
     expect(d2?.position).toEqual({ x: 10, y: 20 });
+  });
+});
+
+describe('appController locateDetachedNote', () => {
+  const mockedGetNoteElement = vi.mocked(getNoteElement);
+
+  beforeEach(() => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn((cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } },
+        { id: 'board-2', name: '二号板', icon: '🧭', createdAt: 1, viewport: { x: 0, y: 0 } },
+      ],
+      currentBoardId: 'default',
+      ...normalizeNotes([
+        createNote({ id: 'note-local', x: 100, y: 200 }),
+        createNote({ id: 'note-remote', boardId: 'board-2', x: 400, y: 300 }),
+        createNote({ id: 'note-collapsed', x: 50, y: 50, collapsed: true }),
+      ]),
+      viewport: { x: 0, y: 0, w: 320, h: 240 },
+    });
+    useUIStore.getState().replaceUIState(createInitialUIState());
+    mockedGetNoteElement.mockReturnValue(document.createElement('div'));
+  });
+
+  it('同看板便签：居中视口、选中、置顶、高亮', () => {
+    useUIStore.getState().addDetachedNote('note-local', { x: 50, y: 50 });
+
+    appController.locateDetachedNote('note-local');
+
+    const state = useStore.getState();
+    const nWidth = LAYOUT.NOTE_WIDTH;
+    const nHeight = LAYOUT.NOTE_MIN_HEIGHT;
+    expect(state.viewport.x).toBe(100 + nWidth / 2 - 160);
+    expect(state.viewport.y).toBe(200 + nHeight / 2 - 120);
+    expect(state.selectedIds).toEqual(['note-local']);
+    expect(state.notesById['note-local'].z).toBeGreaterThan(1);
+    expect(state.noteHighlights['note-local']?.reason).toBe('located');
+  });
+
+  it('跨看板便签：先切换看板再定位', () => {
+    useUIStore.getState().addDetachedNote('note-remote', { x: 50, y: 50 });
+
+    appController.locateDetachedNote('note-remote');
+
+    const state = useStore.getState();
+    expect(state.currentBoardId).toBe('board-2');
+
+    const nWidth = LAYOUT.NOTE_WIDTH;
+    const nHeight = LAYOUT.NOTE_MIN_HEIGHT;
+    expect(state.viewport.x).toBe(400 + nWidth / 2 - 160);
+    expect(state.viewport.y).toBe(300 + nHeight / 2 - 120);
+    expect(state.selectedIds).toEqual(['note-remote']);
+    expect(state.noteHighlights['note-remote']?.reason).toBe('located');
+  });
+
+  it('从 TRASH 切换到 BOARD 再定位', () => {
+    useUIStore.getState().addDetachedNote('note-local', { x: 50, y: 50 });
+    useStore.setState({ viewMode: 'TRASH' });
+    useUIStore.setState({ viewMode: 'TRASH' });
+
+    appController.locateDetachedNote('note-local');
+
+    const state = useStore.getState();
+    expect(state.viewMode).toBe('BOARD');
+    expect(state.selectedIds).toEqual(['note-local']);
+    expect(state.noteHighlights['note-local']?.reason).toBe('located');
+  });
+
+  it('折叠便签：先展开再定位', () => {
+    useUIStore.getState().addDetachedNote('note-collapsed', { x: 50, y: 50 });
+
+    appController.locateDetachedNote('note-collapsed');
+
+    const state = useStore.getState();
+    expect(state.notesById['note-collapsed'].collapsed).toBe(false);
+    expect(state.selectedIds).toEqual(['note-collapsed']);
+    expect(state.noteHighlights['note-collapsed']?.reason).toBe('located');
+    expect(state.domainHistory.undoStack).toHaveLength(0);
+  });
+
+  it('不存在的便签：静默无操作', () => {
+    appController.locateDetachedNote('nonexistent');
+
+    const state = useStore.getState();
+    expect(state.selectedIds).toEqual([]);
+    expect(state.viewport.x).toBe(0);
+    expect(state.viewport.y).toBe(0);
+  });
+
+  it('已删除便签：静默无操作', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        createNote({ id: 'deleted-note', x: 100, y: 200, deletedAt: Date.now() }),
+      ]),
+    });
+    useUIStore.getState().addDetachedNote('deleted-note', { x: 50, y: 50 });
+
+    appController.locateDetachedNote('deleted-note');
+
+    const state = useStore.getState();
+    expect(state.selectedIds).toEqual([]);
+    expect(state.noteHighlights['deleted-note']).toBeUndefined();
+  });
+
+  it('撕下记录不存在时静默无操作', () => {
+    appController.locateDetachedNote('note-local');
+
+    const state = useStore.getState();
+    expect(state.selectedIds).toEqual([]);
+    expect(state.noteHighlights['note-local']).toBeUndefined();
+  });
+
+  it('DOM 未就绪超时后静默退出', () => {
+    mockedGetNoteElement.mockReturnValue(undefined);
+    useUIStore.getState().addDetachedNote('note-local', { x: 50, y: 50 });
+
+    const rAFCallbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', vi.fn((cb: FrameRequestCallback) => {
+      rAFCallbacks.push(cb);
+      return rAFCallbacks.length;
+    }));
+
+    appController.locateDetachedNote('note-local');
+
+    for (let i = 0; i < 5; i++) {
+      if (rAFCallbacks.length > 0) {
+        const cb = rAFCallbacks.shift()!;
+        cb(0);
+      }
+    }
+
+    const state = useStore.getState();
+    expect(state.selectedIds).toEqual([]);
+    expect(state.noteHighlights['note-local']).toBeUndefined();
+  });
+
+  it('DOM 就绪后重新检查便签有效性', () => {
+    useUIStore.getState().addDetachedNote('note-local', { x: 50, y: 50 });
+    useStore.setState({
+      ...normalizeNotes([
+        createNote({ id: 'note-local', x: 100, y: 200, deletedAt: Date.now() }),
+      ]),
+    });
+
+    appController.locateDetachedNote('note-local');
+
+    const state = useStore.getState();
+    expect(state.selectedIds).toEqual([]);
+    expect(state.noteHighlights['note-local']).toBeUndefined();
   });
 });

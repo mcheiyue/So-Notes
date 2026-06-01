@@ -19,6 +19,18 @@ vi.mock('../utils/fileSystem', () => ({
   openFile: vi.fn(async () => null),
 }));
 
+const mockLocateDetachedNote = vi.fn();
+const mockToggleDetachedNotePin = vi.fn();
+const mockCloseDetachedNote = vi.fn();
+
+vi.mock('../controllers/appController', () => ({
+  appController: {
+    locateDetachedNote: (...args: unknown[]) => mockLocateDetachedNote(...args),
+    toggleDetachedNotePin: (...args: unknown[]) => mockToggleDetachedNotePin(...args),
+    closeDetachedNote: (...args: unknown[]) => mockCloseDetachedNote(...args),
+  },
+}));
+
 import { DetachedNoteOverlay } from './DetachedNoteOverlay';
 import { useUIStore, createInitialUIState } from '../store/uiStore';
 import { useStore } from '../store/useStore';
@@ -277,5 +289,144 @@ describe('DetachedNoteOverlay 拖拽移动', () => {
     await act(async () => {
       document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     });
+  });
+});
+
+describe('DetachedNoteOverlay 按钮行为', () => {
+  let container: HTMLDivElement;
+  let overlayRoot: HTMLDivElement;
+  let root: Root;
+
+  const renderOverlay = async () => {
+    await act(async () => {
+      root.render(<DetachedNoteOverlay />);
+    });
+  };
+
+  beforeEach(() => {
+    resetUIStore();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+      notesById: {
+        'note-test-1': createTestNote(),
+      },
+      allNoteIds: ['note-test-1'],
+    });
+    useUIStore.getState().addDetachedNote('note-test-1', { x: 100, y: 200 });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+
+    overlayRoot = document.createElement('div');
+    overlayRoot.id = 'overlay-root';
+    document.body.appendChild(overlayRoot);
+
+    root = createRoot(container);
+
+    mockLocateDetachedNote.mockClear();
+    mockToggleDetachedNotePin.mockClear();
+    mockCloseDetachedNote.mockClear();
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    overlayRoot.remove();
+  });
+
+  it('点击定位按钮调用 appController.locateDetachedNote', async () => {
+    await renderOverlay();
+
+    const locateBtn = overlayRoot.querySelector(
+      '[data-testid="detached-note-locate-note-test-1"]',
+    ) as HTMLButtonElement;
+    expect(locateBtn).not.toBeNull();
+
+    await act(async () => {
+      locateBtn.click();
+    });
+
+    expect(mockLocateDetachedNote).toHaveBeenCalledWith('note-test-1');
+    expect(mockLocateDetachedNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('点击置顶按钮调用 appController.toggleDetachedNotePin', async () => {
+    await renderOverlay();
+
+    const pinBtn = overlayRoot.querySelector(
+      '[data-testid="detached-note-pin-note-test-1"]',
+    ) as HTMLButtonElement;
+    expect(pinBtn).not.toBeNull();
+
+    await act(async () => {
+      pinBtn.click();
+    });
+
+    expect(mockToggleDetachedNotePin).toHaveBeenCalledWith('note-test-1');
+    expect(mockToggleDetachedNotePin).toHaveBeenCalledTimes(1);
+  });
+
+  it('点击贴回画布按钮调用 appController.closeDetachedNote', async () => {
+    await renderOverlay();
+
+    const stickBackBtn = overlayRoot.querySelector(
+      '[data-testid="detached-note-stick-back-note-test-1"]',
+    ) as HTMLButtonElement;
+    expect(stickBackBtn).not.toBeNull();
+
+    await act(async () => {
+      stickBackBtn.click();
+    });
+
+    expect(mockCloseDetachedNote).toHaveBeenCalledWith('note-test-1');
+    expect(mockCloseDetachedNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('三个按钮均有可访问的 aria-label', async () => {
+    await renderOverlay();
+
+    const locateBtn = overlayRoot.querySelector('[data-testid="detached-note-locate-note-test-1"]');
+    const pinBtn = overlayRoot.querySelector('[data-testid="detached-note-pin-note-test-1"]');
+    const stickBackBtn = overlayRoot.querySelector('[data-testid="detached-note-stick-back-note-test-1"]');
+
+    expect(locateBtn?.getAttribute('aria-label')).toBe('定位到画布所在');
+    expect(pinBtn?.getAttribute('aria-label')).toBe('置顶');
+    expect(stickBackBtn?.getAttribute('aria-label')).toBe('贴回画布');
+  });
+
+  it('按钮 mousedown 不触发浮层拖拽', async () => {
+    await renderOverlay();
+
+    const locateBtn = overlayRoot.querySelector(
+      '[data-testid="detached-note-locate-note-test-1"]',
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      locateBtn.dispatchEvent(
+        new MouseEvent('mousedown', { clientX: 120, clientY: 220, bubbles: true }),
+      );
+      document.dispatchEvent(
+        new MouseEvent('mousemove', { clientX: 200, clientY: 300, bubbles: true }),
+      );
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+
+    const entry = useUIStore.getState().detachedNotes.find((d) => d.noteId === 'note-test-1');
+    expect(entry?.position).toEqual({ x: 100, y: 200 });
+  });
+
+  it('置顶状态时 pin 按钮 aria-label 变为取消置顶', async () => {
+    useUIStore.getState().toggleDetachedNotePin('note-test-1');
+
+    await renderOverlay();
+
+    const pinBtn = overlayRoot.querySelector('[data-testid="detached-note-pin-note-test-1"]');
+    expect(pinBtn?.getAttribute('aria-label')).toBe('取消置顶');
   });
 });
