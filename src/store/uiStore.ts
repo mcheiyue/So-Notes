@@ -5,7 +5,6 @@ import type {
   ContextMenuState,
   NoteHighlight,
   NoteHighlightReason,
-  Note,
 } from './types';
 import type { SmartPasteResult } from '../utils/smartPaste';
 import { useStore } from './useStore';
@@ -15,24 +14,6 @@ export const UI_STORE_MODULE = 'uiStore';
 interface SmartPasteSplitPanelState {
   noteId: string;
   result: SmartPasteResult;
-}
-
-type OrganizationUndoAction = 'arrange' | 'merge' | 'split';
-
-interface ArrangeUndoPosition {
-  id: string;
-  x: number;
-  y: number;
-}
-
-export interface ArrangeUndoToastState {
-  token: number;
-  action: OrganizationUndoAction;
-  noteCount: number;
-  positions?: ArrangeUndoPosition[];
-  createdIds?: string[];
-  originalNotes?: Note[];
-  originalSelectedIds?: string[];
 }
 
 export interface UIStateFields {
@@ -45,7 +26,6 @@ export interface UIStateFields {
   smartPasteSplitPanel: SmartPasteSplitPanelState | null;
   recentlyCreatedIds: string[];
   noteHighlights: Record<string, NoteHighlight>;
-  arrangeUndoToast: ArrangeUndoToastState | null;
   isPinned: boolean;
 }
 
@@ -64,7 +44,6 @@ export interface UIActions {
   clearRecentlyCreated: (id: string) => void;
   markNoteHighlights: (ids: string[], reason: NoteHighlightReason) => void;
   clearNoteHighlight: (id: string, token?: number) => void;
-  dismissArrangeUndoToast: () => void;
   setPinned: (pinned: boolean) => void;
   replaceUIState: (state: UIStateFields) => void;
 }
@@ -152,7 +131,6 @@ export const createInitialUIState = (): UIStateFields => ({
   smartPasteSplitPanel: null,
   recentlyCreatedIds: [],
   noteHighlights: {},
-  arrangeUndoToast: null,
   isPinned: false,
 });
 
@@ -260,12 +238,6 @@ export const useUIStore = create<UIStoreState>()(
       });
     },
 
-    dismissArrangeUndoToast: () => {
-      set((state) => {
-        state.arrangeUndoToast = null;
-      });
-    },
-
     setPinned: (pinned) => {
       set((state) => {
         state.isPinned = pinned;
@@ -292,7 +264,6 @@ export const uiSelectors = {
   smartPasteSplitPanel: (state: UIStateFields): SmartPasteSplitPanelState | null => state.smartPasteSplitPanel,
   recentlyCreatedIds: (state: UIStateFields): string[] => state.recentlyCreatedIds,
   noteHighlights: (state: UIStateFields): Record<string, NoteHighlight> => state.noteHighlights,
-  arrangeUndoToast: (state: UIStateFields): ArrangeUndoToastState | null => state.arrangeUndoToast,
   isPinned: (state: UIStateFields): boolean => state.isPinned,
 };
 
@@ -311,7 +282,6 @@ const UI_SYNC_FIELDS: (keyof UIStateFields)[] = [
   'smartPasteSplitPanel',
   'recentlyCreatedIds',
   'noteHighlights',
-  'arrangeUndoToast',
   'isPinned',
 ];
 
@@ -337,7 +307,6 @@ const extractUIFromLegacy = (state: ReturnType<typeof useStore.getState>): UISta
   smartPasteSplitPanel: state.smartPasteSplitPanel,
   recentlyCreatedIds: state.recentlyCreatedIds,
   noteHighlights: state.noteHighlights,
-  arrangeUndoToast: state.arrangeUndoToast,
   isPinned: state.isPinned,
 });
 
@@ -351,7 +320,6 @@ const extractUIStateForLegacy = (state: UIStateFields) => ({
   smartPasteSplitPanel: state.smartPasteSplitPanel,
   recentlyCreatedIds: state.recentlyCreatedIds,
   noteHighlights: state.noteHighlights,
-  arrangeUndoToast: state.arrangeUndoToast,
   isPinned: state.isPinned,
 });
 

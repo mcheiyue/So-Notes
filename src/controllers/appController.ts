@@ -134,12 +134,6 @@ export const appController = {
     await useStore.getState().exportSelectedNotes();
   },
 
-  undoLastArrange: (): boolean => useStore.getState().undoLastArrange(),
-
-  dismissArrangeUndoToast: (): void => {
-    useStore.getState().dismissArrangeUndoToast();
-  },
-
   resetViewport: (): void => {
     useStore.getState().setViewportPosition(0, 0);
   },

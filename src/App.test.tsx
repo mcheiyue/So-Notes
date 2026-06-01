@@ -247,33 +247,6 @@ describe('App WindowShell 组合契约', () => {
     expect(container.textContent).toContain('Ctrl+Alt+N 已被占用');
   });
 
-  it('显示归拢撤销提示并触发最近一次归拢回退', async () => {
-    const undoLastArrange = vi.fn(() => true);
-    useStore.setState({
-      arrangeUndoToast: {
-        token: 1,
-        action: 'arrange',
-        noteCount: 2,
-        positions: [],
-      },
-      undoLastArrange,
-    });
-
-    await renderApp();
-
-    expect(container.textContent).toContain('已归拢 2 个便签');
-    expect(container.textContent).toContain('可恢复到本次归拢前的位置。');
-
-    const undoButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('撤销')) as HTMLButtonElement | undefined;
-    expect(undoButton).toBeDefined();
-
-    await act(async () => {
-      undoButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-
-    expect(undoLastArrange).toHaveBeenCalledTimes(1);
-  });
-
   it('切换到 TRASH 时保留同一个 WindowShell，只替换内容槽', async () => {
     await renderApp();
 

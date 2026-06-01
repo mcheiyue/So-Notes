@@ -20,30 +20,6 @@ import { diagnostics } from "./utils/diagnostics";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { appController } from "./controllers/appController";
 
-const getOrganizationUndoToastCopy = (action: 'arrange' | 'merge' | 'split', noteCount: number) => {
-  if (action === 'merge') {
-    return {
-      title: `已合并 ${noteCount} 个便签`,
-      description: '可删除本次新建的合并结果。',
-      closeLabel: '关闭合并撤销提示',
-    };
-  }
-
-  if (action === 'split') {
-    return {
-      title: `已拆分出 ${noteCount} 个便签`,
-      description: '可删除本次新建的拆分结果。',
-      closeLabel: '关闭拆分撤销提示',
-    };
-  }
-
-  return {
-    title: `已归拢 ${noteCount} 个便签`,
-    description: '可恢复到本次归拢前的位置。',
-    closeLabel: '关闭归拢撤销提示',
-  };
-};
-
 const getTraySaveStatusCopy = (saveStatus: string, saveError: string | null): string | null => {
   if (saveStatus === 'saving') {
     return '保存中';
@@ -83,7 +59,6 @@ function App() {
   const saveStatus = useStore(state => state.saveStatus);
   const saveError = useStore(state => state.saveError);
   const selectedIds = useStore(state => state.selectedIds);
-  const arrangeUndoToast = useStore(state => state.arrangeUndoToast);
 
   const { start: startFPS, stop: stopFPS } = useFPSMonitor();
 
@@ -100,16 +75,6 @@ function App() {
     const trashNotes = allNoteIds.filter((id) => notesById[id]?.deletedAt).length;
     diagnostics.updateNoteStats(totalNotes, currentBoardNotes, selectedIds.length, trashNotes);
   }, [allNoteIds, boardNoteIds, currentBoardId, notesById, selectedIds]);
-
-  useEffect(() => {
-    if (!arrangeUndoToast) return undefined;
-
-    const timeoutId = window.setTimeout(() => {
-      appController.dismissArrangeUndoToast();
-    }, 6000);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [arrangeUndoToast]);
 
   useEffect(() => {
     const currentBoard = boards.find(board => board.id === currentBoardId);
@@ -184,10 +149,6 @@ function App() {
     };
   }, []);
 
-  const undoToastCopy = arrangeUndoToast
-    ? getOrganizationUndoToastCopy(arrangeUndoToast.action, arrangeUndoToast.noteCount)
-    : null;
-
   const shellOverlay = (
     <>
       {viewMode === 'BOARD' && (
@@ -217,34 +178,6 @@ function App() {
       <ShortcutsManager />
       <SmartPasteSplitBubble />
       <SelectionActionBar />
-      {arrangeUndoToast && undoToastCopy && (
-        <div
-          className="fixed left-1/2 bottom-5 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-sky-200/70 bg-secondary-bg/95 px-4 py-3 text-sm text-text-primary shadow-2xl backdrop-blur-md dark:border-sky-400/25 dark:bg-secondary-bg/90"
-          style={{ zIndex: Z_INDEX.QUICK_CAPTURE + 2 }}
-          role="status"
-          aria-live="polite"
-        >
-          <div className="min-w-0">
-            <div className="font-medium">{undoToastCopy.title}</div>
-            <div className="mt-0.5 text-xs text-text-tertiary">{undoToastCopy.description}</div>
-          </div>
-          <button
-            type="button"
-            className="shrink-0 rounded-full bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-300"
-            onClick={() => appController.undoLastArrange()}
-          >
-            撤销
-          </button>
-          <button
-            type="button"
-            className="shrink-0 rounded-full px-2 py-1 text-xs text-text-tertiary transition-colors hover:bg-secondary-bg hover:text-text-primary dark:hover:bg-white/10"
-            aria-label={undoToastCopy.closeLabel}
-            onClick={() => appController.dismissArrangeUndoToast()}
-          >
-            ×
-          </button>
-        </div>
-      )}
       {globalShortcutError && (
         <div
           className="fixed left-1/2 top-4 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-xl"

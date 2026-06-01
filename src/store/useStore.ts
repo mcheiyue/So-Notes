@@ -28,24 +28,6 @@ interface SmartPasteSplitPanelState {
 type ArrangeNotesStrategy = 'position' | 'updatedAt' | 'color';
 type ArrangeNotesScope = 'auto' | 'board' | 'selection';
 
-interface ArrangeUndoPosition {
-  id: string;
-  x: number;
-  y: number;
-}
-
-type OrganizationUndoAction = 'arrange' | 'merge' | 'split';
-
-interface ArrangeUndoToastState {
-  token: number;
-  action: OrganizationUndoAction;
-  noteCount: number;
-  positions?: ArrangeUndoPosition[];
-  createdIds?: string[];
-  originalNotes?: Note[];
-  originalSelectedIds?: string[];
-}
-
 interface State {
   notesById: Record<string, Note>;
   allNoteIds: string[];
@@ -90,7 +72,6 @@ interface State {
   smartPasteSplitPanel: SmartPasteSplitPanelState | null;
   recentlyCreatedIds: string[];
   noteHighlights: Record<string, NoteHighlight>;
-  arrangeUndoToast: ArrangeUndoToastState | null;
 
   // 领域撤销/重做历史（v1.4.3）
   domainHistory: HistoryStack<DomainPatch>;
@@ -137,8 +118,6 @@ interface State {
   arrangeNotes: (startX?: number, startY?: number, strategy?: ArrangeNotesStrategy, scope?: ArrangeNotesScope) => void;
   mergeSelectedNotes: () => string | null;
   splitNoteByParagraph: (noteId: string) => string[];
-  undoLastArrange: () => boolean;
-  dismissArrangeUndoToast: () => void;
   bringToFront: (id: string) => void;
   deleteNote: (id: string) => void; // Soft delete
   restoreNote: (id: string) => void; // Restore from Trash
@@ -190,7 +169,6 @@ interface State {
 }
 
 let noteHighlightSequence = 0;
-let arrangeUndoSequence = 0;
 const noteHighlightTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 const recentlyCreatedTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingMoveSnapshots = new Map<string, { x: number; y: number; updatedAt: number }>();
@@ -294,28 +272,6 @@ const sortNotesForArrange = (notes: Note[], strategy: ArrangeNotesStrategy): Not
     return compareNotesByPosition(a, b);
   });
 };
-
-const createArrangeUndoToast = (positions: ArrangeUndoPosition[]): ArrangeUndoToastState => ({
-  token: Date.now() + (++arrangeUndoSequence / 1000),
-  action: 'arrange',
-  noteCount: positions.length,
-  positions,
-});
-
-const createCreatedNotesUndoToast = (
-  action: Exclude<OrganizationUndoAction, 'arrange'>,
-  createdIds: string[],
-  noteCount: number,
-  originalNotes?: Note[],
-  originalSelectedIds?: string[],
-): ArrangeUndoToastState => ({
-  token: Date.now() + (++arrangeUndoSequence / 1000),
-  action,
-  noteCount,
-  createdIds,
-  originalNotes,
-  originalSelectedIds,
-});
 
 const resolveSaveErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -590,7 +546,6 @@ export const useStore = create<State>()(
     smartPasteSplitPanel: null,
     recentlyCreatedIds: [],
     noteHighlights: {},
-    arrangeUndoToast: null,
     domainHistory: createUndoRedoHistory<DomainPatch>(),
 
     init: async () => {
@@ -1267,9 +1222,6 @@ export const useStore = create<State>()(
             }
 
             affectedIds.push(...targetNotes.map((note) => note.id));
-            state.arrangeUndoToast = createArrangeUndoToast(
-                targetNotes.map((note) => ({ id: note.id, x: note.x, y: note.y })),
-            );
 
             const sortedNotes = sortNotesForArrange(targetNotes, strategy);
 
@@ -1382,10 +1334,6 @@ export const useStore = create<State>()(
             .filter((content) => content.length > 0)
             .join('\n\n');
 
-        // 保存原始便签快照用于撤销恢复
-        const originalNotesSnapshot: Note[] = sortedNotes.map(note => ({ ...note }));
-        const originalSelectedIdsSnapshot = [...get().selectedIds];
-
         set((state) => {
             const newNote: Note = {
                 id: mergedId,
@@ -1405,13 +1353,6 @@ export const useStore = create<State>()(
             state.config.maxZ += 1;
             state.selectedIds = [mergedId];
             state.recentlyCreatedIds = [mergedId];
-            state.arrangeUndoToast = createCreatedNotesUndoToast(
-                'merge',
-                [mergedId],
-                selectedNotes.length,
-                originalNotesSnapshot,
-                originalSelectedIdsSnapshot,
-            );
             assignNoteHighlights(state, [mergedId], 'created');
 
             const entry: HistoryEntry<DomainPatch> = {
@@ -1443,10 +1384,6 @@ export const useStore = create<State>()(
         if (paragraphs.length < 2) {
             return [];
         }
-
-        // 保存原始便签快照用于撤销恢复
-        const originalNoteSnapshot: Note = { ...targetNote };
-        const originalSelectedIdsSnapshot = [...get().selectedIds];
 
         const splitInputs = buildSmartPasteNoteInputs(['', ...paragraphs], targetNote.x, targetNote.y).slice(1);
         const createdAt = Date.now();
@@ -1481,13 +1418,6 @@ export const useStore = create<State>()(
             state.config.maxZ += splitInputs.length;
             state.selectedIds = selectedIds;
             state.recentlyCreatedIds = createdIds;
-            state.arrangeUndoToast = createCreatedNotesUndoToast(
-                'split',
-                createdIds,
-                createdIds.length,
-                [originalNoteSnapshot],
-                originalSelectedIdsSnapshot,
-            );
             assignNoteHighlights(state, createdIds, 'created');
 
             const splitNotes = createdIds
@@ -1510,72 +1440,6 @@ export const useStore = create<State>()(
         });
 
         return selectedIds;
-    },
-
-    undoLastArrange: () => {
-        const restoredIds: string[] = [];
-        const removedIds: string[] = [];
-
-        set((state) => {
-            const snapshot = state.arrangeUndoToast;
-            if (!snapshot) return;
-
-            if (snapshot.action === 'arrange') {
-                snapshot.positions?.forEach((position) => {
-                    const note = getNoteById(state, position.id);
-                    if (!note || note.deletedAt) return;
-
-                    note.x = position.x;
-                    note.y = position.y;
-                    state.layoutNotesById[note.id] = extractLayoutNote(note);
-                    restoredIds.push(note.id);
-                });
-            } else {
-                // merge/split 撤销：先删除新建便签
-                snapshot.createdIds?.forEach((id) => {
-                    if (!state.notesById[id]) return;
-                    removeNoteFromNormalizedState(state, id);
-                    removedIds.push(id);
-                });
-
-                // 恢复原始便签（如果快照中保存了原始状态）
-                snapshot.originalNotes?.forEach((oldNote) => {
-                    // 如果便签已不存在，则恢复它
-                    if (!state.notesById[oldNote.id]) {
-                        appendNoteToNormalizedState(state, oldNote);
-                        restoredIds.push(oldNote.id);
-                    }
-                });
-
-                // 恢复选择集
-                if (snapshot.originalSelectedIds) {
-                    state.selectedIds = snapshot.originalSelectedIds.filter(
-                        (id) => state.notesById[id] && !state.notesById[id].deletedAt,
-                    );
-                } else if (removedIds.length > 0) {
-                    state.selectedIds = state.selectedIds.filter((id) => !removedIds.includes(id));
-                }
-            }
-
-            state.arrangeUndoToast = null;
-        });
-
-        if (restoredIds.length > 0) {
-            get().finalizeLayoutChange(restoredIds);
-            return true;
-        }
-
-        if (removedIds.length > 0) {
-            return true;
-        }
-
-        return false;
-    },
-
-    dismissArrangeUndoToast: () => {
-        set((state) => {
-            state.arrangeUndoToast = null;
-        });
     },
 
     bringToFront: (id) => {

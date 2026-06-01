@@ -42,7 +42,6 @@ describe('uiStore 初始状态与 selector', () => {
     expect(state.smartPasteSplitPanel).toBeNull();
     expect(state.recentlyCreatedIds).toEqual([]);
     expect(state.noteHighlights).toEqual({});
-    expect(state.arrangeUndoToast).toBeNull();
     expect(state.isPinned).toBe(false);
     expect('notesById' in state).toBe(false);
     expect('viewport' in state).toBe(false);
@@ -61,7 +60,6 @@ describe('uiStore 初始状态与 selector', () => {
     expect(uiSelectors.smartPasteSplitPanel(state)).toBeNull();
     expect(uiSelectors.recentlyCreatedIds(state)).toEqual([]);
     expect(uiSelectors.noteHighlights(state)).toEqual({});
-    expect(uiSelectors.arrangeUndoToast(state)).toBeNull();
     expect(uiSelectors.isPinned(state)).toBe(false);
   });
 });
@@ -129,24 +127,6 @@ describe('uiStore 纯 UI actions', () => {
 
     useUIStore.getState().closeSmartPasteSplitPanel();
     expect(useUIStore.getState().smartPasteSplitPanel).toBeNull();
-  });
-
-  it('dismissArrangeUndoToast 关闭归拢提示', () => {
-    useUIStore.setState({
-      arrangeUndoToast: {
-        token: 123,
-        action: 'arrange',
-        noteCount: 3,
-        positions: [
-          { id: 'a', x: 10, y: 20 },
-          { id: 'b', x: 30, y: 40 },
-        ],
-      },
-    });
-    expect(useUIStore.getState().arrangeUndoToast).not.toBeNull();
-
-    useUIStore.getState().dismissArrangeUndoToast();
-    expect(useUIStore.getState().arrangeUndoToast).toBeNull();
   });
 
   it('setPinned 切换钉住状态', () => {
