@@ -16,6 +16,13 @@ interface SmartPasteSplitPanelState {
   result: SmartPasteResult;
 }
 
+/** 撕下便签的瞬态 UI 记录，仅存在于运行期，不持久化 */
+export interface DetachedNote {
+  noteId: string;
+  position: { x: number; y: number };
+  isPinned: boolean;
+}
+
 export interface UIStateFields {
   viewMode: ViewMode;
   selectedIds: string[];
@@ -27,6 +34,7 @@ export interface UIStateFields {
   recentlyCreatedIds: string[];
   noteHighlights: Record<string, NoteHighlight>;
   isPinned: boolean;
+  detachedNotes: DetachedNote[];
 }
 
 export interface UIActions {
@@ -45,6 +53,10 @@ export interface UIActions {
   markNoteHighlights: (ids: string[], reason: NoteHighlightReason) => void;
   clearNoteHighlight: (id: string, token?: number) => void;
   setPinned: (pinned: boolean) => void;
+  addDetachedNote: (noteId: string, position: { x: number; y: number }) => void;
+  removeDetachedNote: (noteId: string) => void;
+  updateDetachedNotePosition: (noteId: string, position: { x: number; y: number }) => void;
+  toggleDetachedNotePin: (noteId: string) => void;
   replaceUIState: (state: UIStateFields) => void;
 }
 
@@ -132,6 +144,7 @@ export const createInitialUIState = (): UIStateFields => ({
   recentlyCreatedIds: [],
   noteHighlights: {},
   isPinned: false,
+  detachedNotes: [],
 });
 
 // ─── Store 创建 ────────────────────────────────────────────────────────────────
@@ -244,6 +257,37 @@ export const useUIStore = create<UIStoreState>()(
       });
     },
 
+    addDetachedNote: (noteId, position) => {
+      set((state) => {
+        if (state.detachedNotes.some((d) => d.noteId === noteId)) return;
+        state.detachedNotes.push({ noteId, position, isPinned: false });
+      });
+    },
+
+    removeDetachedNote: (noteId) => {
+      set((state) => {
+        state.detachedNotes = state.detachedNotes.filter((d) => d.noteId !== noteId);
+      });
+    },
+
+    updateDetachedNotePosition: (noteId, position) => {
+      set((state) => {
+        const entry = state.detachedNotes.find((d) => d.noteId === noteId);
+        if (entry) {
+          entry.position = position;
+        }
+      });
+    },
+
+    toggleDetachedNotePin: (noteId) => {
+      set((state) => {
+        const entry = state.detachedNotes.find((d) => d.noteId === noteId);
+        if (entry) {
+          entry.isPinned = !entry.isPinned;
+        }
+      });
+    },
+
     replaceUIState: (nextState) => {
       set((state) => {
         Object.assign(state, nextState);
@@ -265,6 +309,7 @@ export const uiSelectors = {
   recentlyCreatedIds: (state: UIStateFields): string[] => state.recentlyCreatedIds,
   noteHighlights: (state: UIStateFields): Record<string, NoteHighlight> => state.noteHighlights,
   isPinned: (state: UIStateFields): boolean => state.isPinned,
+  detachedNotes: (state: UIStateFields): DetachedNote[] => state.detachedNotes,
 };
 
 // ─── 过渡期双向同步桥 ──────────────────────────────────────────────────────────
@@ -283,6 +328,7 @@ const UI_SYNC_FIELDS: (keyof UIStateFields)[] = [
   'recentlyCreatedIds',
   'noteHighlights',
   'isPinned',
+  'detachedNotes',
 ];
 
 const hasUIFieldChanged = (
@@ -308,6 +354,7 @@ const extractUIFromLegacy = (state: ReturnType<typeof useStore.getState>): UISta
   recentlyCreatedIds: state.recentlyCreatedIds,
   noteHighlights: state.noteHighlights,
   isPinned: state.isPinned,
+  detachedNotes: state.detachedNotes,
 });
 
 const extractUIStateForLegacy = (state: UIStateFields) => ({
@@ -321,6 +368,7 @@ const extractUIStateForLegacy = (state: UIStateFields) => ({
   recentlyCreatedIds: state.recentlyCreatedIds,
   noteHighlights: state.noteHighlights,
   isPinned: state.isPinned,
+  detachedNotes: state.detachedNotes,
 });
 
 const isSameUIState = (a: UIStateFields, b: UIStateFields): boolean =>

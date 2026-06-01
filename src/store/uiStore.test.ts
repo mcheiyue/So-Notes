@@ -384,3 +384,130 @@ describe('uiStore 多选/右键菜单/Dock 兼容行为', () => {
     expect(useStore.getState().isDockVisible).toBe(false);
   });
 });
+
+describe('uiStore detachedNotes 状态与 actions', () => {
+  beforeEach(() => {
+    resetUIStore();
+  });
+
+  it('初始状态 detachedNotes 为空数组', () => {
+    const state = createInitialUIState();
+    expect(state.detachedNotes).toEqual([]);
+    expect(uiSelectors.detachedNotes(state)).toEqual([]);
+  });
+
+  it('addDetachedNote 追加记录，同一 noteId 不重复添加', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 100, y: 200 });
+    expect(useUIStore.getState().detachedNotes).toEqual([
+      { noteId: 'n1', position: { x: 100, y: 200 }, isPinned: false },
+    ]);
+
+    useUIStore.getState().addDetachedNote('n1', { x: 300, y: 400 });
+    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
+    expect(useUIStore.getState().detachedNotes[0].position).toEqual({ x: 100, y: 200 });
+  });
+
+  it('addDetachedNote 支持多条记录', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+    useUIStore.getState().addDetachedNote('n2', { x: 30, y: 40 });
+
+    expect(useUIStore.getState().detachedNotes).toHaveLength(2);
+    expect(useUIStore.getState().detachedNotes[0].noteId).toBe('n1');
+    expect(useUIStore.getState().detachedNotes[1].noteId).toBe('n2');
+  });
+
+  it('removeDetachedNote 移除指定记录，不影响其他记录', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+    useUIStore.getState().addDetachedNote('n2', { x: 30, y: 40 });
+    useUIStore.getState().removeDetachedNote('n1');
+
+    expect(useUIStore.getState().detachedNotes).toEqual([
+      { noteId: 'n2', position: { x: 30, y: 40 }, isPinned: false },
+    ]);
+  });
+
+  it('removeDetachedNote 对不存在的 noteId 无副作用', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+    useUIStore.getState().removeDetachedNote('nonexistent');
+
+    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
+  });
+
+  it('updateDetachedNotePosition 只更新指定记录的位置', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+    useUIStore.getState().addDetachedNote('n2', { x: 30, y: 40 });
+    useUIStore.getState().updateDetachedNotePosition('n1', { x: 999, y: 888 });
+
+    expect(useUIStore.getState().detachedNotes[0].position).toEqual({ x: 999, y: 888 });
+    expect(useUIStore.getState().detachedNotes[1].position).toEqual({ x: 30, y: 40 });
+  });
+
+  it('updateDetachedNotePosition 对不存在的 noteId 无副作用', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+    useUIStore.getState().updateDetachedNotePosition('nonexistent', { x: 0, y: 0 });
+
+    expect(useUIStore.getState().detachedNotes[0].position).toEqual({ x: 10, y: 20 });
+  });
+
+  it('toggleDetachedNotePin 切换 isPinned 状态', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+    expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(false);
+
+    useUIStore.getState().toggleDetachedNotePin('n1');
+    expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(true);
+
+    useUIStore.getState().toggleDetachedNotePin('n1');
+    expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(false);
+  });
+
+  it('toggleDetachedNotePin 对不存在的 noteId 无副作用', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+    useUIStore.getState().toggleDetachedNotePin('nonexistent');
+
+    expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(false);
+    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
+  });
+
+  it('replaceUIState 可替换包含 detachedNotes 的完整状态', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+
+    const newState = createInitialUIState();
+    newState.detachedNotes = [
+      { noteId: 'replaced', position: { x: 50, y: 60 }, isPinned: true },
+    ];
+    useUIStore.getState().replaceUIState(newState);
+
+    expect(useUIStore.getState().detachedNotes).toEqual([
+      { noteId: 'replaced', position: { x: 50, y: 60 }, isPinned: true },
+    ]);
+  });
+});
+
+describe('uiStore detachedNotes 同步桥', () => {
+  beforeEach(() => {
+    resetUIStore();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+  });
+
+  it('useUIStore detachedNotes 变更同步到 useStore', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 100, y: 200 });
+    expect(useStore.getState().detachedNotes).toEqual([
+      { noteId: 'n1', position: { x: 100, y: 200 }, isPinned: false },
+    ]);
+  });
+
+  it('useStore detachedNotes 变更同步到 useUIStore', () => {
+    useStore.setState({
+      detachedNotes: [{ noteId: 'n2', position: { x: 50, y: 60 }, isPinned: true }],
+    });
+    expect(useUIStore.getState().detachedNotes).toEqual([
+      { noteId: 'n2', position: { x: 50, y: 60 }, isPinned: true },
+    ]);
+  });
+});

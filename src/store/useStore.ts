@@ -25,6 +25,12 @@ interface SmartPasteSplitPanelState {
   result: SmartPasteResult;
 }
 
+interface DetachedNoteUIEntry {
+  noteId: string;
+  position: { x: number; y: number };
+  isPinned: boolean;
+}
+
 interface NoteResizeSnapshot {
   editingWidth: number | undefined;
   editingHeight: number | undefined;
@@ -80,6 +86,7 @@ interface State {
   smartPasteSplitPanel: SmartPasteSplitPanelState | null;
   recentlyCreatedIds: string[];
   noteHighlights: Record<string, NoteHighlight>;
+  detachedNotes: DetachedNoteUIEntry[];
 
   // 领域撤销/重做历史（v1.4.3）
   domainHistory: HistoryStack<DomainPatch>;
@@ -553,6 +560,7 @@ export const useStore = create<State>()(
     smartPasteSplitPanel: null,
     recentlyCreatedIds: [],
     noteHighlights: {},
+    detachedNotes: [],
     domainHistory: createUndoRedoHistory<DomainPatch>(),
 
     init: async () => {
