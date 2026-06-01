@@ -267,3 +267,134 @@ describe('ContextMenu shell 坐标合同', () => {
     expect(moveSubmenu?.style.maxHeight).toBe('212px');
   });
 });
+
+describe('ContextMenu 撕下便签菜单项', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      isLoaded: true,
+      viewMode: 'BOARD',
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '',
+          content: '测试内容',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+      ]),
+      selectedIds: ['note-1'],
+      viewport: { x: 0, y: 0, w: 400, h: 300 },
+      shellRect: { left: 0, top: 0, right: 400, bottom: 300 },
+      contextMenu: {
+        isOpen: true,
+        x: 120,
+        y: 140,
+        type: 'NOTE',
+        targetId: 'note-1',
+      },
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('单张便签右键菜单显示撕下便签入口', async () => {
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const detachButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('撕下便签'),
+    );
+    expect(detachButton).toBeDefined();
+  });
+
+  it('点击撕下便签调用 appController.detachNote', async () => {
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const detachButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('撕下便签'),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      detachButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    const detached = useStore.getState().detachedNotes;
+    expect(detached).toHaveLength(1);
+    expect(detached[0].noteId).toBe('note-1');
+  });
+
+  it('废纸篓模式下不显示撕下便签入口', async () => {
+    useStore.setState({ viewMode: 'TRASH' });
+
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const detachButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('撕下便签'),
+    );
+    expect(detachButton).toBeUndefined();
+  });
+
+  it('多选右键菜单不显示撕下便签入口', async () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'note-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: '',
+          content: 'b',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+      ]),
+      selectedIds: ['note-1', 'note-2'],
+    });
+
+    await act(async () => {
+      root.render(<ContextMenu />);
+    });
+
+    const detachButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('撕下便签'),
+    );
+    expect(detachButton).toBeUndefined();
+  });
+});

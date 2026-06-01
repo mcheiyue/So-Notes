@@ -5,6 +5,7 @@ import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
 import {
   ArrowDownToLine,
+  ArrowUpRight,
   ArrowUpToLine,
   ChevronRight,
   ClipboardPaste,
@@ -48,6 +49,7 @@ const ContextMenuContent: React.FC = () => {
     notesById,
     boards,
     currentBoardId,
+    viewMode,
     viewport,
     shellRect,
     smartPasteSplitPanel,
@@ -469,6 +471,18 @@ const ContextMenuContent: React.FC = () => {
           >
             <ArrowUpToLine className="w-4 h-4" /> 置顶
           </MenuItemButton>
+
+          {viewMode === 'BOARD' && !isGroupContext && (
+            <MenuItemButton
+              role="menuitem"
+              className="text-text-secondary hover:text-text-primary hover:bg-secondary-bg/50 dark:hover:bg-white/5"
+              onClick={() => handleAction(() => {
+                appController.detachNote(contextMenu.targetId!);
+              })}
+            >
+              <ArrowUpRight className="w-4 h-4" /> 撕下便签
+            </MenuItemButton>
+          )}
           
           <MenuItemButton
             role="menuitem"

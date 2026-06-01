@@ -19,6 +19,7 @@ vi.mock('../utils/fileSystem', () => ({
 
 import { appController } from './appController';
 import { useStore } from '../store/useStore';
+import { useUIStore, createInitialUIState } from '../store/uiStore';
 import { normalizeNotes } from '../store/normalization';
 import { LAYOUT } from '../constants/layout';
 import type { Note } from '../store/types';
@@ -309,5 +310,101 @@ describe('appController locateAndSelectNote', () => {
     const state = useStore.getState();
     expect(state.selectedIds).toEqual([]);
     expect(state.noteHighlights['deleted-note']).toBeUndefined();
+  });
+});
+
+describe('appController 撕下便签方法', () => {
+  beforeEach(() => {
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: 'default',
+      ...normalizeNotes([
+        createNote({ id: 'n1', x: 100, y: 200 }),
+        createNote({ id: 'n2', x: 300, y: 400 }),
+      ]),
+      viewport: { x: 50, y: 80, w: 400, h: 300 },
+    });
+    useUIStore.getState().replaceUIState(createInitialUIState());
+  });
+
+  it('detachNote 添加一条 detachedNotes 记录', () => {
+    appController.detachNote('n1');
+    const detached = useUIStore.getState().detachedNotes;
+    expect(detached).toHaveLength(1);
+    expect(detached[0].noteId).toBe('n1');
+    expect(detached[0].isPinned).toBe(false);
+  });
+
+  it('detachNote 对已撕下的 Note 不重复添加', () => {
+    appController.detachNote('n1');
+    appController.detachNote('n1');
+    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
+  });
+
+  it('detachNote 不修改领域状态和 Undo 历史', () => {
+    const beforeNotesById = { ...useStore.getState().notesById };
+    const beforeUndoStack = [...useStore.getState().domainHistory.undoStack];
+    const beforeAllNoteIds = [...useStore.getState().allNoteIds];
+
+    appController.detachNote('n1');
+
+    expect(useStore.getState().notesById).toEqual(beforeNotesById);
+    expect(useStore.getState().domainHistory.undoStack).toEqual(beforeUndoStack);
+    expect(useStore.getState().allNoteIds).toEqual(beforeAllNoteIds);
+  });
+
+  it('detachNote 对不存在的 Note 不做任何操作', () => {
+    appController.detachNote('nonexistent');
+    expect(useUIStore.getState().detachedNotes).toHaveLength(0);
+  });
+
+  it('detachNote 使用 note 位置与 viewport 计算初始坐标', () => {
+    appController.detachNote('n1');
+    const entry = useUIStore.getState().detachedNotes[0];
+    expect(entry.position.x).toBe(50);
+    expect(entry.position.y).toBe(120);
+  });
+
+  it('closeDetachedNote 移除对应的记录', () => {
+    appController.detachNote('n1');
+    appController.detachNote('n2');
+    expect(useUIStore.getState().detachedNotes).toHaveLength(2);
+
+    appController.closeDetachedNote('n1');
+    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
+    expect(useUIStore.getState().detachedNotes[0].noteId).toBe('n2');
+  });
+
+  it('moveDetachedNote 更新指定记录的位置', () => {
+    appController.detachNote('n1');
+    appController.moveDetachedNote('n1', { x: 500, y: 600 });
+    const entry = useUIStore.getState().detachedNotes.find((d) => d.noteId === 'n1');
+    expect(entry?.position).toEqual({ x: 500, y: 600 });
+  });
+
+  it('toggleDetachedNotePin 切换指定记录的置顶状态', () => {
+    appController.detachNote('n1');
+    expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(false);
+
+    appController.toggleDetachedNotePin('n1');
+    expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(true);
+
+    appController.toggleDetachedNotePin('n1');
+    expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(false);
+  });
+
+  it('多个 Note 可以同时撕下且互不干扰', () => {
+    appController.detachNote('n1');
+    appController.detachNote('n2');
+    expect(useUIStore.getState().detachedNotes).toHaveLength(2);
+
+    appController.toggleDetachedNotePin('n1');
+    appController.moveDetachedNote('n2', { x: 10, y: 20 });
+
+    const d1 = useUIStore.getState().detachedNotes.find((d) => d.noteId === 'n1');
+    const d2 = useUIStore.getState().detachedNotes.find((d) => d.noteId === 'n2');
+    expect(d1?.isPinned).toBe(true);
+    expect(d2?.position).toEqual({ x: 10, y: 20 });
   });
 });

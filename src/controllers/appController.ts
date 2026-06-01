@@ -1,4 +1,5 @@
 import { useStore } from '../store/useStore';
+import { useUIStore } from '../store/uiStore';
 import { LAYOUT } from '../constants/layout';
 import type { Note, ShellRectState, StickyDragStatus } from '../store/types';
 import { parseSmartPaste, buildSmartPasteNoteInputs } from '../utils/smartPaste';
@@ -271,6 +272,32 @@ export const appController = {
     runOnBoardView(() => {
       appController.smartPasteFromText(text);
     });
+  },
+
+  detachNote: (noteId: string): void => {
+    const uiState = useUIStore.getState();
+    if (uiState.detachedNotes.some((d) => d.noteId === noteId)) return;
+
+    const domainState = useStore.getState();
+    const note = domainState.notesById[noteId];
+    if (!note) return;
+
+    const { viewport } = domainState;
+    const x = Math.max(40, Math.min(note.x - viewport.x, viewport.w - 200));
+    const y = Math.max(40, Math.min(note.y - viewport.y, viewport.h - 150));
+    uiState.addDetachedNote(noteId, { x, y });
+  },
+
+  closeDetachedNote: (noteId: string): void => {
+    useUIStore.getState().removeDetachedNote(noteId);
+  },
+
+  moveDetachedNote: (noteId: string, position: { x: number; y: number }): void => {
+    useUIStore.getState().updateDetachedNotePosition(noteId, position);
+  },
+
+  toggleDetachedNotePin: (noteId: string): void => {
+    useUIStore.getState().toggleDetachedNotePin(noteId);
   },
 } as const;
 
