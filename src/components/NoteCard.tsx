@@ -193,7 +193,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const restoreNote = useStore(state => state.restoreNote);
   const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
   const setIsDragging = useStore(state => state.setIsDragging);
-  const commitNoteResize = useStore(state => state.commitNoteResize);
+  const commitNoteEditingSize = useStore(state => state.commitNoteEditingSize);
   
   const isStickyDragging = useStore(state => state.stickyDrag.id === id);
   const isSelected = useUIStore(state => state.selectedIds.includes(id));
@@ -225,8 +225,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const resizeStateRef = useRef<{
     startWidth: number;
     startHeight: number;
-    startNoteWidth: number | undefined;
-    startNoteHeight: number | undefined;
+    startNoteEditingWidth: number | undefined;
+    startNoteEditingHeight: number | undefined;
     startClientX: number;
     startClientY: number;
     startUpdatedAt: number;
@@ -259,7 +259,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     }
 
     nodeRef.current.style.width = `${state.startWidth}px`;
-    nodeRef.current.style.height = state.startNoteHeight === undefined ? 'auto' : `${state.startHeight}px`;
+    nodeRef.current.style.height = state.startNoteEditingHeight === undefined ? 'auto' : `${state.startHeight}px`;
     resizeStateRef.current = null;
     isResizingRef.current = false;
   };
@@ -342,6 +342,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const isHoverActive = isHovered && !isDragActive && !isPanMode && !isStickyDragging;
   const isTemporarilyHighlighted = Boolean(noteHighlight) && !isStatic;
   const isMaterialAccentActive = isHoverActive || isDragActive || isStickyDragging || isSelected || isTemporarilyHighlighted;
+  const shouldUseEditingSize = (isSelected || isEditing) && !isStatic && !note.collapsed;
   const darkBorderColor = getDarkBorderColor(
     darkSpectrum.accent,
     darkSpectrum.border,
@@ -408,15 +409,15 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
               rawPosition.x,
               rawPosition.y,
               viewport,
-              n.width || LAYOUT.NOTE_WIDTH,
-              n.height || (n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT),
+              LAYOUT.NOTE_WIDTH,
+              n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT,
               isPanMode,
               margin,
             );
 
         n.x = resolvedPosition.x;
         n.y = resolvedPosition.y;
-        state.layoutNotesById[id] = { id: n.id, x: n.x, y: n.y, boardId: n.boardId, deletedAt: n.deletedAt ?? null, color: n.color, width: n.width, height: n.height };
+        state.layoutNotesById[id] = { id: n.id, x: n.x, y: n.y, boardId: n.boardId, deletedAt: n.deletedAt ?? null, color: n.color };
       });
     });
 
@@ -461,8 +462,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
               const leaderY = note.y;
 
               dragNotes.forEach(n => {
-                  const nW = n.width || LAYOUT.NOTE_WIDTH;
-                  const nH = n.height || (n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT);
+                  const nW = LAYOUT.NOTE_WIDTH;
+                  const nH = n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT;
                   
                   const relX = n.x - leaderX;
                   const relY = n.y - leaderY;
@@ -638,13 +639,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     const clampedW = Math.max(LAYOUT.NOTE_MIN_WIDTH, state.currentWidth);
     const clampedH = Math.max(LAYOUT.NOTE_MIN_HEIGHT, state.currentHeight);
 
-    commitNoteResize(
+    commitNoteEditingSize(
       state.noteId,
       clampedW,
       clampedH,
       {
-        width: state.startNoteWidth,
-        height: state.startNoteHeight,
+        editingWidth: state.startNoteEditingWidth,
+        editingHeight: state.startNoteEditingHeight,
         renderedWidth: state.startWidth,
         renderedHeight: state.startHeight,
         updatedAt: state.startUpdatedAt,
@@ -665,15 +666,15 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     const el = nodeRef.current;
     if (!el) return;
 
-    const startWidth = currentNote.width ?? LAYOUT.NOTE_WIDTH;
-    const startHeight = currentNote.height ?? el.offsetHeight;
+    const startWidth = currentNote.editingWidth ?? LAYOUT.NOTE_WIDTH;
+    const startHeight = currentNote.editingHeight ?? el.offsetHeight;
     const handleElement = e.currentTarget;
 
     resizeStateRef.current = {
       startWidth,
       startHeight,
-      startNoteWidth: currentNote.width,
-      startNoteHeight: currentNote.height,
+      startNoteEditingWidth: currentNote.editingWidth,
+      startNoteEditingHeight: currentNote.editingHeight,
       startClientX: e.clientX,
       startClientY: e.clientY,
       startUpdatedAt: currentNote.updatedAt,
@@ -720,7 +721,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     cancelResize();
   };
 
-  const shouldShowResizeHandle = !isStatic && !note.collapsed;
+  const shouldShowResizeHandle = !isStatic && !note.collapsed && (isSelected || isEditing);
 
   return (
       <DraggableCore
@@ -758,8 +759,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
            isPanMode && "pointer-events-none"
         )}
         style={{ 
-             width: note.width ?? LAYOUT.NOTE_WIDTH,
-             height: note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : (note.height ?? 'auto'),
+             width: shouldUseEditingSize ? (note.editingWidth ?? LAYOUT.NOTE_WIDTH) : LAYOUT.NOTE_WIDTH,
+             height: note.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : (shouldUseEditingSize ? (note.editingHeight ?? 'auto') : 'auto'),
              minHeight: note.collapsed ? undefined : LAYOUT.NOTE_MIN_HEIGHT,
              backgroundColor: getNoteColor(note.color, isDarkMode),
              borderColor: isDarkMode ? darkBorderColor : undefined,

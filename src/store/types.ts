@@ -88,8 +88,12 @@ export interface Note {
   content: string;
   color: NoteColor;
   z: number;
+  /** @deprecated v1.4.4 起由 editingWidth/editingHeight 替代，仅用于旧数据兼容读取 */
   width?: number;
+  /** @deprecated v1.4.4 起由 editingWidth/editingHeight 替代，仅用于旧数据兼容读取 */
   height?: number;
+  editingWidth?: number;
+  editingHeight?: number;
   collapsed?: boolean;
   createdAt: number;
   updatedAt: number;

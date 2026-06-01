@@ -26,8 +26,8 @@ interface SmartPasteSplitPanelState {
 }
 
 interface NoteResizeSnapshot {
-  width: number | undefined;
-  height: number | undefined;
+  editingWidth: number | undefined;
+  editingHeight: number | undefined;
   renderedWidth: number;
   renderedHeight: number;
   updatedAt: number;
@@ -141,7 +141,7 @@ interface State {
   undoDomainChange: () => boolean;
   redoDomainChange: () => boolean;
   commitNoteTextEdit: (noteId: string, beforeTitle: string, beforeContent: string, beforeUpdatedAt: number) => void;
-  commitNoteResize: (noteId: string, newWidth: number, newHeight: number, beforeResize: NoteResizeSnapshot) => void;
+  commitNoteEditingSize: (noteId: string, newWidth: number, newHeight: number, beforeResize: NoteResizeSnapshot) => void;
   captureMoveSnapshot: (positions: Record<string, { x: number; y: number; updatedAt: number }>) => void;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number, status?: StickyDragStatus) => void;
   
@@ -347,8 +347,6 @@ const appendNoteToNormalizedState = (state: Pick<State, 'notesById' | 'allNoteId
     boardId: note.boardId,
     deletedAt: note.deletedAt ?? null,
     color: note.color,
-    width: note.width,
-    height: note.height,
   };
 };
 
@@ -472,7 +470,7 @@ const navigateToAffectedNote = (
 
   const viewport = useStore.getState().viewport;
   const nWidth = LAYOUT.NOTE_WIDTH;
-  const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, note.height || LAYOUT.NOTE_MIN_HEIGHT);
+  const nHeight = LAYOUT.NOTE_MIN_HEIGHT;
   const noteRight = note.x + nWidth;
   const noteBottom = note.y + nHeight;
   const isInCurrentViewport =
@@ -624,8 +622,12 @@ export const useStore = create<State>()(
            if (n.x < 0 || n.y < 0) { n.x = 20 + (i * 10); n.y = 20 + (i * 10); }
            if (n.collapsed === undefined) n.collapsed = false;
            if (n.title === undefined) n.title = "";
-           if (!n.boardId) n.boardId = 'default'; // Migration: Assign default board
+           if (!n.boardId) n.boardId = 'default';
            if (!n.updatedAt) n.updatedAt = n.createdAt || Date.now();
+           if (n.width !== undefined && n.editingWidth === undefined) { n.editingWidth = n.width; }
+           if (n.height !== undefined && n.editingHeight === undefined) { n.editingHeight = n.height; }
+           delete n.width;
+           delete n.height;
         });
       }
       
@@ -1768,7 +1770,7 @@ export const useStore = create<State>()(
       });
     },
 
-    commitNoteResize: (noteId, newWidth, newHeight, beforeResize) => {
+    commitNoteEditingSize: (noteId, newWidth, newHeight, beforeResize) => {
       set((state) => {
         const note = getNoteById(state, noteId);
         if (!note || note.deletedAt) return;
@@ -1782,17 +1784,16 @@ export const useStore = create<State>()(
         if (clampedWidth === effectiveStartWidth && clampedHeight === effectiveStartHeight) return;
 
         const updatedAt = Date.now();
-        note.width = clampedWidth;
-        note.height = clampedHeight;
+        note.editingWidth = clampedWidth;
+        note.editingHeight = clampedHeight;
         note.updatedAt = updatedAt;
-        state.layoutNotesById[noteId] = extractLayoutNote(note);
 
         const entry: HistoryEntry<DomainPatch> = {
           id: crypto.randomUUID(),
-          label: 'resize-note',
+          label: 'resize-editing-size',
           createdAt: updatedAt,
-          undo: { type: 'update-fields', noteId, fields: { width: beforeResize.width, height: beforeResize.height, updatedAt: beforeResize.updatedAt } },
-          redo: { type: 'update-fields', noteId, fields: { width: clampedWidth, height: clampedHeight, updatedAt } },
+          undo: { type: 'update-fields', noteId, fields: { editingWidth: beforeResize.editingWidth, editingHeight: beforeResize.editingHeight, updatedAt: beforeResize.updatedAt } },
+          redo: { type: 'update-fields', noteId, fields: { editingWidth: clampedWidth, editingHeight: clampedHeight, updatedAt } },
         };
         state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
       });

@@ -296,7 +296,7 @@ describe('useStore 布局持久化契约', () => {
     expect(getNote('note-2')?.y).toBe(120 + LAYOUT.NOTE_MIN_HEIGHT + 20);
   });
 
-  it('arrangeNotes 对显式高度的展开便签使用真实高度估算下一行起点', () => {
+  it('arrangeNotes 对显式高度的展开便签使用默认最小高度估算下一行起点', () => {
     useStore.setState({
       ...normalizeNotes([
         {
@@ -333,7 +333,7 @@ describe('useStore 布局持久化契约', () => {
     useStore.getState().arrangeNotes(100, 120);
 
     expect(getNote('note-1')?.y).toBe(120);
-    expect(getNote('note-2')?.y).toBe(120 + 180 + 20);
+    expect(getNote('note-2')?.y).toBe(120 + LAYOUT.NOTE_MIN_HEIGHT + 20);
   });
 
   it('arrangeNotes 支持按更新时间从近到远排列', () => {
@@ -1630,7 +1630,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
       state.notesById[noteId] = note;
       state.allNoteIds = [noteId];
       state.boardNoteIds = { default: [noteId] };
-      state.layoutNotesById[noteId] = { id: noteId, x: note.x, y: note.y, boardId: note.boardId, deletedAt: null, color: note.color, width: note.width, height: note.height };
+      state.layoutNotesById[noteId] = { id: noteId, x: note.x, y: note.y, boardId: note.boardId, deletedAt: null, color: note.color };
     });
 
     const undoLen = useStore.getState().domainHistory.undoStack.length;
@@ -3312,7 +3312,7 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
   });
 });
 
-describe('v1.4.4 便签尺寸调整撤销/重做契约', () => {
+describe('v1.4.4 便签编辑尺寸偏好撤销/重做契约', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     vi.clearAllMocks();
@@ -3340,8 +3340,8 @@ describe('v1.4.4 便签尺寸调整撤销/重做契约', () => {
           content: 'beta',
           color: '#dbeafe',
           z: 2,
-          width: 300,
-          height: 200,
+          editingWidth: 300,
+          editingHeight: 200,
           createdAt: 200,
           updatedAt: 200,
         },
@@ -3357,57 +3357,51 @@ describe('v1.4.4 便签尺寸调整撤销/重做契约', () => {
     vi.useRealTimers();
   });
 
-  it('commitNoteResize 尺寸变化时创建一条历史并支持撤销/重做', () => {
+  it('commitNoteEditingSize 编辑尺寸变化时创建一条历史并支持撤销/重做', () => {
     vi.setSystemTime(new Date('2026-06-01T14:00:00.000Z'));
 
-    useStore.getState().commitNoteResize('rs-1', 320, 250, {
-      width: undefined,
-      height: undefined,
+    useStore.getState().commitNoteEditingSize('rs-1', 320, 250, {
+      editingWidth: undefined,
+      editingHeight: undefined,
       renderedWidth: 260,
       renderedHeight: 100,
       updatedAt: 100,
     });
 
     const note = getNote('rs-1');
-    expect(note?.width).toBe(320);
-    expect(note?.height).toBe(250);
+    expect(note?.editingWidth).toBe(320);
+    expect(note?.editingHeight).toBe(250);
     expect(note?.updatedAt).toBe(new Date('2026-06-01T14:00:00.000Z').getTime());
-    expect(useStore.getState().layoutNotesById['rs-1'].width).toBe(320);
-    expect(useStore.getState().layoutNotesById['rs-1'].height).toBe(250);
 
     const undoStack = useStore.getState().domainHistory.undoStack;
     expect(undoStack).toHaveLength(1);
-    expect(undoStack[0].label).toBe('resize-note');
+    expect(undoStack[0].label).toBe('resize-editing-size');
     expect(undoStack[0].undo).toMatchObject({
       type: 'update-fields',
       noteId: 'rs-1',
-      fields: { width: undefined, height: undefined, updatedAt: 100 },
+      fields: { editingWidth: undefined, editingHeight: undefined, updatedAt: 100 },
     });
     expect(undoStack[0].redo).toMatchObject({
       type: 'update-fields',
       noteId: 'rs-1',
-      fields: { width: 320, height: 250 },
+      fields: { editingWidth: 320, editingHeight: 250 },
     });
 
     useStore.getState().undoDomainChange();
-    expect(getNote('rs-1')?.width).toBeUndefined();
-    expect(getNote('rs-1')?.height).toBeUndefined();
+    expect(getNote('rs-1')?.editingWidth).toBeUndefined();
+    expect(getNote('rs-1')?.editingHeight).toBeUndefined();
     expect(getNote('rs-1')?.updatedAt).toBe(100);
-    expect(useStore.getState().layoutNotesById['rs-1'].width).toBeUndefined();
-    expect(useStore.getState().layoutNotesById['rs-1'].height).toBeUndefined();
 
     useStore.getState().redoDomainChange();
-    expect(getNote('rs-1')?.width).toBe(320);
-    expect(getNote('rs-1')?.height).toBe(250);
+    expect(getNote('rs-1')?.editingWidth).toBe(320);
+    expect(getNote('rs-1')?.editingHeight).toBe(250);
     expect(getNote('rs-1')?.updatedAt).toBe(new Date('2026-06-01T14:00:00.000Z').getTime());
-    expect(useStore.getState().layoutNotesById['rs-1'].width).toBe(320);
-    expect(useStore.getState().layoutNotesById['rs-1'].height).toBe(250);
   });
 
-  it('commitNoteResize 尺寸未变时不创建历史', () => {
-    useStore.getState().commitNoteResize('rs-2', 300, 200, {
-      width: 300,
-      height: 200,
+  it('commitNoteEditingSize 编辑尺寸未变时不创建历史', () => {
+    useStore.getState().commitNoteEditingSize('rs-2', 300, 200, {
+      editingWidth: 300,
+      editingHeight: 200,
       renderedWidth: 300,
       renderedHeight: 200,
       updatedAt: 200,
@@ -3416,12 +3410,12 @@ describe('v1.4.4 便签尺寸调整撤销/重做契约', () => {
     expect(useStore.getState().undoDomainChange()).toBe(false);
   });
 
-  it('commitNoteResize 便签不存在时不创建历史', () => {
+  it('commitNoteEditingSize 便签不存在时不创建历史', () => {
     const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
 
-    useStore.getState().commitNoteResize('nonexistent', 300, 200, {
-      width: undefined,
-      height: undefined,
+    useStore.getState().commitNoteEditingSize('nonexistent', 300, 200, {
+      editingWidth: undefined,
+      editingHeight: undefined,
       renderedWidth: 260,
       renderedHeight: 100,
       updatedAt: 100,
@@ -3430,15 +3424,15 @@ describe('v1.4.4 便签尺寸调整撤销/重做契约', () => {
     expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
   });
 
-  it('commitNoteResize 便签已在废纸篓时不创建历史', () => {
+  it('commitNoteEditingSize 便签已在废纸篓时不创建历史', () => {
     vi.setSystemTime(new Date('2026-06-01T14:00:00.000Z'));
     useStore.getState().deleteNote('rs-1');
 
     const undoCountAfterDelete = useStore.getState().domainHistory.undoStack.length;
 
-    useStore.getState().commitNoteResize('rs-1', 320, 250, {
-      width: undefined,
-      height: undefined,
+    useStore.getState().commitNoteEditingSize('rs-1', 320, 250, {
+      editingWidth: undefined,
+      editingHeight: undefined,
       renderedWidth: 260,
       renderedHeight: 100,
       updatedAt: 100,
@@ -3447,34 +3441,34 @@ describe('v1.4.4 便签尺寸调整撤销/重做契约', () => {
     expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountAfterDelete);
   });
 
-  it('commitNoteResize 尺寸低于最小值时自动钳制', () => {
+  it('commitNoteEditingSize 编辑尺寸低于最小值时自动钳制', () => {
     vi.setSystemTime(new Date('2026-06-01T14:00:00.000Z'));
 
-    useStore.getState().commitNoteResize('rs-1', 50, 30, {
-      width: undefined,
-      height: undefined,
+    useStore.getState().commitNoteEditingSize('rs-1', 50, 30, {
+      editingWidth: undefined,
+      editingHeight: undefined,
       renderedWidth: 260,
       renderedHeight: 100,
       updatedAt: 100,
     });
 
     const note = getNote('rs-1');
-    expect(note?.width).toBe(LAYOUT.NOTE_MIN_WIDTH);
-    expect(note?.height).toBe(LAYOUT.NOTE_MIN_HEIGHT);
+    expect(note?.editingWidth).toBe(LAYOUT.NOTE_MIN_WIDTH);
+    expect(note?.editingHeight).toBe(LAYOUT.NOTE_MIN_HEIGHT);
 
     const redoPatch = useStore.getState().domainHistory.undoStack[0].redo;
     expect(redoPatch).toMatchObject({
       type: 'update-fields',
-      fields: { width: LAYOUT.NOTE_MIN_WIDTH, height: LAYOUT.NOTE_MIN_HEIGHT },
+      fields: { editingWidth: LAYOUT.NOTE_MIN_WIDTH, editingHeight: LAYOUT.NOTE_MIN_HEIGHT },
     });
   });
 
-  it('commitNoteResize undo 后 layoutNotesById 与 notesById 保持一致', () => {
+  it('commitNoteEditingSize undo 后 editingWidth/editingHeight 正确恢复', () => {
     vi.setSystemTime(new Date('2026-06-01T14:00:00.000Z'));
 
-    useStore.getState().commitNoteResize('rs-1', 350, 280, {
-      width: undefined,
-      height: undefined,
+    useStore.getState().commitNoteEditingSize('rs-1', 350, 280, {
+      editingWidth: undefined,
+      editingHeight: undefined,
       renderedWidth: 260,
       renderedHeight: 100,
       updatedAt: 100,
@@ -3483,24 +3477,22 @@ describe('v1.4.4 便签尺寸调整撤销/重做契约', () => {
     useStore.getState().undoDomainChange();
 
     const note = getNote('rs-1');
-    const layout = useStore.getState().layoutNotesById['rs-1'];
-    expect(layout.width).toBe(note?.width);
-    expect(layout.height).toBe(note?.height);
+    expect(note?.editingWidth).toBeUndefined();
+    expect(note?.editingHeight).toBeUndefined();
 
     useStore.getState().redoDomainChange();
 
     const noteRedo = getNote('rs-1');
-    const layoutRedo = useStore.getState().layoutNotesById['rs-1'];
-    expect(layoutRedo.width).toBe(noteRedo?.width);
-    expect(layoutRedo.height).toBe(noteRedo?.height);
+    expect(noteRedo?.editingWidth).toBe(350);
+    expect(noteRedo?.editingHeight).toBe(280);
   });
 
-  it('commitNoteResize 修改已有尺寸便签时正确保存旧值', () => {
+  it('commitNoteEditingSize 修改已有编辑尺寸便签时正确保存旧值', () => {
     vi.setSystemTime(new Date('2026-06-01T14:00:00.000Z'));
 
-    useStore.getState().commitNoteResize('rs-2', 400, 300, {
-      width: 300,
-      height: 200,
+    useStore.getState().commitNoteEditingSize('rs-2', 400, 300, {
+      editingWidth: 300,
+      editingHeight: 200,
       renderedWidth: 300,
       renderedHeight: 200,
       updatedAt: 200,
@@ -3511,12 +3503,12 @@ describe('v1.4.4 便签尺寸调整撤销/重做契约', () => {
     expect(undoStack[0].undo).toMatchObject({
       type: 'update-fields',
       noteId: 'rs-2',
-      fields: { width: 300, height: 200, updatedAt: 200 },
+      fields: { editingWidth: 300, editingHeight: 200, updatedAt: 200 },
     });
 
     useStore.getState().undoDomainChange();
-    expect(getNote('rs-2')?.width).toBe(300);
-    expect(getNote('rs-2')?.height).toBe(200);
+    expect(getNote('rs-2')?.editingWidth).toBe(300);
+    expect(getNote('rs-2')?.editingHeight).toBe(200);
     expect(getNote('rs-2')?.updatedAt).toBe(200);
   });
 });

@@ -37,8 +37,6 @@ export const extractLayoutNote = (note: Note): LayoutNote => ({
   boardId: note.boardId,
   deletedAt: note.deletedAt ?? null,
   color: note.color,
-  width: note.width,
-  height: note.height,
 });
 
 export const createLayoutNotesById = (notesById: Record<string, Note>): Record<string, LayoutNote> => {

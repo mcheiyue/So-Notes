@@ -213,7 +213,7 @@ describe('MiniMap 看板隔离', () => {
     expect(expandedHeight).toBeGreaterThan(collapsedHeight);
   });
 
-  it('显式 height 的展开便签在 MiniMap 世界边界中按真实高度参与缩放', async () => {
+  it('展开便签在 MiniMap 世界边界中按默认高度参与缩放', async () => {
     const normalized = normalizeNotes([
       {
         id: 'default-height',
@@ -228,15 +228,14 @@ describe('MiniMap 看板隔离', () => {
         updatedAt: 1,
       },
       {
-        id: 'tall-height',
+        id: 'another-height',
         boardId: 'default',
         x: 260,
         y: 120,
-        title: '显式高度',
+        title: '另一便签',
         content: 'b',
         color: '#FFFFFF',
         z: 2,
-        height: 180,
         createdAt: 2,
         updatedAt: 2,
       },
@@ -245,7 +244,7 @@ describe('MiniMap 看板隔离', () => {
     useStore.setState({
       ...normalized,
       layoutNotesById: createLayoutNotesById(normalized.notesById),
-      boardNoteIds: { default: ['default-height', 'tall-height'] },
+      boardNoteIds: { default: ['default-height', 'another-height'] },
       currentBoardId: 'default',
       viewport: { x: 0, y: 0, w: 1200, h: 800 },
     });
@@ -255,9 +254,10 @@ describe('MiniMap 看板隔离', () => {
     const notes = Array.from(container.querySelectorAll('.minimap-note')) as HTMLDivElement[];
     expect(notes).toHaveLength(2);
 
-    const defaultHeight = Number.parseFloat(notes[0]?.style.height ?? '0');
-    const tallHeight = Number.parseFloat(notes[1]?.style.height ?? '0');
-    expect(tallHeight).toBeGreaterThan(defaultHeight);
+    const firstHeight = Number.parseFloat(notes[0]?.style.height ?? '0');
+    const secondHeight = Number.parseFloat(notes[1]?.style.height ?? '0');
+    expect(firstHeight).toBe(secondHeight);
+    expect(firstHeight).toBeGreaterThan(0);
   });
 
   it('MiniMap 视口拖拽在 blur 时立即取消，不再继续更新 viewport', async () => {

@@ -251,8 +251,6 @@ export class CanvasEngine {
           boardId: note.boardId,
           deletedAt: note.deletedAt ?? null,
           color: note.color,
-          width: note.width,
-          height: note.height,
         };
       });
     });

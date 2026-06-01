@@ -838,8 +838,8 @@ describe('Canvas 空白命中判定', () => {
     expect(follower?.y).toBe(expectedFollower.y);
   });
 
-  it('普通虚拟化使用便签矩形相交判断，宽便签边缘进入缓冲区时仍会渲染', async () => {
-    const wideNote = createNote({ x: 1000, y: 140, width: 600, height: 160 });
+  it('普通虚拟化使用便签矩形相交判断，便签边缘进入缓冲区时仍会渲染', async () => {
+    const wideNote = createNote({ x: 1740, y: 140 });
     const normalized = normalizeNotes([wideNote]);
     useStore.setState({
       ...normalized,
