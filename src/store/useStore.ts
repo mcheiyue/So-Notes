@@ -1232,6 +1232,8 @@ export const useStore = create<State>()(
         scope: ArrangeNotesScope = 'auto',
     ) => {
         const affectedIds: string[] = [];
+        const preArrangeSnapshots = new Map<string, { x: number; y: number; updatedAt: number }>();
+
         set((state) => {
             const viewport = state.viewport;
             const worldRightEdge = viewport.x + viewport.w;
@@ -1259,6 +1261,10 @@ export const useStore = create<State>()(
             }
 
             if (targetNotes.length === 0) return;
+
+            for (const note of targetNotes) {
+                preArrangeSnapshots.set(note.id, { x: note.x, y: note.y, updatedAt: note.updatedAt });
+            }
 
             affectedIds.push(...targetNotes.map((note) => note.id));
             state.arrangeUndoToast = createArrangeUndoToast(
@@ -1314,8 +1320,37 @@ export const useStore = create<State>()(
                 if (estimatedHeight > maxRowH) maxRowH = estimatedHeight;
             });
         });
+
         if (affectedIds.length > 0) {
             get().finalizeLayoutChange(affectedIds);
+        }
+
+        if (preArrangeSnapshots.size > 0) {
+            const currentState = get();
+            const undoPatches: DomainPatch[] = [];
+            const redoPatches: DomainPatch[] = [];
+
+            for (const [noteId, snapshot] of preArrangeSnapshots) {
+                const note = currentState.notesById[noteId];
+                if (!note || note.deletedAt) continue;
+                if (note.x === snapshot.x && note.y === snapshot.y) continue;
+
+                undoPatches.push({ type: 'update-position', noteId, x: snapshot.x, y: snapshot.y, updatedAt: snapshot.updatedAt });
+                redoPatches.push({ type: 'update-position', noteId, x: note.x, y: note.y, updatedAt: note.updatedAt });
+            }
+
+            if (undoPatches.length > 0) {
+                set((state) => {
+                    const entry: HistoryEntry<DomainPatch> = {
+                        id: crypto.randomUUID(),
+                        label: 'arrange-notes',
+                        createdAt: Date.now(),
+                        undo: { type: 'compound-patch', patches: undoPatches },
+                        redo: { type: 'compound-patch', patches: redoPatches },
+                    };
+                    state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
+                });
+            }
         }
     },
 

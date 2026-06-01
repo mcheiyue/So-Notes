@@ -2937,3 +2937,212 @@ describe('v1.4.4 软删除与废纸篓恢复领域撤销/重做契约', () => {
     expect(useStore.getState().viewport).toEqual(viewportBefore);
   });
 });
+
+describe('v1.4.4 归拢领域撤销/重做契约', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'ar-1',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: 'A',
+          content: 'alpha',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'ar-2',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: 'B',
+          content: 'beta',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+        {
+          id: 'ar-3',
+          boardId: 'default',
+          x: 50,
+          y: 60,
+          title: 'C',
+          content: 'gamma',
+          color: '#dbeafe',
+          z: 3,
+          createdAt: 300,
+          updatedAt: 300,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
+      config: { ...useStore.getState().config, maxZ: 3 },
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('arrangeNotes 创建 compound history 条目并支持 undo/redo', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    useStore.getState().arrangeNotes(100, 120);
+
+    const undoStack = useStore.getState().domainHistory.undoStack;
+    const arrangeEntry = undoStack.find((e) => e.label === 'arrange-notes');
+    expect(arrangeEntry).toBeDefined();
+    expect(arrangeEntry!.undo.type).toBe('compound-patch');
+    expect(arrangeEntry!.redo.type).toBe('compound-patch');
+
+    const undoPatch = arrangeEntry!.undo as { type: 'compound-patch'; patches: Array<{ type: string; noteId: string; x: number; y: number; updatedAt: number }> };
+    expect(undoPatch.patches).toHaveLength(3);
+    expect(undoPatch.patches[0]).toMatchObject({ type: 'update-position', noteId: 'ar-1', x: 10, y: 20, updatedAt: 100 });
+    expect(undoPatch.patches[1]).toMatchObject({ type: 'update-position', noteId: 'ar-2', x: 30, y: 40, updatedAt: 200 });
+    expect(undoPatch.patches[2]).toMatchObject({ type: 'update-position', noteId: 'ar-3', x: 50, y: 60, updatedAt: 300 });
+
+    const expectedUpdatedAt = new Date('2026-06-01T12:00:00.000Z').getTime();
+    expect(getNote('ar-1')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('ar-1')?.updatedAt).toBe(expectedUpdatedAt);
+
+    useStore.getState().undoDomainChange();
+    expect(getNote('ar-1')).toMatchObject({ x: 10, y: 20, updatedAt: 100 });
+    expect(getNote('ar-2')).toMatchObject({ x: 30, y: 40, updatedAt: 200 });
+    expect(getNote('ar-3')).toMatchObject({ x: 50, y: 60, updatedAt: 300 });
+    expect(useStore.getState().layoutNotesById['ar-1']).toMatchObject({ x: 10, y: 20 });
+    expect(useStore.getState().layoutNotesById['ar-2']).toMatchObject({ x: 30, y: 40 });
+
+    useStore.getState().redoDomainChange();
+    expect(getNote('ar-1')).toMatchObject({ x: 100, y: 120 });
+    expect(getNote('ar-1')?.updatedAt).toBe(expectedUpdatedAt);
+    expect(useStore.getState().layoutNotesById['ar-1']).toMatchObject({ x: 100, y: 120 });
+  });
+
+  it('arrangeNotes 所有便签位置未变时不创建历史', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'same-1',
+          boardId: 'default',
+          x: 100,
+          y: 120,
+          title: 'A',
+          content: 'a',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+      ]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
+    });
+
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+
+    useStore.getState().arrangeNotes(100, 120);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+    expect(useStore.getState().undoDomainChange()).toBe(false);
+  });
+
+  it('arrangeNotes 跳过废纸篓中的便签', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    useStore.getState().deleteNote('ar-2');
+
+    useStore.getState().arrangeNotes(100, 120);
+
+    const arrangeEntry = useStore.getState().domainHistory.undoStack.find((e) => e.label === 'arrange-notes');
+    expect(arrangeEntry).toBeDefined();
+
+    const undoPatch = arrangeEntry!.undo as { type: 'compound-patch'; patches: Array<{ noteId: string }> };
+    const noteIds = undoPatch.patches.map((p) => p.noteId);
+    expect(noteIds).toContain('ar-1');
+    expect(noteIds).toContain('ar-3');
+    expect(noteIds).not.toContain('ar-2');
+  });
+
+  it('arrangeNotes 仍保留 arrangeUndoToast 供 Commit 6 清理', () => {
+    useStore.getState().arrangeNotes(100, 120);
+
+    const toast = useStore.getState().arrangeUndoToast;
+    expect(toast).not.toBeNull();
+    expect(toast?.action).toBe('arrange');
+    expect(toast?.noteCount).toBe(3);
+    expect(toast?.positions).toEqual([
+      { id: 'ar-1', x: 10, y: 20 },
+      { id: 'ar-2', x: 30, y: 40 },
+      { id: 'ar-3', x: 50, y: 60 },
+    ]);
+
+    const undone = useStore.getState().undoLastArrange();
+    expect(undone).toBe(true);
+    expect(useStore.getState().arrangeUndoToast).toBeNull();
+    expect(getNote('ar-1')).toMatchObject({ x: 10, y: 20 });
+  });
+
+  it('arrangeNotes undo/redo 保持 layoutNotesById 一致', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    useStore.getState().arrangeNotes(100, 120);
+
+    for (const id of ['ar-1', 'ar-2', 'ar-3']) {
+      expect(useStore.getState().layoutNotesById[id].x).toBe(getNote(id)?.x);
+      expect(useStore.getState().layoutNotesById[id].y).toBe(getNote(id)?.y);
+    }
+
+    useStore.getState().undoDomainChange();
+    for (const id of ['ar-1', 'ar-2', 'ar-3']) {
+      expect(useStore.getState().layoutNotesById[id].x).toBe(getNote(id)?.x);
+      expect(useStore.getState().layoutNotesById[id].y).toBe(getNote(id)?.y);
+    }
+
+    useStore.getState().redoDomainChange();
+    for (const id of ['ar-1', 'ar-2', 'ar-3']) {
+      expect(useStore.getState().layoutNotesById[id].x).toBe(getNote(id)?.x);
+      expect(useStore.getState().layoutNotesById[id].y).toBe(getNote(id)?.y);
+    }
+  });
+
+  it('arrangeNotes 无有效目标时不创建历史', () => {
+    useStore.setState({
+      ...normalizeNotes([]),
+      currentBoardId: 'default',
+      selectedIds: [],
+      viewport: { x: 0, y: 0, w: 1280, h: 720 },
+    });
+
+    const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
+    useStore.getState().arrangeNotes(100, 120);
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
+    expect(useStore.getState().arrangeUndoToast).toBeNull();
+  });
+
+  it('arrangeNotes undo 后 redoDomainChange 恢复归拢位置', () => {
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    useStore.getState().arrangeNotes(100, 120);
+
+    const arrangedPos = {
+      'ar-1': { x: getNote('ar-1')!.x, y: getNote('ar-1')!.y },
+      'ar-2': { x: getNote('ar-2')!.x, y: getNote('ar-2')!.y },
+    };
+
+    useStore.getState().undoDomainChange();
+    expect(getNote('ar-1')).toMatchObject({ x: 10, y: 20 });
+
+    useStore.getState().redoDomainChange();
+    expect(getNote('ar-1')).toMatchObject(arrangedPos['ar-1']);
+    expect(getNote('ar-2')).toMatchObject(arrangedPos['ar-2']);
+    expect(useStore.getState().layoutNotesById['ar-1']).toMatchObject(arrangedPos['ar-1']);
+    expect(useStore.getState().layoutNotesById['ar-2']).toMatchObject(arrangedPos['ar-2']);
+  });
+});
