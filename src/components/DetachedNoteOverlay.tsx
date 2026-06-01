@@ -61,6 +61,10 @@ const DetachedNoteShell: React.FC<{
     [noteId, position.x, position.y, updatePosition],
   );
 
+  const handleFocusCapture = useCallback(() => {
+    appController.focusDetachedNote(noteId);
+  }, [noteId]);
+
   const handleLocate = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -135,6 +139,7 @@ const DetachedNoteShell: React.FC<{
     <div
       data-testid={`detached-note-shell-${noteId}`}
       className="absolute"
+      onMouseDownCapture={handleFocusCapture}
       onMouseDown={stopOverlayEvent}
       onMouseUp={stopOverlayEvent}
       onClick={stopOverlayEvent}

@@ -468,6 +468,32 @@ describe('uiStore detachedNotes 状态与 actions', () => {
     expect(useUIStore.getState().detachedNotes).toHaveLength(1);
   });
 
+  it('focusDetachedNote 将指定记录移动到末尾并保留记录内容', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+    useUIStore.getState().addDetachedNote('n2', { x: 30, y: 40 });
+    useUIStore.getState().addDetachedNote('n3', { x: 50, y: 60 });
+    useUIStore.getState().toggleDetachedNotePin('n1');
+
+    useUIStore.getState().focusDetachedNote('n1');
+
+    expect(useUIStore.getState().detachedNotes).toEqual([
+      { noteId: 'n2', position: { x: 30, y: 40 }, isPinned: false },
+      { noteId: 'n3', position: { x: 50, y: 60 }, isPinned: false },
+      { noteId: 'n1', position: { x: 10, y: 20 }, isPinned: true },
+    ]);
+  });
+
+  it('focusDetachedNote 对不存在或已在末尾的记录无副作用', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
+    useUIStore.getState().addDetachedNote('n2', { x: 30, y: 40 });
+
+    useUIStore.getState().focusDetachedNote('missing');
+    expect(useUIStore.getState().detachedNotes.map((d) => d.noteId)).toEqual(['n1', 'n2']);
+
+    useUIStore.getState().focusDetachedNote('n2');
+    expect(useUIStore.getState().detachedNotes.map((d) => d.noteId)).toEqual(['n1', 'n2']);
+  });
+
   it('replaceUIState 可替换包含 detachedNotes 的完整状态', () => {
     useUIStore.getState().addDetachedNote('n1', { x: 10, y: 20 });
 
@@ -500,6 +526,14 @@ describe('uiStore detachedNotes 同步桥', () => {
     expect(useStore.getState().detachedNotes).toEqual([
       { noteId: 'n1', position: { x: 100, y: 200 }, isPinned: false },
     ]);
+  });
+
+  it('useUIStore focusDetachedNote 变更同步到 useStore', () => {
+    useUIStore.getState().addDetachedNote('n1', { x: 100, y: 200 });
+    useUIStore.getState().addDetachedNote('n2', { x: 300, y: 400 });
+    useUIStore.getState().focusDetachedNote('n1');
+
+    expect(useStore.getState().detachedNotes.map((d) => d.noteId)).toEqual(['n2', 'n1']);
   });
 
   it('useStore detachedNotes 变更同步到 useUIStore', () => {

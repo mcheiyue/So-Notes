@@ -404,6 +404,15 @@ describe('appController 撕下便签方法', () => {
     expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(false);
   });
 
+  it('focusDetachedNote 将目标撕下视图移动到活跃栈末尾', () => {
+    appController.detachNote('n1');
+    appController.detachNote('n2');
+
+    appController.focusDetachedNote('n1');
+
+    expect(useUIStore.getState().detachedNotes.map((d) => d.noteId)).toEqual(['n2', 'n1']);
+  });
+
   it('多个 Note 可以同时撕下且互不干扰', () => {
     appController.detachNote('n1');
     appController.detachNote('n2');

@@ -301,6 +301,10 @@ export const appController = {
     useUIStore.getState().toggleDetachedNotePin(noteId);
   },
 
+  focusDetachedNote: (noteId: string): void => {
+    useUIStore.getState().focusDetachedNote(noteId);
+  },
+
   /**
    * locateDetachedNote 编排顺序（与 locateAndSelectNote 对齐）：
    * 检查撕下记录存在 → switchBoard（跨看板）→ toggleCollapse（折叠时）

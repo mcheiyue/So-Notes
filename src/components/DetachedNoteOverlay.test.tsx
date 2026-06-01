@@ -22,12 +22,14 @@ vi.mock('../utils/fileSystem', () => ({
 const mockLocateDetachedNote = vi.fn();
 const mockToggleDetachedNotePin = vi.fn();
 const mockCloseDetachedNote = vi.fn();
+const mockFocusDetachedNote = vi.fn();
 
 vi.mock('../controllers/appController', () => ({
   appController: {
     locateDetachedNote: (...args: unknown[]) => mockLocateDetachedNote(...args),
     toggleDetachedNotePin: (...args: unknown[]) => mockToggleDetachedNotePin(...args),
     closeDetachedNote: (...args: unknown[]) => mockCloseDetachedNote(...args),
+    focusDetachedNote: (...args: unknown[]) => mockFocusDetachedNote(...args),
   },
 }));
 
@@ -395,6 +397,7 @@ describe('DetachedNoteOverlay 按钮行为', () => {
     mockLocateDetachedNote.mockClear();
     mockToggleDetachedNotePin.mockClear();
     mockCloseDetachedNote.mockClear();
+    mockFocusDetachedNote.mockClear();
   });
 
   afterEach(() => {
@@ -525,6 +528,21 @@ describe('DetachedNoteOverlay 按钮行为', () => {
     expect(ancestorClick).not.toHaveBeenCalled();
     expect(ancestorContextMenu).not.toHaveBeenCalled();
     expect(contextMenuEvent.defaultPrevented).toBe(true);
+  });
+
+  it('浮层 mousedown 捕获阶段聚焦撕下视图', async () => {
+    await renderOverlay();
+
+    const shell = overlayRoot.querySelector(
+      '[data-testid="detached-note-shell-note-test-1"]',
+    ) as HTMLElement | null;
+    expect(shell).not.toBeNull();
+
+    await act(async () => {
+      shell!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+
+    expect(mockFocusDetachedNote).toHaveBeenCalledWith('note-test-1');
   });
 
   it('置顶状态时 pin 按钮 aria-label 变为取消置顶', async () => {

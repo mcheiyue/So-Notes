@@ -57,6 +57,7 @@ export interface UIActions {
   removeDetachedNote: (noteId: string) => void;
   updateDetachedNotePosition: (noteId: string, position: { x: number; y: number }) => void;
   toggleDetachedNotePin: (noteId: string) => void;
+  focusDetachedNote: (noteId: string) => void;
   replaceUIState: (state: UIStateFields) => void;
 }
 
@@ -285,6 +286,16 @@ export const useUIStore = create<UIStoreState>()(
         if (entry) {
           entry.isPinned = !entry.isPinned;
         }
+      });
+    },
+
+    focusDetachedNote: (noteId) => {
+      set((state) => {
+        const index = state.detachedNotes.findIndex((d) => d.noteId === noteId);
+        if (index < 0 || index === state.detachedNotes.length - 1) return;
+
+        const [entry] = state.detachedNotes.splice(index, 1);
+        state.detachedNotes.push(entry);
       });
     },
 
