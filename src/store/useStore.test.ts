@@ -414,7 +414,7 @@ describe('useStore 布局持久化契约', () => {
     expect(getNote('blue-note')).toMatchObject({ x: 420, y: 120 });
   });
 
-  it('mergeSelectedNotes 按画布坐标合并并只选中新便签', () => {
+  it('mergeSelectedNotes 按画布坐标合并，移除原便签并只选中新便签', () => {
     const saveSpy = vi.fn(async () => true);
     vi.setSystemTime(new Date('2026-03-19T10:30:00.000Z'));
     useStore.setState({ saveToDisk: saveSpy });
@@ -431,12 +431,12 @@ describe('useStore 布局持久化契约', () => {
       content: 'alpha\n\nbeta',
       z: 3,
     });
-    expect(state.notesById['note-1']).toBeDefined();
-    expect(state.notesById['note-2']).toBeDefined();
+    expect(state.notesById['note-1']).toBeUndefined();
+    expect(state.notesById['note-2']).toBeUndefined();
     expect(saveSpy).not.toHaveBeenCalled();
   });
 
-  it('splitNoteByParagraph 按空行拆分并保留原便签内容', () => {
+  it('splitNoteByParagraph 按空行拆分，移除原便签并返回拆分后便签', () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({
       saveToDisk: saveSpy,
@@ -449,17 +449,16 @@ describe('useStore 布局持久化契约', () => {
       },
     });
 
-    const selectedIds = useStore.getState().splitNoteByParagraph('note-1');
+    const createdIds = useStore.getState().splitNoteByParagraph('note-1');
     const state = useStore.getState();
 
-    expect(selectedIds).toHaveLength(4);
-    expect(selectedIds[0]).toBe('note-1');
-    expect(state.notesById['note-1'].content).toBe('第一段\n\n第二段\n\n第三段');
-    expect(state.notesById[selectedIds[1]]).toMatchObject({ content: '第一段', x: 42, y: 48 });
-    expect(state.notesById[selectedIds[2]]).toMatchObject({ content: '第二段', x: 74, y: 76 });
-    expect(state.notesById[selectedIds[3]]).toMatchObject({ content: '第三段', x: 106, y: 104 });
-    expect(state.selectedIds).toEqual(selectedIds);
-    expect(state.recentlyCreatedIds).toEqual(selectedIds.slice(1));
+    expect(createdIds).toHaveLength(3);
+    expect(state.notesById['note-1']).toBeUndefined();
+    expect(state.notesById[createdIds[0]]).toMatchObject({ content: '第一段', x: 42, y: 48 });
+    expect(state.notesById[createdIds[1]]).toMatchObject({ content: '第二段', x: 74, y: 76 });
+    expect(state.notesById[createdIds[2]]).toMatchObject({ content: '第三段', x: 106, y: 104 });
+    expect(state.selectedIds).toEqual(createdIds);
+    expect(state.recentlyCreatedIds).toEqual(createdIds);
     expect(saveSpy).not.toHaveBeenCalled();
   });
 
@@ -513,6 +512,56 @@ describe('useStore 布局持久化契约', () => {
     expect(result).toBeNull();
     expect(useStore.getState().notesById['note-1']).toBeDefined();
     expect(useStore.getState().notesById['note-cross']).toBeDefined();
+  });
+
+  it('mergeSelectedNotes 撤销会移除合并便签并还原原便签，重做会再次合并', () => {
+    vi.setSystemTime(new Date('2026-03-19T10:30:00.000Z'));
+    const mergedId = useStore.getState().mergeSelectedNotes();
+    expect(mergedId).toBeTruthy();
+    expect(useStore.getState().notesById['note-1']).toBeUndefined();
+    expect(useStore.getState().notesById['note-2']).toBeUndefined();
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById[mergedId!]).toBeUndefined();
+    expect(useStore.getState().notesById['note-1']).toBeDefined();
+    expect(useStore.getState().notesById['note-2']).toBeDefined();
+    expect(useStore.getState().notesById['note-1'].content).toBe('alpha');
+    expect(useStore.getState().notesById['note-2'].content).toBe('beta');
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById[mergedId!]).toBeDefined();
+    expect(useStore.getState().notesById[mergedId!].content).toBe('alpha\n\nbeta');
+    expect(useStore.getState().notesById['note-1']).toBeUndefined();
+    expect(useStore.getState().notesById['note-2']).toBeUndefined();
+  });
+
+  it('splitNoteByParagraph 撤销会移除拆分便签并还原原便签，重做会再次拆分', () => {
+    useStore.setState({
+      notesById: {
+        ...useStore.getState().notesById,
+        'note-1': {
+          ...useStore.getState().notesById['note-1'],
+          content: '第一段\n\n第二段',
+        },
+      },
+    });
+
+    const createdIds = useStore.getState().splitNoteByParagraph('note-1');
+    expect(createdIds).toHaveLength(2);
+    expect(useStore.getState().notesById['note-1']).toBeUndefined();
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['note-1']).toBeDefined();
+    expect(useStore.getState().notesById['note-1'].content).toBe('第一段\n\n第二段');
+    expect(useStore.getState().notesById[createdIds[0]]).toBeUndefined();
+    expect(useStore.getState().notesById[createdIds[1]]).toBeUndefined();
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['note-1']).toBeUndefined();
+    expect(useStore.getState().notesById[createdIds[0]]).toBeDefined();
+    expect(useStore.getState().notesById[createdIds[1]]).toBeDefined();
+    expect(useStore.getState().notesById[createdIds[0]].content).toBe('第一段');
+    expect(useStore.getState().notesById[createdIds[1]].content).toBe('第二段');
   });
 });
 
@@ -1546,6 +1595,52 @@ describe('v1.4.3 领域撤销/重做契约', () => {
 
   it('redo 栈为空时 redoDomainChange 返回 false', () => {
     expect(useStore.getState().redoDomainChange()).toBe(false);
+  });
+
+  it('undoDomainChange patch 失败时不消费历史栈且领域状态不变', () => {
+    useStore.getState().addNote(100, 200);
+    const [noteId] = useStore.getState().allNoteIds;
+
+    useStore.setState((state) => {
+      delete state.notesById[noteId];
+      state.allNoteIds = [];
+      state.boardNoteIds = {};
+      state.layoutNotesById = {};
+    });
+
+    const undoLen = useStore.getState().domainHistory.undoStack.length;
+    const redoLen = useStore.getState().domainHistory.redoStack.length;
+    const snapshot = useStore.getState().notesById;
+
+    expect(useStore.getState().undoDomainChange()).toBe(false);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoLen);
+    expect(useStore.getState().domainHistory.redoStack.length).toBe(redoLen);
+    expect(useStore.getState().notesById).toBe(snapshot);
+  });
+
+  it('redoDomainChange patch 失败时不消费历史栈且领域状态不变', () => {
+    useStore.getState().addNote(100, 200);
+    const [noteId] = useStore.getState().allNoteIds;
+    const note = { ...useStore.getState().notesById[noteId] };
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById[noteId]).toBeUndefined();
+
+    useStore.setState((state) => {
+      state.notesById[noteId] = note;
+      state.allNoteIds = [noteId];
+      state.boardNoteIds = { default: [noteId] };
+      state.layoutNotesById[noteId] = { id: noteId, x: note.x, y: note.y, boardId: note.boardId, deletedAt: null, color: note.color, width: note.width, height: note.height };
+    });
+
+    const undoLen = useStore.getState().domainHistory.undoStack.length;
+    const redoLen = useStore.getState().domainHistory.redoStack.length;
+    const snapshot = useStore.getState().notesById;
+
+    expect(useStore.getState().redoDomainChange()).toBe(false);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(undoLen);
+    expect(useStore.getState().domainHistory.redoStack.length).toBe(redoLen);
+    expect(useStore.getState().notesById).toBe(snapshot);
   });
 
   it('commitNoteTextEdit 标题编辑撤销/重做会恢复 title 与 updatedAt', () => {
@@ -3092,37 +3187,36 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
 
   it('splitNoteByParagraph undo 移除拆分便签，redo 恢复同一 UUID', () => {
     vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
-    const selectedIds = useStore.getState().splitNoteByParagraph('sm-3');
-    expect(selectedIds).toHaveLength(4);
-    const splitIds = selectedIds.slice(1);
+    const createdIds = useStore.getState().splitNoteByParagraph('sm-3');
+    expect(createdIds).toHaveLength(3);
 
-    splitIds.forEach((id) => {
+    createdIds.forEach((id) => {
       expect(getNote(id)).toBeDefined();
     });
-    expect(getNote('sm-3')).toBeDefined();
+    expect(getNote('sm-3')).toBeUndefined();
 
     useStore.getState().undoDomainChange();
-    splitIds.forEach((id) => {
+    createdIds.forEach((id) => {
       expect(getNote(id)).toBeUndefined();
     });
     expect(getNote('sm-3')).toBeDefined();
 
     useStore.getState().redoDomainChange();
-    splitIds.forEach((id) => {
+    createdIds.forEach((id) => {
       const note = getNote(id);
       expect(note).toBeDefined();
       expect(note!.id).toBe(id);
     });
-    expect(getNote('sm-3')).toBeDefined();
+    expect(getNote('sm-3')).toBeUndefined();
   });
 
   it('splitNoteByParagraph undo/redo 保持 notesById、allNoteIds、boardNoteIds、layoutNotesById 一致', () => {
     vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
-    const selectedIds = useStore.getState().splitNoteByParagraph('sm-3');
-    const splitIds = selectedIds.slice(1);
+    const createdIds = useStore.getState().splitNoteByParagraph('sm-3');
 
     const afterSplit = useStore.getState();
-    splitIds.forEach((id) => {
+    expect(afterSplit.notesById['sm-3']).toBeUndefined();
+    createdIds.forEach((id) => {
       expect(afterSplit.notesById[id]).toBeDefined();
       expect(afterSplit.allNoteIds).toContain(id);
       expect(afterSplit.boardNoteIds['default']).toContain(id);
@@ -3133,7 +3227,7 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
 
     useStore.getState().undoDomainChange();
     const afterUndo = useStore.getState();
-    splitIds.forEach((id) => {
+    createdIds.forEach((id) => {
       expect(afterUndo.notesById[id]).toBeUndefined();
       expect(afterUndo.allNoteIds).not.toContain(id);
       expect(afterUndo.boardNoteIds['default'] ?? []).not.toContain(id);
@@ -3143,7 +3237,8 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
 
     useStore.getState().redoDomainChange();
     const afterRedo = useStore.getState();
-    splitIds.forEach((id) => {
+    expect(afterRedo.notesById['sm-3']).toBeUndefined();
+    createdIds.forEach((id) => {
       expect(afterRedo.notesById[id]).toBeDefined();
       expect(afterRedo.allNoteIds).toContain(id);
       expect(afterRedo.boardNoteIds['default']).toContain(id);
@@ -3151,7 +3246,6 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
       expect(afterRedo.layoutNotesById[id].x).toBe(afterRedo.notesById[id].x);
       expect(afterRedo.layoutNotesById[id].y).toBe(afterRedo.notesById[id].y);
     });
-    expect(afterRedo.notesById['sm-3']).toBeDefined();
   });
 
   it('splitNoteByParagraph 内容不足两段时不创建 domainHistory 条目', () => {
@@ -3188,16 +3282,15 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
     expect(redoPatch.type).toBe('compound-patch');
     if (redoPatch.type !== 'compound-patch') throw new Error('redo patch 应为 compound-patch');
 
-    const addPatch = redoPatch.patches[0];
-    expect(addPatch.type).toBe('add-note');
-    if (addPatch.type !== 'add-note') throw new Error('redo 子 patch 应为 add-note');
+    const addPatch = redoPatch.patches.find((p) => p.type === 'add-note');
+    expect(addPatch).toBeDefined();
+    if (!addPatch || addPatch.type !== 'add-note') throw new Error('redo 应包含 add-note 子 patch');
     expect(addPatch.note.id).toBe(mergedId);
   });
 
   it('split undo 后 redo 不重新生成 UUID', () => {
     vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
-    const selectedIds = useStore.getState().splitNoteByParagraph('sm-3');
-    const splitIds = selectedIds.slice(1);
+    const createdIds = useStore.getState().splitNoteByParagraph('sm-3');
 
     useStore.getState().undoDomainChange();
     useStore.getState().redoDomainChange();
@@ -3210,10 +3303,11 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
     expect(redoPatch.type).toBe('compound-patch');
     if (redoPatch.type !== 'compound-patch') throw new Error('redo patch 应为 compound-patch');
 
-    redoPatch.patches.forEach((patch, i) => {
-      expect(patch.type).toBe('add-note');
+    const addPatches = redoPatch.patches.filter((p) => p.type === 'add-note');
+    expect(addPatches).toHaveLength(createdIds.length);
+    addPatches.forEach((patch, i) => {
       if (patch.type !== 'add-note') throw new Error('redo 子 patch 应为 add-note');
-      expect(patch.note.id).toBe(splitIds[i]);
+      expect(patch.note.id).toBe(createdIds[i]);
     });
   });
 });

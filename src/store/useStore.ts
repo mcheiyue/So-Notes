@@ -1358,6 +1358,9 @@ export const useStore = create<State>()(
                 updatedAt: createdAt,
             };
 
+            for (const note of sortedNotes) {
+                removeNoteFromNormalizedState(state, note.id);
+            }
             appendNoteToNormalizedState(state, newNote);
             state.config.maxZ += 1;
             state.selectedIds = [mergedId];
@@ -1370,11 +1373,17 @@ export const useStore = create<State>()(
                 createdAt: Date.now(),
                 undo: {
                     type: 'compound-patch',
-                    patches: [{ type: 'remove-note', noteId: newNote.id }],
+                    patches: [
+                        { type: 'remove-note', noteId: newNote.id },
+                        ...sortedNotes.map((n) => ({ type: 'add-note' as const, note: n })),
+                    ],
                 },
                 redo: {
                     type: 'compound-patch',
-                    patches: [{ type: 'add-note', note: newNote }],
+                    patches: [
+                        ...sortedNotes.map((n) => ({ type: 'remove-note' as const, noteId: n.id })),
+                        { type: 'add-note', note: newNote },
+                    ],
                 },
             };
             state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
@@ -1398,7 +1407,6 @@ export const useStore = create<State>()(
         const createdAt = Date.now();
         const startZ = get().config.maxZ;
         const createdIds = splitInputs.map(() => crypto.randomUUID());
-        const selectedIds = [noteId, ...createdIds];
 
         set((state) => {
             const existingNote = state.notesById[noteId];
@@ -1406,16 +1414,19 @@ export const useStore = create<State>()(
                 return;
             }
 
+            const originalNote = { ...existingNote };
+            removeNoteFromNormalizedState(state, noteId);
+
             splitInputs.forEach((input, index) => {
                 const newNote: Note = {
                     id: createdIds[index],
-                    boardId: existingNote.boardId,
+                    boardId: originalNote.boardId,
                     title: '',
                     content: input.content,
                     x: input.x,
                     y: input.y,
                     z: startZ + index + 1,
-                    color: existingNote.color,
+                    color: originalNote.color,
                     collapsed: false,
                     createdAt,
                     updatedAt: createdAt,
@@ -1425,7 +1436,7 @@ export const useStore = create<State>()(
             });
 
             state.config.maxZ += splitInputs.length;
-            state.selectedIds = selectedIds;
+            state.selectedIds = createdIds;
             state.recentlyCreatedIds = createdIds;
             assignNoteHighlights(state, createdIds, 'created');
 
@@ -1438,17 +1449,23 @@ export const useStore = create<State>()(
                 createdAt: Date.now(),
                 undo: {
                     type: 'compound-patch',
-                    patches: splitNotes.map((n) => ({ type: 'remove-note' as const, noteId: n.id })),
+                    patches: [
+                        ...splitNotes.map((n) => ({ type: 'remove-note' as const, noteId: n.id })),
+                        { type: 'add-note' as const, note: originalNote },
+                    ],
                 },
                 redo: {
                     type: 'compound-patch',
-                    patches: splitNotes.map((n) => ({ type: 'add-note' as const, note: n })),
+                    patches: [
+                        { type: 'remove-note' as const, noteId: originalNote.id },
+                        ...splitNotes.map((n) => ({ type: 'add-note' as const, note: n })),
+                    ],
                 },
             };
             state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
 
-        return selectedIds;
+        return createdIds;
     },
 
     bringToFront: (id) => {
@@ -1795,6 +1812,8 @@ export const useStore = create<State>()(
       const currentDomain = extractDomainSlice(get());
       const patched = applyDomainPatch(currentDomain, result.entry.undo);
 
+      if (patched === currentDomain) return false;
+
       const removedIds = new Set(
         Object.keys(currentDomain.notesById).filter((id) => !patched.notesById[id]),
       );
@@ -1822,6 +1841,8 @@ export const useStore = create<State>()(
 
       const currentDomain = extractDomainSlice(get());
       const patched = applyDomainPatch(currentDomain, result.entry.redo);
+
+      if (patched === currentDomain) return false;
 
       const removedIds = new Set(
         Object.keys(currentDomain.notesById).filter((id) => !patched.notesById[id]),
