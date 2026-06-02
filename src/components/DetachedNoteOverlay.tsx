@@ -25,6 +25,7 @@ const DetachedNoteShell: React.FC<{
 }> = ({ noteId, position, isPinned }) => {
   const updatePosition = useUIStore((s) => s.updateDetachedNotePosition);
   const dragRef = useRef<DragState | null>(null);
+  const [isDragging, setIsDragging] = React.useState(false);
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent) => {
@@ -37,29 +38,38 @@ const DetachedNoteShell: React.FC<{
         startPositionX: position.x,
         startPositionY: position.y,
       };
-
-      const handleMouseMove = (e: MouseEvent) => {
-        const drag = dragRef.current;
-        if (!drag) return;
-        const dx = e.clientX - drag.startMouseX;
-        const dy = e.clientY - drag.startMouseY;
-        updatePosition(drag.noteId, {
-          x: drag.startPositionX + dx,
-          y: drag.startPositionY + dy,
-        });
-      };
-
-      const handleMouseUp = () => {
-        dragRef.current = null;
-        document.removeEventListener('mousemove', handleMouseMove, true);
-        document.removeEventListener('mouseup', handleMouseUp, true);
-      };
-
-      document.addEventListener('mousemove', handleMouseMove, true);
-      document.addEventListener('mouseup', handleMouseUp, true);
+      setIsDragging(true);
     },
-    [noteId, position.x, position.y, updatePosition],
+    [noteId, position.x, position.y],
   );
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const dx = e.clientX - drag.startMouseX;
+      const dy = e.clientY - drag.startMouseY;
+      updatePosition(drag.noteId, {
+        x: drag.startPositionX + dx,
+        y: drag.startPositionY + dy,
+      });
+    };
+
+    const handleMouseUp = () => {
+      dragRef.current = null;
+      setIsDragging(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove, true);
+    document.addEventListener('mouseup', handleMouseUp, true);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove, true);
+      document.removeEventListener('mouseup', handleMouseUp, true);
+    };
+  }, [isDragging, updatePosition]);
 
   const handleFocusCapture = useCallback(() => {
     appController.focusDetachedNote(noteId);

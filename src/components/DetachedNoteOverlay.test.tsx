@@ -348,14 +348,20 @@ describe('DetachedNoteOverlay 拖拽移动', () => {
       handle!.dispatchEvent(
         new MouseEvent('mousedown', { clientX: 150, clientY: 220, bubbles: true }),
       );
+    });
+
+    await act(async () => {
       document.dispatchEvent(
         new MouseEvent('mousemove', { clientX: 180, clientY: 250, bubbles: true }),
       );
-      shell!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     });
 
     const afterShellUp = useUIStore.getState().detachedNotes.find((d) => d.noteId === note.id);
     expect(afterShellUp?.position).toEqual({ x: 130, y: 230 });
+
+    await act(async () => {
+      shell!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
 
     await act(async () => {
       document.dispatchEvent(
@@ -403,6 +409,51 @@ describe('DetachedNoteOverlay 拖拽移动', () => {
     await act(async () => {
       document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     });
+  });
+
+  it('拖拽过程中组件卸载时全局监听器被清理', async () => {
+    const note = createTestNote();
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
+
+    await renderOverlay();
+
+    const handle = overlayRoot.querySelector(
+      `[data-testid="detached-note-drag-handle-${note.id}"]`,
+    ) as HTMLElement | null;
+    expect(handle).not.toBeNull();
+
+    // 开始拖拽
+    await act(async () => {
+      handle!.dispatchEvent(
+        new MouseEvent('mousedown', { clientX: 150, clientY: 220, bubbles: true }),
+      );
+    });
+
+    // 软删除便签，触发组件卸载
+    await act(async () => {
+      useStore.setState((state) => ({
+        notesById: {
+          ...state.notesById,
+          [note.id]: { ...state.notesById[note.id], deletedAt: Date.now() },
+        },
+      }));
+    });
+
+    // 组件已卸载，后续 mousemove 不应再更新位置
+    const posBefore = useUIStore.getState().detachedNotes.find((d) => d.noteId === note.id);
+    await act(async () => {
+      document.dispatchEvent(
+        new MouseEvent('mousemove', { clientX: 300, clientY: 400, bubbles: true }),
+      );
+    });
+    const posAfter = useUIStore.getState().detachedNotes.find((d) => d.noteId === note.id);
+
+    // 位置应不变（组件已卸载，监听器已清理）
+    expect(posAfter?.position).toEqual(posBefore?.position);
   });
 });
 
