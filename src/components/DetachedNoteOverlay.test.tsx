@@ -120,6 +120,29 @@ describe('DetachedNoteOverlay 渲染', () => {
     expect(shell).not.toBeNull();
   });
 
+  it('控制按钮嵌入便签表面内部而非外置工具条', async () => {
+    const note = createTestNote();
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 150, y: 250 });
+
+    await renderOverlay();
+
+    const visuals = overlayRoot.querySelector('[data-note-visuals="true"]');
+    const controls = overlayRoot.querySelector(
+      `[data-testid="detached-note-embedded-controls-${note.id}"]`,
+    );
+    const shell = overlayRoot.querySelector(`[data-testid="detached-note-shell-${note.id}"]`);
+
+    expect(visuals).not.toBeNull();
+    expect(controls).not.toBeNull();
+    expect(shell).not.toBeNull();
+    expect(visuals!.contains(controls)).toBe(true);
+    expect(shell!.firstElementChild?.firstElementChild).toBe(visuals);
+  });
+
   it('支持渲染多个撕下视图', async () => {
     const note1 = createTestNote({ id: 'n1', title: '便签一' });
     const note2 = createTestNote({ id: 'n2', title: '便签二' });

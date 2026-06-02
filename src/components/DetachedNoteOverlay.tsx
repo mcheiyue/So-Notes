@@ -90,6 +90,7 @@ const DetachedNoteShell: React.FC<{
   );
 
   const stopButtonMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
   }, []);
 
@@ -152,58 +153,73 @@ const DetachedNoteShell: React.FC<{
       }}
     >
       <div className="pointer-events-auto">
-        <div
-          data-testid={`detached-note-drag-handle-${noteId}`}
-          className={cn(
-            'mb-1.5 flex h-8 w-fit cursor-grab items-center justify-between gap-1 rounded-lg border border-border-subtle px-1.5',
-            'bg-secondary-bg/95 shadow-lg backdrop-blur-md active:cursor-grabbing',
-          )}
-          onMouseDown={handleMouseDown}
-        >
-          <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              data-testid={`detached-note-locate-${noteId}`}
-              aria-label="定位到画布所在"
-              className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:bg-black/5 dark:hover:bg-white/10 hover:text-text-secondary"
-              onMouseDown={stopButtonMouseDown}
-              onClick={handleLocate}
-            >
-              <Crosshair size={14} />
-            </button>
-            <button
-              type="button"
-              data-testid={`detached-note-pin-${noteId}`}
-              aria-label={isPinned ? '取消置顶' : '置顶'}
-              className={cn(
-                'flex h-6 w-6 items-center justify-center rounded hover:bg-black/5 dark:hover:bg-white/10',
-                isPinned ? 'text-accent' : 'text-text-tertiary hover:text-text-secondary',
-              )}
-              onMouseDown={stopButtonMouseDown}
-              onClick={handlePin}
-            >
-              <Pin size={14} />
-            </button>
-            <button
-              type="button"
-              data-testid={`detached-note-stick-back-${noteId}`}
-              aria-label="贴回画布"
-              className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:bg-black/5 dark:hover:bg-white/10 hover:text-text-secondary"
-              onMouseDown={stopButtonMouseDown}
-              onClick={handleClose}
-            >
-              <X size={14} />
-            </button>
-          </div>
-          {isPinned && <Pin size={12} className="text-accent" />}
-        </div>
         <NoteVisuals
+          data-testid={`detached-note-drag-handle-${noteId}`}
           title={noteSnapshot.title}
           content={noteSnapshot.content}
           color={noteSnapshot.color}
           isCollapsed={noteSnapshot.isCollapsed}
           isDark={isDark}
-          className="shadow-xl"
+          className="cursor-grab shadow-xl active:cursor-grabbing group/detached-note"
+          onMouseDown={handleMouseDown}
+          surfaceOverlay={
+            <>
+              {isPinned && (
+                <div
+                  data-testid={`detached-note-pin-indicator-${noteId}`}
+                  aria-hidden="true"
+                  className={cn(
+                    'pointer-events-none absolute right-2.5 top-2.5 z-10 flex h-5 w-5 items-center justify-center text-accent/60',
+                    'transition-opacity duration-200 group-hover/detached-note:opacity-0',
+                  )}
+                >
+                  <Pin size={12} />
+                </div>
+              )}
+              <div
+                data-testid={`detached-note-embedded-controls-${noteId}`}
+                className={cn(
+                  'absolute right-2.5 top-2.5 z-20 flex items-center gap-0.5 opacity-0 pointer-events-none',
+                  'transition-opacity duration-200 group-hover/detached-note:pointer-events-auto group-hover/detached-note:opacity-100',
+                  'focus-within:pointer-events-auto focus-within:opacity-100',
+                )}
+              >
+                <button
+                  type="button"
+                  data-testid={`detached-note-locate-${noteId}`}
+                  aria-label="定位到画布所在"
+                  className="flex h-6 w-6 items-center justify-center rounded bg-transparent text-text-tertiary transition-colors hover:bg-black/5 hover:text-text-secondary dark:hover:bg-white/10"
+                  onMouseDown={stopButtonMouseDown}
+                  onClick={handleLocate}
+                >
+                  <Crosshair size={14} />
+                </button>
+                <button
+                  type="button"
+                  data-testid={`detached-note-pin-${noteId}`}
+                  aria-label={isPinned ? '取消置顶' : '置顶'}
+                  className={cn(
+                    'flex h-6 w-6 items-center justify-center rounded bg-transparent transition-colors hover:bg-black/5 dark:hover:bg-white/10',
+                    isPinned ? 'text-accent' : 'text-text-tertiary hover:text-text-secondary',
+                  )}
+                  onMouseDown={stopButtonMouseDown}
+                  onClick={handlePin}
+                >
+                  <Pin size={14} />
+                </button>
+                <button
+                  type="button"
+                  data-testid={`detached-note-stick-back-${noteId}`}
+                  aria-label="贴回画布"
+                  className="flex h-6 w-6 items-center justify-center rounded bg-transparent text-text-tertiary transition-colors hover:bg-black/5 hover:text-text-secondary dark:hover:bg-white/10"
+                  onMouseDown={stopButtonMouseDown}
+                  onClick={handleClose}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </>
+          }
         />
       </div>
     </div>

@@ -24,6 +24,7 @@ export interface NoteVisualsProps {
   shouldUseEditingSize?: boolean;
   className?: string;
   style?: React.CSSProperties;
+  surfaceOverlay?: React.ReactNode;
   children?: React.ReactNode;
 }
 
@@ -44,6 +45,7 @@ export const NoteVisuals = React.memo(React.forwardRef<HTMLElement, NoteVisualsP
     shouldUseEditingSize = false,
     className,
     style,
+    surfaceOverlay,
     children,
     ...rest
   },
@@ -66,6 +68,7 @@ export const NoteVisuals = React.memo(React.forwardRef<HTMLElement, NoteVisualsP
       data-note-visuals="true"
       className={cn(
         "flex flex-col",
+        "relative",
         isCollapsed ? "overflow-hidden" : "h-auto",
         "rounded-xl",
         "border border-border-subtle",
@@ -94,8 +97,9 @@ export const NoteVisuals = React.memo(React.forwardRef<HTMLElement, NoteVisualsP
       }}
       {...rest}
     >
+      {surfaceOverlay}
       {isCollapsed && (
-        <div className="flex h-9 w-full items-center justify-center px-10">
+        <div className={cn("flex h-9 w-full items-center justify-center px-10", surfaceOverlay && "px-16")}>
           <span
             className={cn(
               "block max-w-full truncate rounded-md px-2 py-1 text-center text-sm font-bold select-none",
@@ -109,7 +113,7 @@ export const NoteVisuals = React.memo(React.forwardRef<HTMLElement, NoteVisualsP
       {children ?? (
         !isCollapsed && (
           <>
-            <div className="px-4 pt-3 pb-1">
+            <div className={cn("px-4 pt-3 pb-1", surfaceOverlay && "pr-24")}>
               <div
                 className={cn(
                   "w-full truncate",
