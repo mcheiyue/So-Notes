@@ -143,6 +143,30 @@ describe('DetachedNoteOverlay 渲染', () => {
     expect(shell!.firstElementChild?.firstElementChild).toBe(visuals);
   });
 
+  it('无标题撕下视图保留标题栏空间，避免控制按钮遮挡正文', async () => {
+    const note = createTestNote({ title: '' });
+    useStore.setState({
+      notesById: { [note.id]: note },
+      allNoteIds: [note.id],
+    });
+    useUIStore.getState().addDetachedNote(note.id, { x: 150, y: 250 });
+
+    await renderOverlay();
+
+    const controls = overlayRoot.querySelector(
+      `[data-testid="detached-note-embedded-controls-${note.id}"]`,
+    );
+    const titleRegion = overlayRoot.querySelector('[data-note-title-region="true"]');
+    const contentRegion = overlayRoot.querySelector('[data-note-content-region="true"]');
+
+    expect(controls).not.toBeNull();
+    expect(controls?.className).toContain('top-1.5');
+    expect(titleRegion).not.toBeNull();
+    expect(titleRegion?.className).toContain('min-h-9');
+    expect(titleRegion?.className).toContain('pr-24');
+    expect(contentRegion).not.toBeNull();
+  });
+
   it('支持渲染多个撕下视图', async () => {
     const note1 = createTestNote({ id: 'n1', title: '便签一' });
     const note2 = createTestNote({ id: 'n2', title: '便签二' });

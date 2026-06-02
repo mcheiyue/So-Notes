@@ -169,7 +169,7 @@ const DetachedNoteShell: React.FC<{
                   data-testid={`detached-note-pin-indicator-${noteId}`}
                   aria-hidden="true"
                   className={cn(
-                    'pointer-events-none absolute right-2.5 top-2.5 z-10 flex h-5 w-5 items-center justify-center text-accent/60',
+                    'pointer-events-none absolute right-2 top-1.5 z-10 flex h-5 w-5 items-center justify-center text-accent/60',
                     'transition-opacity duration-200 group-hover/detached-note:opacity-0',
                   )}
                 >
@@ -179,7 +179,7 @@ const DetachedNoteShell: React.FC<{
               <div
                 data-testid={`detached-note-embedded-controls-${noteId}`}
                 className={cn(
-                  'absolute right-2.5 top-2.5 z-20 flex items-center gap-0.5 opacity-0 pointer-events-none',
+                  'absolute right-2 top-1.5 z-20 flex items-center gap-0.5 opacity-0 pointer-events-none',
                   'transition-opacity duration-200 group-hover/detached-note:pointer-events-auto group-hover/detached-note:opacity-100',
                   'focus-within:pointer-events-auto focus-within:opacity-100',
                 )}

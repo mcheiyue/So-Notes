@@ -113,7 +113,10 @@ export const NoteVisuals = React.memo(React.forwardRef<HTMLElement, NoteVisualsP
       {children ?? (
         !isCollapsed && (
           <>
-            <div className={cn("px-4 pt-3 pb-1", surfaceOverlay && "pr-24")}>
+            <div
+              data-note-title-region="true"
+              className={cn("px-4 pt-3 pb-1", surfaceOverlay && "min-h-9 pr-24")}
+            >
               <div
                 className={cn(
                   "w-full truncate",
@@ -124,7 +127,7 @@ export const NoteVisuals = React.memo(React.forwardRef<HTMLElement, NoteVisualsP
                 {title}
               </div>
             </div>
-            <div className="flex-1 pb-4 pt-0 min-h-0">
+            <div data-note-content-region="true" className="flex-1 pb-4 pt-0 min-h-0">
               <div
                 className={cn(
                   "w-full px-4",
