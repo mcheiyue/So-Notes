@@ -21,6 +21,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: listenMock,
+  emitTo: vi.fn(async () => undefined),
 }));
 
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
@@ -181,6 +182,8 @@ describe('App WindowShell 组合契约', () => {
     expect(listenMock).toHaveBeenCalledWith('create-note-from-clipboard', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('tray-new-note', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('global-shortcut-register-failed', expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith('detached-note:locate', expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith('detached-note:closed', expect.any(Function));
     expect(invokeMock).toHaveBeenCalledWith('get_pin_mode');
     expect(invokeMock).toHaveBeenCalledWith('get_global_shortcut_error');
   });
@@ -482,6 +485,28 @@ describe('App WindowShell 组合契约', () => {
       right: 380,
       bottom: 570,
     });
+  });
+
+  it('收到 detached-note:closed 事件后清理撕下便签运行态映射', async () => {
+    let closedHandler: ((event: { payload: { noteId: string } }) => void) | null = null;
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      const [eventName, handler] = args as [string, (event: { payload: { noteId: string } }) => void];
+      if (eventName === 'detached-note:closed') {
+        closedHandler = handler;
+      }
+      return vi.fn();
+    });
+
+    await renderApp();
+
+    useUIStore.getState().addDetachedNote('note-closed-1', { x: 100, y: 200 });
+    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
+
+    await act(async () => {
+      closedHandler?.({ payload: { noteId: 'note-closed-1' } });
+    });
+
+    expect(useUIStore.getState().detachedNotes).toHaveLength(0);
   });
 });
 

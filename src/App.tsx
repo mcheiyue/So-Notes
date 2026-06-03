@@ -22,7 +22,7 @@ import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { appController } from "./controllers/appController";
 import { startDetachedNoteSnapshotSync } from "./services/detachedNoteSnapshotSync";
 import { DETACHED_NOTE_EVENTS } from "./types/detachedNoteSnapshot";
-import type { DetachedNoteLocatePayload } from "./types/detachedNoteSnapshot";
+import type { DetachedNoteLocatePayload, DetachedNoteClosedPayload } from "./types/detachedNoteSnapshot";
 
 const getTraySaveStatusCopy = (saveStatus: string, saveError: string | null): string | null => {
   if (saveStatus === 'saving') {
@@ -133,6 +133,13 @@ function App() {
       },
     );
 
+    const unlistenClosedDetached = listen<DetachedNoteClosedPayload>(
+      DETACHED_NOTE_EVENTS.CLOSED,
+      (event) => {
+        appController.closeDetachedNote(event.payload.noteId);
+      },
+    );
+
     invoke<boolean>('get_pin_mode')
       .then((pinned) => {
         appController.setPinned(pinned);
@@ -157,6 +164,7 @@ function App() {
       unlistenClipboardNote.then(f => f());
       unlistenGlobalShortcutError.then(f => f());
       unlistenLocateDetached.then(f => f());
+      unlistenClosedDetached.then(f => f());
       document.removeEventListener('mouseleave', handleMouseLeave);
     };
   }, []);

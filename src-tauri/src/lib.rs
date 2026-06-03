@@ -465,7 +465,24 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() != "main" {
+            let label = window.label();
+
+            // 撕下窗口销毁时通知主窗口清理运行态映射
+            if is_detached_note_label(label) {
+                if let WindowEvent::Destroyed = event {
+                    if let Some(note_id) = label.strip_prefix("detached-note-") {
+                        if let Some(main_window) = window.app_handle().get_webview_window("main") {
+                            let _ = main_window.emit(
+                                "detached-note:closed",
+                                serde_json::json!({ "noteId": note_id }),
+                            );
+                        }
+                    }
+                }
+                return;
+            }
+
+            if label != "main" {
                 return;
             }
             if let WindowEvent::Focused(focused) = event {

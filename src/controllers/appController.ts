@@ -1,5 +1,6 @@
 import { useStore } from '../store/useStore';
 import { useUIStore } from '../store/uiStore';
+import { invoke } from '@tauri-apps/api/core';
 import { LAYOUT } from '../constants/layout';
 import type { Note, ShellRectState, StickyDragStatus } from '../store/types';
 import { parseSmartPaste, buildSmartPasteNoteInputs } from '../utils/smartPaste';
@@ -277,16 +278,20 @@ export const appController = {
 
   detachNote: (noteId: string): void => {
     const uiState = useUIStore.getState();
-    if (uiState.detachedNotes.some((d) => d.noteId === noteId)) return;
+    const alreadyDetached = uiState.detachedNotes.some((d) => d.noteId === noteId);
 
-    const domainState = useStore.getState();
-    const note = domainState.notesById[noteId];
-    if (!note) return;
+    if (!alreadyDetached) {
+      const domainState = useStore.getState();
+      const note = domainState.notesById[noteId];
+      if (!note) return;
 
-    const { viewport } = domainState;
-    const x = Math.max(40, Math.min(note.x - viewport.x, viewport.w - 200));
-    const y = Math.max(40, Math.min(note.y - viewport.y, viewport.h - 150));
-    uiState.addDetachedNote(noteId, { x, y });
+      const { viewport } = domainState;
+      const x = Math.max(40, Math.min(note.x - viewport.x, viewport.w - 200));
+      const y = Math.max(40, Math.min(note.y - viewport.y, viewport.h - 150));
+      uiState.addDetachedNote(noteId, { x, y });
+    }
+
+    invoke('open_detached_note_window', { noteId }).catch(() => undefined);
   },
 
   closeDetachedNote: (noteId: string): void => {

@@ -30,9 +30,19 @@ export interface DetachedNoteLocatePayload {
   noteId: string;
 }
 
+/**
+ * 窗口销毁清理事件载荷。
+ * Rust 监听到撕下窗口 WindowEvent::Destroyed 后，向主窗口发送此事件。
+ * 主窗口据此清理运行态映射，不依赖撕下窗口前端主动通知。
+ */
+export interface DetachedNoteClosedPayload {
+  noteId: string;
+}
+
 /** 撕下窗口事件名常量 */
 export const DETACHED_NOTE_EVENTS = {
   SNAPSHOT: 'detached-note:snapshot',
   MISSING: 'detached-note:missing',
   LOCATE: 'detached-note:locate',
+  CLOSED: 'detached-note:closed',
 } as const;
