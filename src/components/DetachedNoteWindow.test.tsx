@@ -70,7 +70,10 @@ describe('DetachedNoteWindow 按钮行为', () => {
     invokeMock.mockClear();
     listenMock.mockResolvedValue(vi.fn());
     emitMock.mockResolvedValue(undefined);
-    invokeMock.mockResolvedValue(null);
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'show_detached_note_window') return Promise.resolve(null);
+      return Promise.resolve(null);
+    });
 
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -118,7 +121,7 @@ describe('DetachedNoteWindow 按钮行为', () => {
   });
 
   it('点击置顶按钮调用 Rust set_detached_note_always_on_top', async () => {
-    invokeMock.mockResolvedValueOnce(true);
+    invokeMock.mockResolvedValueOnce(null).mockResolvedValueOnce(true);
 
     await renderWindow();
     simulateSnapshot(createSnapshot());
@@ -138,7 +141,7 @@ describe('DetachedNoteWindow 按钮行为', () => {
   });
 
   it('置顶成功后按钮 aria-label 变为取消置顶，样式带 accent 色', async () => {
-    invokeMock.mockResolvedValueOnce(true);
+    invokeMock.mockResolvedValueOnce(null).mockResolvedValueOnce(true);
 
     await renderWindow();
     simulateSnapshot(createSnapshot());
@@ -162,7 +165,7 @@ describe('DetachedNoteWindow 按钮行为', () => {
   });
 
   it('再次点击取消置顶', async () => {
-    invokeMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    invokeMock.mockResolvedValueOnce(null).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
     await renderWindow();
     simulateSnapshot(createSnapshot());
@@ -243,5 +246,107 @@ describe('DetachedNoteWindow 按钮行为', () => {
       const unlistenFn = await unlistenPromise;
       expect(unlistenFn).toHaveBeenCalled();
     }
+  });
+});
+
+describe('DetachedNoteWindow 显示窗口行为', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const renderWindow = async (noteId = 'note-test-1') => {
+    await act(async () => {
+      root.render(<DetachedNoteWindow noteId={noteId} />);
+    });
+  };
+
+  const simulateSnapshot = (snapshot: DetachedNoteSnapshot) => {
+    const snapshotCall = listenMock.mock.calls.find(
+      (call: unknown[]) => call[0] === DETACHED_NOTE_EVENTS.SNAPSHOT,
+    );
+    expect(snapshotCall).toBeDefined();
+    const snapshotCallback = snapshotCall![1] as (event: { payload: DetachedNoteSnapshot }) => void;
+    act(() => {
+      snapshotCallback({ payload: snapshot });
+    });
+  };
+
+  beforeEach(() => {
+    listenMock.mockClear();
+    emitMock.mockClear();
+    invokeMock.mockClear();
+    listenMock.mockResolvedValue(vi.fn());
+    emitMock.mockResolvedValue(undefined);
+    invokeMock.mockResolvedValue(null);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('挂载时立即调用 show_detached_note_window', async () => {
+    await renderWindow();
+
+    expect(invokeMock).toHaveBeenCalledWith('show_detached_note_window', {
+      noteId: 'note-test-1',
+    });
+  });
+
+  it('快照到达时若尚未显示则再次调用 show_detached_note_window', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'show_detached_note_window') return Promise.reject(new Error('暂不可用'));
+      return Promise.resolve(null);
+    });
+
+    await renderWindow();
+
+    invokeMock.mockClear();
+    invokeMock.mockResolvedValue(null);
+
+    simulateSnapshot(createSnapshot());
+
+    expect(invokeMock).toHaveBeenCalledWith('show_detached_note_window', {
+      noteId: 'note-test-1',
+    });
+  });
+
+  it('幂等：show_detached_note_window 不会因快照重复调用', async () => {
+    await renderWindow();
+
+    const showCallsBefore = invokeMock.mock.calls.filter(
+      (c: unknown[]) => c[0] === 'show_detached_note_window',
+    ).length;
+
+    simulateSnapshot(createSnapshot());
+
+    const showCallsAfter = invokeMock.mock.calls.filter(
+      (c: unknown[]) => c[0] === 'show_detached_note_window',
+    ).length;
+
+    expect(showCallsAfter).toBe(showCallsBefore);
+  });
+
+  it('show 失败后允许后续重试', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'show_detached_note_window') return Promise.reject(new Error('失败'));
+      return Promise.resolve(null);
+    });
+
+    await renderWindow();
+
+    invokeMock.mockResolvedValue(null);
+
+    simulateSnapshot(createSnapshot());
+
+    const showCalls = invokeMock.mock.calls.filter(
+      (c: unknown[]) => c[0] === 'show_detached_note_window',
+    );
+    expect(showCalls.length).toBeGreaterThanOrEqual(1);
   });
 });

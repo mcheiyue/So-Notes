@@ -210,9 +210,28 @@ async fn open_detached_note_window(app: tauri::AppHandle, note_id: String) -> Re
     .decorations(false)
     .transparent(true)
     .resizable(true)
-    .visible(true)
+    .visible(false)
+    .skip_taskbar(true)
     .build()
     .map_err(|e| format!("创建撕下窗口失败: {e}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn show_detached_note_window(app: tauri::AppHandle, note_id: String) -> Result<(), String> {
+    let label = detached_note_label(&note_id);
+
+    let window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("撕下窗口 {label} 不存在"))?;
+
+    window
+        .show()
+        .map_err(|e| format!("显示撕下窗口失败: {e}"))?;
+    window
+        .set_focus()
+        .map_err(|e| format!("聚焦撕下窗口失败: {e}"))?;
 
     Ok(())
 }
@@ -523,6 +542,7 @@ pub fn run() {
             check_hide_on_leave,
             frontend_unpin,
             open_detached_note_window,
+            show_detached_note_window,
             close_detached_note_window,
             set_detached_note_always_on_top
         ])

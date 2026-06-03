@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
@@ -36,6 +36,22 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   const isDark = useLocalDarkMode();
   const [snapshot, setSnapshot] = useState<DetachedNoteSnapshot | null>(null);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false);
+  const hasShownRef = useRef(false);
+
+  /** 幂等显示窗口：确保只调用一次 show_detached_note_window */
+  const showWindowOnce = useCallback(() => {
+    if (hasShownRef.current) return;
+    hasShownRef.current = true;
+    invoke('show_detached_note_window', { noteId }).catch((err) => {
+      console.warn('显示撕下窗口失败:', err);
+      // 调用失败时重置标记，允许后续重试
+      hasShownRef.current = false;
+    });
+  }, [noteId]);
+
+  useEffect(() => {
+    showWindowOnce();
+  }, [showWindowOnce]);
 
   useEffect(() => {
     const unlistenSnapshot = listen<DetachedNoteSnapshot>(
@@ -43,6 +59,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
       (event) => {
         if (event.payload.noteId === noteId) {
           setSnapshot(event.payload);
+          showWindowOnce();
         }
       },
     );
@@ -60,7 +77,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
       unlistenSnapshot.then((f) => f());
       unlistenMissing.then((f) => f());
     };
-  }, [noteId]);
+  }, [noteId, showWindowOnce]);
 
   const handleLocate = useCallback(
     (e: React.MouseEvent) => {
