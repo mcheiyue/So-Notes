@@ -198,11 +198,11 @@ async fn open_detached_note_window(app: tauri::AppHandle, note_id: String) -> Re
         return Ok(());
     }
 
-    // TODO (Commit 4): 替换为独立 detached.html 入口
+    let detached_url = format!("detached.html?noteId={}", note_id);
     let _window = WebviewWindowBuilder::new(
         &app,
         &label,
-        WebviewUrl::App("index.html".into()),
+        WebviewUrl::App(detached_url.into()),
     )
     .title("SoNotes - 便签")
     .inner_size(320.0, 400.0)

@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { resolve } from "path";
 
 const host = process.env.TAURI_DEV_HOST;
 const isProfiling = process.env.ENABLE_PROFILING === "true" || process.env.VITE_ENABLE_PROFILING === "true";
@@ -47,5 +48,14 @@ export default defineConfig(async () => ({
     // Spotlight 组件在 jsdom 渲染时触发 4GB+ 内存消耗（backdrop-blur + animate-in 等复杂 CSS），
     // 在本地开发环境中可正常运行，CI 环境内存受限时排除此文件。
     exclude: ['**/Spotlight.test.tsx', '**/node_modules/**'],
+  },
+
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        detached: resolve(__dirname, "detached.html"),
+      },
+    },
   },
 }));

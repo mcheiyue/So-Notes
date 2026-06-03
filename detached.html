@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SoNotes - 便签</title>
+    <script>
+      (function() {
+        const savedTheme = localStorage.getItem('theme');
+        const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const shouldBeDark = savedTheme === 'dark' || (!savedTheme && isSystemDark) || (savedTheme === 'system' && isSystemDark);
+        if (shouldBeDark) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (event) => {
+          const currentTheme = localStorage.getItem('theme');
+          if (!currentTheme || currentTheme === 'system') {
+            if (event.matches) {
+              document.documentElement.classList.add('dark');
+            } else {
+              document.documentElement.classList.remove('dark');
+            }
+          }
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="detached-root"></div>
+    <script type="module" src="/src/detached-main.tsx"></script>
+  </body>
+</html>
