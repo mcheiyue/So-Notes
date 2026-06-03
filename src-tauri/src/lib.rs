@@ -142,7 +142,9 @@ async fn save_content(
 fn check_hide_on_leave(window: tauri::Window, state: tauri::State<AppState>) {
     let is_pinned = state.is_pinned.lock().map(|p| *p).unwrap_or(false);
     if !is_pinned {
-        // 如果当前窗口未聚焦（说明可能处于死锁状态），此时鼠标移出，应立即隐藏
+        if any_detached_window_focused(window.app_handle()) {
+            return;
+        }
         if let Ok(false) = window.is_focused() {
             let _ = window.hide();
         }
@@ -172,6 +174,18 @@ fn frontend_unpin(app: tauri::AppHandle, state: tauri::State<AppState>) {
 
 fn detached_note_label(note_id: &str) -> String {
     format!("detached-note-{note_id}")
+}
+
+/// 判断窗口 label 是否属于 SoNotes 撕下便签窗口
+fn is_detached_note_label(label: &str) -> bool {
+    label.starts_with("detached-note-")
+}
+
+/// 检查是否有任一撕下便签窗口当前持有 OS 焦点
+fn any_detached_window_focused(app: &tauri::AppHandle) -> bool {
+    app.webview_windows()
+        .iter()
+        .any(|(label, window)| is_detached_note_label(label) && window.is_focused().unwrap_or(false))
 }
 
 #[tauri::command]
@@ -432,6 +446,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
             if let WindowEvent::Focused(focused) = event {
                 let state = window.state::<AppState>();
                 if *focused {
@@ -445,8 +462,12 @@ pub fn run() {
                     let is_pinned = state.is_pinned.lock().map(|p| *p).unwrap_or(false);
                     if !is_pinned {
                         let window_handle = window.clone();
+                        let app_handle = window.app_handle().clone();
                         tauri::async_runtime::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                            if any_detached_window_focused(&app_handle) {
+                                return;
+                            }
                             if let Ok(false) = window_handle.is_focused() {
                                 let _ = window_handle.hide();
                             }
