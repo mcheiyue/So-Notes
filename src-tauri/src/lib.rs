@@ -209,6 +209,7 @@ async fn open_detached_note_window(app: tauri::AppHandle, note_id: String) -> Re
     .min_inner_size(240.0, 300.0)
     .decorations(false)
     .transparent(true)
+    .shadow(false)
     .resizable(true)
     .visible(false)
     .skip_taskbar(true)

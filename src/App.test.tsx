@@ -551,7 +551,7 @@ describe('App WindowShell 组合契约', () => {
   });
 });
 
-describe('App DetachedNoteOverlay 集成契约', () => {
+describe('App 撕下窗口集成契约', () => {
   let container: HTMLDivElement;
   let overlayRoot: HTMLDivElement;
   let root: Root;
@@ -623,7 +623,7 @@ describe('App DetachedNoteOverlay 集成契约', () => {
     vi.unstubAllGlobals();
   });
 
-  it('通过 App 组合后撕下便签 portal 渲染到 #overlay-root', async () => {
+  it('主窗口不再渲染 v1.4.5 旧撕下浮层，避免撕下后出现两个视图', async () => {
     const note = createIntegrationNote();
     useStore.setState({
       notesById: { [note.id]: note },
@@ -635,138 +635,10 @@ describe('App DetachedNoteOverlay 集成契约', () => {
     await renderApp();
 
     const overlay = overlayRoot.querySelector('[data-testid="detached-note-overlay"]');
-    expect(overlay).not.toBeNull();
+    expect(overlay).toBeNull();
 
     const shell = overlayRoot.querySelector(
       `[data-testid="detached-note-shell-${note.id}"]`,
-    );
-    expect(shell).not.toBeNull();
-  });
-
-  it('store 更新标题与内容后撕下视图同步反映', async () => {
-    const note = createIntegrationNote();
-    useStore.setState({
-      notesById: { [note.id]: note },
-      allNoteIds: [note.id],
-      boardNoteIds: { default: [note.id] },
-    });
-    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
-
-    await renderApp();
-
-    const shell = overlayRoot.querySelector(
-      `[data-testid="detached-note-shell-${note.id}"]`,
-    );
-    expect(shell?.textContent).toContain('集成标题');
-    expect(shell?.textContent).toContain('集成正文内容');
-
-    await act(async () => {
-      useStore.setState({
-        notesById: {
-          [note.id]: { ...note, title: '同步后标题', content: '同步后正文' },
-        },
-      });
-    });
-
-    expect(shell?.textContent).toContain('同步后标题');
-    expect(shell?.textContent).toContain('同步后正文');
-  });
-
-  it('点击 pin 按钮切换 UI store 中的置顶状态', async () => {
-    const note = createIntegrationNote();
-    useStore.setState({
-      notesById: { [note.id]: note },
-      allNoteIds: [note.id],
-      boardNoteIds: { default: [note.id] },
-    });
-    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
-
-    await renderApp();
-
-    expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(false);
-
-    const pinBtn = overlayRoot.querySelector(
-      `[data-testid="detached-note-pin-${note.id}"]`,
-    ) as HTMLButtonElement;
-    expect(pinBtn).not.toBeNull();
-
-    await act(async () => {
-      pinBtn.click();
-    });
-
-    expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(true);
-
-    await act(async () => {
-      pinBtn.click();
-    });
-
-    expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(false);
-  });
-
-  it('点击贴回画布按钮关闭撕下视图', async () => {
-    const note = createIntegrationNote();
-    useStore.setState({
-      notesById: { [note.id]: note },
-      allNoteIds: [note.id],
-      boardNoteIds: { default: [note.id] },
-    });
-    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
-
-    await renderApp();
-
-    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
-
-    const stickBackBtn = overlayRoot.querySelector(
-      `[data-testid="detached-note-stick-back-${note.id}"]`,
-    ) as HTMLButtonElement;
-    expect(stickBackBtn).not.toBeNull();
-
-    await act(async () => {
-      stickBackBtn.click();
-    });
-
-    expect(useUIStore.getState().detachedNotes).toHaveLength(0);
-    const shellAfter = overlayRoot.querySelector(
-      `[data-testid="detached-note-shell-${note.id}"]`,
-    );
-    expect(shellAfter).toBeNull();
-  });
-
-  it('软删除便签后撕下视图自动关闭', async () => {
-    const note = createIntegrationNote();
-    useStore.setState({
-      notesById: { [note.id]: note },
-      allNoteIds: [note.id],
-      boardNoteIds: { default: [note.id] },
-    });
-    useUIStore.getState().addDetachedNote(note.id, { x: 100, y: 200 });
-
-    await renderApp();
-
-    expect(useUIStore.getState().detachedNotes).toHaveLength(1);
-
-    await act(async () => {
-      useStore.setState({
-        notesById: {
-          [note.id]: { ...note, deletedAt: Date.now() },
-        },
-      });
-    });
-
-    expect(useUIStore.getState().detachedNotes).toHaveLength(0);
-    const shellAfter = overlayRoot.querySelector(
-      `[data-testid="detached-note-shell-${note.id}"]`,
-    );
-    expect(shellAfter).toBeNull();
-  });
-
-  it('便签不存在时不渲染撕下视图', async () => {
-    useUIStore.getState().addDetachedNote('nonexistent-note', { x: 10, y: 20 });
-
-    await renderApp();
-
-    const shell = overlayRoot.querySelector(
-      '[data-testid="detached-note-shell-nonexistent-note"]',
     );
     expect(shell).toBeNull();
   });

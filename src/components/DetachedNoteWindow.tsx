@@ -120,25 +120,24 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
 
   if (!snapshot) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-primary-bg">
-        <span className="text-sm text-text-tertiary">加载中…</span>
-      </div>
+      <div className="h-screen w-screen bg-transparent" />
     );
   }
 
   return (
     <div
-      className="flex h-screen w-screen items-center justify-center bg-primary-bg overflow-auto p-4"
+      className="h-screen w-screen overflow-auto bg-transparent"
       onContextMenu={stopContextMenu}
     >
-      <div className="pointer-events-auto">
+      <div className="pointer-events-auto min-h-full w-full">
         <NoteVisuals
           title={snapshot.title}
           content={snapshot.content}
           color={snapshot.color}
           isCollapsed={snapshot.isCollapsed}
           isDark={isDark}
-          className="shadow-xl group/detached-note"
+          className="min-h-screen rounded-none shadow-xl group/detached-note"
+          style={{ width: '100%' }}
           surfaceOverlay={
             <div
               className="absolute right-2 top-1.5 z-20 flex items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-200 group-hover/detached-note:pointer-events-auto group-hover/detached-note:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100"

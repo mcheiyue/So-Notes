@@ -87,19 +87,29 @@ describe('DetachedNoteWindow 按钮行为', () => {
     container.remove();
   });
 
-  it('快照到达前显示加载状态', async () => {
+  it('快照到达前保持透明占位，避免显示额外窗口壳', async () => {
     await renderWindow();
 
-    expect(container.textContent).toContain('加载中…');
+    expect(container.textContent).not.toContain('加载中…');
+    expect(container.querySelector('.bg-transparent')).not.toBeNull();
   });
 
   it('收到快照后渲染 NoteVisuals 与三个按钮', async () => {
     await renderWindow();
     simulateSnapshot(createSnapshot());
 
+    expect(container.querySelector('[data-note-visuals="true"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="定位到画布所在"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="置顶"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="贴回画布"]')).not.toBeNull();
+  });
+
+  it('收到快照后不渲染额外背景与 padding 外壳', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    expect(container.querySelector('.bg-primary-bg')).toBeNull();
+    expect(container.querySelector('.p-4')).toBeNull();
   });
 
   it('点击定位按钮向主窗口发送 locate 事件', async () => {
