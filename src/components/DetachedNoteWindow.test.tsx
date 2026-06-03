@@ -503,6 +503,39 @@ describe('DetachedNoteWindow 尺寸与 ResizeObserver', () => {
     expect(sizeCalls).toHaveLength(1);
   });
 
+  it('封顶后高度小幅波动时不重复 setSize', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    triggerResize(800);
+    triggerResize(521);
+    triggerResize(519);
+
+    const sizeCalls = setSizeMock.mock.calls.filter(
+      (c: unknown[]) => (c[0] as { width: number; height: number }).width === 260,
+    );
+    expect(sizeCalls).toHaveLength(1);
+    expect(sizeCalls[0][0]).toEqual(expect.objectContaining({ width: 260, height: 520 }));
+  });
+
+  it('内容明显缩短后退出封顶并恢复自然高度', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    triggerResize(800);
+    triggerResize(500);
+
+    expect(setSizeMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ width: 260, height: 500 }),
+    );
+
+    const noteEl = container.querySelector('[data-note-visuals="true"]') as HTMLElement;
+    expect(noteEl.className).not.toContain('overflow-hidden');
+
+    const contentRegion = container.querySelector('[data-note-content-region="true"]') as HTMLElement;
+    expect(contentRegion.className).not.toContain('overflow-y-auto');
+  });
+
   it('内容变化后 ResizeObserver 重新触发 setSize', async () => {
     await renderWindow();
     simulateSnapshot(createSnapshot());

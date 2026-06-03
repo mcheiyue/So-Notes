@@ -13,6 +13,9 @@ import { LAYOUT } from "../constants/layout";
 
 const DETACHED_MAX_HEIGHT_RATIO = 0.7;
 const DETACHED_MAX_HEIGHT_FALLBACK = 520;
+const RESIZE_EPSILON = 2;
+const CAP_ENTER_BUFFER = 4;
+const CAP_EXIT_BUFFER = 16;
 
 function computeMaxHeight(): number {
   const screen = typeof window !== "undefined" ? window.screen : undefined;
@@ -52,7 +55,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   const [snapshot, setSnapshot] = useState<DetachedNoteSnapshot | null>(null);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false);
   const hasShownRef = useRef(false);
-  const noteRef = useRef<HTMLElement>(null);
+  const measureRef = useRef<HTMLElement>(null);
   const lastSentSizeRef = useRef({ width: 0, height: 0 });
   const rafRef = useRef(0);
   const isCappedRef = useRef(false);
@@ -60,7 +63,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   const maxHeightRef = useRef(computeMaxHeight());
 
   const resizeWindowToNote = useCallback((entry?: ResizeObserverEntry) => {
-    const el = noteRef.current;
+    const el = measureRef.current;
     if (!el) return;
 
     const maxHeight = maxHeightRef.current;
@@ -71,7 +74,9 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
     const naturalHeight = Math.max(Math.round(el.scrollHeight), measuredHeight);
     if (naturalHeight <= 0) return;
 
-    const capped = naturalHeight > maxHeight;
+    const capped = isCappedRef.current
+      ? naturalHeight > maxHeight - CAP_EXIT_BUFFER
+      : naturalHeight > maxHeight + CAP_ENTER_BUFFER;
     const targetHeight = capped ? maxHeight : naturalHeight;
     const targetWidth = LAYOUT.NOTE_WIDTH;
 
@@ -80,7 +85,10 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
       setIsHeightCapped(capped);
     }
 
-    if (lastSentSizeRef.current.width === targetWidth && lastSentSizeRef.current.height === targetHeight) {
+    if (
+      Math.abs(lastSentSizeRef.current.width - targetWidth) <= RESIZE_EPSILON
+      && Math.abs(lastSentSizeRef.current.height - targetHeight) <= RESIZE_EPSILON
+    ) {
       return;
     }
     lastSentSizeRef.current = { width: targetWidth, height: targetHeight };
@@ -132,7 +140,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   }, [noteId, showWindowOnce]);
 
   useEffect(() => {
-    const el = noteRef.current;
+    const el = measureRef.current;
     if (!el) return;
 
     const observer = new ResizeObserver((entries) => {
@@ -213,6 +221,46 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
     getCurrentWindow().startDragging().catch(() => undefined);
   }, []);
 
+  const renderNoteBody = (scrollable: boolean) => {
+    if (!snapshot || snapshot.isCollapsed) return null;
+
+    return (
+      <>
+        <div
+          data-note-title-region="true"
+          className={cn("px-4 pt-3 pb-1", "min-h-9 pr-24")}
+        >
+          <div
+            className={cn(
+              "w-full truncate",
+              "text-text-primary font-bold text-[16px]",
+              snapshot.title ? "block" : "hidden",
+            )}
+          >
+            {snapshot.title}
+          </div>
+        </div>
+        <div
+          data-note-content-region="true"
+          className={cn(
+            "flex-1 pb-4 pt-0 min-h-0",
+            scrollable && "overflow-y-auto scrollbar-thin scrollbar-thumb-text-tertiary/20 scrollbar-track-transparent hover:scrollbar-thumb-text-secondary/20",
+          )}
+        >
+          <div
+            className={cn(
+              "w-full px-4",
+              "text-text-secondary dark:text-text-primary",
+              "font-normal text-[15px] leading-relaxed",
+            )}
+          >
+            {snapshot.content || <span className="text-text-tertiary">记点什么…</span>}
+          </div>
+        </div>
+      </>
+    );
+  };
+
   if (!snapshot) {
     return (
       <div className="h-screen w-screen bg-transparent" />
@@ -229,7 +277,6 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
         onMouseDown={handleDragStart}
       >
         <NoteVisuals
-          ref={noteRef}
           title={snapshot.title}
           content={snapshot.content}
           color={snapshot.color}
@@ -276,41 +323,20 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
             </div>
           }
         >
-          {!snapshot.isCollapsed && (
-            <>
-              <div
-                data-note-title-region="true"
-                className={cn("px-4 pt-3 pb-1", "min-h-9 pr-24")}
-              >
-                <div
-                  className={cn(
-                    "w-full truncate",
-                    "text-text-primary font-bold text-[16px]",
-                    snapshot.title ? "block" : "hidden",
-                  )}
-                >
-                  {snapshot.title}
-                </div>
-              </div>
-              <div
-                data-note-content-region="true"
-                className={cn(
-                  "flex-1 pb-4 pt-0 min-h-0",
-                  isHeightCapped && "overflow-y-auto scrollbar-thin scrollbar-thumb-text-tertiary/20 scrollbar-track-transparent hover:scrollbar-thumb-text-secondary/20",
-                )}
-              >
-                <div
-                  className={cn(
-                    "w-full px-4",
-                    "text-text-secondary dark:text-text-primary",
-                    "font-normal text-[15px] leading-relaxed",
-                  )}
-                >
-                  {snapshot.content || <span className="text-text-tertiary">记点什么…</span>}
-                </div>
-              </div>
-            </>
-          )}
+          {renderNoteBody(isHeightCapped)}
+        </NoteVisuals>
+        <NoteVisuals
+          ref={measureRef}
+          title={snapshot.title}
+          content={snapshot.content}
+          color={snapshot.color}
+          isCollapsed={snapshot.isCollapsed}
+          isDark={isDark}
+          className="fixed left-0 top-0 pointer-events-none opacity-0 -z-10 group/detached-note"
+          aria-hidden="true"
+          data-detached-note-measure="true"
+        >
+          {renderNoteBody(false)}
         </NoteVisuals>
       </div>
     </div>
