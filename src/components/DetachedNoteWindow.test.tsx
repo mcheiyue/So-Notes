@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
-const { emitMock, invokeMock, listenMock } = vi.hoisted(() => ({
+const { emitMock, invokeMock, listenMock, startDraggingMock } = vi.hoisted(() => ({
   emitMock: vi.fn(),
   invokeMock: vi.fn(),
   listenMock: vi.fn(),
+  startDraggingMock: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -15,6 +16,12 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
+}));
+
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    startDragging: startDraggingMock,
+  }),
 }));
 
 vi.mock('../store/db', () => ({
@@ -68,8 +75,10 @@ describe('DetachedNoteWindow 按钮行为', () => {
     listenMock.mockClear();
     emitMock.mockClear();
     invokeMock.mockClear();
+    startDraggingMock.mockClear();
     listenMock.mockResolvedValue(vi.fn());
     emitMock.mockResolvedValue(undefined);
+    startDraggingMock.mockResolvedValue(undefined);
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'show_detached_note_window') return Promise.resolve(null);
       return Promise.resolve(null);
@@ -110,6 +119,49 @@ describe('DetachedNoteWindow 按钮行为', () => {
 
     expect(container.querySelector('.bg-primary-bg')).toBeNull();
     expect(container.querySelector('.p-4')).toBeNull();
+  });
+
+  it('快照后渲染 data-tauri-drag-region 拖拽区域', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    expect(container.querySelector('[data-tauri-drag-region]')).not.toBeNull();
+  });
+
+  it('按下便签表面时启动 Tauri 窗口拖拽', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    const noteEl = container.querySelector('[data-note-visuals="true"]') as HTMLElement;
+    await act(async () => {
+      noteEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    });
+
+    expect(startDraggingMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('按下按钮区域时不启动 Tauri 窗口拖拽', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    const locateBtn = container.querySelector(
+      '[aria-label="定位到画布所在"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      locateBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    });
+
+    expect(startDraggingMock).not.toHaveBeenCalled();
+  });
+
+  it('NoteVisuals 保留圆角，不使用 rounded-none', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    const noteEl = container.querySelector('[data-note-visuals="true"]');
+    expect(noteEl).not.toBeNull();
+    expect(noteEl!.className).not.toContain('rounded-none');
+    expect(noteEl!.className).toContain('rounded-xl');
   });
 
   it('点击定位按钮向主窗口发送 locate 事件', async () => {
@@ -284,8 +336,10 @@ describe('DetachedNoteWindow 显示窗口行为', () => {
     listenMock.mockClear();
     emitMock.mockClear();
     invokeMock.mockClear();
+    startDraggingMock.mockClear();
     listenMock.mockResolvedValue(vi.fn());
     emitMock.mockResolvedValue(undefined);
+    startDraggingMock.mockResolvedValue(undefined);
     invokeMock.mockResolvedValue(null);
 
     container = document.createElement('div');

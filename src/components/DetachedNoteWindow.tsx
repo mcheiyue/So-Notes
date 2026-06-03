@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Crosshair, Pin, X } from "lucide-react";
 import { NoteVisuals } from "./note-render/NoteVisuals";
 import type { DetachedNoteSnapshot, DetachedNoteMissingPayload } from "../types/detachedNoteSnapshot";
@@ -118,6 +119,17 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
     e.stopPropagation();
   };
 
+  const handleDragStart = useCallback((e: React.MouseEvent<HTMLElement>) => {
+    if (e.button !== 0) return;
+
+    const target = e.target;
+    if (target instanceof Element && target.closest('[data-detached-note-control="true"]')) {
+      return;
+    }
+
+    getCurrentWindow().startDragging().catch(() => undefined);
+  }, []);
+
   if (!snapshot) {
     return (
       <div className="h-screen w-screen bg-transparent" />
@@ -126,21 +138,25 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
 
   return (
     <div
-      className="h-screen w-screen overflow-auto bg-transparent"
+      className="bg-transparent"
       onContextMenu={stopContextMenu}
     >
-      <div className="pointer-events-auto min-h-full w-full">
+      <div className="pointer-events-auto">
         <NoteVisuals
           title={snapshot.title}
           content={snapshot.content}
           color={snapshot.color}
           isCollapsed={snapshot.isCollapsed}
           isDark={isDark}
-          className="min-h-screen rounded-none shadow-xl group/detached-note"
+          className="overflow-hidden shadow-xl group/detached-note"
           style={{ width: '100%' }}
+          data-tauri-drag-region
+          onMouseDown={handleDragStart}
           surfaceOverlay={
             <div
+              data-detached-note-control="true"
               className="absolute right-2 top-1.5 z-20 flex items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-200 group-hover/detached-note:pointer-events-auto group-hover/detached-note:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100"
+              onMouseDown={(e) => e.stopPropagation()}
             >
               <button
                 type="button"
