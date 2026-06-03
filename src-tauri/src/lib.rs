@@ -188,13 +188,24 @@ fn any_detached_window_focused(app: &tauri::AppHandle) -> bool {
         .any(|(label, window)| is_detached_note_label(label) && window.is_focused().unwrap_or(false))
 }
 
+fn restore_detached_note_window(window: &WebviewWindow) -> Result<(), String> {
+    let _ = window.unminimize();
+    window
+        .show()
+        .map_err(|e| format!("显示撕下窗口失败: {e}"))?;
+    window
+        .set_focus()
+        .map_err(|e| format!("聚焦撕下窗口失败: {e}"))?;
+
+    Ok(())
+}
+
 #[tauri::command]
 async fn open_detached_note_window(app: tauri::AppHandle, note_id: String) -> Result<(), String> {
     let label = detached_note_label(&note_id);
 
     if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.show();
-        let _ = window.set_focus();
+        restore_detached_note_window(&window)?;
         return Ok(());
     }
 
@@ -227,14 +238,7 @@ async fn show_detached_note_window(app: tauri::AppHandle, note_id: String) -> Re
         .get_webview_window(&label)
         .ok_or_else(|| format!("撕下窗口 {label} 不存在"))?;
 
-    window
-        .show()
-        .map_err(|e| format!("显示撕下窗口失败: {e}"))?;
-    window
-        .set_focus()
-        .map_err(|e| format!("聚焦撕下窗口失败: {e}"))?;
-
-    Ok(())
+    restore_detached_note_window(&window)
 }
 
 #[tauri::command]
