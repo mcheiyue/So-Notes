@@ -61,6 +61,8 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   const isCappedRef = useRef(false);
   const [isHeightCapped, setIsHeightCapped] = useState(false);
   const maxHeightRef = useRef(computeMaxHeight());
+  const [isInitialHighlight, setIsInitialHighlight] = useState(false);
+  const highlightTriggeredRef = useRef(false);
 
   const resizeWindowToNote = useCallback((entry?: ResizeObserverEntry) => {
     const el = measureRef.current;
@@ -182,6 +184,14 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
     });
   }, [snapshot, resizeWindowToNote]);
 
+  useEffect(() => {
+    if (!snapshot || highlightTriggeredRef.current) return;
+    highlightTriggeredRef.current = true;
+    setIsInitialHighlight(true);
+    const timer = setTimeout(() => setIsInitialHighlight(false), 1600);
+    return () => clearTimeout(timer);
+  }, [snapshot]);
+
   const handleLocate = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -294,14 +304,24 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
           color={snapshot.color}
           isCollapsed={snapshot.isCollapsed}
           isDark={isDark}
+          isActive={isInitialHighlight}
           className={cn(
             "shadow-xl group/detached-note",
             isHeightCapped && "overflow-hidden",
           )}
           style={isHeightCapped ? { height: maxHeightRef.current, maxHeight: maxHeightRef.current } : undefined}
           surfaceOverlay={
-            <div
-              data-detached-note-control="true"
+            <>
+              {isInitialHighlight && (
+                <div
+                  data-detached-note-cue="true"
+                  className="absolute left-3 top-2 z-20 pointer-events-none select-none rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent"
+                >
+                  悬浮
+                </div>
+              )}
+              <div
+                data-detached-note-control="true"
               className="absolute right-2 top-1.5 z-20 flex items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-200 group-hover/detached-note:pointer-events-auto group-hover/detached-note:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100"
               onMouseDown={(e) => e.stopPropagation()}
             >
@@ -333,6 +353,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
                 <X size={14} />
               </button>
             </div>
+            </>
           }
         >
           {renderNoteBody(isHeightCapped)}

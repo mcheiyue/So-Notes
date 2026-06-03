@@ -764,3 +764,139 @@ describe('DetachedNoteWindow 显示窗口行为', () => {
     expect(textDiv.className).toContain('whitespace-pre-wrap');
   });
 });
+
+describe('DetachedNoteWindow 瞬态视觉提示', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const renderWindow = async (noteId = 'note-test-1') => {
+    await act(async () => {
+      root.render(<DetachedNoteWindow noteId={noteId} />);
+    });
+  };
+
+  const simulateSnapshot = (snapshot: DetachedNoteSnapshot) => {
+    const snapshotCall = listenMock.mock.calls.find(
+      (call: unknown[]) => call[0] === DETACHED_NOTE_EVENTS.SNAPSHOT,
+    );
+    expect(snapshotCall).toBeDefined();
+    const snapshotCallback = snapshotCall![1] as (event: { payload: DetachedNoteSnapshot }) => void;
+    act(() => {
+      snapshotCallback({ payload: snapshot });
+    });
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    listenMock.mockClear();
+    emitMock.mockClear();
+    invokeMock.mockClear();
+    startDraggingMock.mockClear();
+    setSizeMock.mockClear();
+    listenMock.mockResolvedValue(vi.fn());
+    emitMock.mockResolvedValue(undefined);
+    startDraggingMock.mockResolvedValue(undefined);
+    invokeMock.mockResolvedValue(null);
+
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(_cb: ResizeObserverCallback) {}
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    });
+
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => {
+      cb();
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('收到首张快照后可见 NoteVisuals 以 isActive 样式渲染', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    const noteVisuals = container.querySelectorAll('[data-note-visuals="true"]');
+    expect(noteVisuals.length).toBeGreaterThanOrEqual(2);
+
+    const visibleNote = noteVisuals[0] as HTMLElement;
+    expect(visibleNote.style.boxShadow).toContain('4px 14px');
+  });
+
+  it('隐藏测量 NoteVisuals 不以 isActive 样式渲染', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    const measureNote = container.querySelector('[data-detached-note-measure="true"]') as HTMLElement;
+    expect(measureNote).not.toBeNull();
+    expect(measureNote.style.boxShadow).toContain('2px 8px');
+    expect(measureNote.style.boxShadow).not.toContain('4px 14px');
+  });
+
+  it('首张快照后显示"悬浮"徽章', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    const cue = container.querySelector('[data-detached-note-cue="true"]');
+    expect(cue).not.toBeNull();
+    expect(cue!.textContent).toBe('悬浮');
+  });
+
+  it('1600ms 后"悬浮"徽章自动消失', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    expect(container.querySelector('[data-detached-note-cue="true"]')).not.toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(1600);
+    });
+
+    expect(container.querySelector('[data-detached-note-cue="true"]')).toBeNull();
+  });
+
+  it('定时器清理不会在卸载后触发 setState', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    act(() => {
+      root.unmount();
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+  });
+
+  it('后续快照不会重新触发高亮', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(container.querySelector('[data-detached-note-cue="true"]')).toBeNull();
+
+    simulateSnapshot(createSnapshot({
+      title: '更新标题',
+      content: '更新内容',
+    }));
+
+    expect(container.querySelector('[data-detached-note-cue="true"]')).toBeNull();
+  });
+});
