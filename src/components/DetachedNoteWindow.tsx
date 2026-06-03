@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { Crosshair, Pin, X } from "lucide-react";
 import { NoteVisuals } from "./note-render/NoteVisuals";
 import type { DetachedNoteSnapshot, DetachedNoteMissingPayload } from "../types/detachedNoteSnapshot";
 import { DETACHED_NOTE_EVENTS } from "../types/detachedNoteSnapshot";
+import { cn } from "../utils/cn";
 
 function useLocalDarkMode(): boolean {
   const [isDark, setIsDark] = useState(() => {
@@ -32,6 +35,7 @@ function useLocalDarkMode(): boolean {
 export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => {
   const isDark = useLocalDarkMode();
   const [snapshot, setSnapshot] = useState<DetachedNoteSnapshot | null>(null);
+  const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false);
 
   useEffect(() => {
     const unlistenSnapshot = listen<DetachedNoteSnapshot>(
@@ -57,6 +61,41 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
       unlistenMissing.then((f) => f());
     };
   }, [noteId]);
+
+  const handleLocate = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      emit(DETACHED_NOTE_EVENTS.LOCATE, { noteId }).catch(() => undefined);
+    },
+    [noteId],
+  );
+
+  const handlePin = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const nextValue = !isAlwaysOnTop;
+      invoke<boolean>('set_detached_note_always_on_top', {
+        noteId,
+        alwaysOnTop: nextValue,
+      })
+        .then((result) => {
+          setIsAlwaysOnTop(result);
+        })
+        .catch(() => undefined);
+    },
+    [noteId, isAlwaysOnTop],
+  );
+
+  const handleClose = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      invoke('close_detached_note_window', { noteId }).catch(() => undefined);
+    },
+    [noteId],
+  );
 
   const stopContextMenu = (e: React.SyntheticEvent) => {
     e.stopPropagation();
@@ -91,13 +130,18 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
                 type="button"
                 aria-label="定位到画布所在"
                 className="flex h-6 w-6 items-center justify-center rounded bg-transparent text-text-tertiary transition-colors hover:bg-black/5 hover:text-text-secondary dark:hover:bg-white/10"
+                onClick={handleLocate}
               >
                 <Crosshair size={14} />
               </button>
               <button
                 type="button"
-                aria-label="置顶"
-                className="flex h-6 w-6 items-center justify-center rounded bg-transparent text-text-tertiary transition-colors hover:bg-black/5 hover:text-text-secondary dark:hover:bg-white/10"
+                aria-label={isAlwaysOnTop ? '取消置顶' : '置顶'}
+                className={cn(
+                  'flex h-6 w-6 items-center justify-center rounded bg-transparent transition-colors hover:bg-black/5 dark:hover:bg-white/10',
+                  isAlwaysOnTop ? 'text-accent' : 'text-text-tertiary hover:text-text-secondary',
+                )}
+                onClick={handlePin}
               >
                 <Pin size={14} />
               </button>
@@ -105,6 +149,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
                 type="button"
                 aria-label="贴回画布"
                 className="flex h-6 w-6 items-center justify-center rounded bg-transparent text-text-tertiary transition-colors hover:bg-black/5 hover:text-text-secondary dark:hover:bg-white/10"
+                onClick={handleClose}
               >
                 <X size={14} />
               </button>

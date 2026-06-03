@@ -230,6 +230,25 @@ async fn close_detached_note_window(app: tauri::AppHandle, note_id: String) -> R
     Ok(())
 }
 
+#[tauri::command]
+async fn set_detached_note_always_on_top(
+    app: tauri::AppHandle,
+    note_id: String,
+    always_on_top: bool,
+) -> Result<bool, String> {
+    let label = detached_note_label(&note_id);
+
+    let window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("撕下窗口 {label} 不存在"))?;
+
+    window
+        .set_always_on_top(always_on_top)
+        .map_err(|e| format!("设置置顶失败: {e}"))?;
+
+    Ok(always_on_top)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -487,7 +506,8 @@ pub fn run() {
             check_hide_on_leave,
             frontend_unpin,
             open_detached_note_window,
-            close_detached_note_window
+            close_detached_note_window,
+            set_detached_note_always_on_top
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

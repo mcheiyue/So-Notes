@@ -22,8 +22,17 @@ export interface DetachedNoteMissingPayload {
   noteId: string;
 }
 
+/**
+ * 定位请求事件载荷。
+ * 撕下窗口向主窗口发送，请求定位到原便签所在画布位置。
+ */
+export interface DetachedNoteLocatePayload {
+  noteId: string;
+}
+
 /** 撕下窗口事件名常量 */
 export const DETACHED_NOTE_EVENTS = {
   SNAPSHOT: 'detached-note:snapshot',
   MISSING: 'detached-note:missing',
+  LOCATE: 'detached-note:locate',
 } as const;
