@@ -280,18 +280,19 @@ export const appController = {
     const uiState = useUIStore.getState();
     const alreadyDetached = uiState.detachedNotes.some((d) => d.noteId === noteId);
 
-    if (!alreadyDetached) {
-      const domainState = useStore.getState();
-      const note = domainState.notesById[noteId];
-      if (!note) return;
+    const domainState = useStore.getState();
+    const note = domainState.notesById[noteId];
+    if (!note) return;
 
-      const { viewport } = domainState;
-      const x = Math.max(40, Math.min(note.x - viewport.x, viewport.w - 200));
-      const y = Math.max(40, Math.min(note.y - viewport.y, viewport.h - 150));
+    const { viewport } = domainState;
+    const x = Math.max(40, Math.min(note.x - viewport.x, viewport.w - 200));
+    const y = Math.max(40, Math.min(note.y - viewport.y, viewport.h - 150));
+
+    if (!alreadyDetached) {
       uiState.addDetachedNote(noteId, { x, y });
     }
 
-    invoke('open_detached_note_window', { noteId }).catch(() => undefined);
+    invoke('open_detached_note_window', { noteId, spawnX: x, spawnY: y }).catch(() => undefined);
   },
 
   closeDetachedNote: (noteId: string): void => {

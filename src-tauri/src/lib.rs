@@ -83,6 +83,7 @@ fn position_window_near_tray(window: &WebviewWindow) {
 }
 
 fn show_window_near_tray(window: &WebviewWindow) {
+    let _ = window.unminimize();
     position_window_near_tray(window);
     let _ = window.show();
     let _ = window.set_focus();
@@ -91,7 +92,8 @@ fn show_window_near_tray(window: &WebviewWindow) {
 fn emit_main_window(app: &tauri::AppHandle, event: &str) {
     if let Some(window) = app.get_webview_window("main") {
         let is_visible = window.is_visible().unwrap_or(false);
-        if is_visible {
+        let is_minimized = window.is_minimized().unwrap_or(false);
+        if is_visible && !is_minimized {
             let _ = window.show();
             let _ = window.set_focus();
         } else {
@@ -207,7 +209,12 @@ fn restore_detached_note_window(window: &WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn open_detached_note_window(app: tauri::AppHandle, note_id: String) -> Result<(), String> {
+async fn open_detached_note_window(
+    app: tauri::AppHandle,
+    note_id: String,
+    spawn_x: Option<f64>,
+    spawn_y: Option<f64>,
+) -> Result<(), String> {
     let label = detached_note_label(&note_id);
 
     if let Some(window) = app.get_webview_window(&label) {
@@ -216,7 +223,7 @@ async fn open_detached_note_window(app: tauri::AppHandle, note_id: String) -> Re
     }
 
     let detached_url = format!("detached.html?noteId={}", note_id);
-    let _window = WebviewWindowBuilder::new(
+    let mut builder = WebviewWindowBuilder::new(
         &app,
         &label,
         WebviewUrl::App(detached_url.into()),
@@ -229,9 +236,35 @@ async fn open_detached_note_window(app: tauri::AppHandle, note_id: String) -> Re
     .shadow(false)
     .resizable(true)
     .visible(false)
-    .skip_taskbar(true)
-    .build()
-    .map_err(|e| format!("创建撕下窗口失败: {e}"))?;
+    .skip_taskbar(true);
+
+    if let (Some(sx), Some(sy)) = (spawn_x, spawn_y) {
+        if let Some(main_win) = app.get_webview_window("main") {
+            if let Ok(main_pos) = main_win.outer_position() {
+                let sf = main_win.scale_factor().unwrap_or(1.0);
+                let mut abs_x = main_pos.x as f64 / sf + sx;
+                let mut abs_y = main_pos.y as f64 / sf + sy;
+
+                if let Ok(Some(monitor)) = main_win.current_monitor() {
+                    let monitor_sf = monitor.scale_factor();
+                    let monitor_pos = monitor.position();
+                    let monitor_size = monitor.size();
+                    let min_x = monitor_pos.x as f64 / monitor_sf + 8.0;
+                    let min_y = monitor_pos.y as f64 / monitor_sf + 8.0;
+                    let max_x = min_x + monitor_size.width as f64 / monitor_sf - 260.0 - 16.0;
+                    let max_y = min_y + monitor_size.height as f64 / monitor_sf - 280.0 - 16.0;
+                    abs_x = abs_x.clamp(min_x, max_x.max(min_x));
+                    abs_y = abs_y.clamp(min_y, max_y.max(min_y));
+                }
+
+                builder = builder.position(abs_x, abs_y);
+            }
+        }
+    }
+
+    builder
+        .build()
+        .map_err(|e| format!("创建撕下窗口失败: {e}"))?;
 
     Ok(())
 }

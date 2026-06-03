@@ -346,7 +346,7 @@ describe('appController 撕下便签方法', () => {
     expect(detached).toHaveLength(1);
     expect(detached[0].noteId).toBe('n1');
     expect(detached[0].isPinned).toBe(false);
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith('open_detached_note_window', { noteId: 'n1' });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('open_detached_note_window', { noteId: 'n1', spawnX: 50, spawnY: 120 });
   });
 
   it('detachNote 对已撕下的 Note 不重复添加但仍聚焦 Rust 窗口', () => {
@@ -354,7 +354,7 @@ describe('appController 撕下便签方法', () => {
     vi.mocked(invoke).mockClear();
     appController.detachNote('n1');
     expect(useUIStore.getState().detachedNotes).toHaveLength(1);
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith('open_detached_note_window', { noteId: 'n1' });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('open_detached_note_window', { noteId: 'n1', spawnX: 50, spawnY: 120 });
   });
 
   it('detachNote 不修改领域状态和 Undo 历史', () => {
