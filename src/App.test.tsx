@@ -508,6 +508,47 @@ describe('App WindowShell 组合契约', () => {
 
     expect(useUIStore.getState().detachedNotes).toHaveLength(0);
   });
+
+  it('收到 detached-note:locate 事件后调用 locateDetachedNote 编排定位', async () => {
+    let locateHandler: ((event: { payload: { noteId: string } }) => void) | null = null;
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      const [eventName, handler] = args as [string, (event: { payload: { noteId: string } }) => void];
+      if (eventName === 'detached-note:locate') {
+        locateHandler = handler;
+      }
+      return vi.fn();
+    });
+
+    await renderApp();
+
+    useStore.setState({
+      viewMode: 'TRASH',
+      notesById: {
+        'note-locate-1': {
+          id: 'note-locate-1',
+          boardId: 'default',
+          title: '定位测试',
+          content: '',
+          x: 100,
+          y: 200,
+          z: 1,
+          color: '#FFFFFF',
+          collapsed: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      },
+      allNoteIds: ['note-locate-1'],
+    });
+    useUIStore.getState().addDetachedNote('note-locate-1', { x: 100, y: 200 });
+
+    await act(async () => {
+      locateHandler?.({ payload: { noteId: 'note-locate-1' } });
+    });
+
+    expect(useStore.getState().viewMode).toBe('BOARD');
+    expect(useStore.getState().currentBoardId).toBe('default');
+  });
 });
 
 describe('App DetachedNoteOverlay 集成契约', () => {
