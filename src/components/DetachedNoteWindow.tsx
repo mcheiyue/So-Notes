@@ -114,6 +114,8 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   }, [showWindowOnce]);
 
   useEffect(() => {
+    let disposed = false;
+
     const unlistenSnapshot = listen<DetachedNoteSnapshot>(
       DETACHED_NOTE_EVENTS.SNAPSHOT,
       (event) => {
@@ -133,7 +135,16 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
       },
     );
 
+    Promise.all([unlistenSnapshot, unlistenMissing])
+      .then(() => {
+        if (!disposed) {
+          emit(DETACHED_NOTE_EVENTS.READY, { noteId }).catch(() => undefined);
+        }
+      })
+      .catch(() => undefined);
+
     return () => {
+      disposed = true;
       unlistenSnapshot.then((f) => f());
       unlistenMissing.then((f) => f());
     };
@@ -244,7 +255,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
           data-note-content-region="true"
           className={cn(
             "flex-1 pb-4 pt-0 min-h-0",
-            scrollable && "overflow-y-auto scrollbar-thin scrollbar-thumb-text-tertiary/20 scrollbar-track-transparent hover:scrollbar-thumb-text-secondary/20",
+            scrollable && "overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-text-tertiary/20 scrollbar-track-transparent hover:scrollbar-thumb-text-secondary/20 detached-scroll-area",
           )}
         >
           <div
@@ -252,6 +263,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
               "w-full px-4",
               "text-text-secondary dark:text-text-primary",
               "font-normal text-[15px] leading-relaxed",
+              "break-words whitespace-pre-wrap",
             )}
           >
             {snapshot.content || <span className="text-text-tertiary">记点什么…</span>}
@@ -268,7 +280,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   }
 
   return (
-    <div className="h-screen w-screen bg-transparent" onContextMenu={stopContextMenu}>
+    <div className="h-screen w-screen bg-transparent overflow-hidden" onContextMenu={stopContextMenu}>
       <div
         className={cn(
           "pointer-events-auto",

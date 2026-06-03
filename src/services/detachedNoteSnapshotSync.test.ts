@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { emitToMock } = vi.hoisted(() => ({
+const { emitToMock, listenMock } = vi.hoisted(() => ({
   emitToMock: vi.fn(async () => {}),
+  listenMock: vi.fn(async () => vi.fn()),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
   emitTo: emitToMock,
+  listen: listenMock,
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -50,9 +52,14 @@ const createNote = (overrides: Partial<Note> = {}): Note => ({
 });
 
 describe('detachedNoteSnapshotSync', () => {
+  type ReadyEventHandler = (event: { payload: { noteId: string } }) => void;
+  type ListenCall = [string, ReadyEventHandler];
+
   beforeEach(() => {
     vi.useFakeTimers();
     emitToMock.mockClear();
+    listenMock.mockClear();
+    listenMock.mockResolvedValue(vi.fn());
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
@@ -242,5 +249,76 @@ describe('detachedNoteSnapshotSync', () => {
       DETACHED_NOTE_EVENTS.SNAPSHOT,
       expect.objectContaining({ isCollapsed: true }),
     );
+  });
+
+  it('收到 READY 事件后立即发送当前快照', () => {
+    useStore.setState({
+      detachedNotes: [{ noteId: 'n1', position: { x: 0, y: 0 }, isPinned: false }],
+    });
+
+    startDetachedNoteSnapshotSync();
+
+    const readyCall = (listenMock.mock.calls as unknown as ListenCall[]).find(
+      (call: unknown[]) => call[0] === DETACHED_NOTE_EVENTS.READY,
+    );
+    expect(readyCall).toBeDefined();
+
+    const readyCallback = readyCall![1];
+    readyCallback({ payload: { noteId: 'n1' } });
+
+    expect(emitToMock).toHaveBeenCalledWith(
+      'detached-note-n1',
+      DETACHED_NOTE_EVENTS.SNAPSHOT,
+      expect.objectContaining({
+        noteId: 'n1',
+        title: '便签1',
+        content: '内容1',
+        color: '#fef9c3',
+        isCollapsed: false,
+      }),
+    );
+  });
+
+  it('收到 READY 事件后若便签已删除则发送 missing', () => {
+    useStore.setState({
+      detachedNotes: [{ noteId: 'n1', position: { x: 0, y: 0 }, isPinned: false }],
+    });
+    useStore.setState((state) => {
+      state.notesById['n1'].deletedAt = Date.now();
+    });
+
+    startDetachedNoteSnapshotSync();
+
+    const readyCall = (listenMock.mock.calls as unknown as ListenCall[]).find(
+      (call: unknown[]) => call[0] === DETACHED_NOTE_EVENTS.READY,
+    );
+    expect(readyCall).toBeDefined();
+
+    const readyCallback = readyCall![1];
+    readyCallback({ payload: { noteId: 'n1' } });
+
+    expect(emitToMock).toHaveBeenCalledWith(
+      'detached-note-n1',
+      DETACHED_NOTE_EVENTS.MISSING,
+      { noteId: 'n1' },
+    );
+  });
+
+  it('stop 清理 ready 监听器 Promise', async () => {
+    const unlistenReadyFn = vi.fn();
+    listenMock.mockResolvedValue(unlistenReadyFn);
+
+    startDetachedNoteSnapshotSync();
+
+    expect(listenMock).toHaveBeenCalledWith(
+      DETACHED_NOTE_EVENTS.READY,
+      expect.any(Function),
+    );
+
+    stopDetachedNoteSnapshotSync();
+
+    await vi.waitFor(() => {
+      expect(unlistenReadyFn).toHaveBeenCalled();
+    });
   });
 });

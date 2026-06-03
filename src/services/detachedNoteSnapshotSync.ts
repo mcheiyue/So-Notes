@@ -1,6 +1,6 @@
-import { emitTo } from '@tauri-apps/api/event';
+import { emitTo, listen } from '@tauri-apps/api/event';
 import { useStore } from '../store/useStore';
-import type { DetachedNoteSnapshot } from '../types/detachedNoteSnapshot';
+import type { DetachedNoteReadyPayload, DetachedNoteSnapshot } from '../types/detachedNoteSnapshot';
 import { DETACHED_NOTE_EVENTS } from '../types/detachedNoteSnapshot';
 
 const SNAPSHOT_THROTTLE_MS = 100;
@@ -10,6 +10,7 @@ const detachedNoteLabel = (noteId: string): string =>
 
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let unsubscribe: (() => void) | null = null;
+let unlistenReadyPromise: Promise<() => void> | null = null;
 
 const clearPendingTimer = (noteId: string): void => {
   const timer = pendingTimers.get(noteId);
@@ -78,6 +79,31 @@ export const startDetachedNoteSnapshotSync = (): (() => void) => {
     syncAllDetachedNotes();
   });
 
+  if (!unlistenReadyPromise) {
+    unlistenReadyPromise = listen<DetachedNoteReadyPayload>(
+      DETACHED_NOTE_EVENTS.READY,
+      (event) => {
+        const { noteId } = event.payload;
+        clearPendingTimer(noteId);
+        const { notesById } = useStore.getState();
+        const note = notesById[noteId];
+        if (!note || note.deletedAt) {
+          emitMissing(noteId);
+        } else {
+          const snapshot: DetachedNoteSnapshot = {
+            noteId,
+            title: note.title,
+            content: note.content,
+            color: note.color,
+            isCollapsed: note.collapsed ?? false,
+            deletedAt: note.deletedAt,
+          };
+          emitSnapshot(noteId, snapshot);
+        }
+      },
+    );
+  }
+
   return stopDetachedNoteSnapshotSync;
 };
 
@@ -85,4 +111,8 @@ export const stopDetachedNoteSnapshotSync = (): void => {
   unsubscribe?.();
   unsubscribe = null;
   clearAllPendingTimers();
+  if (unlistenReadyPromise) {
+    unlistenReadyPromise.then((unlisten) => unlisten()).catch(() => undefined);
+    unlistenReadyPromise = null;
+  }
 };

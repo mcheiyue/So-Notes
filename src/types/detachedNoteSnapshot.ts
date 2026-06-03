@@ -39,6 +39,15 @@ export interface DetachedNoteClosedPayload {
   noteId: string;
 }
 
+/**
+ * 窗口就绪事件载荷。
+ * 撕下窗口在监听器注册完成后向主窗口发送此事件。
+ * 主窗口据此立即推送当前快照，确保首帧渲染无延迟。
+ */
+export interface DetachedNoteReadyPayload {
+  noteId: string;
+}
+
 /** 撕下窗口事件名常量 */
 export const DETACHED_NOTE_EVENTS = {
   SNAPSHOT: 'detached-note:snapshot',
@@ -46,4 +55,5 @@ export const DETACHED_NOTE_EVENTS = {
   LOCATE: 'detached-note:locate',
   CLOSED: 'detached-note:closed',
   SHOW_ALL: 'detached-note:show-all',
+  READY: 'detached-note:ready',
 } as const;

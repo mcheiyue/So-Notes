@@ -672,4 +672,95 @@ describe('DetachedNoteWindow 显示窗口行为', () => {
     );
     expect(showCalls.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('READY emit 在监听器 Promise 解析后才发送', async () => {
+    let resolveSnapshot: (fn: () => void) => void;
+    let resolveMissing: (fn: () => void) => void;
+
+    listenMock.mockImplementation((event: string) => {
+      if (event === DETACHED_NOTE_EVENTS.SNAPSHOT) {
+        return new Promise<() => void>((resolve) => { resolveSnapshot = resolve; });
+      }
+      if (event === DETACHED_NOTE_EVENTS.MISSING) {
+        return new Promise<() => void>((resolve) => { resolveMissing = resolve; });
+      }
+      return Promise.resolve(vi.fn());
+    });
+
+    await renderWindow();
+
+    expect(emitMock).not.toHaveBeenCalledWith(
+      DETACHED_NOTE_EVENTS.READY,
+      expect.anything(),
+    );
+
+    await act(async () => {
+      resolveSnapshot!(vi.fn());
+    });
+
+    expect(emitMock).not.toHaveBeenCalledWith(
+      DETACHED_NOTE_EVENTS.READY,
+      expect.anything(),
+    );
+
+    await act(async () => {
+      resolveMissing!(vi.fn());
+    });
+
+    expect(emitMock).toHaveBeenCalledWith(
+      DETACHED_NOTE_EVENTS.READY,
+      { noteId: 'note-test-1' },
+    );
+  });
+
+  it('卸载后不再发送 READY emit', async () => {
+    let resolveSnapshot: (fn: () => void) => void;
+    let resolveMissing: (fn: () => void) => void;
+
+    listenMock.mockImplementation((event: string) => {
+      if (event === DETACHED_NOTE_EVENTS.SNAPSHOT) {
+        return new Promise<() => void>((resolve) => { resolveSnapshot = resolve; });
+      }
+      if (event === DETACHED_NOTE_EVENTS.MISSING) {
+        return new Promise<() => void>((resolve) => { resolveMissing = resolve; });
+      }
+      return Promise.resolve(vi.fn());
+    });
+
+    await renderWindow();
+
+    await act(async () => {
+      root.unmount();
+    });
+
+    await act(async () => {
+      resolveSnapshot!(vi.fn());
+      resolveMissing!(vi.fn());
+    });
+
+    expect(emitMock).not.toHaveBeenCalledWith(
+      DETACHED_NOTE_EVENTS.READY,
+      expect.anything(),
+    );
+  });
+
+  it('正文区域类名包含 overflow-x-hidden 和 detached-scroll-area', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    triggerResize(800);
+
+    const contentRegion = container.querySelector('[data-note-content-region="true"]') as HTMLElement;
+    expect(contentRegion.className).toContain('overflow-x-hidden');
+    expect(contentRegion.className).toContain('detached-scroll-area');
+  });
+
+  it('文本内容区域包含 break-words 和 whitespace-pre-wrap', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    const textDiv = container.querySelector('[data-note-content-region="true"] > div') as HTMLElement;
+    expect(textDiv.className).toContain('break-words');
+    expect(textDiv.className).toContain('whitespace-pre-wrap');
+  });
 });

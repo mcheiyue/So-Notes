@@ -197,3 +197,34 @@ body.is-dragging [data-canvas-hit="blocked"] {
     filter: brightness(1) saturate(1);
   }
 }
+
+/* 分离便签滚动条：默认隐藏滑块，父级 group 悬停/聚焦时显示 */
+.detached-scroll-area::-webkit-scrollbar-thumb {
+  background: transparent;
+  transition: background 200ms ease;
+}
+
+.group\/detached-note:hover .detached-scroll-area::-webkit-scrollbar-thumb,
+.group\/detached-note:focus-within .detached-scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.dark .group\/detached-note:hover .detached-scroll-area::-webkit-scrollbar-thumb,
+.dark .group\/detached-note:focus-within .detached-scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.detached-scroll-area {
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 200ms ease;
+}
+
+.group\/detached-note:hover .detached-scroll-area,
+.group\/detached-note:focus-within .detached-scroll-area {
+  scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
+}
+
+.dark .group\/detached-note:hover .detached-scroll-area,
+.dark .group\/detached-note:focus-within .detached-scroll-area {
+  scrollbar-color: rgba(148, 163, 184, 0.2) transparent;
+}
