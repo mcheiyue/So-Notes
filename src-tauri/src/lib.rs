@@ -5,7 +5,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WebviewWindow, WindowEvent,
+    Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_positioner::{Position, WindowExt};
@@ -168,6 +168,52 @@ fn frontend_unpin(app: tauri::AppHandle, state: tauri::State<AppState>) {
         let _ = window.set_always_on_top(false);
         let _ = window.emit("pin-state-changed", false);
     }
+}
+
+fn detached_note_label(note_id: &str) -> String {
+    format!("detached-note-{note_id}")
+}
+
+#[tauri::command]
+async fn open_detached_note_window(app: tauri::AppHandle, note_id: String) -> Result<(), String> {
+    let label = detached_note_label(&note_id);
+
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    // TODO (Commit 4): 替换为独立 detached.html 入口
+    let _window = WebviewWindowBuilder::new(
+        &app,
+        &label,
+        WebviewUrl::App("index.html".into()),
+    )
+    .title("SoNotes - 便签")
+    .inner_size(320.0, 400.0)
+    .min_inner_size(240.0, 300.0)
+    .decorations(false)
+    .transparent(true)
+    .resizable(true)
+    .visible(true)
+    .build()
+    .map_err(|e| format!("创建撕下窗口失败: {e}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn close_detached_note_window(app: tauri::AppHandle, note_id: String) -> Result<(), String> {
+    let label = detached_note_label(&note_id);
+
+    if let Some(window) = app.get_webview_window(&label) {
+        window
+            .close()
+            .map_err(|e| format!("关闭撕下窗口失败: {e}"))?;
+    }
+
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -418,7 +464,9 @@ pub fn run() {
             save_content,
             load_content,
             check_hide_on_leave,
-            frontend_unpin
+            frontend_unpin,
+            open_detached_note_window,
+            close_detached_note_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
