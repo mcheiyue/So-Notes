@@ -222,8 +222,8 @@ async fn open_detached_note_window(app: tauri::AppHandle, note_id: String) -> Re
         WebviewUrl::App(detached_url.into()),
     )
     .title("SoNotes - 便签")
-    .inner_size(280.0, 380.0)
-    .min_inner_size(220.0, 280.0)
+    .inner_size(260.0, 280.0)
+    .min_inner_size(260.0, 100.0)
     .decorations(false)
     .transparent(true)
     .shadow(false)

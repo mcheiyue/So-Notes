@@ -3,11 +3,25 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { Crosshair, Pin, X } from "lucide-react";
 import { NoteVisuals } from "./note-render/NoteVisuals";
 import type { DetachedNoteSnapshot, DetachedNoteMissingPayload } from "../types/detachedNoteSnapshot";
 import { DETACHED_NOTE_EVENTS } from "../types/detachedNoteSnapshot";
 import { cn } from "../utils/cn";
+import { LAYOUT } from "../constants/layout";
+
+const DETACHED_MAX_HEIGHT_RATIO = 0.7;
+const DETACHED_MAX_HEIGHT_FALLBACK = 520;
+
+function computeMaxHeight(): number {
+  const screen = typeof window !== "undefined" ? window.screen : undefined;
+  const availHeight = screen?.availHeight;
+  if (typeof availHeight === "number" && availHeight > 0) {
+    return Math.min(Math.round(availHeight * DETACHED_MAX_HEIGHT_RATIO), DETACHED_MAX_HEIGHT_FALLBACK);
+  }
+  return DETACHED_MAX_HEIGHT_FALLBACK;
+}
 
 function useLocalDarkMode(): boolean {
   const [isDark, setIsDark] = useState(() => {
@@ -38,6 +52,43 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   const [snapshot, setSnapshot] = useState<DetachedNoteSnapshot | null>(null);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false);
   const hasShownRef = useRef(false);
+  const noteRef = useRef<HTMLElement>(null);
+  const lastSentSizeRef = useRef({ width: 0, height: 0 });
+  const rafRef = useRef(0);
+  const isCappedRef = useRef(false);
+  const [isHeightCapped, setIsHeightCapped] = useState(false);
+  const maxHeightRef = useRef(computeMaxHeight());
+
+  const resizeWindowToNote = useCallback((entry?: ResizeObserverEntry) => {
+    const el = noteRef.current;
+    if (!el) return;
+
+    const maxHeight = maxHeightRef.current;
+    const borderBox = entry?.borderBoxSize?.[0];
+    const measuredHeight = Math.round(
+      borderBox ? borderBox.blockSize : el.getBoundingClientRect().height,
+    );
+    const naturalHeight = Math.max(Math.round(el.scrollHeight), measuredHeight);
+    if (naturalHeight <= 0) return;
+
+    const capped = naturalHeight > maxHeight;
+    const targetHeight = capped ? maxHeight : naturalHeight;
+    const targetWidth = LAYOUT.NOTE_WIDTH;
+
+    if (capped !== isCappedRef.current) {
+      isCappedRef.current = capped;
+      setIsHeightCapped(capped);
+    }
+
+    if (lastSentSizeRef.current.width === targetWidth && lastSentSizeRef.current.height === targetHeight) {
+      return;
+    }
+    lastSentSizeRef.current = { width: targetWidth, height: targetHeight };
+
+    getCurrentWindow()
+      .setSize(new LogicalSize(targetWidth, targetHeight))
+      .catch(() => undefined);
+  }, []);
 
   /** 幂等显示窗口：确保只调用一次 show_detached_note_window */
   const showWindowOnce = useCallback(() => {
@@ -79,6 +130,38 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
       unlistenMissing.then((f) => f());
     };
   }, [noteId, showWindowOnce]);
+
+  useEffect(() => {
+    const el = noteRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver((entries) => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+      rafRef.current = requestAnimationFrame(() => {
+        resizeWindowToNote(entries[0]);
+      });
+    });
+
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, [!!snapshot, resizeWindowToNote]);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+    }
+    rafRef.current = requestAnimationFrame(() => {
+      resizeWindowToNote();
+    });
+  }, [snapshot, resizeWindowToNote]);
 
   const handleLocate = useCallback(
     (e: React.MouseEvent) => {
@@ -137,21 +220,26 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   }
 
   return (
-    <div
-      className="flex h-screen w-screen bg-transparent"
-      onContextMenu={stopContextMenu}
-    >
-      <div className="pointer-events-auto h-full w-full">
+    <div className="h-screen w-screen bg-transparent" onContextMenu={stopContextMenu}>
+      <div
+        className={cn(
+          "pointer-events-auto",
+        )}
+        data-tauri-drag-region
+        onMouseDown={handleDragStart}
+      >
         <NoteVisuals
+          ref={noteRef}
           title={snapshot.title}
           content={snapshot.content}
           color={snapshot.color}
           isCollapsed={snapshot.isCollapsed}
           isDark={isDark}
-          className="h-full w-full overflow-hidden shadow-xl group/detached-note"
-          style={{ width: '100%', height: '100%', minHeight: '100%' }}
-          data-tauri-drag-region
-          onMouseDown={handleDragStart}
+          className={cn(
+            "shadow-xl group/detached-note",
+            isHeightCapped && "overflow-hidden",
+          )}
+          style={isHeightCapped ? { height: maxHeightRef.current, maxHeight: maxHeightRef.current } : undefined}
           surfaceOverlay={
             <div
               data-detached-note-control="true"
@@ -187,7 +275,43 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
               </button>
             </div>
           }
-        />
+        >
+          {!snapshot.isCollapsed && (
+            <>
+              <div
+                data-note-title-region="true"
+                className={cn("px-4 pt-3 pb-1", "min-h-9 pr-24")}
+              >
+                <div
+                  className={cn(
+                    "w-full truncate",
+                    "text-text-primary font-bold text-[16px]",
+                    snapshot.title ? "block" : "hidden",
+                  )}
+                >
+                  {snapshot.title}
+                </div>
+              </div>
+              <div
+                data-note-content-region="true"
+                className={cn(
+                  "flex-1 pb-4 pt-0 min-h-0",
+                  isHeightCapped && "overflow-y-auto scrollbar-thin scrollbar-thumb-text-tertiary/20 scrollbar-track-transparent hover:scrollbar-thumb-text-secondary/20",
+                )}
+              >
+                <div
+                  className={cn(
+                    "w-full px-4",
+                    "text-text-secondary dark:text-text-primary",
+                    "font-normal text-[15px] leading-relaxed",
+                  )}
+                >
+                  {snapshot.content || <span className="text-text-tertiary">记点什么…</span>}
+                </div>
+              </div>
+            </>
+          )}
+        </NoteVisuals>
       </div>
     </div>
   );

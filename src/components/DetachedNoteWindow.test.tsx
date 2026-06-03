@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
-const { emitMock, invokeMock, listenMock, startDraggingMock } = vi.hoisted(() => ({
+const { emitMock, invokeMock, listenMock, startDraggingMock, setSizeMock } = vi.hoisted(() => ({
   emitMock: vi.fn(),
   invokeMock: vi.fn(),
   listenMock: vi.fn(),
   startDraggingMock: vi.fn(),
+  setSizeMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -21,7 +22,17 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     startDragging: startDraggingMock,
+    setSize: setSizeMock,
   }),
+}));
+
+vi.mock('@tauri-apps/api/dpi', () => ({
+  LogicalSize: class LogicalSize {
+    constructor(
+      public width: number,
+      public height: number,
+    ) {}
+  },
 }));
 
 vi.mock('../store/db', () => ({
@@ -40,6 +51,20 @@ vi.mock('../utils/fileSystem', () => ({
 import { DetachedNoteWindow } from './DetachedNoteWindow';
 import { DETACHED_NOTE_EVENTS } from '../types/detachedNoteSnapshot';
 import type { DetachedNoteSnapshot } from '../types/detachedNoteSnapshot';
+
+let resizeCallback: ResizeObserverCallback | null = null;
+
+function triggerResize(height: number) {
+  if (!resizeCallback) throw new Error('ResizeObserver 未初始化');
+  act(() => {
+    resizeCallback!([
+      {
+        borderBoxSize: [{ blockSize: height, inlineSize: 260 }],
+        contentRect: { height, width: 260 },
+      },
+    ] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+  });
+}
 
 const createSnapshot = (overrides: Partial<DetachedNoteSnapshot> = {}): DetachedNoteSnapshot => ({
   noteId: 'note-test-1',
@@ -76,6 +101,8 @@ describe('DetachedNoteWindow 按钮行为', () => {
     emitMock.mockClear();
     invokeMock.mockClear();
     startDraggingMock.mockClear();
+    setSizeMock.mockClear();
+    resizeCallback = null;
     listenMock.mockResolvedValue(vi.fn());
     emitMock.mockResolvedValue(undefined);
     startDraggingMock.mockResolvedValue(undefined);
@@ -83,6 +110,21 @@ describe('DetachedNoteWindow 按钮行为', () => {
       if (cmd === 'show_detached_note_window') return Promise.resolve(null);
       return Promise.resolve(null);
     });
+
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: ResizeObserverCallback) {
+        resizeCallback = cb;
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    });
+
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => {
+      cb();
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
 
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -94,6 +136,8 @@ describe('DetachedNoteWindow 按钮行为', () => {
       root.unmount();
     });
     container.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('快照到达前保持透明占位，避免显示额外窗口壳', async () => {
@@ -121,20 +165,18 @@ describe('DetachedNoteWindow 按钮行为', () => {
     expect(container.querySelector('.p-4')).toBeNull();
   });
 
-  it('收到快照后便签面填满整个独立窗口', async () => {
+  it('NoteVisuals 使用默认宽度而非撑满窗口', async () => {
     await renderWindow();
     simulateSnapshot(createSnapshot());
 
-    const shell = container.querySelector('.h-screen.w-screen') as HTMLElement;
     const noteEl = container.querySelector('[data-note-visuals="true"]') as HTMLElement;
 
-    expect(shell).not.toBeNull();
-    expect(noteEl).not.toBeNull();
-    expect(noteEl.className).toContain('h-full');
-    expect(noteEl.className).toContain('w-full');
-    expect(noteEl.style.width).toBe('100%');
-    expect(noteEl.style.height).toBe('100%');
-    expect(noteEl.style.minHeight).toBe('100%');
+    expect(noteEl.className).not.toContain('h-full');
+    expect(noteEl.className).not.toContain('w-full');
+    expect(noteEl.style.width).not.toBe('100%');
+    expect(noteEl.style.height).not.toBe('100%');
+    expect(noteEl.style.minHeight).not.toBe('100%');
+    expect(noteEl.style.width).toBe('260px');
   });
 
   it('快照后渲染 data-tauri-drag-region 拖拽区域', async () => {
@@ -327,6 +369,155 @@ describe('DetachedNoteWindow 按钮行为', () => {
   });
 });
 
+describe('DetachedNoteWindow 尺寸与 ResizeObserver', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const renderWindow = async (noteId = 'note-test-1') => {
+    await act(async () => {
+      root.render(<DetachedNoteWindow noteId={noteId} />);
+    });
+  };
+
+  const simulateSnapshot = (snapshot: DetachedNoteSnapshot) => {
+    const snapshotCall = listenMock.mock.calls.find(
+      (call: unknown[]) => call[0] === DETACHED_NOTE_EVENTS.SNAPSHOT,
+    );
+    expect(snapshotCall).toBeDefined();
+    const snapshotCallback = snapshotCall![1] as (event: { payload: DetachedNoteSnapshot }) => void;
+    act(() => {
+      snapshotCallback({ payload: snapshot });
+    });
+  };
+
+  beforeEach(() => {
+    listenMock.mockClear();
+    emitMock.mockClear();
+    invokeMock.mockClear();
+    startDraggingMock.mockClear();
+    setSizeMock.mockClear();
+    resizeCallback = null;
+    listenMock.mockResolvedValue(vi.fn());
+    emitMock.mockResolvedValue(undefined);
+    startDraggingMock.mockResolvedValue(undefined);
+    invokeMock.mockResolvedValue(null);
+
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: ResizeObserverCallback) {
+        resizeCallback = cb;
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    });
+
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => {
+      cb();
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('ResizeObserver 触发后以固定宽度 260 调用 setSize', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    triggerResize(300);
+
+    expect(setSizeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 260, height: 300 }),
+    );
+  });
+
+  it('高度超过上限时 setSize 使用上限值，正文区域添加滚动类', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    triggerResize(800);
+
+    const wrapper = container.querySelector('[data-tauri-drag-region]') as HTMLElement;
+    expect(wrapper.className).not.toContain('overflow-y-auto');
+
+    const noteEl = container.querySelector('[data-note-visuals="true"]') as HTMLElement;
+    expect(noteEl.className).toContain('overflow-hidden');
+    expect(noteEl.style.height).toBe('520px');
+    expect(noteEl.style.maxHeight).toBe('520px');
+
+    const contentRegion = container.querySelector('[data-note-content-region="true"]') as HTMLElement;
+    expect(contentRegion.className).toContain('overflow-y-auto');
+    expect(contentRegion.className).toContain('scrollbar-thin');
+
+    expect(setSizeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 260, height: 520 }),
+    );
+  });
+
+  it('高度未超限时不添加滚动类', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    triggerResize(200);
+
+    const noteEl = container.querySelector('[data-note-visuals="true"]') as HTMLElement;
+    expect(noteEl.className).not.toContain('overflow-hidden');
+    expect(noteEl.style.height).toBe('auto');
+
+    const contentRegion = container.querySelector('[data-note-content-region="true"]') as HTMLElement;
+    expect(contentRegion.className).not.toContain('overflow-y-auto');
+  });
+
+  it('折叠状态触发小尺寸 setSize', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot({ isCollapsed: true }));
+
+    triggerResize(36);
+
+    expect(setSizeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 260, height: 36 }),
+    );
+  });
+
+  it('相同尺寸不重复调用 setSize', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    triggerResize(300);
+    triggerResize(300);
+
+    const sizeCalls = setSizeMock.mock.calls.filter(
+      (c: unknown[]) => (c[0] as { width: number }).width === 260,
+    );
+    expect(sizeCalls).toHaveLength(1);
+  });
+
+  it('内容变化后 ResizeObserver 重新触发 setSize', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    triggerResize(300);
+    expect(setSizeMock).toHaveBeenCalledTimes(1);
+
+    triggerResize(450);
+    expect(setSizeMock).toHaveBeenCalledTimes(2);
+    expect(setSizeMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ width: 260, height: 450 }),
+    );
+  });
+});
+
 describe('DetachedNoteWindow 显示窗口行为', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -353,10 +544,27 @@ describe('DetachedNoteWindow 显示窗口行为', () => {
     emitMock.mockClear();
     invokeMock.mockClear();
     startDraggingMock.mockClear();
+    setSizeMock.mockClear();
+    resizeCallback = null;
     listenMock.mockResolvedValue(vi.fn());
     emitMock.mockResolvedValue(undefined);
     startDraggingMock.mockResolvedValue(undefined);
     invokeMock.mockResolvedValue(null);
+
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: ResizeObserverCallback) {
+        resizeCallback = cb;
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    });
+
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => {
+      cb();
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
 
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -368,6 +576,8 @@ describe('DetachedNoteWindow 显示窗口行为', () => {
       root.unmount();
     });
     container.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('挂载时立即调用 show_detached_note_window', async () => {
