@@ -2,15 +2,8 @@ import React, { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Crosshair, Pin, X } from "lucide-react";
 import { NoteVisuals } from "./note-render/NoteVisuals";
-
-interface DetachedNoteSnapshot {
-  noteId: string;
-  title: string;
-  content: string;
-  color: string;
-  isCollapsed: boolean;
-  deletedAt?: number | null;
-}
+import type { DetachedNoteSnapshot, DetachedNoteMissingPayload } from "../types/detachedNoteSnapshot";
+import { DETACHED_NOTE_EVENTS } from "../types/detachedNoteSnapshot";
 
 function useLocalDarkMode(): boolean {
   const [isDark, setIsDark] = useState(() => {
@@ -42,7 +35,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
 
   useEffect(() => {
     const unlistenSnapshot = listen<DetachedNoteSnapshot>(
-      "detached-note:snapshot",
+      DETACHED_NOTE_EVENTS.SNAPSHOT,
       (event) => {
         if (event.payload.noteId === noteId) {
           setSnapshot(event.payload);
@@ -50,8 +43,8 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
       },
     );
 
-    const unlistenMissing = listen<{ noteId: string }>(
-      "detached-note:missing",
+    const unlistenMissing = listen<DetachedNoteMissingPayload>(
+      DETACHED_NOTE_EVENTS.MISSING,
       (event) => {
         if (event.payload.noteId === noteId) {
           window.close();

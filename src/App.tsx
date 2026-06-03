@@ -20,6 +20,7 @@ import { useFPSMonitor } from "./utils/performance";
 import { diagnostics } from "./utils/diagnostics";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { appController } from "./controllers/appController";
+import { startDetachedNoteSnapshotSync } from "./services/detachedNoteSnapshotSync";
 
 const getTraySaveStatusCopy = (saveStatus: string, saveError: string | null): string | null => {
   if (saveStatus === 'saving') {
@@ -149,6 +150,8 @@ function App() {
       document.removeEventListener('mouseleave', handleMouseLeave);
     };
   }, []);
+
+  useEffect(() => startDetachedNoteSnapshotSync(), []);
 
   const shellOverlay = (
     <>
