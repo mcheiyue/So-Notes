@@ -298,6 +298,12 @@ export const appController = {
     useUIStore.getState().removeDetachedNote(noteId);
   },
 
+  showAllDetachedNotes: (): void => {
+    for (const { noteId } of useUIStore.getState().detachedNotes) {
+      invoke('show_detached_note_window', { noteId }).catch(() => undefined);
+    }
+  },
+
   moveDetachedNote: (noteId: string, position: { x: number; y: number }): void => {
     useUIStore.getState().updateDetachedNotePosition(noteId, position);
   },

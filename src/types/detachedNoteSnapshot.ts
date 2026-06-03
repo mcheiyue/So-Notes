@@ -45,4 +45,5 @@ export const DETACHED_NOTE_EVENTS = {
   MISSING: 'detached-note:missing',
   LOCATE: 'detached-note:locate',
   CLOSED: 'detached-note:closed',
+  SHOW_ALL: 'detached-note:show-all',
 } as const;

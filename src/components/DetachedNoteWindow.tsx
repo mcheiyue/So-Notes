@@ -138,18 +138,18 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
 
   return (
     <div
-      className="bg-transparent"
+      className="flex h-screen w-screen bg-transparent"
       onContextMenu={stopContextMenu}
     >
-      <div className="pointer-events-auto">
+      <div className="pointer-events-auto h-full w-full">
         <NoteVisuals
           title={snapshot.title}
           content={snapshot.content}
           color={snapshot.color}
           isCollapsed={snapshot.isCollapsed}
           isDark={isDark}
-          className="overflow-hidden shadow-xl group/detached-note"
-          style={{ width: '100%' }}
+          className="h-full w-full overflow-hidden shadow-xl group/detached-note"
+          style={{ width: '100%', height: '100%', minHeight: '100%' }}
           data-tauri-drag-region
           onMouseDown={handleDragStart}
           surfaceOverlay={

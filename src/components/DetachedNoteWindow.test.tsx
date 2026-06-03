@@ -121,6 +121,22 @@ describe('DetachedNoteWindow 按钮行为', () => {
     expect(container.querySelector('.p-4')).toBeNull();
   });
 
+  it('收到快照后便签面填满整个独立窗口', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    const shell = container.querySelector('.h-screen.w-screen') as HTMLElement;
+    const noteEl = container.querySelector('[data-note-visuals="true"]') as HTMLElement;
+
+    expect(shell).not.toBeNull();
+    expect(noteEl).not.toBeNull();
+    expect(noteEl.className).toContain('h-full');
+    expect(noteEl.className).toContain('w-full');
+    expect(noteEl.style.width).toBe('100%');
+    expect(noteEl.style.height).toBe('100%');
+    expect(noteEl.style.minHeight).toBe('100%');
+  });
+
   it('快照后渲染 data-tauri-drag-region 拖拽区域', async () => {
     await renderWindow();
     simulateSnapshot(createSnapshot());

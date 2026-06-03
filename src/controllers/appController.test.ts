@@ -337,6 +337,7 @@ describe('appController 撕下便签方法', () => {
       viewport: { x: 50, y: 80, w: 400, h: 300 },
     });
     useUIStore.getState().replaceUIState(createInitialUIState());
+    vi.mocked(invoke).mockClear();
   });
 
   it('detachNote 添加一条 detachedNotes 记录', () => {
@@ -390,6 +391,23 @@ describe('appController 撕下便签方法', () => {
     appController.closeDetachedNote('n1');
     expect(useUIStore.getState().detachedNotes).toHaveLength(1);
     expect(useUIStore.getState().detachedNotes[0].noteId).toBe('n2');
+  });
+
+  it('showAllDetachedNotes 恢复所有运行态撕下窗口', () => {
+    appController.detachNote('n1');
+    appController.detachNote('n2');
+    vi.mocked(invoke).mockClear();
+
+    appController.showAllDetachedNotes();
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'n1' });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'n2' });
+  });
+
+  it('showAllDetachedNotes 在没有撕下窗口时不调用 Rust', () => {
+    appController.showAllDetachedNotes();
+
+    expect(vi.mocked(invoke)).not.toHaveBeenCalled();
   });
 
   it('moveDetachedNote 更新指定记录的位置', () => {

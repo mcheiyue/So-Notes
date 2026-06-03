@@ -184,6 +184,7 @@ describe('App WindowShell 组合契约', () => {
     expect(listenMock).toHaveBeenCalledWith('global-shortcut-register-failed', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('detached-note:locate', expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith('detached-note:closed', expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith('detached-note:show-all', expect.any(Function));
     expect(invokeMock).toHaveBeenCalledWith('get_pin_mode');
     expect(invokeMock).toHaveBeenCalledWith('get_global_shortcut_error');
   });
@@ -507,6 +508,32 @@ describe('App WindowShell 组合契约', () => {
     });
 
     expect(useUIStore.getState().detachedNotes).toHaveLength(0);
+  });
+
+  it('收到 detached-note:show-all 事件后恢复所有撕下窗口', async () => {
+    let showAllHandler: (() => void) | null = null;
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      const [eventName, handler] = args as [string, () => void];
+      if (eventName === 'detached-note:show-all') {
+        showAllHandler = handler;
+      }
+      return vi.fn();
+    });
+
+    useUIStore.getState().replaceUIState(createInitialUIState());
+
+    await renderApp();
+
+    useUIStore.getState().addDetachedNote('note-show-1', { x: 100, y: 200 });
+    useUIStore.getState().addDetachedNote('note-show-2', { x: 120, y: 220 });
+    invokeMock.mockClear();
+
+    await act(async () => {
+      showAllHandler?.();
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'note-show-1' });
+    expect(invokeMock).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'note-show-2' });
   });
 
   it('收到 detached-note:locate 事件后调用 locateDetachedNote 编排定位', async () => {

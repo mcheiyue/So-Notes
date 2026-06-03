@@ -101,6 +101,12 @@ fn emit_main_window(app: &tauri::AppHandle, event: &str) {
     }
 }
 
+fn emit_main_window_without_show(app: &tauri::AppHandle, event: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit(event, ());
+    }
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -362,11 +368,19 @@ pub fn run() {
             )?;
             let new_note_i =
                 MenuItem::with_id(app, "new_note", "新建空白便签", true, None::<&str>)?;
+            let show_detached_notes_i = MenuItem::with_id(
+                app,
+                "show_detached_notes",
+                "显示所有悬浮便签",
+                true,
+                None::<&str>,
+            )?;
             let reset_i = MenuItem::with_id(app, "reset", "重置窗口", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
                 &[
                     &pin_i,
+                    &show_detached_notes_i,
                     &quick_capture_i,
                     &clipboard_note_i,
                     &new_note_i,
@@ -416,6 +430,9 @@ pub fn run() {
                         "quick_capture" => emit_main_window(app, "open-quick-capture"),
                         "clipboard_note" => emit_main_window(app, "create-note-from-clipboard"),
                         "new_note" => emit_main_window(app, "tray-new-note"),
+                        "show_detached_notes" => {
+                            emit_main_window_without_show(app, "detached-note:show-all")
+                        }
                         "reset" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 // Emit reset-viewport event to frontend

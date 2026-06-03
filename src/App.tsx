@@ -139,6 +139,10 @@ function App() {
       },
     );
 
+    const unlistenShowAllDetached = listen(DETACHED_NOTE_EVENTS.SHOW_ALL, () => {
+      appController.showAllDetachedNotes();
+    });
+
     invoke<boolean>('get_pin_mode')
       .then((pinned) => {
         appController.setPinned(pinned);
@@ -164,6 +168,7 @@ function App() {
       unlistenGlobalShortcutError.then(f => f());
       unlistenLocateDetached.then(f => f());
       unlistenClosedDetached.then(f => f());
+      unlistenShowAllDetached.then(f => f());
       document.removeEventListener('mouseleave', handleMouseLeave);
     };
   }, []);
