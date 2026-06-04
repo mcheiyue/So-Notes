@@ -26,7 +26,7 @@ import { db } from '../../store/db';
 import { setDomainPersistenceBridge } from '../../store/domainStore';
 import { bootstrap, attach } from './StorageService';
 import { STORAGE_SCHEMA_VERSION, DEFAULT_BOARD, DEFAULT_CONFIG } from '../../store/types';
-import type { StorageData } from '../../store/types';
+import type { StorageData, AttachmentRef } from '../../store/types';
 
 type DiskJsonFixture = Partial<Omit<StorageData, 'notes'>> & {
   notes: Array<Record<string, unknown>>;
@@ -497,5 +497,171 @@ describe('StorageService.attach', () => {
     expect(onStatusChange).toHaveBeenCalledWith('error');
 
     handle.detach();
+  });
+});
+
+const VALID_REF: AttachmentRef = {
+  id: 'att-001',
+  hash: 'a'.repeat(64),
+  filename: 'photo.jpg',
+  mimeType: 'image/jpeg',
+  size: 1024,
+  relativePath: 'attachments/' + 'a'.repeat(64) + '.jpg',
+  createdAt: 1700000000000,
+};
+
+describe('StorageService 附件迁移与归一化', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('v1 旧数据（无 attachments 字段）安全加载，每个 note 补齐 attachments: []', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: 1,
+      storageUpdatedAt: 100,
+      notes: [
+        { id: 'old-1', boardId: 'default', x: 0, y: 0, title: '旧', content: '', color: '#FFFFFF', z: 1, createdAt: 10, updatedAt: 10 },
+        { id: 'old-2', boardId: 'default', x: 10, y: 10, title: '旧二', content: '', color: '#FFFFFF', z: 2, createdAt: 20, updatedAt: 20 },
+      ],
+      boards: [DEFAULT_BOARD],
+      currentBoardId: DEFAULT_BOARD.id,
+      config: DEFAULT_CONFIG,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+
+    const result = await bootstrap();
+
+    expect(result.data.notes).toHaveLength(2);
+    expect(result.data.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+    expect(result.data.notes[0].attachments).toEqual([]);
+    expect(result.data.notes[1].attachments).toEqual([]);
+  });
+
+  it('合法 AttachmentRef 在迁移后完整保留', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'with-ref',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '有附件',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 10,
+        attachments: [VALID_REF],
+      }],
+      storageUpdatedAt: 100,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+
+    const result = await bootstrap();
+    const note = result.data.notes[0];
+
+    expect(note.attachments).toHaveLength(1);
+    expect(note.attachments?.[0]).toEqual(VALID_REF);
+  });
+
+  it('畸形附件条目被过滤，合法条目保留', async () => {
+    const malformedEntries = [
+      null,
+      42,
+      'string',
+      { id: 123 },
+      { id: 'bad', hash: 999 },
+      { id: 'bad', hash: 'abc', filename: 'f', mimeType: 'm', size: 'not-num', relativePath: 'r', createdAt: 1 },
+      { id: 'bad', hash: 'abc', filename: 'f', mimeType: 'm', size: 1, relativePath: '', createdAt: 1 },
+      { id: 'bad', hash: 'abc', filename: 'f', mimeType: 'm', size: 1, relativePath: 'r', createdAt: Infinity },
+    ];
+
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'mixed',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '混合',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 10,
+        attachments: [...malformedEntries, VALID_REF],
+      }],
+      storageUpdatedAt: 100,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+
+    const result = await bootstrap();
+    const note = result.data.notes[0];
+
+    expect(note.attachments).toHaveLength(1);
+    expect(note.attachments?.[0]).toEqual(VALID_REF);
+  });
+
+  it('attachments 为非数组值时归一化为空数组', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'non-array',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '异常',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 10,
+        attachments: 'not-an-array',
+      }],
+      storageUpdatedAt: 100,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+
+    const result = await bootstrap();
+
+    expect(result.data.notes[0].attachments).toEqual([]);
+  });
+
+  it('bootstrap 输出 schemaVersion 为 2', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{ id: 'v2', boardId: 'default', x: 0, y: 0, title: '', content: '', color: '#FFFFFF', z: 1, createdAt: 10, updatedAt: 10 }],
+      storageUpdatedAt: 10,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+
+    const result = await bootstrap();
+
+    expect(result.data.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+    expect(result.data.schemaVersion).toBe(2);
+  });
+
+  it('WAL 来源数据也经过附件迁移归一化', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(null);
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: 1,
+      storageUpdatedAt: 500,
+      notes: [{
+        id: 'wal-note',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: 'WAL',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 500,
+      }],
+      boards: [DEFAULT_BOARD],
+      currentBoardId: DEFAULT_BOARD.id,
+      config: DEFAULT_CONFIG,
+    });
+
+    const result = await bootstrap();
+
+    expect(result.source).toBe('WAL');
+    expect(result.data.notes[0].attachments).toEqual([]);
   });
 });

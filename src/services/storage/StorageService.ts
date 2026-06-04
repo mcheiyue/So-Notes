@@ -4,7 +4,7 @@ import { DEFAULT_BOARD, DEFAULT_CONFIG, STORAGE_SCHEMA_VERSION } from '../../sto
 import { db } from '../../store/db';
 import type { DomainState } from '../../store/domainStore';
 import { setDomainPersistenceBridge } from '../../store/domainStore';
-import { denormalizeNotes } from '../../store/normalization';
+import { denormalizeNotes, sanitizeAttachments } from '../../store/normalization';
 import type { BootstrapResult, SyncAction, StorageDataSource, AttachOptions, AttachResult, PersistenceStatus } from './types';
 import {
   readDiskStorageData,
@@ -35,6 +35,8 @@ const buildNewDefaultData = (): StorageData =>
   });
 
 const migrateAndSanitize = (data: StorageData): StorageData => {
+  data.schemaVersion = STORAGE_SCHEMA_VERSION;
+
   if (data.notes.length > 0) {
     const currentMaxZ = Math.max(...data.notes.map((n) => n.z || 0), 0);
     data.config.maxZ = Math.max(currentMaxZ, data.notes.length);
@@ -48,6 +50,7 @@ const migrateAndSanitize = (data: StorageData): StorageData => {
       if (n.title === undefined) n.title = '';
       if (!n.boardId) n.boardId = 'default';
       if (!n.updatedAt) n.updatedAt = n.createdAt || Date.now();
+      n.attachments = sanitizeAttachments(n.attachments);
     });
   }
 

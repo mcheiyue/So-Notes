@@ -1,4 +1,26 @@
-import { LayoutNote, Note, NormalizedNotesState } from './types';
+import { AttachmentRef, LayoutNote, Note, NormalizedNotesState } from './types';
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0;
+
+const isValidAttachmentRef = (entry: unknown): entry is AttachmentRef => {
+  if (!entry || typeof entry !== 'object') return false;
+  const ref = entry as Record<string, unknown>;
+  return (
+    isNonEmptyString(ref.id) &&
+    isNonEmptyString(ref.hash) &&
+    isNonEmptyString(ref.filename) &&
+    isNonEmptyString(ref.mimeType) &&
+    typeof ref.size === 'number' &&
+    Number.isFinite(ref.size) &&
+    isNonEmptyString(ref.relativePath) &&
+    typeof ref.createdAt === 'number' &&
+    Number.isFinite(ref.createdAt)
+  );
+};
+
+export const sanitizeAttachments = (attachments: unknown): AttachmentRef[] =>
+  Array.isArray(attachments) ? attachments.filter(isValidAttachmentRef) : [];
 
 export const createEmptyNormalizedNotesState = (): NormalizedNotesState => ({
   notesById: {},

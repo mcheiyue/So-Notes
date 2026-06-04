@@ -23,6 +23,7 @@ import { openFile } from '../utils/fileSystem';
 import { invoke } from '@tauri-apps/api/core';
 import { createEmptyNormalizedNotesState, denormalizeNotes, normalizeNotes } from './normalization';
 import { STORAGE_SCHEMA_VERSION } from './types';
+import type { AttachmentRef } from './types';
 import { LAYOUT } from '../constants/layout';
 import { registerActiveNoteDragFinalizer } from '../utils/activeNoteDrag';
 import { parseSmartPaste } from '../utils/smartPaste';
@@ -3510,5 +3511,242 @@ describe('v1.4.4 便签编辑尺寸偏好撤销/重做契约', () => {
     expect(getNote('rs-2')?.editingWidth).toBe(300);
     expect(getNote('rs-2')?.editingHeight).toBe(200);
     expect(getNote('rs-2')?.updatedAt).toBe(200);
+  });
+});
+
+const VALID_ATTACH_REF: AttachmentRef = {
+  id: 'att-001',
+  hash: 'a'.repeat(64),
+  filename: 'photo.jpg',
+  mimeType: 'image/jpeg',
+  size: 1024,
+  relativePath: 'attachments/' + 'a'.repeat(64) + '.jpg',
+  createdAt: 1700000000000,
+};
+
+const VALID_ATTACH_REF_2: AttachmentRef = {
+  id: 'att-002',
+  hash: 'b'.repeat(64),
+  filename: 'doc.pdf',
+  mimeType: 'application/pdf',
+  size: 2048,
+  relativePath: 'attachments/' + 'b'.repeat(64) + '.pdf',
+  createdAt: 1700000001000,
+};
+
+describe('v1.4.7 附件迁移与归一化契约', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+  });
+
+  it('init 从 disk 加载无 attachments 字段的 v1 数据后，每个 note 有 attachments: []', async () => {
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: 1,
+      storageUpdatedAt: 100,
+      notes: [{
+        id: 'legacy-no-att',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '旧数据',
+        content: '无附件',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 10,
+      }],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    }));
+
+    await useStore.getState().init();
+
+    const note = useStore.getState().notesById['legacy-no-att'];
+    expect(note).toBeDefined();
+    expect(note.attachments).toEqual([]);
+
+    const savedWal = vi.mocked(db.saveWAL).mock.calls[0]?.[0];
+    expect(savedWal?.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+  });
+
+  it('init 从 disk 加载含合法 AttachmentRef 的数据后，引用被完整保留', async () => {
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: 2,
+      storageUpdatedAt: 200,
+      notes: [{
+        id: 'with-ref',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '有附件',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 200,
+        attachments: [VALID_ATTACH_REF],
+      }],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    }));
+
+    await useStore.getState().init();
+
+    const note = useStore.getState().notesById['with-ref'];
+    expect(note.attachments).toHaveLength(1);
+    expect(note.attachments?.[0]).toEqual(VALID_ATTACH_REF);
+  });
+
+  it('init 后畸形附件条目被过滤，合法条目保留', async () => {
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: 2,
+      storageUpdatedAt: 300,
+      notes: [{
+        id: 'mixed',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '混合附件',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 300,
+        attachments: [
+          null,
+          42,
+          { id: 'bad' },
+          { id: 'bad', hash: 'x', filename: 'f', mimeType: 'm', size: 'not-num', relativePath: 'r', createdAt: 1 },
+          VALID_ATTACH_REF,
+        ],
+      }],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    }));
+
+    await useStore.getState().init();
+
+    const note = useStore.getState().notesById['mixed'];
+    expect(note.attachments).toHaveLength(1);
+    expect(note.attachments?.[0]).toEqual(VALID_ATTACH_REF);
+  });
+
+  it('attachments 为非数组值时归一化为空数组', async () => {
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: 2,
+      storageUpdatedAt: 400,
+      notes: [{
+        id: 'non-array-att',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '异常附件',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 400,
+        attachments: 'not-an-array',
+      }],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    }));
+
+    await useStore.getState().init();
+
+    expect(useStore.getState().notesById['non-array-att'].attachments).toEqual([]);
+  });
+
+  it('denormalizeNotes 透传附件引用，normalizeNotes + denormalizeRoundTrip 保留附件', () => {
+    const notes = [
+      {
+        id: 'att-rt-1',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: 'roundtrip',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 10,
+        attachments: [VALID_ATTACH_REF, VALID_ATTACH_REF_2],
+      },
+      {
+        id: 'att-rt-2',
+        boardId: 'default',
+        x: 10,
+        y: 10,
+        title: 'no-att',
+        content: '',
+        color: '#FFFFFF',
+        z: 2,
+        createdAt: 20,
+        updatedAt: 20,
+      },
+    ];
+
+    const normalized = normalizeNotes(notes);
+    useStore.setState({
+      ...normalized,
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    const denormalized = denormalizeNotes(useStore.getState());
+
+    expect(denormalized).toHaveLength(2);
+    expect(denormalized[0].attachments).toHaveLength(2);
+    expect(denormalized[0].attachments?.[0]).toEqual(VALID_ATTACH_REF);
+    expect(denormalized[0].attachments?.[1]).toEqual(VALID_ATTACH_REF_2);
+    expect(denormalized[1].attachments).toBeUndefined();
+  });
+
+  it('init 后保存再重新加载，附件引用不丢失', async () => {
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: 2,
+      storageUpdatedAt: 500,
+      notes: [{
+        id: 'persist-ref',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '持久化',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 500,
+        attachments: [VALID_ATTACH_REF],
+      }],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    }));
+
+    await useStore.getState().init();
+
+    expect(useStore.getState().notesById['persist-ref'].attachments).toHaveLength(1);
+
+    vi.mocked(db.saveWAL).mockResolvedValueOnce(true);
+    vi.mocked(invoke).mockResolvedValueOnce({ success: true, io_duration_ms: 0, retries: 0 });
+
+    await useStore.getState().saveToDisk();
+
+    const savedWal = vi.mocked(db.saveWAL).mock.calls[0]?.[0];
+    expect(savedWal).toBeDefined();
+    expect(savedWal.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+    expect(savedWal.notes[0].attachments).toHaveLength(1);
+    expect(savedWal.notes[0].attachments?.[0]).toEqual(VALID_ATTACH_REF);
   });
 });
