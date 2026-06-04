@@ -1,7 +1,8 @@
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { useStore } from '../store/useStore';
-import type { DetachedNoteReadyPayload, DetachedNoteSnapshot } from '../types/detachedNoteSnapshot';
+import type { DetachedNoteReadyPayload, DetachedNoteSnapshot, DetachedNoteThemePayload } from '../types/detachedNoteSnapshot';
 import { DETACHED_NOTE_EVENTS } from '../types/detachedNoteSnapshot';
+import type { ThemeMode } from '../store/types';
 
 const SNAPSHOT_THROTTLE_MS = 100;
 
@@ -32,6 +33,20 @@ const emitSnapshot = (noteId: string, snapshot: DetachedNoteSnapshot): Promise<v
 
 const emitMissing = (noteId: string): Promise<void> =>
   emitTo(detachedNoteLabel(noteId), DETACHED_NOTE_EVENTS.MISSING, { noteId }).catch(() => undefined);
+
+const resolveIsDark = (themeMode: ThemeMode): boolean => {
+  if (themeMode === 'dark') return true;
+  if (themeMode === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+};
+
+const buildThemePayload = (): DetachedNoteThemePayload => {
+  const themeMode = useStore.getState().config.themeMode ?? 'system';
+  return { themeMode, isDark: resolveIsDark(themeMode) };
+};
+
+const emitTheme = (noteId: string): Promise<void> =>
+  emitTo(detachedNoteLabel(noteId), DETACHED_NOTE_EVENTS.THEME, buildThemePayload()).catch(() => undefined);
 
 const syncDetachedNote = (noteId: string, note: { title: string; content: string; color: string; collapsed?: boolean; deletedAt?: number | null } | undefined): void => {
   if (!note || note.deletedAt) {
@@ -67,16 +82,35 @@ const syncAllDetachedNotes = (): void => {
   }
 };
 
+const syncAllDetachedThemes = (): void => {
+  const { detachedNotes } = useStore.getState();
+
+  for (const entry of detachedNotes) {
+    emitTheme(entry.noteId);
+  }
+};
+
 export const startDetachedNoteSnapshotSync = (): (() => void) => {
   if (unsubscribe) {
     return stopDetachedNoteSnapshotSync;
   }
 
   unsubscribe = useStore.subscribe((state, prevState) => {
-    if (state.detachedNotes === prevState.detachedNotes && state.notesById === prevState.notesById) {
+    const detachedChanged = state.detachedNotes !== prevState.detachedNotes;
+    const notesChanged = state.notesById !== prevState.notesById;
+    const themeChanged = state.config.themeMode !== prevState.config.themeMode;
+
+    if (!detachedChanged && !notesChanged && !themeChanged) {
       return;
     }
-    syncAllDetachedNotes();
+
+    if (detachedChanged || notesChanged) {
+      syncAllDetachedNotes();
+    }
+
+    if (detachedChanged || themeChanged) {
+      syncAllDetachedThemes();
+    }
   });
 
   if (!unlistenReadyPromise) {
@@ -85,6 +119,7 @@ export const startDetachedNoteSnapshotSync = (): (() => void) => {
       (event) => {
         const { noteId } = event.payload;
         clearPendingTimer(noteId);
+        emitTheme(noteId);
         const { notesById } = useStore.getState();
         const note = notesById[noteId];
         if (!note || note.deletedAt) {

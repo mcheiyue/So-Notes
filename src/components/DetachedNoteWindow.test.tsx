@@ -234,6 +234,7 @@ describe('DetachedNoteWindow 按钮行为', () => {
       locateBtn.click();
     });
 
+    expect(invokeMock).toHaveBeenCalledWith('show_main_window');
     expect(emitMock).toHaveBeenCalledWith(
       DETACHED_NOTE_EVENTS.LOCATE,
       { noteId: 'note-test-1' },
@@ -898,5 +899,85 @@ describe('DetachedNoteWindow 瞬态视觉提示', () => {
     }));
 
     expect(container.querySelector('[data-detached-note-cue="true"]')).toBeNull();
+  });
+});
+
+describe('DetachedNoteWindow 主题同步', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const renderWindow = async (noteId = 'note-test-1') => {
+    await act(async () => {
+      root.render(<DetachedNoteWindow noteId={noteId} />);
+    });
+  };
+
+  beforeEach(() => {
+    listenMock.mockClear();
+    emitMock.mockClear();
+    invokeMock.mockClear();
+    startDraggingMock.mockClear();
+    setSizeMock.mockClear();
+    resizeCallback = null;
+    document.documentElement.classList.remove('dark');
+    localStorage.clear();
+    listenMock.mockResolvedValue(vi.fn());
+    emitMock.mockResolvedValue(undefined);
+    startDraggingMock.mockResolvedValue(undefined);
+    invokeMock.mockResolvedValue(null);
+
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: ResizeObserverCallback) {
+        resizeCallback = cb;
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    });
+
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => {
+      cb();
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    document.documentElement.classList.remove('dark');
+    localStorage.clear();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('收到主题事件后同步 detached document 的 dark class 与本地 theme', async () => {
+    await renderWindow();
+
+    const themeCall = listenMock.mock.calls.find(
+      (call: unknown[]) => call[0] === DETACHED_NOTE_EVENTS.THEME,
+    );
+    expect(themeCall).toBeDefined();
+    const themeCallback = themeCall![1] as (event: { payload: { themeMode: 'light' | 'dark' | 'system'; isDark: boolean } }) => void;
+
+    act(() => {
+      themeCallback({ payload: { themeMode: 'dark', isDark: true } });
+    });
+
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(localStorage.getItem('theme')).toBe('dark');
+
+    act(() => {
+      themeCallback({ payload: { themeMode: 'light', isDark: false } });
+    });
+
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(localStorage.getItem('theme')).toBe('light');
   });
 });

@@ -1,4 +1,4 @@
-import type { NoteColor } from '../store/types';
+import type { NoteColor, ThemeMode } from '../store/types';
 
 /**
  * 撕下窗口只读快照。
@@ -48,6 +48,15 @@ export interface DetachedNoteReadyPayload {
   noteId: string;
 }
 
+/**
+ * 主题同步事件载荷。
+ * 主窗口向撕下窗口发送当前主题计算结果，保证独立 WebView 的 dark class 与便签材质同步。
+ */
+export interface DetachedNoteThemePayload {
+  themeMode: ThemeMode;
+  isDark: boolean;
+}
+
 /** 撕下窗口事件名常量 */
 export const DETACHED_NOTE_EVENTS = {
   SNAPSHOT: 'detached-note:snapshot',
@@ -56,4 +65,5 @@ export const DETACHED_NOTE_EVENTS = {
   CLOSED: 'detached-note:closed',
   SHOW_ALL: 'detached-note:show-all',
   READY: 'detached-note:ready',
+  THEME: 'detached-note:theme',
 } as const;

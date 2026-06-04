@@ -6,10 +6,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { Crosshair, Pin, X } from "lucide-react";
 import { NoteVisuals } from "./note-render/NoteVisuals";
-import type { DetachedNoteSnapshot, DetachedNoteMissingPayload } from "../types/detachedNoteSnapshot";
+import type { DetachedNoteSnapshot, DetachedNoteMissingPayload, DetachedNoteThemePayload } from "../types/detachedNoteSnapshot";
 import { DETACHED_NOTE_EVENTS } from "../types/detachedNoteSnapshot";
 import { cn } from "../utils/cn";
 import { LAYOUT } from "../constants/layout";
+import type { ThemeMode } from "../store/types";
 
 const DETACHED_MAX_HEIGHT_RATIO = 0.7;
 const DETACHED_MAX_HEIGHT_FALLBACK = 520;
@@ -26,28 +27,55 @@ function computeMaxHeight(): number {
   return DETACHED_MAX_HEIGHT_FALLBACK;
 }
 
+function readThemeMode(): ThemeMode {
+  const theme = localStorage.getItem("theme");
+  return theme === "light" || theme === "dark" || theme === "system" ? theme : "system";
+}
+
+function resolveIsDark(themeMode: ThemeMode): boolean {
+  if (themeMode === "dark") return true;
+  if (themeMode === "light") return false;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
 function useLocalDarkMode(): boolean {
-  const [isDark, setIsDark] = useState(() => {
-    const savedTheme = localStorage.getItem("theme");
-    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    if (savedTheme === "dark") return true;
-    if (!savedTheme || savedTheme === "system") return systemDark;
-    return false;
+  const [themeState, setThemeState] = useState(() => {
+    const themeMode = readThemeMode();
+    return { themeMode, isDark: resolveIsDark(themeMode) };
   });
+  const themeModeRef = useRef(themeState.themeMode);
+
+  useEffect(() => {
+    themeModeRef.current = themeState.themeMode;
+    document.documentElement.classList.toggle("dark", themeState.isDark);
+  }, [themeState]);
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e: MediaQueryListEvent) => {
-      const savedTheme = localStorage.getItem("theme");
-      if (!savedTheme || savedTheme === "system") {
-        setIsDark(e.matches);
+      if (themeModeRef.current === "system") {
+        setThemeState({ themeMode: "system", isDark: e.matches });
       }
     };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  return isDark;
+  useEffect(() => {
+    const unlistenTheme = listen<DetachedNoteThemePayload>(
+      DETACHED_NOTE_EVENTS.THEME,
+      (event) => {
+        localStorage.setItem("theme", event.payload.themeMode);
+        setThemeState(event.payload);
+      },
+    );
+
+    return () => {
+      unlistenTheme.then((f) => f()).catch(() => undefined);
+    };
+  }, []);
+
+  return themeState.isDark;
 }
 
 export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => {
@@ -196,7 +224,11 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
     (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
-      emit(DETACHED_NOTE_EVENTS.LOCATE, { noteId }).catch(() => undefined);
+      invoke('show_main_window')
+        .catch(() => undefined)
+        .finally(() => {
+          emit(DETACHED_NOTE_EVENTS.LOCATE, { noteId }).catch(() => undefined);
+        });
     },
     [noteId],
   );

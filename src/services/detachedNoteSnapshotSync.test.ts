@@ -60,6 +60,14 @@ describe('detachedNoteSnapshotSync', () => {
     emitToMock.mockClear();
     listenMock.mockClear();
     listenMock.mockResolvedValue(vi.fn());
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }),
+    });
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
@@ -268,6 +276,11 @@ describe('detachedNoteSnapshotSync', () => {
 
     expect(emitToMock).toHaveBeenCalledWith(
       'detached-note-n1',
+      DETACHED_NOTE_EVENTS.THEME,
+      { themeMode: 'system', isDark: false },
+    );
+    expect(emitToMock).toHaveBeenCalledWith(
+      'detached-note-n1',
       DETACHED_NOTE_EVENTS.SNAPSHOT,
       expect.objectContaining({
         noteId: 'n1',
@@ -299,8 +312,39 @@ describe('detachedNoteSnapshotSync', () => {
 
     expect(emitToMock).toHaveBeenCalledWith(
       'detached-note-n1',
+      DETACHED_NOTE_EVENTS.THEME,
+      { themeMode: 'system', isDark: false },
+    );
+    expect(emitToMock).toHaveBeenCalledWith(
+      'detached-note-n1',
       DETACHED_NOTE_EVENTS.MISSING,
       { noteId: 'n1' },
+    );
+  });
+
+  it('主题模式变化后向所有撕下窗口发送主题事件', () => {
+    useStore.setState({
+      detachedNotes: [
+        { noteId: 'n1', position: { x: 0, y: 0 }, isPinned: false },
+        { noteId: 'n2', position: { x: 100, y: 100 }, isPinned: false },
+      ],
+    });
+
+    startDetachedNoteSnapshotSync();
+
+    useStore.setState((state) => {
+      state.config.themeMode = 'dark';
+    });
+
+    expect(emitToMock).toHaveBeenCalledWith(
+      'detached-note-n1',
+      DETACHED_NOTE_EVENTS.THEME,
+      { themeMode: 'dark', isDark: true },
+    );
+    expect(emitToMock).toHaveBeenCalledWith(
+      'detached-note-n2',
+      DETACHED_NOTE_EVENTS.THEME,
+      { themeMode: 'dark', isDark: true },
     );
   });
 

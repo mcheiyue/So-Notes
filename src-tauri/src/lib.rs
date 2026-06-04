@@ -110,6 +110,16 @@ fn emit_main_window_without_show(app: &tauri::AppHandle, event: &str) {
 }
 
 #[tauri::command]
+fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+
+    show_window_near_tray(&window);
+    Ok(())
+}
+
+#[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
@@ -592,6 +602,7 @@ pub fn run() {
             get_pin_mode,
             get_global_shortcut_error,
             set_tray_tooltip,
+            show_main_window,
             save_content,
             load_content,
             check_hide_on_leave,
