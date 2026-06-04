@@ -1,0 +1,101 @@
+/**
+ * 附件持久化服务
+ *
+ * 封装 Tauri 侧 `attachments` 模块的命令调用，
+ * 提供类型安全的 Promise 接口供前端使用。
+ *
+ * Rust 命令名称：
+ * - write_attachment_from_path
+ * - attachment_exists
+ * - read_attachment_metadata
+ */
+
+import { invoke } from '@tauri-apps/api/core';
+
+// ---------------------------------------------------------------------------
+// 类型定义（与 Rust 侧 serde camelCase 输出对齐）
+// ---------------------------------------------------------------------------
+
+/** 写入附件后的结果元数据 */
+export interface AttachmentWriteResult {
+  /** 文件内容 SHA-256 哈希（64 字符十六进制） */
+  hash: string;
+  /** 原始文件名 */
+  filename: string;
+  /** 归一化后的 MIME 类型 */
+  mimeType: string;
+  /** 文件大小（字节） */
+  size: number;
+  /** 相对 SoNotes 数据目录的路径，例如 `attachments/<sha256>.<ext>` */
+  relativePath: string;
+  /** 创建时间（毫秒级 Unix 时间戳） */
+  createdAt: number;
+  /** 实际写入字节数；若文件已存在（内容去重）则为 0 */
+  bytesWritten: number;
+}
+
+/** 附件文件元数据 */
+export interface AttachmentFileMetadata {
+  /** 文件内容哈希（从文件名解析） */
+  hash: string;
+  /** 展示用文件名（含扩展名） */
+  filename: string;
+  /** MIME 类型 */
+  mimeType: string;
+  /** 文件大小（字节） */
+  size: number;
+  /** 相对路径 */
+  relativePath: string;
+  /** 创建时间（毫秒级 Unix 时间戳） */
+  createdAt: number;
+}
+
+// ---------------------------------------------------------------------------
+// 命令封装
+// ---------------------------------------------------------------------------
+
+/**
+ * 将源路径指定的文件写入附件目录。
+ *
+ * Rust 侧会流式计算 SHA-256 并按内容哈希命名存储。
+ * 若相同内容的文件已存在，则复用已有文件（bytesWritten 为 0）。
+ *
+ * @param sourcePath 源文件的绝对路径
+ * @param filename   原始文件名（用于提取扩展名和展示）
+ * @param mimeType   可选 MIME 类型；为空时自动推断或回退到 application/octet-stream
+ */
+export async function writeAttachmentFromPath(
+  sourcePath: string,
+  filename: string,
+  mimeType?: string,
+): Promise<AttachmentWriteResult> {
+  return invoke<AttachmentWriteResult>('write_attachment_from_path', {
+    sourcePath,
+    filename,
+    mimeType: mimeType ?? null,
+  });
+}
+
+/**
+ * 检查指定相对路径的附件文件是否存在。
+ *
+ * @param relativePath 相对路径，例如 `attachments/<sha256>.<ext>`
+ */
+export async function attachmentExists(
+  relativePath: string,
+): Promise<boolean> {
+  return invoke<boolean>('attachment_exists', { relativePath });
+}
+
+/**
+ * 读取指定相对路径的附件文件元数据。
+ *
+ * @param relativePath 相对路径，例如 `attachments/<sha256>.<ext>`
+ */
+export async function readAttachmentMetadata(
+  relativePath: string,
+): Promise<AttachmentFileMetadata> {
+  return invoke<AttachmentFileMetadata>('read_attachment_metadata', {
+    relativePath,
+  });
+}

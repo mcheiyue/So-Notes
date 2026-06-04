@@ -11,6 +11,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 use tauri_plugin_positioner::{Position, WindowExt};
 use tokio::sync;
 
+mod attachments;
 mod persistence;
 
 struct AppState {
@@ -610,7 +611,10 @@ pub fn run() {
             open_detached_note_window,
             show_detached_note_window,
             close_detached_note_window,
-            set_detached_note_always_on_top
+            set_detached_note_always_on_top,
+            attachments::write_attachment_from_path,
+            attachments::attachment_exists,
+            attachments::read_attachment_metadata,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
