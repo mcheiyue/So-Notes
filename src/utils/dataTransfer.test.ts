@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-import { DEFAULT_BOARD, DEFAULT_CONFIG, type Board, type Note } from '../store/types';
-import { generateFullBackup, processImport } from './dataTransfer';
+import { DEFAULT_BOARD, DEFAULT_CONFIG, type Board, type Note, type AttachmentRef } from '../store/types';
+import { generateBoardExport, generateFullBackup, processImport } from './dataTransfer';
 
 const makeBoard = (overrides: Partial<Board> = {}): Board => ({
   ...DEFAULT_BOARD,
@@ -23,6 +23,17 @@ const makeNote = (overrides: Partial<Note> = {}): Note => ({
   z: 1,
   createdAt: 100,
   updatedAt: 100,
+  ...overrides,
+});
+
+const makeAttachmentRef = (overrides: Partial<AttachmentRef> = {}): AttachmentRef => ({
+  id: 'att-1',
+  hash: 'abc123',
+  filename: 'image.png',
+  mimeType: 'image/png',
+  size: 1024,
+  relativePath: 'attachments/abc123.png',
+  createdAt: 500,
   ...overrides,
 });
 
@@ -270,6 +281,241 @@ describe('dataTransfer 导入契约', () => {
       expect(result.data.boards).toHaveLength(1);
       expect(result.data.boards[0].id).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
       expect(result.data.summary.createdDefaultBoard).toBe(true);
+    }
+  });
+});
+
+describe('dataTransfer 附件引用导出', () => {
+  it('全量备份导出包含附件引用但不含二进制/base64 字段', () => {
+    const board = makeBoard();
+    const noteWithClean = makeNote({
+      id: 'note-clean',
+      attachments: [makeAttachmentRef()],
+    });
+    const noteWithBinary = makeNote({ id: 'note-binary' });
+    (noteWithBinary as unknown as Record<string, unknown>).attachments = [{
+      ...makeAttachmentRef({ id: 'att-bin' }),
+      data: 'base64-junk',
+      base64: 'data:image/png;base64,iVBOR',
+      content: new ArrayBuffer(10),
+      blob: 'blob-ref',
+    }];
+    const noteWithout = makeNote({ id: 'note-none' });
+
+    const json = generateFullBackup(
+      [board],
+      [noteWithClean, noteWithBinary, noteWithout],
+      DEFAULT_CONFIG,
+      board.id,
+    );
+
+    const parsed = JSON.parse(json);
+    const notes = parsed.payload.notes as Record<string, unknown>[];
+
+    expect(notes[0].attachments).toHaveLength(1);
+    expect((notes[0].attachments as AttachmentRef[])[0].id).toBe('att-1');
+
+    expect(notes[1].attachments).toHaveLength(1);
+    const binAtt = (notes[1].attachments as Record<string, unknown>[])[0];
+    expect(binAtt.id).toBe('att-bin');
+    expect(binAtt).not.toHaveProperty('data');
+    expect(binAtt).not.toHaveProperty('base64');
+    expect(binAtt).not.toHaveProperty('content');
+    expect(binAtt).not.toHaveProperty('blob');
+
+    const allowedKeys = ['id', 'hash', 'filename', 'mimeType', 'size', 'relativePath', 'createdAt'];
+    expect(Object.keys(binAtt).sort()).toEqual([...allowedKeys].sort());
+
+    expect(notes[2].attachments).toBeUndefined();
+  });
+
+  it('单板导出保留附件引用', () => {
+    const board = makeBoard();
+    const note = makeNote({ attachments: [makeAttachmentRef()] });
+
+    const json = generateBoardExport(board, [note]);
+    const parsed = JSON.parse(json);
+
+    expect(parsed.payload.notes).toHaveLength(1);
+    expect(parsed.payload.notes[0].attachments).toHaveLength(1);
+    expect(parsed.payload.notes[0].attachments[0].id).toBe('att-1');
+  });
+
+  it('选中便签导出保留附件引用', () => {
+    const board = makeBoard();
+    const note = makeNote({
+      attachments: [makeAttachmentRef({ id: 'sel-att' })],
+    });
+
+    const json = generateBoardExport(board, [note]);
+    const parsed = JSON.parse(json);
+
+    expect(parsed.payload.notes[0].attachments[0].id).toBe('sel-att');
+  });
+});
+
+describe('dataTransfer 附件引用导入', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('导入保留有效附件引用并丢弃无效条目', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(999999);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('att-board-0000-4000-8000-0000000000')
+      .mockReturnValueOnce('att-note-0000-4000-8000-000000000000');
+
+    const board = makeBoard({ id: 'att-board', name: '附件板' });
+    const noteData = {
+      id: 'note-mixed',
+      boardId: 'att-board',
+      x: 10,
+      y: 20,
+      title: '混合附件',
+      content: '内容',
+      color: '#FFFFFF',
+      z: 1,
+      createdAt: 100,
+      updatedAt: 100,
+      attachments: [
+        makeAttachmentRef({ id: 'valid-att' }),
+        { id: '', hash: '', filename: '', mimeType: '', size: 0, relativePath: '', createdAt: 0 },
+        null,
+        { id: 'partial', hash: 'h' },
+        makeAttachmentRef({ id: 'valid-att-2', hash: 'def456', filename: 'doc.pdf', mimeType: 'application/pdf', size: 2048 }),
+      ],
+    };
+
+    const json = JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: { boards: [board], notes: [noteData], currentBoardId: 'att-board' },
+    });
+
+    const result = processImport(json);
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.data.notes).toHaveLength(1);
+      const imported = result.data.notes[0];
+      expect(imported.attachments).toHaveLength(2);
+      expect(imported.attachments?.[0]?.id).toBe('valid-att');
+      expect(imported.attachments?.[1]?.id).toBe('valid-att-2');
+    }
+  });
+
+  it('导入剥离附件中的二进制残留字段', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(888888);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('bin-board-0000-4000-8000-0000000000')
+      .mockReturnValueOnce('bin-note-0000-4000-8000-000000000000');
+
+    const board = makeBoard({ id: 'bin-board', name: '二进制板' });
+    const noteData = {
+      id: 'note-bin',
+      boardId: 'bin-board',
+      x: 10, y: 20, title: 't', content: 'c', color: '#FFF', z: 1,
+      createdAt: 100, updatedAt: 100,
+      attachments: [{
+        ...makeAttachmentRef({ id: 'att-with-binary' }),
+        data: 'base64-data',
+        base64: 'data:image/png;base64,xxx',
+      }],
+    };
+
+    const json = JSON.stringify({
+      version: 1, source: 'so-notes', type: 'FULL_BACKUP', timestamp: 1,
+      payload: { boards: [board], notes: [noteData], currentBoardId: 'bin-board' },
+    });
+
+    const result = processImport(json);
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      const att = result.data.notes[0].attachments;
+      expect(att).toHaveLength(1);
+      expect(att?.[0]?.id).toBe('att-with-binary');
+      expect(att?.[0]).not.toHaveProperty('data');
+      expect(att?.[0]).not.toHaveProperty('base64');
+    }
+  });
+
+  it('旧版无附件备份仍可正常导入', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(777777);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('old-board-0000-4000-8000-00000000000')
+      .mockReturnValueOnce('old-note-0000-4000-8000-000000000000');
+
+    const result = processImport(JSON.stringify({
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      payload: { notes: [{ content: '旧内容', createdAt: 50 }] },
+    }));
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.data.notes).toHaveLength(1);
+      expect(result.data.notes[0].attachments).toBeUndefined();
+    }
+  });
+
+  it('畸形附件数组不破坏导入', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(666666);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('mal-board-0000-4000-8000-0000000000')
+      .mockReturnValueOnce('mal-note-0000-4000-8000-000000000000');
+
+    const board = makeBoard({ id: 'mal-board', name: '畸形板' });
+    const noteData = {
+      id: 'note-mal',
+      boardId: 'mal-board',
+      x: 10, y: 20, title: 't', content: 'c', color: '#FFF', z: 1,
+      createdAt: 100, updatedAt: 100,
+      attachments: 'not-an-array',
+    };
+
+    const json = JSON.stringify({
+      version: 1, source: 'so-notes', type: 'FULL_BACKUP', timestamp: 1,
+      payload: { boards: [board], notes: [noteData], currentBoardId: 'mal-board' },
+    });
+
+    const result = processImport(json);
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.data.notes).toHaveLength(1);
+      expect(result.data.notes[0].attachments).toBeUndefined();
+    }
+  });
+
+  it('附件为数字/null/布尔等非对象值时安全忽略', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(555555);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('weird-board-0000-4000-8000-000000000')
+      .mockReturnValueOnce('weird-note-0000-4000-8000-00000000000');
+
+    const board = makeBoard({ id: 'weird-board', name: '怪异板' });
+    const noteData = {
+      id: 'note-weird',
+      boardId: 'weird-board',
+      x: 10, y: 20, title: 't', content: 'c', color: '#FFF', z: 1,
+      createdAt: 100, updatedAt: 100,
+      attachments: [42, null, true, undefined, 'string', makeAttachmentRef({ id: 'only-valid' })],
+    };
+
+    const json = JSON.stringify({
+      version: 1, source: 'so-notes', type: 'FULL_BACKUP', timestamp: 1,
+      payload: { boards: [board], notes: [noteData], currentBoardId: 'weird-board' },
+    });
+
+    const result = processImport(json);
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.data.notes[0].attachments).toHaveLength(1);
+      expect(result.data.notes[0].attachments?.[0]?.id).toBe('only-valid');
     }
   });
 });

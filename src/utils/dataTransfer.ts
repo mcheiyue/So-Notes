@@ -1,4 +1,5 @@
-import { Note, Board, AppConfig, DEFAULT_BOARD } from '../store/types';
+import { Note, Board, AppConfig, DEFAULT_BOARD, type AttachmentRef } from '../store/types';
+import { sanitizeAttachments } from '../store/normalization';
 
 export const EXPORT_DATA_VERSION = 1;
 
@@ -154,6 +155,28 @@ const buildImportIssue = (
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
+const toCleanAttachmentRef = (ref: AttachmentRef): AttachmentRef => ({
+  id: ref.id,
+  hash: ref.hash,
+  filename: ref.filename,
+  mimeType: ref.mimeType,
+  size: ref.size,
+  relativePath: ref.relativePath,
+  createdAt: ref.createdAt,
+});
+
+const sanitizeNoteForExport = (note: Note): Note => {
+  if (!note.attachments || note.attachments.length === 0) {
+    return note;
+  }
+  const sanitized = sanitizeAttachments(note.attachments).map(toCleanAttachmentRef);
+  if (sanitized.length === 0) {
+    const { attachments: _removed, ...rest } = note;
+    return rest;
+  }
+  return { ...note, attachments: sanitized };
+};
+
 const getStringOrFallback = (value: unknown, fallback: string) =>
   typeof value === 'string' ? value : fallback;
 
@@ -291,7 +314,7 @@ const normalizeLegacyExport = (data: Record<string, unknown>): {
       timestamp: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
       payload: {
         boards,
-        notes,
+        notes: notes.map(sanitizeNoteForExport),
         config,
         currentBoardId,
       },
@@ -450,7 +473,7 @@ const resolveImportedBoardName = (baseName: string, usedNames: Set<string>) => {
  * Export a single board and its notes
  */
 export const generateBoardExport = (board: Board, allNotes: Note[]): string => {
-  const boardNotes = allNotes.filter(n => n.boardId === board.id && !n.deletedAt);
+  const boardNotes = allNotes.filter(n => n.boardId === board.id && !n.deletedAt).map(sanitizeNoteForExport);
 
   const data: ExportData = {
     version: EXPORT_DATA_VERSION,
@@ -483,7 +506,7 @@ export const generateFullBackup = (
     timestamp: Date.now(),
     payload: {
       boards,
-      notes,
+      notes: notes.map(sanitizeNoteForExport),
       config,
       currentBoardId,
     },
@@ -573,12 +596,17 @@ export const processImport = (jsonContent: string, existingBoardNames: string[] 
       return;
     }
 
+    const rawAttachments = isRecord(rawNote) ? rawNote.attachments : undefined;
+    const sanitizedAttachments = sanitizeAttachments(rawAttachments).map(toCleanAttachmentRef);
+
+    const { attachments: _rawRef, ...noteBase } = normalizedNote.note;
     newNotes.push({
-      ...normalizedNote.note,
+      ...noteBase,
       id: crypto.randomUUID(),
       boardId: newBoardId,
       createdAt: now,
       updatedAt: now,
+      ...(sanitizedAttachments.length > 0 ? { attachments: sanitizedAttachments } : {}),
     });
   });
 

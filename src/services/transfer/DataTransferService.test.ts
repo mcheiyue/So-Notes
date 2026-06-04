@@ -379,4 +379,150 @@ describe('DataTransferService', () => {
       expect(deps.saveWAL).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('附件引用', () => {
+    it('导出看板时包含附件引用并剥离多余字段', async () => {
+      const deps = makeDeps({
+        getState: () => makeStateSlice({
+          notesById: {
+            'note-1': makeNote({
+              id: 'note-1',
+              attachments: [{
+                id: 'att-1',
+                hash: 'abc',
+                filename: 'test.png',
+                mimeType: 'image/png',
+                size: 100,
+                relativePath: 'attachments/abc.png',
+                createdAt: 500,
+              }],
+            }),
+          },
+        }),
+      });
+      const service = createDataTransferService(deps);
+
+      await service.exportBoard('board-1');
+
+      expect(deps.saveFile).toHaveBeenCalledTimes(1);
+      const [json] = vi.mocked(deps.saveFile).mock.calls[0];
+      const parsed = JSON.parse(json);
+      expect(parsed.payload.notes[0].attachments).toHaveLength(1);
+      expect(parsed.payload.notes[0].attachments[0].id).toBe('att-1');
+    });
+
+    it('全量导出包含附件引用', async () => {
+      const deps = makeDeps({
+        getState: () => makeStateSlice({
+          notesById: {
+            'note-1': makeNote({
+              id: 'note-1',
+              attachments: [{
+                id: 'att-full',
+                hash: 'h1',
+                filename: 'a.png',
+                mimeType: 'image/png',
+                size: 200,
+                relativePath: 'attachments/a.png',
+                createdAt: 600,
+              }],
+            }),
+          },
+        }),
+      });
+      const service = createDataTransferService(deps);
+
+      await service.exportAll();
+
+      expect(deps.saveFile).toHaveBeenCalledTimes(1);
+      const [json] = vi.mocked(deps.saveFile).mock.calls[0];
+      const parsed = JSON.parse(json);
+      expect(parsed.type).toBe('FULL_BACKUP');
+      expect(parsed.payload.notes[0].attachments).toHaveLength(1);
+      expect(parsed.payload.notes[0].attachments[0].id).toBe('att-full');
+    });
+
+    it('导入时保留有效附件引用并丢弃无效条目', async () => {
+      vi.spyOn(globalThis.crypto, 'randomUUID')
+        .mockReturnValueOnce('imp-board-0000-4000-8000-0000000000')
+        .mockReturnValueOnce('imp-note-0000-4000-8000-000000000000');
+
+      const state = makeStateSlice();
+      const deps = makeDeps({
+        getState: () => state,
+        openFile: vi.fn(async () => JSON.stringify({
+          version: 1,
+          source: 'so-notes',
+          type: 'FULL_BACKUP',
+          timestamp: 1,
+          payload: {
+            boards: [{ id: 'imp-board', name: '附件板', icon: '📎', createdAt: 10 }],
+            notes: [{
+              id: 'imp-note',
+              boardId: 'imp-board',
+              x: 10, y: 20,
+              title: '附件便签',
+              content: '内容',
+              color: '#FFFFFF',
+              z: 2,
+              createdAt: 11,
+              updatedAt: 12,
+              attachments: [
+                { id: 'att-ok', hash: 'h1', filename: 'a.png', mimeType: 'image/png', size: 100, relativePath: 'attachments/a.png', createdAt: 500 },
+                { id: '', hash: '', filename: '', mimeType: '', size: 0, relativePath: '', createdAt: 0 },
+              ],
+            }],
+            currentBoardId: 'imp-board',
+          },
+        })),
+      });
+      const service = createDataTransferService(deps);
+
+      const result = await service.importFromFile();
+
+      expect(result.status).toBe('success');
+      const importedNote = state.notesById['imp-note-0000-4000-8000-000000000000'];
+      expect(importedNote.attachments).toHaveLength(1);
+      expect(importedNote.attachments?.[0]?.id).toBe('att-ok');
+    });
+
+    it('导入便签无附件时状态不包含 attachments 字段', async () => {
+      vi.spyOn(globalThis.crypto, 'randomUUID')
+        .mockReturnValueOnce('noatt-board-0000-4000-8000-00000000')
+        .mockReturnValueOnce('noatt-note-0000-4000-8000-0000000000');
+
+      const state = makeStateSlice();
+      const deps = makeDeps({
+        getState: () => state,
+        openFile: vi.fn(async () => JSON.stringify({
+          version: 1,
+          source: 'so-notes',
+          type: 'FULL_BACKUP',
+          timestamp: 1,
+          payload: {
+            boards: [{ id: 'noatt-board', name: '无附件板', icon: '📄', createdAt: 10 }],
+            notes: [{
+              id: 'noatt-note',
+              boardId: 'noatt-board',
+              x: 10, y: 20,
+              title: '普通便签',
+              content: '内容',
+              color: '#FFFFFF',
+              z: 2,
+              createdAt: 11,
+              updatedAt: 12,
+            }],
+            currentBoardId: 'noatt-board',
+          },
+        })),
+      });
+      const service = createDataTransferService(deps);
+
+      const result = await service.importFromFile();
+
+      expect(result.status).toBe('success');
+      const importedNote = state.notesById['noatt-note-0000-4000-8000-0000000000'];
+      expect(importedNote.attachments).toBeUndefined();
+    });
+  });
 });
