@@ -2,6 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { createDataTransferService, type DataTransferServiceDeps, type DataTransferStateSlice } from './DataTransferService';
 import type { Note, Board } from '../../store/types';
 
+const HASH_A = 'a'.repeat(64);
+const HASH_B = 'b'.repeat(64);
+const HASH_C = 'c'.repeat(64);
+
 const makeNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
   boardId: 'board-1',
@@ -382,21 +386,27 @@ describe('DataTransferService', () => {
 
   describe('附件引用', () => {
     it('导出看板时包含附件引用并剥离多余字段', async () => {
+      const noteWithExtraAttachmentField = makeNote({
+        id: 'note-1',
+        attachments: [{
+          id: 'att-1',
+          hash: HASH_A,
+          filename: 'test.png',
+          mimeType: 'image/png',
+          size: 100,
+          relativePath: `attachments/${HASH_A}.png`,
+          createdAt: 500,
+        }],
+      });
+      const attachment = noteWithExtraAttachmentField.attachments?.[0];
+      if (attachment) {
+        (attachment as unknown as Record<string, unknown>).base64 = 'data:image/png;base64,xxx';
+      }
+
       const deps = makeDeps({
         getState: () => makeStateSlice({
           notesById: {
-            'note-1': makeNote({
-              id: 'note-1',
-              attachments: [{
-                id: 'att-1',
-                hash: 'abc',
-                filename: 'test.png',
-                mimeType: 'image/png',
-                size: 100,
-                relativePath: 'attachments/abc.png',
-                createdAt: 500,
-              }],
-            }),
+            'note-1': noteWithExtraAttachmentField,
           },
         }),
       });
@@ -409,6 +419,7 @@ describe('DataTransferService', () => {
       const parsed = JSON.parse(json);
       expect(parsed.payload.notes[0].attachments).toHaveLength(1);
       expect(parsed.payload.notes[0].attachments[0].id).toBe('att-1');
+      expect(parsed.payload.notes[0].attachments[0]).not.toHaveProperty('base64');
     });
 
     it('全量导出包含附件引用', async () => {
@@ -419,11 +430,11 @@ describe('DataTransferService', () => {
               id: 'note-1',
               attachments: [{
                 id: 'att-full',
-                hash: 'h1',
+                hash: HASH_B,
                 filename: 'a.png',
                 mimeType: 'image/png',
                 size: 200,
-                relativePath: 'attachments/a.png',
+                relativePath: `attachments/${HASH_B}.png`,
                 createdAt: 600,
               }],
             }),
@@ -468,7 +479,7 @@ describe('DataTransferService', () => {
               createdAt: 11,
               updatedAt: 12,
               attachments: [
-                { id: 'att-ok', hash: 'h1', filename: 'a.png', mimeType: 'image/png', size: 100, relativePath: 'attachments/a.png', createdAt: 500 },
+                { id: 'att-ok', hash: HASH_C, filename: 'a.png', mimeType: 'image/png', size: 100, relativePath: 'attachments/imported/source.png', createdAt: 500 },
                 { id: '', hash: '', filename: '', mimeType: '', size: 0, relativePath: '', createdAt: 0 },
               ],
             }],
@@ -484,6 +495,7 @@ describe('DataTransferService', () => {
       const importedNote = state.notesById['imp-note-0000-4000-8000-000000000000'];
       expect(importedNote.attachments).toHaveLength(1);
       expect(importedNote.attachments?.[0]?.id).toBe('att-ok');
+      expect(importedNote.attachments?.[0]?.relativePath).toBe(`attachments/${HASH_C}.png`);
     });
 
     it('导入便签无附件时状态不包含 attachments 字段', async () => {

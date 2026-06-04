@@ -563,6 +563,39 @@ describe('StorageService 附件迁移与归一化', () => {
     expect(note.attachments?.[0]).toEqual(VALID_REF);
   });
 
+  it('附件迁移会剥离多余字段，避免二进制残留进入 Domain state', async () => {
+    const dirtyRef: Record<string, unknown> = {
+      ...VALID_REF,
+      base64: 'data:image/jpeg;base64,xxx',
+      data: 'binary-like-payload',
+    };
+
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'dirty-ref',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '脏附件',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 10,
+        attachments: [dirtyRef],
+      }],
+      storageUpdatedAt: 100,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+
+    const result = await bootstrap();
+    const ref = result.data.notes[0].attachments?.[0];
+
+    expect(ref).toEqual(VALID_REF);
+    expect(ref).not.toHaveProperty('base64');
+    expect(ref).not.toHaveProperty('data');
+  });
+
   it('畸形附件条目被过滤，合法条目保留', async () => {
     const malformedEntries = [
       null,

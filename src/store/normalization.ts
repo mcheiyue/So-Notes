@@ -3,24 +3,50 @@ import { AttachmentRef, LayoutNote, Note, NormalizedNotesState } from './types';
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
 
-const isValidAttachmentRef = (entry: unknown): entry is AttachmentRef => {
-  if (!entry || typeof entry !== 'object') return false;
+const isSha256Hash = (value: unknown): value is string =>
+  typeof value === 'string' && /^[0-9a-f]{64}$/i.test(value);
+
+const isSafeAttachmentRelativePath = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false;
+  if (!value.startsWith('attachments/') || value.includes('\\') || value.startsWith('/')) return false;
+  return value.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+};
+
+const toCleanAttachmentRef = (entry: unknown): AttachmentRef | null => {
+  if (!entry || typeof entry !== 'object') return null;
   const ref = entry as Record<string, unknown>;
-  return (
+  if (!(
     isNonEmptyString(ref.id) &&
-    isNonEmptyString(ref.hash) &&
+    isSha256Hash(ref.hash) &&
     isNonEmptyString(ref.filename) &&
     isNonEmptyString(ref.mimeType) &&
     typeof ref.size === 'number' &&
     Number.isFinite(ref.size) &&
-    isNonEmptyString(ref.relativePath) &&
+    isSafeAttachmentRelativePath(ref.relativePath) &&
     typeof ref.createdAt === 'number' &&
     Number.isFinite(ref.createdAt)
-  );
+  )) {
+    return null;
+  }
+
+  return {
+    id: ref.id,
+    hash: ref.hash.toLowerCase(),
+    filename: ref.filename,
+    mimeType: ref.mimeType,
+    size: ref.size,
+    relativePath: ref.relativePath,
+    createdAt: ref.createdAt,
+  };
 };
 
 export const sanitizeAttachments = (attachments: unknown): AttachmentRef[] =>
-  Array.isArray(attachments) ? attachments.filter(isValidAttachmentRef) : [];
+  Array.isArray(attachments)
+    ? attachments.flatMap((entry) => {
+      const cleaned = toCleanAttachmentRef(entry);
+      return cleaned ? [cleaned] : [];
+    })
+    : [];
 
 export const createEmptyNormalizedNotesState = (): NormalizedNotesState => ({
   notesById: {},

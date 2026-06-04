@@ -3,6 +3,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { DEFAULT_BOARD, DEFAULT_CONFIG, type Board, type Note, type AttachmentRef } from '../store/types';
 import { generateBoardExport, generateFullBackup, processImport } from './dataTransfer';
 
+const HASH_A = 'a'.repeat(64);
+const HASH_B = 'b'.repeat(64);
+
 const makeBoard = (overrides: Partial<Board> = {}): Board => ({
   ...DEFAULT_BOARD,
   id: 'board-1',
@@ -28,11 +31,11 @@ const makeNote = (overrides: Partial<Note> = {}): Note => ({
 
 const makeAttachmentRef = (overrides: Partial<AttachmentRef> = {}): AttachmentRef => ({
   id: 'att-1',
-  hash: 'abc123',
+  hash: HASH_A,
   filename: 'image.png',
   mimeType: 'image/png',
   size: 1024,
-  relativePath: 'attachments/abc123.png',
+  relativePath: `attachments/${HASH_A}.png`,
   createdAt: 500,
   ...overrides,
 });
@@ -382,7 +385,7 @@ describe('dataTransfer 附件引用导入', () => {
         { id: '', hash: '', filename: '', mimeType: '', size: 0, relativePath: '', createdAt: 0 },
         null,
         { id: 'partial', hash: 'h' },
-        makeAttachmentRef({ id: 'valid-att-2', hash: 'def456', filename: 'doc.pdf', mimeType: 'application/pdf', size: 2048 }),
+        makeAttachmentRef({ id: 'valid-att-2', hash: HASH_B, filename: 'doc.pdf', mimeType: 'application/pdf', size: 2048, relativePath: `attachments/${HASH_B}.pdf` }),
       ],
     };
 

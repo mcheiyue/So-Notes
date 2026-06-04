@@ -155,13 +155,26 @@ const buildImportIssue = (
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
+const getSafeAttachmentExtension = (...candidates: string[]): string => {
+  for (const candidate of candidates) {
+    const lastSegment = candidate.split('/').pop() ?? '';
+    const dotIndex = lastSegment.lastIndexOf('.');
+    if (dotIndex < 0 || dotIndex === lastSegment.length - 1) continue;
+    const extension = lastSegment.slice(dotIndex + 1).toLowerCase();
+    if (/^[a-z0-9]{1,12}$/.test(extension)) {
+      return extension;
+    }
+  }
+  return 'bin';
+};
+
 const toCleanAttachmentRef = (ref: AttachmentRef): AttachmentRef => ({
   id: ref.id,
   hash: ref.hash,
   filename: ref.filename,
   mimeType: ref.mimeType,
   size: ref.size,
-  relativePath: ref.relativePath,
+  relativePath: `attachments/${ref.hash}.${getSafeAttachmentExtension(ref.relativePath, ref.filename)}`,
   createdAt: ref.createdAt,
 });
 
