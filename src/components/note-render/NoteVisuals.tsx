@@ -98,7 +98,7 @@ export const NoteVisuals = React.memo(React.forwardRef<HTMLElement, NoteVisualsP
       {...rest}
     >
       {surfaceOverlay}
-      {isCollapsed && (
+      {children == null && isCollapsed && (
         <div className={cn("flex h-9 w-full items-center justify-center px-10", surfaceOverlay && "px-16")}>
           <span
             className={cn(

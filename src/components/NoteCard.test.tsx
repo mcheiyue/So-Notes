@@ -137,6 +137,21 @@ describe('NoteCard 头部交互边界', () => {
     expect(centerLayer?.textContent).toContain('已折叠便签');
   });
 
+  it('折叠态便签的 article 内第一个子元素是 .drag-handle 头部，保证拖拽命中区域', async () => {
+    useStore.setState({
+      ...normalizeNotes([createNote({ collapsed: true, title: '折叠拖拽' })]),
+    });
+
+    await renderNoteCard();
+
+    const article = container.querySelector('[data-note-visuals]') as HTMLElement | null;
+    expect(article).not.toBeNull();
+
+    const firstElementChild = article?.firstElementChild as HTMLElement | null;
+    expect(firstElementChild).not.toBeNull();
+    expect(firstElementChild?.classList.contains('drag-handle')).toBe(true);
+  });
+
   it('空标题时头部与标题输入共享同一套显隐派生状态', async () => {
     useStore.setState({
       ...normalizeNotes([createNote({ title: '' })]),

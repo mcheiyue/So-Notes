@@ -301,4 +301,22 @@ describe('NoteVisuals 组件渲染', () => {
     const article = container.querySelector('[data-note-visuals]') as HTMLElement | null;
     expect(article?.style.boxShadow).toContain('0 12px 24px');
   });
+
+  it('折叠态且有 children 时不渲染默认折叠标题，children 替代全部内容', async () => {
+    await renderVisuals({
+      title: '原始标题',
+      isCollapsed: true,
+      children: <div data-testid="custom-child">自定义内容</div>,
+    });
+
+    const defaultCollapsedTitle = Array.from(container.querySelectorAll('span')).find(
+      (el) => el.textContent === '原始标题',
+    );
+    expect(defaultCollapsedTitle).toBeUndefined();
+    expect(container.textContent).not.toContain('无标题');
+
+    const customChild = container.querySelector('[data-testid="custom-child"]');
+    expect(customChild).not.toBeNull();
+    expect(customChild?.textContent).toBe('自定义内容');
+  });
 });
