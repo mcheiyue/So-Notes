@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_NOTE_DARK_SPECTRUM, NOTE_COLORS, getNoteColor, getNoteDarkSpectrum } from './types';
+import type { AttachmentRef, Note } from './types';
+import { DEFAULT_NOTE_DARK_SPECTRUM, NOTE_COLORS, STORAGE_SCHEMA_VERSION, getNoteColor, getNoteDarkSpectrum } from './types';
 
 describe('深色便签颜色映射', () => {
   it('深色模式下 getNoteColor 返回 dark spectrum 的 bg', () => {
@@ -37,5 +38,75 @@ describe('深色便签颜色映射', () => {
     expect(getNoteColor('#fef9c3', false)).toBe('#fef9c3');
     expect(NOTE_COLORS.every((color) => color.startsWith('#'))).toBe(true);
     expect(NOTE_COLORS.some((color) => color.startsWith('rgba('))).toBe(false);
+  });
+});
+
+describe('STORAGE_SCHEMA_VERSION', () => {
+  it('schemaVersion 为 2', () => {
+    expect(STORAGE_SCHEMA_VERSION).toBe(2);
+  });
+});
+
+describe('AttachmentRef 与 Note.attachments', () => {
+  it('AttachmentRef 包含计划中的全部 7 个字段', () => {
+    const ref: AttachmentRef = {
+      id: 'att-001',
+      hash: 'a'.repeat(64),
+      filename: 'photo.jpg',
+      mimeType: 'image/jpeg',
+      size: 1024,
+      relativePath: 'attachments/' + 'a'.repeat(64) + '.jpg',
+      createdAt: Date.now(),
+    };
+    expect(ref.id).toBe('att-001');
+    expect(ref.hash).toHaveLength(64);
+    expect(ref.filename).toBe('photo.jpg');
+    expect(ref.mimeType).toBe('image/jpeg');
+    expect(ref.size).toBe(1024);
+    expect(ref.relativePath).toContain('attachments/');
+    expect(typeof ref.createdAt).toBe('number');
+  });
+
+  it('Note.attachments 为可选字段，缺失时不报错', () => {
+    const note: Note = {
+      id: 'n-1',
+      boardId: 'default',
+      x: 0,
+      y: 0,
+      title: 't',
+      content: 'c',
+      color: '#FFFFFF',
+      z: 1,
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    expect(note.attachments).toBeUndefined();
+  });
+
+  it('Note.attachments 可以附加 AttachmentRef 数组', () => {
+    const ref: AttachmentRef = {
+      id: 'att-002',
+      hash: 'b'.repeat(64),
+      filename: 'doc.pdf',
+      mimeType: 'application/pdf',
+      size: 2048,
+      relativePath: 'attachments/' + 'b'.repeat(64) + '.pdf',
+      createdAt: 1700000000000,
+    };
+    const note: Note = {
+      id: 'n-2',
+      boardId: 'default',
+      x: 10,
+      y: 20,
+      title: 't',
+      content: 'c',
+      color: '#fef9c3',
+      z: 2,
+      createdAt: 1700000000000,
+      updatedAt: 1700000000000,
+      attachments: [ref],
+    };
+    expect(note.attachments).toHaveLength(1);
+    expect(note.attachments?.[0]?.mimeType).toBe('application/pdf');
   });
 });

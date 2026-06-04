@@ -79,6 +79,17 @@ export function getNoteColor(color: NoteColor, isDarkMode: boolean): string {
   return getNoteDarkSpectrum(color).bg;
 }
 
+// 附件引用：仅保存元数据与相对路径，不包含二进制内容
+export interface AttachmentRef {
+  id: string;
+  hash: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  relativePath: string;
+  createdAt: number;
+}
+
 export interface Note {
   id: string;
   boardId: string; // New field
@@ -98,6 +109,7 @@ export interface Note {
   createdAt: number;
   updatedAt: number;
   deletedAt?: number | null; // Soft delete timestamp. If present, note is in Trash.
+  attachments?: AttachmentRef[];
 }
 
 export type NoteHighlightReason = 'created' | 'located' | 'edited';
@@ -166,7 +178,7 @@ export interface ContextMenuState {
   targetId?: string;
 }
 
-export const STORAGE_SCHEMA_VERSION = 1;
+export const STORAGE_SCHEMA_VERSION = 2;
 
 export interface StorageData {
   schemaVersion: number;
