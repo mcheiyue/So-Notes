@@ -6,7 +6,9 @@
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 use tauri::Manager;
 
@@ -18,6 +20,10 @@ const ATTACHMENTS_SUBDIR: &str = "attachments";
 const DEFAULT_MIME: &str = "application/octet-stream";
 const DEFAULT_EXTENSION: &str = "bin";
 const COPY_BUF_SIZE: usize = 64 * 1024; // 64 KiB 流式拷贝缓冲区
+
+type AttachmentHashLocks = Mutex<HashMap<String, Arc<Mutex<()>>>>;
+
+static ATTACHMENT_HASH_LOCKS: OnceLock<AttachmentHashLocks> = OnceLock::new();
 
 // ---------------------------------------------------------------------------
 // 返回值类型（serde camelCase 以便前端直接消费）
@@ -261,27 +267,6 @@ impl Drop for TempFileGuard {
     }
 }
 
-struct HashLockGuard {
-    path: PathBuf,
-    file: Option<std::fs::File>,
-}
-
-impl HashLockGuard {
-    fn new(path: PathBuf, file: std::fs::File) -> Self {
-        Self {
-            path,
-            file: Some(file),
-        }
-    }
-}
-
-impl Drop for HashLockGuard {
-    fn drop(&mut self) {
-        self.file.take();
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
 fn create_random_tmp_file(attach_dir: &Path) -> Result<(PathBuf, std::fs::File), String> {
     for _ in 0..16 {
         let suffix = rand::random::<u128>();
@@ -299,22 +284,17 @@ fn create_random_tmp_file(attach_dir: &Path) -> Result<(PathBuf, std::fs::File),
     Err("创建临时文件失败：随机文件名连续冲突".to_string())
 }
 
-fn acquire_hash_lock(attach_dir: &Path, hash: &str) -> Result<HashLockGuard, String> {
-    let lock_path = attach_dir.join(format!(".lock-{hash}"));
-    for _ in 0..200 {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(file) => return Ok(HashLockGuard::new(lock_path, file)),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Err(e) => return Err(format!("创建附件哈希锁失败: {e}")),
-        }
-    }
-    Err("创建附件哈希锁失败：等待同名附件写入超时".to_string())
+fn lock_for_hash(hash: &str) -> Arc<Mutex<()>> {
+    let locks = ATTACHMENT_HASH_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = match locks.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    Arc::clone(
+        guard
+            .entry(hash.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(()))),
+    )
 }
 
 fn write_attachment_from_path_blocking(
@@ -360,7 +340,11 @@ fn write_attachment_from_path_blocking(
     let relative_path = content_addressed_relative_path(&hash_hex, Some(&ext));
     let final_path = attach_dir.join(format!("{hash_hex}.{ext}"));
 
-    let _hash_lock = acquire_hash_lock(&attach_dir, &hash_hex)?;
+    let hash_lock = lock_for_hash(&hash_hex);
+    let _hash_guard = match hash_lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     let bytes_written = if final_path.exists() {
         0
     } else {
@@ -831,7 +815,10 @@ mod tests {
         assert!(std::fs::read_dir(root.join("attachments"))
             .expect("read attach dir")
             .filter_map(Result::ok)
-            .all(|entry| !entry.file_name().to_string_lossy().starts_with(".tmp-")));
+            .all(|entry| {
+                let name = entry.file_name().to_string_lossy().to_string();
+                !name.starts_with(".tmp-") && !name.starts_with(".lock-")
+            }));
 
         let _ = std::fs::remove_dir_all(root);
     }
