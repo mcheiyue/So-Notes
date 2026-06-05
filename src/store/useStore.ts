@@ -318,6 +318,11 @@ const getLegacyStorageUpdatedAt = (notes: Note[]): number => {
   return Math.max(...notes.map((note) => note.updatedAt || 0));
 };
 
+const hasPersistedNotes = (data: StorageData | null | undefined): data is StorageData =>
+  Array.isArray(data?.notes) && data.notes.length > 0;
+
+const isEmptyStorageData = (data: StorageData): boolean => data.notes.length === 0;
+
 const normalizeStorageDataMetadata = (data: StorageDataInput): StorageData => ({
   ...data,
   schemaVersion: isFiniteTimestamp(data.schemaVersion) ? data.schemaVersion : STORAGE_SCHEMA_VERSION,
@@ -603,12 +608,15 @@ export const useStore = create<State>()(
       // console.log(`Init Arbitration -> WAL: ${walTime}, DISK: ${diskTime}`);
 
       // Decision Logic
-      if (diskData && diskTime > walTime) {
+      if (diskData && isEmptyStorageData(diskData) && hasPersistedNotes(normalizedWalData)) {
+        finalData = normalizedWalData;
+        source = 'WAL';
+      } else if (diskData && diskTime > walTime) {
         // Disk is newer (or WAL is empty/stale) -> Use Disk
         // console.log('Using DISK (Newer content found)');
         finalData = diskData;
         source = 'DISK';
-      } else if (normalizedWalData && normalizedWalData.notes.length > 0) {
+      } else if (hasPersistedNotes(normalizedWalData)) {
         // WAL is newer or equal -> Use WAL
         // console.log('Using WAL (Cache is active)');
         finalData = normalizedWalData;
@@ -2186,6 +2194,17 @@ export const useStore = create<State>()(
       const storageData = serializeState(currentState);
       const currentGen = saveGenerationId + 1;
       set({ isSaving: true, saveStatus: 'saving', saveError: null, saveGenerationId: currentGen });
+
+      if (isEmptyStorageData(storageData)) {
+        if (get().saveGenerationId === currentGen) {
+          set({
+            isSaving: false,
+            saveStatus: 'error',
+            saveError: '检测到空便签数据，已阻止覆盖本地存储。',
+          });
+        }
+        return false;
+      }
 
       try {
         const serializationStart = performance.now();

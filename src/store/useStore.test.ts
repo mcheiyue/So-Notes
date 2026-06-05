@@ -79,6 +79,47 @@ describe('v1.4.0 StorageData 演进契约', () => {
       storageUpdatedAt: 123,
     });
   });
+
+  it('磁盘是较新空快照时优先保留较旧非空 WAL', async () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 5000,
+      notes: [{
+        id: 'wal-note',
+        boardId: 'wal-board',
+        x: 10,
+        y: 20,
+        title: 'WAL 数据',
+        content: '不能被空磁盘覆盖',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 5000,
+      }],
+      boards: [{ id: 'wal-board', name: 'WAL 看板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'wal-board',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    });
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 9000,
+      notes: [],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    }));
+
+    await useStore.getState().init();
+
+    const state = useStore.getState();
+    expect(state.currentBoardId).toBe('wal-board');
+    expect(state.notesById['wal-note']?.title).toBe('WAL 数据');
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith('load_content', { filename: 'data.json' });
+  });
 });
 
 describe('useStore 布局持久化契约', () => {
@@ -966,7 +1007,18 @@ describe('useStore 保存状态可见性契约', () => {
     vi.clearAllMocks();
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
-      ...createEmptyNormalizedNotesState(),
+      ...normalizeNotes([{
+        id: 'save-note',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '保存样本',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
       currentBoardId: 'default',
       config: { ...useStore.getState().config, maxZ: 1 },
@@ -997,6 +1049,25 @@ describe('useStore 保存状态可见性契约', () => {
     expect(state.isSaving).toBe(false);
     expect(state.saveStatus).toBe('error');
     expect(state.saveError).toBe('写入本地缓存失败，未保存到磁盘。');
+  });
+
+  it('空便签状态会阻止写入 WAL 和磁盘', async () => {
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    const saved = await useStore.getState().saveToDisk();
+    const state = useStore.getState();
+
+    expect(saved).toBe(false);
+    expect(db.saveWAL).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith('save_content', expect.anything());
+    expect(state.isSaving).toBe(false);
+    expect(state.saveStatus).toBe('error');
+    expect(state.saveError).toBe('检测到空便签数据，已阻止覆盖本地存储。');
   });
 
   it('磁盘写入异常时写入 error 状态并透传错误消息', async () => {
@@ -1032,7 +1103,18 @@ describe('v1.3.0 并发与代际契约', () => {
     vi.clearAllMocks();
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
-      ...createEmptyNormalizedNotesState(),
+      ...normalizeNotes([{
+        id: 'gen-note',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '代际保存样本',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      }]),
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
       currentBoardId: 'default',
       config: { ...useStore.getState().config, maxZ: 1 },

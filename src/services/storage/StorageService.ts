@@ -34,6 +34,11 @@ const buildNewDefaultData = (): StorageData =>
     config: DEFAULT_CONFIG,
   });
 
+const hasPersistedNotes = (data: StorageData | null | undefined): data is StorageData =>
+  Array.isArray(data?.notes) && data.notes.length > 0;
+
+const isEmptyStorageData = (data: StorageData): boolean => data.notes.length === 0;
+
 const migrateAndSanitize = (data: StorageData): StorageData => {
   data.schemaVersion = STORAGE_SCHEMA_VERSION;
 
@@ -86,10 +91,13 @@ export async function bootstrap(): Promise<BootstrapResult> {
   const walTime = getLatestUpdateTimestamp(walData);
   const diskTime = getLatestUpdateTimestamp(diskData);
 
-  if (diskData && diskTime > walTime) {
+  if (diskData && isEmptyStorageData(diskData) && hasPersistedNotes(walData)) {
+    finalData = walData;
+    source = 'WAL';
+  } else if (diskData && diskTime > walTime) {
     finalData = diskData;
     source = 'DISK';
-  } else if (walData && walData.notes.length > 0) {
+  } else if (hasPersistedNotes(walData)) {
     finalData = walData;
     source = 'WAL';
   } else if (diskData) {
@@ -119,6 +127,10 @@ const serializeDomainState = (state: DomainState): StorageData => ({
 });
 
 const defaultWriteDisk = async (data: StorageData): Promise<boolean> => {
+  if (isEmptyStorageData(data)) {
+    return false;
+  }
+
   try {
     const jsonString = JSON.stringify(data, null, 2);
     const result = await invoke<SaveResult>('save_content', {
@@ -163,6 +175,10 @@ export function attach(options?: AttachOptions): AttachResult {
 
     setStatus('writing-wal');
     const data = serializeDomainState(latestState);
+    if (isEmptyStorageData(data)) {
+      setStatus('error');
+      return;
+    }
     const success = await writeWAL(data);
 
     if (!success) {
@@ -191,6 +207,11 @@ export function attach(options?: AttachOptions): AttachResult {
 
         setStatus('writing-disk');
         const data = serializeDomainState(latestState);
+        if (isEmptyStorageData(data)) {
+          setStatus('error');
+          diskInFlight = false;
+          return false;
+        }
         const success = await writeDisk(data);
 
         if (!success) {
@@ -248,6 +269,10 @@ export function attach(options?: AttachOptions): AttachResult {
   const onBeforeUnload = () => {
     if (!dirty || !latestState) return;
     const data = serializeDomainState(latestState);
+    if (isEmptyStorageData(data)) {
+      setStatus('error');
+      return;
+    }
     writeWAL(data);
     writeDisk(data);
   };
@@ -279,6 +304,10 @@ export function attach(options?: AttachOptions): AttachResult {
 
     setStatus('writing-wal');
     const data = serializeDomainState(latestState);
+    if (isEmptyStorageData(data)) {
+      setStatus('error');
+      return false;
+    }
     const walSuccess = await writeWAL(data);
     if (!walSuccess) {
       setStatus('error');

@@ -100,6 +100,32 @@ describe('StorageService.bootstrap', () => {
     expect(result.recovered).toBe(false);
   });
 
+  it('磁盘是较新空快照时不覆盖较旧非空 WAL', async () => {
+    const walTime = 5000;
+    const diskTime = 9000;
+
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [],
+      storageUpdatedAt: diskTime,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: walTime,
+      notes: [{ id: 'w1', boardId: 'default', x: 5, y: 5, title: 'WAL', content: '', color: '#FFFFFF', z: 1, createdAt: 50, updatedAt: walTime }],
+      boards: [DEFAULT_BOARD],
+      currentBoardId: DEFAULT_BOARD.id,
+      config: DEFAULT_CONFIG,
+    });
+
+    const result = await bootstrap();
+
+    expect(result.source).toBe('WAL');
+    expect(result.data.notes[0].id).toBe('w1');
+    expect(result.syncAction.type).toBe('SYNC_WAL_TO_DISK');
+    expect(result.diskTime).toBe(diskTime);
+    expect(result.walTime).toBe(walTime);
+  });
+
   it('WAL 为空时回退到 disk', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [{ id: 'd1', boardId: 'default', x: 0, y: 0, title: '', content: '', color: '#FFFFFF', z: 1, createdAt: 100, updatedAt: 200 }],
@@ -247,6 +273,37 @@ describe('StorageService.bootstrap', () => {
 });
 
 const makeDomainState = () => ({
+  notesById: {
+    'note-1': {
+      id: 'note-1',
+      boardId: DEFAULT_BOARD.id,
+      x: 10,
+      y: 20,
+      title: '安全写入样本',
+      content: '',
+      color: '#FFFFFF',
+      z: 1,
+      createdAt: 100,
+      updatedAt: 100,
+    },
+  },
+  allNoteIds: ['note-1'],
+  boardNoteIds: { [DEFAULT_BOARD.id]: ['note-1'] },
+  layoutNotesById: {
+    'note-1': {
+      id: 'note-1',
+      boardId: DEFAULT_BOARD.id,
+      x: 10,
+      y: 20,
+      z: 1,
+    },
+  },
+  boards: [DEFAULT_BOARD],
+  currentBoardId: DEFAULT_BOARD.id,
+  config: { ...DEFAULT_CONFIG },
+});
+
+const makeEmptyDomainState = () => ({
   notesById: {},
   allNoteIds: [],
   boardNoteIds: {},
@@ -356,6 +413,40 @@ describe('StorageService.attach', () => {
     expect(result).toBe(true);
     expect(writeWAL).not.toHaveBeenCalled();
     expect(writeDisk).not.toHaveBeenCalled();
+
+    handle.detach();
+  });
+
+  it('flushPersistNow 检测到空领域状态时拒绝写入 WAL 和磁盘', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk });
+
+    capturedBridgeCallback!(makeEmptyDomainState());
+
+    const result = await handle.flushPersistNow();
+
+    expect(result).toBe(false);
+    expect(writeWAL).not.toHaveBeenCalled();
+    expect(writeDisk).not.toHaveBeenCalled();
+    expect(handle.getStatus()).toBe('error');
+
+    handle.detach();
+  });
+
+  it('定时写入检测到空领域状态时拒绝写入 WAL 和磁盘', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk, walThrottleMs: 100, diskDebounceMs: 200 });
+
+    capturedBridgeCallback!(makeEmptyDomainState());
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(writeWAL).not.toHaveBeenCalled();
+    expect(writeDisk).not.toHaveBeenCalled();
+    expect(handle.getStatus()).toBe('error');
 
     handle.detach();
   });
