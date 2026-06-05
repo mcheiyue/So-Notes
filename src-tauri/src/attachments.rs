@@ -213,22 +213,14 @@ fn normalize_path(path: &Path) -> PathBuf {
 // ---------------------------------------------------------------------------
 
 /// 获取附件基础目录（`<Documents>/SoNotes/attachments/`），不存在则创建。
-fn ensure_attachments_base_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let doc_dir = app
-        .path()
-        .document_dir()
-        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+fn ensure_attachments_base_dir_from_document(doc_dir: &Path) -> Result<PathBuf, String> {
     let attach_dir = doc_dir.join("SoNotes").join(ATTACHMENTS_SUBDIR);
     std::fs::create_dir_all(&attach_dir).map_err(|e| format!("创建附件目录失败: {e}"))?;
     Ok(attach_dir)
 }
 
 /// 获取 SoNotes 基础目录（`<Documents>/SoNotes/`），不存在则创建。
-fn ensure_sonotes_base_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let doc_dir = app
-        .path()
-        .document_dir()
-        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+fn ensure_sonotes_base_dir_from_document(doc_dir: &Path) -> Result<PathBuf, String> {
     let base = doc_dir.join("SoNotes");
     std::fs::create_dir_all(&base).map_err(|e| format!("创建 SoNotes 目录失败: {e}"))?;
     Ok(base)
@@ -269,6 +261,27 @@ impl Drop for TempFileGuard {
     }
 }
 
+struct HashLockGuard {
+    path: PathBuf,
+    file: Option<std::fs::File>,
+}
+
+impl HashLockGuard {
+    fn new(path: PathBuf, file: std::fs::File) -> Self {
+        Self {
+            path,
+            file: Some(file),
+        }
+    }
+}
+
+impl Drop for HashLockGuard {
+    fn drop(&mut self) {
+        self.file.take();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 fn create_random_tmp_file(attach_dir: &Path) -> Result<(PathBuf, std::fs::File), String> {
     for _ in 0..16 {
         let suffix = rand::random::<u128>();
@@ -284,6 +297,24 @@ fn create_random_tmp_file(attach_dir: &Path) -> Result<(PathBuf, std::fs::File),
         }
     }
     Err("创建临时文件失败：随机文件名连续冲突".to_string())
+}
+
+fn acquire_hash_lock(attach_dir: &Path, hash: &str) -> Result<HashLockGuard, String> {
+    let lock_path = attach_dir.join(format!(".lock-{hash}"));
+    for _ in 0..200 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(file) => return Ok(HashLockGuard::new(lock_path, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(e) => return Err(format!("创建附件哈希锁失败: {e}")),
+        }
+    }
+    Err("创建附件哈希锁失败：等待同名附件写入超时".to_string())
 }
 
 fn write_attachment_from_path_blocking(
@@ -329,21 +360,13 @@ fn write_attachment_from_path_blocking(
     let relative_path = content_addressed_relative_path(&hash_hex, Some(&ext));
     let final_path = attach_dir.join(format!("{hash_hex}.{ext}"));
 
+    let _hash_lock = acquire_hash_lock(&attach_dir, &hash_hex)?;
     let bytes_written = if final_path.exists() {
         0
     } else {
-        match std::fs::rename(&tmp_path, &final_path) {
-            Ok(()) => {
-                tmp_guard.disarm();
-                total_size
-            }
-            Err(e) if final_path.exists() => {
-                // 并发写入相同内容时，另一个请求可能已完成 rename；此时复用已有文件。
-                let _ = e;
-                0
-            }
-            Err(e) => return Err(format!("重命名临时文件失败: {e}")),
-        }
+        std::fs::rename(&tmp_path, &final_path).map_err(|e| format!("重命名临时文件失败: {e}"))?;
+        tmp_guard.disarm();
+        total_size
     };
 
     let meta = std::fs::metadata(&final_path).map_err(|e| format!("读取附件元数据失败: {e}"))?;
@@ -378,9 +401,13 @@ pub async fn write_attachment_from_path(
     filename: String,
     mime_type: Option<String>,
 ) -> Result<AttachmentWriteResult, String> {
-    let attach_dir = ensure_attachments_base_dir(&app)?;
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("获取文档目录失败: {e}"))?;
     let normalized_mime = normalize_mime(mime_type.as_deref());
     tokio::task::spawn_blocking(move || {
+        let attach_dir = ensure_attachments_base_dir_from_document(&doc_dir)?;
         write_attachment_from_path_blocking(attach_dir, source_path, filename, normalized_mime)
     })
     .await
@@ -393,10 +420,18 @@ pub async fn attachment_exists(
     app: tauri::AppHandle,
     relative_path: String,
 ) -> Result<bool, String> {
-    let base = ensure_sonotes_base_dir(&app)?;
-    let _attach_dir = ensure_attachments_base_dir(&app)?;
-    let resolved = resolve_attachment_path_missing_safe(&base, &relative_path)?;
-    Ok(resolved.is_file())
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+    tokio::task::spawn_blocking(move || {
+        let base = ensure_sonotes_base_dir_from_document(&doc_dir)?;
+        let _attach_dir = ensure_attachments_base_dir_from_document(&doc_dir)?;
+        let resolved = resolve_attachment_path_missing_safe(&base, &relative_path)?;
+        Ok(resolved.is_file())
+    })
+    .await
+    .map_err(|e| format!("附件存在性检查线程失败: {e}"))?
 }
 
 /// 读取指定相对路径的附件文件元数据。
@@ -405,46 +440,48 @@ pub async fn read_attachment_metadata(
     app: tauri::AppHandle,
     relative_path: String,
 ) -> Result<AttachmentFileMetadata, String> {
-    let base = ensure_sonotes_base_dir(&app)?;
-    let _attach_dir = ensure_attachments_base_dir(&app)?;
-    let resolved = resolve_existing_attachment(&base, &relative_path)?;
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+    tokio::task::spawn_blocking(move || {
+        let base = ensure_sonotes_base_dir_from_document(&doc_dir)?;
+        let _attach_dir = ensure_attachments_base_dir_from_document(&doc_dir)?;
+        let resolved = resolve_existing_attachment(&base, &relative_path)?;
 
-    if !resolved.is_file() {
-        return Err(format!("附件文件不存在: {relative_path}"));
-    }
+        if !resolved.is_file() {
+            return Err(format!("附件文件不存在: {relative_path}"));
+        }
 
-    let meta = std::fs::metadata(&resolved).map_err(|e| format!("读取文件元数据失败: {e}"))?;
+        let meta = std::fs::metadata(&resolved).map_err(|e| format!("读取文件元数据失败: {e}"))?;
 
-    // 从文件名反推哈希和展示用文件名
-    let file_stem = resolved
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_string();
-    let file_ext = resolved
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| format!(".{s}"))
-        .unwrap_or_default();
-    let display_filename = format!("{file_stem}{file_ext}");
+        let file_stem = resolved
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let file_ext = resolved
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| format!(".{s}"))
+            .unwrap_or_default();
+        let display_filename = format!("{file_stem}{file_ext}");
+        let hash = file_stem.to_string();
+        let mime_type =
+            mime_from_extension(resolved.extension().and_then(|s| s.to_str()).unwrap_or(""));
+        let created_at = meta.created().map(system_time_to_millis).unwrap_or(0);
 
-    // 通过重新计算哈希获取精确值（从文件名解析可能不可靠）
-    // 但为避免大文件重读，直接使用文件名中的哈希前缀
-    let hash = file_stem.to_string();
-
-    let mime_type =
-        mime_from_extension(resolved.extension().and_then(|s| s.to_str()).unwrap_or(""));
-
-    let created_at = meta.created().map(system_time_to_millis).unwrap_or(0);
-
-    Ok(AttachmentFileMetadata {
-        hash,
-        filename: display_filename,
-        mime_type,
-        size: meta.len(),
-        relative_path,
-        created_at,
+        Ok(AttachmentFileMetadata {
+            hash,
+            filename: display_filename,
+            mime_type,
+            size: meta.len(),
+            relative_path,
+            created_at,
+        })
     })
+    .await
+    .map_err(|e| format!("附件元数据读取线程失败: {e}"))?
 }
 
 /// 从扩展名推断 MIME 类型（与 `safe_extension_for_mime` 对称）。
@@ -738,5 +775,64 @@ mod tests {
     fn traversal_in_relative_path_rejected_by_safe_check() {
         assert!(!is_safe_relative_path("attachments/../../../x"));
         assert!(!is_safe_relative_path("attachments/sub/../../x"));
+    }
+
+    fn test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sonotes-attachments-{name}-{:032x}",
+            rand::random::<u128>()
+        ));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        dir
+    }
+
+    #[test]
+    fn random_tmp_file_uses_exclusive_creation() {
+        let dir = test_dir("tmp");
+        let (first_path, first_file) = create_random_tmp_file(&dir).expect("first tmp");
+        let (second_path, second_file) = create_random_tmp_file(&dir).expect("second tmp");
+
+        assert_ne!(first_path, second_path);
+        assert!(first_path.exists());
+        assert!(second_path.exists());
+
+        drop(first_file);
+        drop(second_file);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn duplicate_write_reuses_existing_content() {
+        let root = test_dir("dedupe");
+        let attach_dir = root.join("attachments");
+        std::fs::create_dir_all(&attach_dir).expect("create attach dir");
+        let source_path = root.join("source.txt");
+        std::fs::write(&source_path, b"same attachment bytes").expect("write source");
+
+        let first = write_attachment_from_path_blocking(
+            attach_dir.clone(),
+            source_path.to_string_lossy().to_string(),
+            "source.txt".to_string(),
+            "text/plain".to_string(),
+        )
+        .expect("first write");
+        let second = write_attachment_from_path_blocking(
+            attach_dir,
+            source_path.to_string_lossy().to_string(),
+            "source.txt".to_string(),
+            "text/plain".to_string(),
+        )
+        .expect("second write");
+
+        assert_eq!(first.hash, second.hash);
+        assert_eq!(first.relative_path, second.relative_path);
+        assert_eq!(first.bytes_written, b"same attachment bytes".len() as u64);
+        assert_eq!(second.bytes_written, 0);
+        assert!(std::fs::read_dir(root.join("attachments"))
+            .expect("read attach dir")
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().starts_with(".tmp-")));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
