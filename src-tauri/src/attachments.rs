@@ -246,6 +246,120 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+struct TempFileGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TempFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn create_random_tmp_file(attach_dir: &Path) -> Result<(PathBuf, std::fs::File), String> {
+    for _ in 0..16 {
+        let suffix = rand::random::<u128>();
+        let tmp_path = attach_dir.join(format!(".tmp-{suffix:032x}"));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => return Ok((tmp_path, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("创建临时文件失败: {e}")),
+        }
+    }
+    Err("创建临时文件失败：随机文件名连续冲突".to_string())
+}
+
+fn write_attachment_from_path_blocking(
+    attach_dir: PathBuf,
+    source_path: String,
+    filename: String,
+    normalized_mime: String,
+) -> Result<AttachmentWriteResult, String> {
+    let src = Path::new(&source_path);
+    if !src.is_file() {
+        return Err(format!("源文件不存在或不是文件: {source_path}"));
+    }
+
+    // 流式拷贝到临时文件并同步计算 SHA-256；失败路径由 guard 清理 tmp。
+    let mut hasher = Sha256::new();
+    let (tmp_path, mut tmp_file) = create_random_tmp_file(&attach_dir)?;
+    let mut tmp_guard = TempFileGuard::new(tmp_path.clone());
+
+    let mut src_file = std::fs::File::open(src).map_err(|e| format!("打开源文件失败: {e}"))?;
+    let mut buf = vec![0u8; COPY_BUF_SIZE];
+    let mut total_size: u64 = 0;
+
+    loop {
+        let bytes_read = std::io::Read::read(&mut src_file, &mut buf)
+            .map_err(|e| format!("读取源文件失败: {e}"))?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buf[..bytes_read]);
+        std::io::Write::write_all(&mut tmp_file, &buf[..bytes_read])
+            .map_err(|e| format!("写入临时文件失败: {e}"))?;
+        total_size += bytes_read as u64;
+    }
+
+    std::io::Write::flush(&mut tmp_file).map_err(|e| format!("刷新临时文件失败: {e}"))?;
+    drop(tmp_file);
+
+    let hash_bytes = hasher.finalize();
+    let hash_hex = bytes_to_hex(&hash_bytes);
+    let ext = safe_extension_from_filename(&filename)
+        .or_else(|| safe_extension_for_mime(&normalized_mime).map(String::from))
+        .unwrap_or_else(|| DEFAULT_EXTENSION.to_string());
+    let relative_path = content_addressed_relative_path(&hash_hex, Some(&ext));
+    let final_path = attach_dir.join(format!("{hash_hex}.{ext}"));
+
+    let bytes_written = if final_path.exists() {
+        0
+    } else {
+        match std::fs::rename(&tmp_path, &final_path) {
+            Ok(()) => {
+                tmp_guard.disarm();
+                total_size
+            }
+            Err(e) if final_path.exists() => {
+                // 并发写入相同内容时，另一个请求可能已完成 rename；此时复用已有文件。
+                let _ = e;
+                0
+            }
+            Err(e) => return Err(format!("重命名临时文件失败: {e}")),
+        }
+    };
+
+    let meta = std::fs::metadata(&final_path).map_err(|e| format!("读取附件元数据失败: {e}"))?;
+    let created_at = meta.created().map(system_time_to_millis).unwrap_or(0);
+
+    Ok(AttachmentWriteResult {
+        hash: hash_hex,
+        filename,
+        mime_type: normalized_mime,
+        size: total_size,
+        relative_path,
+        created_at,
+        bytes_written,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Tauri 命令
 // ---------------------------------------------------------------------------
@@ -266,82 +380,11 @@ pub async fn write_attachment_from_path(
 ) -> Result<AttachmentWriteResult, String> {
     let attach_dir = ensure_attachments_base_dir(&app)?;
     let normalized_mime = normalize_mime(mime_type.as_deref());
-
-    let src = Path::new(&source_path);
-    if !src.is_file() {
-        return Err(format!("源文件不存在或不是文件: {source_path}"));
-    }
-
-    // 流式拷贝到临时文件并同步计算 SHA-256
-    let mut hasher = Sha256::new();
-    let tmp_path = attach_dir.join(format!(
-        ".tmp-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-
-    let mut src_file = std::fs::File::open(src).map_err(|e| format!("打开源文件失败: {e}"))?;
-    let mut tmp_file =
-        std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {e}"))?;
-
-    let mut buf = vec![0u8; COPY_BUF_SIZE];
-    let mut total_size: u64 = 0;
-
-    loop {
-        let bytes_read = std::io::Read::read(&mut src_file, &mut buf)
-            .map_err(|e| format!("读取源文件失败: {e}"))?;
-        if bytes_read == 0 {
-            break;
-        }
-        hasher.update(&buf[..bytes_read]);
-        std::io::Write::write_all(&mut tmp_file, &buf[..bytes_read])
-            .map_err(|e| format!("写入临时文件失败: {e}"))?;
-        total_size += bytes_read as u64;
-    }
-
-    std::io::Write::flush(&mut tmp_file).map_err(|e| format!("刷新临时文件失败: {e}"))?;
-
-    // 计算哈希并确定最终路径
-    let hash_bytes = hasher.finalize();
-    let hash_hex = bytes_to_hex(&hash_bytes);
-    let ext = safe_extension_from_filename(&filename)
-        .or_else(|| safe_extension_for_mime(&normalized_mime).map(String::from))
-        .unwrap_or_else(|| DEFAULT_EXTENSION.to_string());
-    let relative_path = content_addressed_relative_path(&hash_hex, Some(&ext));
-    let final_path = attach_dir.join(format!(
-        "{hash_hex}{}",
-        format!(".{ext}")
-    ));
-
-    let bytes_written: u64;
-
-    if final_path.exists() {
-        // 内容已存在：删除临时文件，复用已有
-        let _ = std::fs::remove_file(&tmp_path);
-        bytes_written = 0;
-    } else {
-        std::fs::rename(&tmp_path, &final_path).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp_path);
-            format!("重命名临时文件失败: {e}")
-        })?;
-        bytes_written = total_size;
-    }
-
-    // 读取最终文件的元数据（创建时间）
-    let meta = std::fs::metadata(&final_path).map_err(|e| format!("读取附件元数据失败: {e}"))?;
-    let created_at = meta.created().map(system_time_to_millis).unwrap_or(0);
-
-    Ok(AttachmentWriteResult {
-        hash: hash_hex,
-        filename,
-        mime_type: normalized_mime,
-        size: total_size,
-        relative_path,
-        created_at,
-        bytes_written,
+    tokio::task::spawn_blocking(move || {
+        write_attachment_from_path_blocking(attach_dir, source_path, filename, normalized_mime)
     })
+    .await
+    .map_err(|e| format!("附件写入线程失败: {e}"))?
 }
 
 /// 检查指定相对路径的附件文件是否存在。
