@@ -2,12 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
-const { emitMock, invokeMock, listenMock, startDraggingMock, setSizeMock } = vi.hoisted(() => ({
+const { emitMock, invokeMock, listenMock, startDraggingMock, setSizeMock, convertFileSrcMock, resolveAttachmentPathMock } = vi.hoisted(() => ({
   emitMock: vi.fn(),
   invokeMock: vi.fn(),
   listenMock: vi.fn(),
   startDraggingMock: vi.fn(),
   setSizeMock: vi.fn().mockResolvedValue(undefined),
+  convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
+  resolveAttachmentPathMock: vi.fn(async (path: string) => `/abs/${path}`),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -17,6 +19,11 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
+  convertFileSrc: convertFileSrcMock,
+}));
+
+vi.mock('../services/storage/attachmentPersistence', () => ({
+  resolveAttachmentPath: resolveAttachmentPathMock,
 }));
 
 vi.mock('@tauri-apps/api/window', () => ({
@@ -51,6 +58,7 @@ vi.mock('../utils/fileSystem', () => ({
 import { DetachedNoteWindow } from './DetachedNoteWindow';
 import { DETACHED_NOTE_EVENTS } from '../types/detachedNoteSnapshot';
 import type { DetachedNoteSnapshot } from '../types/detachedNoteSnapshot';
+import type { AttachmentRef } from '../store/types';
 
 let resizeCallback: ResizeObserverCallback | null = null;
 
@@ -72,6 +80,17 @@ const createSnapshot = (overrides: Partial<DetachedNoteSnapshot> = {}): Detached
   content: '测试正文',
   color: '#FFFFFF',
   isCollapsed: false,
+  ...overrides,
+});
+
+const createAttachment = (overrides: Partial<AttachmentRef> = {}): AttachmentRef => ({
+  id: 'att-1',
+  hash: 'a'.repeat(64),
+  filename: 'photo.png',
+  mimeType: 'image/png',
+  size: 1024,
+  relativePath: `attachments/${'a'.repeat(64)}.png`,
+  createdAt: 1,
   ...overrides,
 });
 
@@ -102,6 +121,9 @@ describe('DetachedNoteWindow 按钮行为', () => {
     invokeMock.mockClear();
     startDraggingMock.mockClear();
     setSizeMock.mockClear();
+    convertFileSrcMock.mockClear();
+    resolveAttachmentPathMock.mockClear();
+    resolveAttachmentPathMock.mockImplementation(async (path: string) => `/abs/${path}`);
     resizeCallback = null;
     listenMock.mockResolvedValue(vi.fn());
     emitMock.mockResolvedValue(undefined);
@@ -220,6 +242,19 @@ describe('DetachedNoteWindow 按钮行为', () => {
     expect(noteEl).not.toBeNull();
     expect(noteEl!.className).not.toContain('rounded-none');
     expect(noteEl!.className).toContain('rounded-xl');
+  });
+
+  it('撕下窗口只读渲染图片附件预览且不显示移除按钮', async () => {
+    const attachment = createAttachment();
+    await renderWindow();
+    simulateSnapshot(createSnapshot({ attachments: [attachment] }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="note-attachments"]')).not.toBeNull();
+      expect(container.querySelector('img')?.getAttribute('src')).toBe(`asset://localhost//abs/${attachment.relativePath}`);
+    });
+
+    expect(container.querySelector(`[data-testid="attachment-remove-${attachment.id}"]`)).toBeNull();
   });
 
   it('点击定位按钮向主窗口发送 locate 事件', async () => {

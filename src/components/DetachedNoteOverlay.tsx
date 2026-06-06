@@ -6,6 +6,7 @@ import { useUIStore, uiSelectors } from '../store/uiStore';
 import { useStore } from '../store/useStore';
 import { appController } from '../controllers/appController';
 import { NoteVisuals } from './note-render/NoteVisuals';
+import { NoteAttachments } from './note-render/NoteAttachments';
 import { Z_INDEX } from '../constants/layout';
 import { cn } from '../utils/cn';
 import { useDarkMode } from '../hooks/useDarkMode';
@@ -131,6 +132,7 @@ const DetachedNoteShell: React.FC<{
         content: note.content,
         color: note.color,
         isCollapsed: note.collapsed ?? false,
+        attachments: note.attachments ?? [],
       };
     }),
   );
@@ -230,7 +232,27 @@ const DetachedNoteShell: React.FC<{
               </div>
             </>
           }
-        />
+        >
+          {!noteSnapshot.isCollapsed && (
+            <>
+              <div data-note-title-region="true" className="px-4 pt-3 pb-1">
+                <div className={cn('w-full truncate text-text-primary font-bold text-[16px]', noteSnapshot.title ? 'block' : 'hidden')}>
+                  {noteSnapshot.title}
+                </div>
+              </div>
+              <div data-note-content-region="true" className="flex-1 pb-4 pt-0 min-h-0">
+                <div className="w-full px-4 text-text-secondary dark:text-text-primary font-normal text-[15px] leading-relaxed">
+                  {noteSnapshot.content || <span className="text-text-tertiary">记点什么…</span>}
+                </div>
+                <NoteAttachments
+                  noteId={noteId}
+                  attachments={noteSnapshot.attachments ?? []}
+                  readOnly
+                />
+              </div>
+            </>
+          )}
+        </NoteVisuals>
       </div>
     </div>
   );

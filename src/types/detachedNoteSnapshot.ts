@@ -1,4 +1,4 @@
-import type { NoteColor, ThemeMode } from '../store/types';
+import type { AttachmentRef, NoteColor, ThemeMode } from '../store/types';
 
 /**
  * 撕下窗口只读快照。
@@ -11,6 +11,7 @@ export interface DetachedNoteSnapshot {
   content: string;
   color: NoteColor;
   isCollapsed: boolean;
+  attachments?: AttachmentRef[];
   deletedAt?: number | null;
 }
 

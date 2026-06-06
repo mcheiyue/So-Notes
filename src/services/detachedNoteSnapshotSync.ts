@@ -2,7 +2,7 @@ import { emitTo, listen } from '@tauri-apps/api/event';
 import { useStore } from '../store/useStore';
 import type { DetachedNoteReadyPayload, DetachedNoteSnapshot, DetachedNoteThemePayload } from '../types/detachedNoteSnapshot';
 import { DETACHED_NOTE_EVENTS } from '../types/detachedNoteSnapshot';
-import type { ThemeMode } from '../store/types';
+import type { AttachmentRef, ThemeMode } from '../store/types';
 
 const SNAPSHOT_THROTTLE_MS = 100;
 
@@ -48,7 +48,10 @@ const buildThemePayload = (): DetachedNoteThemePayload => {
 const emitTheme = (noteId: string): Promise<void> =>
   emitTo(detachedNoteLabel(noteId), DETACHED_NOTE_EVENTS.THEME, buildThemePayload()).catch(() => undefined);
 
-const syncDetachedNote = (noteId: string, note: { title: string; content: string; color: string; collapsed?: boolean; deletedAt?: number | null } | undefined): void => {
+const cloneAttachments = (attachments: AttachmentRef[] | undefined): AttachmentRef[] | undefined =>
+  attachments && attachments.length > 0 ? attachments.map((attachment) => ({ ...attachment })) : undefined;
+
+const syncDetachedNote = (noteId: string, note: { title: string; content: string; color: string; collapsed?: boolean; attachments?: AttachmentRef[]; deletedAt?: number | null } | undefined): void => {
   if (!note || note.deletedAt) {
     clearPendingTimer(noteId);
     emitMissing(noteId);
@@ -65,6 +68,7 @@ const syncDetachedNote = (noteId: string, note: { title: string; content: string
       content: note.content,
       color: note.color,
       isCollapsed: note.collapsed ?? false,
+      attachments: cloneAttachments(note.attachments),
       deletedAt: note.deletedAt,
     };
     emitSnapshot(noteId, snapshot);
@@ -131,6 +135,7 @@ export const startDetachedNoteSnapshotSync = (): (() => void) => {
             content: note.content,
             color: note.color,
             isCollapsed: note.collapsed ?? false,
+            attachments: cloneAttachments(note.attachments),
             deletedAt: note.deletedAt,
           };
           emitSnapshot(noteId, snapshot);

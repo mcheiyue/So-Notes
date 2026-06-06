@@ -22,6 +22,7 @@ import {
   applyActiveDragSessionTransforms,
 } from "../utils/edgePushDragCompensation";
 import { NoteVisuals } from "./note-render/NoteVisuals";
+import { NoteAttachments } from "./note-render/NoteAttachments";
 
 interface NoteCardProps {
   id: string;
@@ -820,6 +821,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 rows={1}
                 readOnly={isStatic}
               />
+              {note.attachments && note.attachments.length > 0 && (
+                <NoteAttachments
+                  noteId={note.id}
+                  attachments={note.attachments}
+                  readOnly={isStatic}
+                />
+              )}
             </div>
         )}
 

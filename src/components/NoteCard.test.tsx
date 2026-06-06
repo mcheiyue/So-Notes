@@ -2,8 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
+const { convertFileSrcMock, resolveAttachmentPathMock } = vi.hoisted(() => ({
+  convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
+  resolveAttachmentPathMock: vi.fn(async (path: string) => `/abs/${path}`),
+}));
+
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async () => null),
+  convertFileSrc: convertFileSrcMock,
+}));
+
+vi.mock('../services/storage/attachmentPersistence', () => ({
+  resolveAttachmentPath: resolveAttachmentPathMock,
 }));
 
 vi.mock('../store/db', () => ({
@@ -29,6 +39,7 @@ import { useStore } from '../store/useStore';
 import { useUIStore } from '../store';
 import { normalizeNotes } from '../store/normalization';
 import { getNoteColor, getNoteDarkSpectrum, Note } from '../store/types';
+import type { AttachmentRef } from '../store/types';
 import { getEdgeCheckRect, resolveDragStopWorldPosition } from '../utils/dragCoordinates';
 
 const hexToRgbString = (hex: string): string => {
@@ -62,6 +73,17 @@ const createNote = (overrides: Partial<Note> = {}): Note => ({
   ...overrides,
 });
 
+const createAttachment = (overrides: Partial<AttachmentRef> = {}): AttachmentRef => ({
+  id: 'att-1',
+  hash: 'a'.repeat(64),
+  filename: 'photo.png',
+  mimeType: 'image/png',
+  size: 1024,
+  relativePath: `attachments/${'a'.repeat(64)}.png`,
+  createdAt: 1,
+  ...overrides,
+});
+
 describe('NoteCard 头部交互边界', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -74,6 +96,9 @@ describe('NoteCard 头部交互边界', () => {
 
   beforeEach(() => {
     useStore.setState(useStore.getInitialState(), true);
+    convertFileSrcMock.mockClear();
+    resolveAttachmentPathMock.mockClear();
+    resolveAttachmentPathMock.mockImplementation(async (path: string) => `/abs/${path}`);
     useStore.setState({
       ...normalizeNotes([createNote()]),
       currentBoardId: 'default',
@@ -428,6 +453,40 @@ describe('NoteCard 头部交互边界', () => {
     expect(article).not.toBeNull();
     expect(article?.getAttribute('data-note-visuals')).toBe('true');
     expect(article?.className).toContain('note-card');
+  });
+
+  it('展开便签渲染图片附件预览并允许移除引用', async () => {
+    const attachment = createAttachment();
+    useStore.setState({
+      ...normalizeNotes([createNote({ attachments: [attachment] })]),
+    });
+
+    await renderNoteCard();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="note-attachments"]')).not.toBeNull();
+      expect(container.querySelector('img')?.getAttribute('src')).toBe(`asset://localhost//abs/${attachment.relativePath}`);
+    });
+
+    const removeButton = container.querySelector(`[data-testid="attachment-remove-${attachment.id}"]`) as HTMLButtonElement | null;
+    expect(removeButton).not.toBeNull();
+
+    await act(async () => {
+      removeButton?.click();
+    });
+
+    expect(useStore.getState().notesById['note-1']?.attachments).toBeUndefined();
+  });
+
+  it('折叠便签不渲染图片附件预览', async () => {
+    useStore.setState({
+      ...normalizeNotes([createNote({ collapsed: true, attachments: [createAttachment()] })]),
+    });
+
+    await renderNoteCard();
+
+    expect(container.querySelector('[data-testid="note-attachments"]')).toBeNull();
+    expect(resolveAttachmentPathMock).not.toHaveBeenCalled();
   });
 
   it('深色模式视觉样式与 NoteVisuals 独立渲染一致（共享视觉渲染能力）', async () => {
