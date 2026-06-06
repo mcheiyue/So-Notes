@@ -19,6 +19,17 @@ vi.mock('../utils/fileSystem', () => ({
   openFile: vi.fn(async () => null),
 }));
 
+vi.mock('../services/storage/attachmentPersistence', () => ({
+  listAttachmentFiles: vi.fn(async () => []),
+  deleteAttachmentFile: vi.fn(async () => ({ deleted: true, relativePath: '' })),
+  attachmentExists: vi.fn(async () => true),
+}));
+
+vi.mock('../services/storage/attachmentConsistency', () => ({
+  detectMissingReferences: vi.fn(async () => []),
+  detectOrphanAttachments: vi.fn(() => []),
+}));
+
 import { BoardDock } from './BoardDock';
 import { Z_INDEX } from '../constants/layout';
 import { createEmptyNormalizedNotesState, normalizeNotes } from '../store/normalization';
@@ -458,5 +469,255 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(container.querySelector('.board-dock-container')).toBeNull();
     expect(container.querySelector('[data-board-id="default"]')).toBeNull();
     expect(container.textContent).not.toContain('主板');
+  });
+});
+
+describe('BoardDock 附件一致性管理入口', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const clickElement = async (element: Element | null) => {
+    expect(element).not.toBeNull();
+    await act(async () => {
+      element?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+  };
+
+  const findButtonByText = (text: string) => Array.from(container.querySelectorAll('button')).find(
+    (button) => button.textContent?.includes(text),
+  ) ?? null;
+
+  const getSettingsButton = () => container.querySelector('button[aria-label="打开设置"]');
+
+  const renderBoardDock = async () => {
+    await act(async () => {
+      root.render(<BoardDock />);
+    });
+  };
+
+  const openDataSettings = async () => {
+    await renderBoardDock();
+    await clickElement(getSettingsButton());
+    await clickElement(findButtonByText('数据管理'));
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } },
+      ],
+      currentBoardId: 'default',
+      isDockVisible: true,
+      viewMode: 'BOARD',
+      config: { ...useStore.getState().config, themeMode: 'system' },
+      saveStatus: 'idle',
+      saveError: null,
+      isSaving: false,
+      lastSavedAt: null,
+      switchBoard: vi.fn(),
+      createBoard: vi.fn(),
+      deleteBoard: vi.fn(),
+      updateBoard: vi.fn(),
+      reorderBoard: vi.fn(),
+      setDockVisible: vi.fn(),
+      setViewMode: vi.fn(),
+      clearSelection: vi.fn(),
+      exportAll: vi.fn(async () => undefined),
+      importFromFile: vi.fn(async () => ({ status: 'cancelled' as const })),
+      exportCurrentBoard: vi.fn(async () => undefined),
+      setThemeMode: vi.fn(),
+    });
+
+    const { listAttachmentFiles } = await import('../services/storage/attachmentPersistence');
+    const { detectMissingReferences, detectOrphanAttachments } = await import('../services/storage/attachmentConsistency');
+    vi.mocked(listAttachmentFiles).mockResolvedValue([]);
+    vi.mocked(detectMissingReferences).mockResolvedValue([]);
+    vi.mocked(detectOrphanAttachments).mockReturnValue([]);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('扫描按钮在数据管理区可见', async () => {
+    await openDataSettings();
+    const scanButton = container.querySelector('[data-testid="attachment-scan-button"]');
+    expect(scanButton).not.toBeNull();
+    expect(scanButton?.textContent).toContain('检查附件一致性');
+  });
+
+  it('扫描后显示缺失引用和孤儿附件计数', async () => {
+    const { listAttachmentFiles } = await import('../services/storage/attachmentPersistence');
+    const { detectMissingReferences, detectOrphanAttachments } = await import('../services/storage/attachmentConsistency');
+
+    vi.mocked(listAttachmentFiles).mockResolvedValue([
+      'attachments/aaa111aaa111aaa111aaa111aaa111aaa111aaa111aaa111aaa111aaa111aaa111aa.png',
+      'attachments/orphan222orphan222orphan222orphan222orphan222orphan222orphan222orphan222o.png',
+    ]);
+    vi.mocked(detectMissingReferences).mockResolvedValue([
+      { noteId: 'n1', ref: { id: 'r1', hash: 'h1', filename: 'f.png', mimeType: 'image/png', size: 100, relativePath: 'attachments/missing.png', createdAt: 1 } },
+    ]);
+    vi.mocked(detectOrphanAttachments).mockReturnValue([
+      { relativePath: 'attachments/orphan222orphan222orphan222orphan222orphan222orphan222orphan222orphan222o.png', hash: undefined },
+    ]);
+
+    await openDataSettings();
+    await clickElement(findButtonByText('检查附件一致性'));
+
+    const result = container.querySelector('[data-testid="attachment-scan-result"]');
+    expect(result).not.toBeNull();
+    expect(result?.textContent).toContain('缺失引用 1');
+    expect(result?.textContent).toContain('孤儿附件 1');
+  });
+
+  it('孤儿数为 0 时不显示清理按钮', async () => {
+    const { listAttachmentFiles } = await import('../services/storage/attachmentPersistence');
+    const { detectMissingReferences, detectOrphanAttachments } = await import('../services/storage/attachmentConsistency');
+
+    vi.mocked(listAttachmentFiles).mockResolvedValue(['attachments/a.png']);
+    vi.mocked(detectMissingReferences).mockResolvedValue([]);
+    vi.mocked(detectOrphanAttachments).mockReturnValue([]);
+
+    await openDataSettings();
+    await clickElement(findButtonByText('检查附件一致性'));
+
+    const cleanupButton = container.querySelector('[data-testid="orphan-cleanup-button"]');
+    expect(cleanupButton).toBeNull();
+  });
+
+  it('孤儿数大于 0 时显示清理按钮', async () => {
+    const { listAttachmentFiles } = await import('../services/storage/attachmentPersistence');
+    const { detectMissingReferences, detectOrphanAttachments } = await import('../services/storage/attachmentConsistency');
+
+    vi.mocked(listAttachmentFiles).mockResolvedValue(['attachments/orphan.png']);
+    vi.mocked(detectMissingReferences).mockResolvedValue([]);
+    vi.mocked(detectOrphanAttachments).mockReturnValue([
+      { relativePath: 'attachments/orphan.png', hash: undefined },
+    ]);
+
+    await openDataSettings();
+    await clickElement(findButtonByText('检查附件一致性'));
+
+    const cleanupButton = container.querySelector('[data-testid="orphan-cleanup-button"]');
+    expect(cleanupButton).not.toBeNull();
+    expect(cleanupButton?.textContent).toContain('清理孤儿附件');
+  });
+
+  it('确认清理后删除孤儿文件并清空历史', async () => {
+    const { listAttachmentFiles, deleteAttachmentFile } = await import('../services/storage/attachmentPersistence');
+    const { detectMissingReferences, detectOrphanAttachments } = await import('../services/storage/attachmentConsistency');
+
+    const orphanPath = 'attachments/orphan.png';
+    vi.mocked(listAttachmentFiles).mockResolvedValue([orphanPath]);
+    vi.mocked(detectMissingReferences).mockResolvedValue([]);
+    vi.mocked(detectOrphanAttachments).mockReturnValue([
+      { relativePath: orphanPath, hash: undefined },
+    ]);
+    vi.mocked(deleteAttachmentFile).mockResolvedValue({ deleted: true, relativePath: orphanPath });
+
+    vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
+    useStore.getState().addNote(0, 0);
+    expect(useStore.getState().domainHistory.undoStack.length).toBeGreaterThan(0);
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await openDataSettings();
+    await clickElement(findButtonByText('检查附件一致性'));
+
+    const cleanupButton = container.querySelector('[data-testid="orphan-cleanup-button"]');
+    await clickElement(cleanupButton);
+
+    expect(deleteAttachmentFile).toHaveBeenCalledWith(orphanPath);
+    expect(useStore.getState().domainHistory.undoStack).toHaveLength(0);
+    expect(useStore.getState().domainHistory.redoStack).toHaveLength(0);
+  });
+
+  it('取消确认时不删除文件', async () => {
+    const { listAttachmentFiles, deleteAttachmentFile } = await import('../services/storage/attachmentPersistence');
+    const { detectMissingReferences, detectOrphanAttachments } = await import('../services/storage/attachmentConsistency');
+
+    vi.mocked(listAttachmentFiles).mockResolvedValue(['attachments/orphan.png']);
+    vi.mocked(detectMissingReferences).mockResolvedValue([]);
+    vi.mocked(detectOrphanAttachments).mockReturnValue([
+      { relativePath: 'attachments/orphan.png', hash: undefined },
+    ]);
+
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    await openDataSettings();
+    await clickElement(findButtonByText('检查附件一致性'));
+
+    const cleanupButton = container.querySelector('[data-testid="orphan-cleanup-button"]');
+    await clickElement(cleanupButton);
+
+    expect(deleteAttachmentFile).not.toHaveBeenCalled();
+  });
+
+  it('Trash 中便签引用的附件不被判定为孤儿', async () => {
+    const { listAttachmentFiles } = await import('../services/storage/attachmentPersistence');
+    const { detectMissingReferences, detectOrphanAttachments } = await import('../services/storage/attachmentConsistency');
+
+    const trashRefPath = 'attachments/trash-note-attachment.png';
+    vi.mocked(listAttachmentFiles).mockResolvedValue([trashRefPath]);
+    vi.mocked(detectMissingReferences).mockResolvedValue([]);
+    // detectOrphanAttachments 内部基于 notes 判断，此处模拟无孤儿
+    vi.mocked(detectOrphanAttachments).mockReturnValue([]);
+
+    // 将 Trash 便签注入 store
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'trash-note',
+          boardId: 'default',
+          x: 0,
+          y: 0,
+          title: '',
+          content: '废纸篓便签',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          deletedAt: 2,
+          attachments: [{
+            id: 'att-trash',
+            hash: 'trashhash',
+            filename: 'trash-note-attachment.png',
+            mimeType: 'image/png',
+            size: 200,
+            relativePath: trashRefPath,
+            createdAt: 1,
+          }],
+        },
+      ]),
+    });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('检查附件一致性'));
+
+    const result = container.querySelector('[data-testid="attachment-scan-result"]');
+    expect(result).not.toBeNull();
+    expect(result?.textContent).toContain('孤儿附件 0');
+  });
+
+  it('扫描出错时显示错误信息', async () => {
+    const { listAttachmentFiles } = await import('../services/storage/attachmentPersistence');
+    vi.mocked(listAttachmentFiles).mockRejectedValue(new Error('磁盘读取失败'));
+
+    await openDataSettings();
+    await clickElement(findButtonByText('检查附件一致性'));
+
+    const errorEl = container.querySelector('[data-testid="attachment-scan-error"]');
+    expect(errorEl).not.toBeNull();
+    expect(errorEl?.textContent).toContain('磁盘读取失败');
   });
 });

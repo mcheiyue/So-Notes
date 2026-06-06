@@ -108,3 +108,19 @@ export function undoCount<TPatch>(stack: HistoryStack<TPatch>): number {
 export function redoCount<TPatch>(stack: HistoryStack<TPatch>): number {
   return stack.redoStack.length;
 }
+
+/**
+ * 清空撤销/重做历史栈，保留容量设置。
+ *
+ * 用于孤儿附件物理删除后，旧历史条目引用的文件已不存在，
+ * 继续允许撤销会恢复出"引用存在但文件已被删除"的不一致状态。
+ */
+export function clearDomainHistory<TPatch>(
+  stack: HistoryStack<TPatch>,
+): HistoryStack<TPatch> {
+  return {
+    undoStack: [],
+    redoStack: [],
+    capacity: stack.capacity,
+  };
+}

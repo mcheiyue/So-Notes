@@ -5,7 +5,7 @@ import { LayoutNote, Note, AppConfig, StorageData, StorageDataInput, STORAGE_SCH
 
 import { db } from './db';
 import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes, sanitizeAttachments } from './normalization';
-import { createUndoRedoHistory, pushHistoryEntry, undoHistory, redoHistory, type HistoryStack, type HistoryEntry } from './undoRedoHistory';
+import { createUndoRedoHistory, pushHistoryEntry, undoHistory, redoHistory, clearDomainHistory as clearDomainHistoryFn, type HistoryStack, type HistoryEntry } from './undoRedoHistory';
 import { applyDomainPatch, type DomainPatch } from './domainPatches';
 import type { DomainState } from './domainStore';
 
@@ -147,6 +147,7 @@ interface State {
   toggleCollapse: (id: string, options?: { recordHistory?: boolean }) => void;
   undoDomainChange: () => boolean;
   redoDomainChange: () => boolean;
+  clearDomainHistory: () => void;
   commitNoteTextEdit: (noteId: string, beforeTitle: string, beforeContent: string, beforeUpdatedAt: number) => void;
   commitNoteEditingSize: (noteId: string, newWidth: number, newHeight: number, beforeResize: NoteResizeSnapshot) => void;
   captureMoveSnapshot: (positions: Record<string, { x: number; y: number; updatedAt: number }>) => void;
@@ -1999,7 +2000,15 @@ export const useStore = create<State>()(
 
       return true;
     },
-    
+
+    clearDomainHistory: () => {
+      set((state) => {
+        state.domainHistory = toMutableHistoryStack(
+          clearDomainHistoryFn(state.domainHistory),
+        );
+      });
+    },
+
     setStickyDrag: (id, offsetX = 0, offsetY = 0, status: StickyDragStatus = 'active') => {
         set((state) => {
             state.stickyDrag = { id, offsetX, offsetY, status };

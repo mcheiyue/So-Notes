@@ -4089,3 +4089,69 @@ describe('v1.4.8 附件引用领域动作契约', () => {
     });
   });
 });
+
+describe('v1.4.8 clearDomainHistory 契约', () => {
+  beforeEach(() => {
+    useStore.setState(useStore.getInitialState(), true);
+  });
+
+  it('清空后 undoStack 和 redoStack 均为空', () => {
+    vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
+    useStore.getState().addNote(0, 0);
+    useStore.getState().addNote(100, 100);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(2);
+
+    useStore.getState().clearDomainHistory();
+    expect(useStore.getState().domainHistory.undoStack).toHaveLength(0);
+    expect(useStore.getState().domainHistory.redoStack).toHaveLength(0);
+  });
+
+  it('清空后 capacity 保持不变', () => {
+    vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
+    useStore.getState().addNote(0, 0);
+    const capacityBefore = useStore.getState().domainHistory.capacity;
+
+    useStore.getState().clearDomainHistory();
+    expect(useStore.getState().domainHistory.capacity).toBe(capacityBefore);
+  });
+
+  it('清空后 undoDomainChange 返回 false', () => {
+    vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
+    useStore.getState().addNote(0, 0);
+    useStore.getState().clearDomainHistory();
+
+    expect(useStore.getState().undoDomainChange()).toBe(false);
+  });
+
+  it('清空后 redoDomainChange 返回 false', () => {
+    vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
+    useStore.getState().addNote(0, 0);
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().domainHistory.redoStack.length).toBe(1);
+
+    useStore.getState().clearDomainHistory();
+    expect(useStore.getState().redoDomainChange()).toBe(false);
+  });
+
+  it('清空不影响领域状态本身', () => {
+    vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
+    useStore.getState().addNote(10, 20);
+    const noteId = useStore.getState().allNoteIds[0];
+    const noteBefore = useStore.getState().notesById[noteId];
+
+    useStore.getState().clearDomainHistory();
+    const noteAfter = useStore.getState().notesById[noteId];
+    expect(noteAfter).toEqual(noteBefore);
+    expect(useStore.getState().allNoteIds).toHaveLength(1);
+  });
+
+  it('清空后新操作仍可正常写入历史', () => {
+    vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
+    useStore.getState().addNote(0, 0);
+    useStore.getState().clearDomainHistory();
+    expect(useStore.getState().domainHistory.undoStack).toHaveLength(0);
+
+    useStore.getState().addNote(100, 100);
+    expect(useStore.getState().domainHistory.undoStack).toHaveLength(1);
+  });
+});

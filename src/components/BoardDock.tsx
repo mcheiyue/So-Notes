@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
-import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity } from "lucide-react";
+import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search } from "lucide-react";
 import { Z_INDEX } from "../constants/layout";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { appController } from "../controllers/appController";
+import { listAttachmentFiles, deleteAttachmentFile, attachmentExists } from "../services/storage/attachmentPersistence";
+import { detectMissingReferences, detectOrphanAttachments } from "../services/storage/attachmentConsistency";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 type StoreState = ReturnType<typeof useStore.getState>;
@@ -69,6 +71,13 @@ export const BoardDock = () => {
   const [importFeedback, setImportFeedback] = useState<ImportFeedback | null>(null);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [attachmentScanState, setAttachmentScanState] = useState<{
+    status: 'idle' | 'scanning' | 'done' | 'error';
+    missingCount: number;
+    orphanCount: number;
+    orphanPaths: string[];
+    errorMessage: string | null;
+  }>({ status: 'idle', missingCount: 0, orphanCount: 0, orphanPaths: [], errorMessage: null });
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const dockContainerRef = useRef<HTMLDivElement>(null);
@@ -128,6 +137,7 @@ export const BoardDock = () => {
       if (!showSettings) {
           setImportFeedback(null);
           setSettingsView('MAIN');
+          setAttachmentScanState({ status: 'idle', missingCount: 0, orphanCount: 0, orphanPaths: [], errorMessage: null });
       }
   }, [showSettings]);
 
@@ -150,6 +160,53 @@ export const BoardDock = () => {
     setImportFeedback(null);
     const result = await importFromFile();
     setImportFeedback(result);
+  };
+
+  const onAttachmentScanClick = async () => {
+    setAttachmentScanState({ status: 'scanning', missingCount: 0, orphanCount: 0, orphanPaths: [], errorMessage: null });
+    try {
+      const allNotes = Object.values(store.notesById);
+      const knownFiles = await listAttachmentFiles();
+      const missingRefs = await detectMissingReferences(allNotes, attachmentExists);
+      const orphans = detectOrphanAttachments(knownFiles, allNotes);
+      setAttachmentScanState({
+        status: 'done',
+        missingCount: missingRefs.length,
+        orphanCount: orphans.length,
+        orphanPaths: orphans.map((o) => o.relativePath),
+        errorMessage: null,
+      });
+    } catch (err) {
+      setAttachmentScanState({
+        status: 'error',
+        missingCount: 0,
+        orphanCount: 0,
+        orphanPaths: [],
+        errorMessage: err instanceof Error ? err.message : '扫描失败',
+      });
+    }
+  };
+
+  const onOrphanCleanupClick = async () => {
+    if (attachmentScanState.orphanPaths.length === 0) return;
+    const confirmed = window.confirm(
+      `即将永久删除 ${attachmentScanState.orphanCount} 个孤儿附件文件本体（不只是移除引用），并同时清空撤销/重做历史。此操作不可撤销，是否继续？`,
+    );
+    if (!confirmed) return;
+
+    try {
+      for (const relativePath of attachmentScanState.orphanPaths) {
+        await deleteAttachmentFile(relativePath);
+      }
+      store.clearDomainHistory();
+      await onAttachmentScanClick();
+    } catch (err) {
+      setAttachmentScanState((prev) => ({
+        ...prev,
+        status: 'error',
+        errorMessage: err instanceof Error ? err.message : '清理失败',
+      }));
+    }
   };
 
   const importSummaryText = importFeedback?.summary && !importFeedback.rolledBack
@@ -513,6 +570,50 @@ export const BoardDock = () => {
                                 <p className="mt-1 text-[11px] leading-4 opacity-90">{saveError}</p>
                             )}
                         </div>
+
+                        <button
+                            type="button"
+                            onClick={onAttachmentScanClick}
+                            disabled={attachmentScanState.status === 'scanning'}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors disabled:opacity-50"
+                            data-testid="attachment-scan-button"
+                        >
+                            <Search className="w-4 h-4 text-text-tertiary" />
+                            <span>{attachmentScanState.status === 'scanning' ? '扫描中…' : '检查附件一致性'}</span>
+                        </button>
+
+                        {attachmentScanState.status === 'done' && (
+                            <div
+                                data-testid="attachment-scan-result"
+                                className="mx-3 mt-2 rounded-md border border-border-subtle bg-secondary-bg/70 px-3 py-2 text-xs leading-5 text-text-secondary"
+                            >
+                                <p className="font-medium text-text-primary">
+                                    缺失引用 {attachmentScanState.missingCount}，孤儿附件 {attachmentScanState.orphanCount}
+                                </p>
+                            </div>
+                        )}
+
+                        {attachmentScanState.status === 'error' && (
+                            <div
+                                data-testid="attachment-scan-error"
+                                role="alert"
+                                className="mx-3 mt-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-600 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-400"
+                            >
+                                <p className="font-medium">{attachmentScanState.errorMessage ?? '扫描失败'}</p>
+                            </div>
+                        )}
+
+                        {attachmentScanState.status === 'done' && attachmentScanState.orphanCount > 0 && (
+                            <button
+                                type="button"
+                                onClick={onOrphanCleanupClick}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                data-testid="orphan-cleanup-button"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                                <span>清理孤儿附件 ({attachmentScanState.orphanCount})</span>
+                            </button>
+                        )}
 
         <button
           type="button"
