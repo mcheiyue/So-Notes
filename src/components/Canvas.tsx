@@ -13,7 +13,7 @@ import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetr
 import { getNoteElement } from "../utils/noteElementRegistry";
 import { buildSmartPasteNoteInputs, parseSmartPaste } from "../utils/smartPaste";
 import { getViewportSpawnOrigin } from "../utils/spawnPosition";
-import { saveImageFromSystemClipboard, writeAttachmentFromPath, deleteAttachmentFile } from "../services/storage/attachmentPersistence";
+import { saveImageFromSystemClipboard, writeAttachmentFromBytes, writeAttachmentFromPath, deleteAttachmentFile } from "../services/storage/attachmentPersistence";
 import type { AttachmentRef } from "../store/types";
 import { attach } from "../services/storage/StorageService";
 import { CanvasEngine } from "../canvas/CanvasEngine";
@@ -519,17 +519,12 @@ export const Canvas: React.FC = () => {
     const baseY = localPoint.y + vp.y;
 
     const writeResults: Array<{ file: File; attachment: AttachmentRef }> = [];
-    const failedFiles: string[] = [];
-
     for (const file of acceptedFiles) {
       const sourcePath = getFilePathFromFile(file);
-      if (!sourcePath) {
-        failedFiles.push(file.name);
-        continue;
-      }
-
       try {
-        const result = await writeAttachmentFromPath(sourcePath, file.name, file.type);
+        const result = sourcePath
+          ? await writeAttachmentFromPath(sourcePath, file.name, file.type)
+          : await writeAttachmentFromBytes(await file.arrayBuffer(), file.name, file.type);
         writeResults.push({
           file,
           attachment: {
@@ -544,7 +539,6 @@ export const Canvas: React.FC = () => {
         });
       } catch (writeError) {
         console.warn('附件写入失败，已跳过。', file.name, writeError);
-        failedFiles.push(file.name);
       }
     }
 

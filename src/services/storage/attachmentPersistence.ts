@@ -6,6 +6,7 @@
  *
  * Rust 命令名称：
  * - write_attachment_from_path
+ * - write_attachment_from_bytes
  * - attachment_exists
  * - read_attachment_metadata
  * - save_image_from_system_clipboard
@@ -83,6 +84,28 @@ export async function writeAttachmentFromPath(
 ): Promise<AttachmentWriteResult> {
   return invoke<AttachmentWriteResult>('write_attachment_from_path', {
     sourcePath,
+    filename,
+    mimeType: mimeType ?? null,
+  });
+}
+
+/**
+ * 将前端持有的文件字节写入附件目录。
+ *
+ * 用于 HTML5 拖放无法提供本地路径时的回退入口。Rust 侧仍负责内容寻址、去重和安全落盘。
+ *
+ * @param data     文件字节
+ * @param filename 原始文件名（用于提取扩展名和展示）
+ * @param mimeType 可选 MIME 类型；为空时自动推断或回退到 application/octet-stream
+ */
+export async function writeAttachmentFromBytes(
+  data: ArrayBuffer | Uint8Array,
+  filename: string,
+  mimeType?: string,
+): Promise<AttachmentWriteResult> {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  return invoke<AttachmentWriteResult>('write_attachment_from_bytes', {
+    data: Array.from(bytes),
     filename,
     mimeType: mimeType ?? null,
   });

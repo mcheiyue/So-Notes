@@ -24,7 +24,7 @@ vi.mock('react-draggable', () => ({
   DraggableCore: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-const { mockSaveImageFromSystemClipboard, mockWriteAttachmentFromPath, mockDeleteAttachmentFile } = vi.hoisted(() => ({
+const { mockSaveImageFromSystemClipboard, mockWriteAttachmentFromBytes, mockWriteAttachmentFromPath, mockDeleteAttachmentFile } = vi.hoisted(() => ({
   mockSaveImageFromSystemClipboard: vi.fn(async () => ({
     hash: 'a'.repeat(64),
     filename: 'clipboard-image.png',
@@ -43,6 +43,15 @@ const { mockSaveImageFromSystemClipboard, mockWriteAttachmentFromPath, mockDelet
     createdAt: 2000,
     bytesWritten: 2048,
   })),
+  mockWriteAttachmentFromBytes: vi.fn(async (_data: ArrayBuffer | Uint8Array, filename: string, mimeType?: string) => ({
+    hash: 'e'.repeat(64),
+    filename,
+    mimeType: mimeType ?? 'application/octet-stream',
+    size: 5,
+    relativePath: `attachments/${'e'.repeat(64)}.png`,
+    createdAt: 2500,
+    bytesWritten: 5,
+  })),
   mockDeleteAttachmentFile: vi.fn(async (relativePath: string) => ({
     deleted: true,
     relativePath,
@@ -51,6 +60,7 @@ const { mockSaveImageFromSystemClipboard, mockWriteAttachmentFromPath, mockDelet
 
 vi.mock('../services/storage/attachmentPersistence', () => ({
   saveImageFromSystemClipboard: mockSaveImageFromSystemClipboard,
+  writeAttachmentFromBytes: mockWriteAttachmentFromBytes,
   writeAttachmentFromPath: mockWriteAttachmentFromPath,
   deleteAttachmentFile: mockDeleteAttachmentFile,
 }));
@@ -114,6 +124,7 @@ describe('Canvas 空白命中判定', () => {
     resetViewportSpawnSequenceForTests();
     setEdgePushDragLeader(null);
     mockSaveImageFromSystemClipboard.mockClear();
+    mockWriteAttachmentFromBytes.mockClear();
     mockWriteAttachmentFromPath.mockClear();
     mockDeleteAttachmentFile.mockClear();
     const normalized = normalizeNotes([createNote()]);
@@ -1615,6 +1626,36 @@ describe('Canvas 空白命中判定', () => {
     expect(note!.attachments!.length).toBe(1);
     expect(note!.attachments![0].filename).toBe('photo.png');
     expect(note!.attachments![0].hash).toBe('b'.repeat(64));
+  });
+
+  it('拖入无本地路径的 PNG 时走字节写入回退', async () => {
+    await renderCanvas();
+
+    canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 10, top: 20, right: 1290, bottom: 740,
+      width: 1280, height: 720, x: 10, y: 20, toJSON: () => ({}),
+    } as DOMRect));
+
+    const pngFile = createMockFile('drop.png', 'image/png');
+    const dropEvent = createFileDragEvent('drop', [pngFile], {
+      clientX: 200, clientY: 300,
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(dropEvent);
+    });
+
+    expect(mockWriteAttachmentFromPath).not.toHaveBeenCalled();
+    expect(mockWriteAttachmentFromBytes).toHaveBeenCalledTimes(1);
+    expect(mockWriteAttachmentFromBytes).toHaveBeenCalledWith(
+      expect.any(ArrayBuffer), 'drop.png', 'image/png',
+    );
+
+    const state = useStore.getState();
+    const note = state.notesById[state.selectedIds[0]];
+    expect(note?.attachments?.[0].filename).toBe('drop.png');
+    expect(note?.attachments?.[0].hash).toBe('e'.repeat(64));
   });
 
   it('拖入多张图片创建多张层叠便签，一条撤销移除全部', async () => {

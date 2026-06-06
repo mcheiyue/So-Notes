@@ -613,6 +613,7 @@ pub fn run() {
             close_detached_note_window,
             set_detached_note_always_on_top,
             attachments::write_attachment_from_path,
+            attachments::write_attachment_from_bytes,
             attachments::attachment_exists,
             attachments::read_attachment_metadata,
             attachments::save_image_from_system_clipboard,

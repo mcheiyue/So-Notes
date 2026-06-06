@@ -9,6 +9,7 @@ import {
   attachmentExists,
   readAttachmentMetadata,
   writeAttachmentFromPath,
+  writeAttachmentFromBytes,
   saveImageFromSystemClipboard,
   resolveAttachmentPath,
   listAttachmentFiles,
@@ -62,6 +63,28 @@ describe('attachmentPersistence', () => {
       sourcePath: 'D:/tmp/file',
       filename: 'file.bin',
       mimeType: null,
+    });
+  });
+
+  it('writeAttachmentFromBytes 调用 Rust 字节写入命令并透传结果', async () => {
+    const result: AttachmentWriteResult = {
+      hash: '9'.repeat(64),
+      filename: 'drop.png',
+      mimeType: 'image/png',
+      size: 3,
+      relativePath: `attachments/${'9'.repeat(64)}.png`,
+      createdAt: 1700000000000,
+      bytesWritten: 3,
+    };
+    vi.mocked(invoke).mockResolvedValueOnce(result);
+
+    const data = new Uint8Array([1, 2, 3]);
+    await expect(writeAttachmentFromBytes(data, 'drop.png', 'image/png')).resolves.toEqual(result);
+
+    expect(invoke).toHaveBeenCalledWith('write_attachment_from_bytes', {
+      data: [1, 2, 3],
+      filename: 'drop.png',
+      mimeType: 'image/png',
     });
   });
 

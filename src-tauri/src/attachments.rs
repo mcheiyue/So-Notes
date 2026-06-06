@@ -398,6 +398,29 @@ pub async fn write_attachment_from_path(
     .map_err(|e| format!("附件写入线程失败: {e}"))?
 }
 
+/// 将前端传入的文件字节写入附件目录。
+///
+/// 用于 HTML5 拖放路径不可用时的回退入口，仍复用内容寻址、临时文件和 hash 锁逻辑。
+#[tauri::command]
+pub async fn write_attachment_from_bytes(
+    app: tauri::AppHandle,
+    data: Vec<u8>,
+    filename: String,
+    mime_type: Option<String>,
+) -> Result<AttachmentWriteResult, String> {
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+    let normalized_mime = normalize_mime(mime_type.as_deref());
+    tokio::task::spawn_blocking(move || {
+        let attach_dir = ensure_attachments_base_dir_from_document(&doc_dir)?;
+        write_attachment_from_bytes_blocking(attach_dir, &data, filename, normalized_mime)
+    })
+    .await
+    .map_err(|e| format!("附件字节写入线程失败: {e}"))?
+}
+
 /// 检查指定相对路径的附件文件是否存在。
 #[tauri::command]
 pub async fn attachment_exists(
