@@ -100,6 +100,36 @@ describe('NoteAttachments', () => {
     expect(convertFileSrcMock).toHaveBeenCalledWith('/abs/attachments/abc123.png');
   });
 
+  it('预览容器约束溢出，点击图片打开大图预览', async () => {
+    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/abc123.png');
+    convertFileSrcMock.mockReturnValue('asset://localhost/abs/attachments/abc123.png');
+
+    await act(async () => {
+      root.render(
+        <NoteAttachments
+          noteId="note-1"
+          attachments={[createAttachment()]}
+        />,
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="attachment-preview-att-1"]')).not.toBeNull();
+    });
+
+    const attachmentsRoot = container.querySelector('[data-testid="note-attachments"]') as HTMLDivElement | null;
+    expect(attachmentsRoot?.className).toContain('overflow-hidden');
+    expect(attachmentsRoot?.className).toContain('max-w-full');
+
+    await act(async () => {
+      (container.querySelector('[data-testid="attachment-preview-att-1"]') as HTMLButtonElement).click();
+    });
+
+    const overlay = container.querySelector('[data-testid="attachment-preview-overlay"]');
+    expect(overlay).not.toBeNull();
+    expect(overlay?.querySelector('img')?.getAttribute('src')).toBe('asset://localhost/abs/attachments/abc123.png');
+  });
+
   it('缺失路径：显示占位并提供重试按钮', async () => {
     resolveAttachmentPathMock.mockRejectedValue(new Error('文件不存在'));
 

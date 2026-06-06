@@ -2,9 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
-const { convertFileSrcMock, resolveAttachmentPathMock } = vi.hoisted(() => ({
+const { convertFileSrcMock, resolveAttachmentPathMock, saveImageFromSystemClipboardMock } = vi.hoisted(() => ({
   convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
   resolveAttachmentPathMock: vi.fn(async (path: string) => `/abs/${path}`),
+  saveImageFromSystemClipboardMock: vi.fn(async () => ({
+    hash: 'b'.repeat(64),
+    filename: 'clipboard-image.png',
+    mimeType: 'image/png',
+    size: 2048,
+    relativePath: `attachments/${'b'.repeat(64)}.png`,
+    createdAt: 2,
+    bytesWritten: 2048,
+  })),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -14,6 +23,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('../services/storage/attachmentPersistence', () => ({
   resolveAttachmentPath: resolveAttachmentPathMock,
+  saveImageFromSystemClipboard: saveImageFromSystemClipboardMock,
 }));
 
 vi.mock('../store/db', () => ({
@@ -99,6 +109,7 @@ describe('NoteCard 头部交互边界', () => {
     convertFileSrcMock.mockClear();
     resolveAttachmentPathMock.mockClear();
     resolveAttachmentPathMock.mockImplementation(async (path: string) => `/abs/${path}`);
+    saveImageFromSystemClipboardMock.mockClear();
     useStore.setState({
       ...normalizeNotes([createNote()]),
       currentBoardId: 'default',
@@ -235,6 +246,89 @@ describe('NoteCard 头部交互边界', () => {
     expect(textarea?.className).toContain('dark:selection:bg-blue-200/35');
     expect(textarea?.className).not.toContain('selection:text-slate-900');
     expect(textarea?.className).not.toContain('dark:selection:text-slate-950');
+  });
+
+  it('正文输入框图片粘贴追加附件到当前便签，不走文本插入', async () => {
+    const addAttachmentToNote = vi.fn();
+    useStore.setState({ addAttachmentToNote });
+    await renderNoteCard();
+
+    const textarea = container.querySelector('textarea[placeholder="记点什么…"]') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        items: [{ type: 'image/png' }],
+      },
+    });
+
+    await act(async () => {
+      textarea?.dispatchEvent(pasteEvent);
+    });
+
+    expect(pasteEvent.defaultPrevented).toBe(true);
+    expect(saveImageFromSystemClipboardMock).toHaveBeenCalledTimes(1);
+    expect(addAttachmentToNote).toHaveBeenCalledTimes(1);
+    expect(addAttachmentToNote).toHaveBeenCalledWith(
+      'note-1',
+      expect.objectContaining({
+        hash: 'b'.repeat(64),
+        filename: 'clipboard-image.png',
+        mimeType: 'image/png',
+        relativePath: `attachments/${'b'.repeat(64)}.png`,
+      }),
+    );
+  });
+
+  it('标题输入框文本粘贴不拦截，保留原生输入行为', async () => {
+    const addAttachmentToNote = vi.fn();
+    useStore.setState({ addAttachmentToNote });
+    await renderNoteCard();
+
+    const titleInput = container.querySelector('input[placeholder="标题"]') as HTMLInputElement | null;
+    expect(titleInput).not.toBeNull();
+
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        items: [{ type: 'text/plain' }],
+      },
+    });
+
+    await act(async () => {
+      titleInput?.dispatchEvent(pasteEvent);
+    });
+
+    expect(pasteEvent.defaultPrevented).toBe(false);
+    expect(saveImageFromSystemClipboardMock).not.toHaveBeenCalled();
+    expect(addAttachmentToNote).not.toHaveBeenCalled();
+  });
+
+  it('尺寸拖拽期间禁用 width/height 过渡', async () => {
+    useStore.setState({ selectedIds: ['note-1'] });
+    await renderNoteCard();
+
+    const article = container.querySelector('.note-card') as HTMLElement | null;
+    const handle = container.querySelector('[aria-label="调整便签尺寸"]') as HTMLElement | null;
+    expect(article).not.toBeNull();
+    expect(handle).not.toBeNull();
+    expect(article?.className).toContain('transition-[box-shadow,border-color,background-color,width,height]');
+
+    handle!.setPointerCapture = vi.fn();
+
+    await act(async () => {
+      handle?.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 1,
+        clientX: 260,
+        clientY: 220,
+      }));
+    });
+
+    expect(article?.className).toContain('transition-[box-shadow,border-color,background-color]');
+    expect(article?.className).not.toContain('width,height');
   });
 
   it('折叠态标题与展开态标题保持同一主文本层级', async () => {

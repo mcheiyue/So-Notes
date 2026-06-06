@@ -80,6 +80,23 @@ export const NoteAttachments: React.FC<NoteAttachmentsProps> = ({
   const [previewStates, setPreviewStates] = useState<
     Record<string, AttachmentPreviewState>
   >({});
+  const [activePreview, setActivePreview] = useState<{
+    filename: string;
+    assetUrl: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!activePreview) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActivePreview(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activePreview]);
 
   const loadSingle = useCallback(
     async (id: string, relativePath: string) => {
@@ -166,7 +183,7 @@ export const NoteAttachments: React.FC<NoteAttachmentsProps> = ({
   return (
     <div
       data-testid="note-attachments"
-      className="flex flex-wrap gap-2 px-4 pb-2"
+      className="flex max-w-full flex-wrap gap-2 overflow-hidden px-4 pb-2"
     >
       {previewable.map((ref) => {
         const state = previewStates[ref.id] ?? { status: "loading" };
@@ -176,11 +193,34 @@ export const NoteAttachments: React.FC<NoteAttachmentsProps> = ({
             attachment={ref}
             state={state}
             readOnly={readOnly}
+            onOpenPreview={setActivePreview}
             onRetry={handleRetry}
             onRemove={handleRemove}
           />
         );
       })}
+      {activePreview && (
+        <button
+          type="button"
+          data-testid="attachment-preview-overlay"
+          className={cn(
+            "fixed inset-0 flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm",
+            "cursor-zoom-out",
+          )}
+          style={{ zIndex: 9999 }}
+          onClick={(event) => {
+            event.stopPropagation();
+            setActivePreview(null);
+          }}
+          aria-label="关闭图片预览"
+        >
+          <img
+            src={activePreview.assetUrl}
+            alt={activePreview.filename}
+            className="max-h-full max-w-full rounded-xl border border-white/20 object-contain shadow-2xl"
+          />
+        </button>
+      )}
     </div>
   );
 };
@@ -190,9 +230,10 @@ const AttachmentPreviewItem: React.FC<{
   attachment: AttachmentRef;
   state: AttachmentPreviewState;
   readOnly: boolean;
+  onOpenPreview: (preview: { filename: string; assetUrl: string }) => void;
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
-}> = ({ attachment, state, readOnly, onRetry, onRemove }) => {
+}> = ({ attachment, state, readOnly, onOpenPreview, onRetry, onRemove }) => {
   return (
     <div
       data-testid={`attachment-item-${attachment.id}`}
@@ -211,17 +252,28 @@ const AttachmentPreviewItem: React.FC<{
       )}
 
       {state.status === "ready" && (
-        <div className="relative">
-          <img
-            src={state.assetUrl}
-            alt={attachment.filename}
-            className={cn(
-              "w-20 h-20 object-cover rounded-lg",
-              "border border-border-subtle",
-            )}
-            loading="lazy"
-            onError={() => onRetry(attachment.id)}
-          />
+        <div className="relative max-w-full">
+          <button
+            type="button"
+            data-testid={`attachment-preview-${attachment.id}`}
+            className="block max-w-full cursor-zoom-in rounded-lg text-left"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenPreview({ filename: attachment.filename, assetUrl: state.assetUrl });
+            }}
+            aria-label={`查看附件 ${attachment.filename}`}
+          >
+            <img
+              src={state.assetUrl}
+              alt={attachment.filename}
+              className={cn(
+                "w-20 h-20 max-w-full object-cover rounded-lg",
+                "border border-border-subtle",
+              )}
+              loading="lazy"
+              onError={() => onRetry(attachment.id)}
+            />
+          </button>
           {!readOnly && (
             <RemoveAttachmentButton
               attachmentId={attachment.id}

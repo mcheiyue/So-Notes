@@ -23,6 +23,8 @@ import {
 } from "../utils/edgePushDragCompensation";
 import { NoteVisuals } from "./note-render/NoteVisuals";
 import { NoteAttachments } from "./note-render/NoteAttachments";
+import { saveImageFromSystemClipboard } from "../services/storage/attachmentPersistence";
+import type { AttachmentRef } from "../store/types";
 
 interface NoteCardProps {
   id: string;
@@ -59,6 +61,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
   const setIsDragging = useStore(state => state.setIsDragging);
   const commitNoteEditingSize = useStore(state => state.commitNoteEditingSize);
+  const addAttachmentToNote = useStore(state => state.addAttachmentToNote);
   
   const isStickyDragging = useStore(state => state.stickyDrag.id === id);
   const isSelected = useUIStore(state => state.selectedIds.includes(id));
@@ -83,6 +86,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const [isEditing, setIsEditing] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
   const titleBeforeEditRef = useRef(note?.title ?? '');
   const contentBeforeEditRef = useRef(note?.content ?? '');
   const updatedAtBeforeEditRef = useRef(note?.updatedAt ?? 0);
@@ -120,6 +124,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     if (!state || !nodeRef.current) {
       resizeStateRef.current = null;
       isResizingRef.current = false;
+      setIsResizing(false);
       return;
     }
 
@@ -127,6 +132,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     nodeRef.current.style.height = state.startNoteEditingHeight === undefined ? 'auto' : `${state.startHeight}px`;
     resizeStateRef.current = null;
     isResizingRef.current = false;
+    setIsResizing(false);
   };
 
   useEffect(() => {
@@ -490,6 +496,41 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     commitNoteTextEdit(note.id, titleBeforeEditRef.current, contentBeforeEditRef.current, updatedAtBeforeEditRef.current);
   };
 
+  const handleInputPaste = async (event: React.ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (isStatic || note.deletedAt) return;
+
+    const items = event.clipboardData.items;
+    let hasRasterImage = false;
+    for (let i = 0; i < items.length; i++) {
+      const itemType = items[i].type;
+      if (itemType.startsWith('image/') && itemType !== 'image/svg+xml') {
+        hasRasterImage = true;
+        break;
+      }
+    }
+
+    if (!hasRasterImage) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    try {
+      const writeResult = await saveImageFromSystemClipboard();
+      const attachmentRef: AttachmentRef = {
+        id: crypto.randomUUID(),
+        hash: writeResult.hash,
+        filename: writeResult.filename,
+        mimeType: writeResult.mimeType,
+        size: writeResult.size,
+        relativePath: writeResult.relativePath,
+        createdAt: writeResult.createdAt,
+      };
+      addAttachmentToNote(note.id, attachmentRef);
+    } catch (error) {
+      console.warn('图片粘贴失败，已跳过附件创建。', error);
+    }
+  };
+
   const commitResize = () => {
     const state = resizeStateRef.current;
     if (!state) return;
@@ -512,6 +553,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
     resizeStateRef.current = null;
     isResizingRef.current = false;
+    setIsResizing(false);
   };
 
   const handleResizePointerDown = (e: React.PointerEvent) => {
@@ -543,6 +585,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       handleElement,
     };
     isResizingRef.current = true;
+    setIsResizing(true);
 
     handleElement.setPointerCapture(e.pointerId);
   };
@@ -582,7 +625,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const shouldShowResizeHandle = !isStatic && !note.collapsed && (isSelected || isEditing);
 
   // 拖拽时禁用尺寸过渡，避免 CSS transition 与 JS transform 拖拽产生冲突。
-  const transitionClass = isDragActive || isStickyDragging
+  const transitionClass = isDragActive || isStickyDragging || isResizing
     ? 'transition-[box-shadow,border-color,background-color]'
     : 'transition-[box-shadow,border-color,background-color,width,height]';
 
@@ -776,6 +819,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                     onChange={(e) => updateTitle(note.id, e.target.value)}
                     onFocus={handleTitleFocus}
                     onBlur={handleTitleBlur}
+                    onPaste={handleInputPaste}
                     onMouseDownCapture={handleMouseDown}
                     readOnly={isStatic}
                 />
@@ -816,6 +860,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 }}
                 onFocus={handleContentFocus}
                 onBlur={handleContentBlur}
+                onPaste={handleInputPaste}
                 onMouseDownCapture={handleMouseDown}
                 spellCheck={false}
                 rows={1}
@@ -834,6 +879,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         {shouldShowResizeHandle && (
           <div
             data-note-no-drag="true"
+            aria-label="调整便签尺寸"
             className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize z-30 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
             onPointerDown={handleResizePointerDown}
             onPointerMove={handleResizePointerMove}
