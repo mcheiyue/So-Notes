@@ -615,6 +615,10 @@ pub fn run() {
             attachments::write_attachment_from_path,
             attachments::attachment_exists,
             attachments::read_attachment_metadata,
+            attachments::save_image_from_system_clipboard,
+            attachments::resolve_attachment_path,
+            attachments::list_attachment_files,
+            attachments::delete_attachment_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

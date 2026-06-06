@@ -481,6 +481,277 @@ fn mime_from_extension(ext: &str) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 附件删除结果类型
+// ---------------------------------------------------------------------------
+
+/// 附件删除结果
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentDeleteResult {
+    pub deleted: bool,
+    pub relative_path: String,
+}
+
+// ---------------------------------------------------------------------------
+// 剪贴板图片限制常量
+// ---------------------------------------------------------------------------
+
+/// 剪贴板图片单边最大像素数（8192），超出则拒绝写入。
+const CLIPBOARD_IMAGE_MAX_DIMENSION: u32 = 8192;
+/// 剪贴板图片编码后最大字节数（50 MiB），超出则拒绝写入。
+const CLIPBOARD_IMAGE_MAX_ENCODED_BYTES: usize = 50 * 1024 * 1024;
+
+// ---------------------------------------------------------------------------
+// 内部辅助：从字节写入附件（内容寻址）
+// ---------------------------------------------------------------------------
+
+/// 将内存中的字节块写入附件目录，复用内容寻址、临时文件和 hash 锁逻辑。
+fn write_attachment_from_bytes_blocking(
+    attach_dir: PathBuf,
+    data: &[u8],
+    filename: String,
+    normalized_mime: String,
+) -> Result<AttachmentWriteResult, String> {
+    use std::io::Write;
+
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    let hash_bytes = hasher.finalize();
+    let hash_hex = bytes_to_hex(&hash_bytes);
+
+    let ext = safe_extension_from_filename(&filename)
+        .or_else(|| safe_extension_for_mime(&normalized_mime).map(String::from))
+        .unwrap_or_else(|| DEFAULT_EXTENSION.to_string());
+    let relative_path = content_addressed_relative_path(&hash_hex, Some(&ext));
+    let final_path = attach_dir.join(format!("{hash_hex}.{ext}"));
+
+    let hash_lock = lock_for_hash(&hash_hex);
+    let _hash_guard = match hash_lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    let bytes_written = if final_path.exists() {
+        0
+    } else {
+        let (tmp_path, mut tmp_file) = create_random_tmp_file(&attach_dir)?;
+        let mut tmp_guard = TempFileGuard::new(tmp_path.clone());
+        tmp_file
+            .write_all(data)
+            .map_err(|e| format!("写入临时文件失败: {e}"))?;
+        tmp_file.flush().map_err(|e| format!("刷新临时文件失败: {e}"))?;
+        drop(tmp_file);
+        std::fs::rename(&tmp_path, &final_path)
+            .map_err(|e| format!("重命名临时文件失败: {e}"))?;
+        tmp_guard.disarm();
+        data.len() as u64
+    };
+
+    let meta =
+        std::fs::metadata(&final_path).map_err(|e| format!("读取附件元数据失败: {e}"))?;
+    let created_at = meta.created().map(system_time_to_millis).unwrap_or(0);
+
+    Ok(AttachmentWriteResult {
+        hash: hash_hex,
+        filename,
+        mime_type: normalized_mime,
+        size: data.len() as u64,
+        relative_path,
+        created_at,
+        bytes_written,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Tauri 命令：剪贴板图片
+// ---------------------------------------------------------------------------
+
+/// 从系统剪贴板读取图片，编码为 PNG 后写入附件目录。
+///
+/// 要求：
+/// - Rust 侧通过 `tauri-plugin-clipboard-manager` 读取剪贴板 RGBA 图片。
+/// - RGBA 像素编码为 PNG 后走内容寻址写入。
+/// - 超过像素量或编码后字节数上限时返回可提示错误。
+/// - 剪贴板无图片时返回可区分错误。
+#[tauri::command]
+pub async fn save_image_from_system_clipboard(
+    app: tauri::AppHandle,
+) -> Result<AttachmentWriteResult, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    // 在 async 上下文读取剪贴板（返回 owned 数据，可安全 move 到 spawn_blocking）
+    let raw_image = app
+        .clipboard()
+        .read_image()
+        .map_err(|e| format!("读取剪贴板图片失败: {e}（剪贴板可能不含图片）"))?;
+
+    let width = raw_image.width();
+    let height = raw_image.height();
+    let rgba_bytes = raw_image.rgba().to_vec();
+
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+
+    tokio::task::spawn_blocking(move || {
+        // 像素量上限检查
+        if width > CLIPBOARD_IMAGE_MAX_DIMENSION || height > CLIPBOARD_IMAGE_MAX_DIMENSION {
+            return Err(format!(
+                "剪贴板图片尺寸 {width}x{height} 超过上限 {CLIPBOARD_IMAGE_MAX_DIMENSION}px"
+            ));
+        }
+
+        // RGBA → PNG 编码
+        let png_bytes = {
+            use std::io::Cursor;
+            let mut buf = Cursor::new(Vec::new());
+            let img = image::RgbaImage::from_raw(width, height, rgba_bytes)
+                .ok_or_else(|| "剪贴板 RGBA 数据与尺寸不匹配".to_string())?;
+            img.write_to(&mut buf, image::ImageFormat::Png)
+                .map_err(|e| format!("PNG 编码失败: {e}"))?;
+            buf.into_inner()
+        };
+
+        // 编码后字节数上限检查
+        if png_bytes.len() > CLIPBOARD_IMAGE_MAX_ENCODED_BYTES {
+            return Err(format!(
+                "剪贴板图片编码后 {} 字节超过上限 {CLIPBOARD_IMAGE_MAX_ENCODED_BYTES} 字节",
+                png_bytes.len()
+            ));
+        }
+
+        let attach_dir = ensure_attachments_base_dir_from_document(&doc_dir)?;
+        write_attachment_from_bytes_blocking(
+            attach_dir,
+            &png_bytes,
+            "clipboard-image.png".to_string(),
+            "image/png".to_string(),
+        )
+    })
+    .await
+    .map_err(|e| format!("剪贴板图片写入线程失败: {e}"))?
+}
+
+// ---------------------------------------------------------------------------
+// Tauri 命令：路径解析
+// ---------------------------------------------------------------------------
+
+/// 将附件相对路径解析为绝对路径，供 `convertFileSrc` 生成预览来源。
+///
+/// 要求：
+/// - 输入只能是 `AttachmentRef.relativePath`（以 `attachments/` 开头）。
+/// - Rust 复用附件路径校验，确认最终路径位于 `<Documents>/SoNotes/attachments/` 下。
+/// - 返回值只作为运行时 UI 层预览输入，不写入 `data.json`。
+/// - 若路径非法或文件不存在，返回可区分错误。
+#[tauri::command]
+pub async fn resolve_attachment_path(
+    app: tauri::AppHandle,
+    relative_path: String,
+) -> Result<String, String> {
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+    tokio::task::spawn_blocking(move || {
+        let base = ensure_sonotes_base_dir_from_document(&doc_dir)?;
+        let _attach_dir = ensure_attachments_base_dir_from_document(&doc_dir)?;
+        let resolved = resolve_existing_attachment(&base, &relative_path)?;
+        Ok(resolved.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("附件路径解析线程失败: {e}"))?
+}
+
+// ---------------------------------------------------------------------------
+// Tauri 命令：列出附件文件
+// ---------------------------------------------------------------------------
+
+/// 列出 `attachments/` 目录下所有普通文件的安全相对路径。
+///
+/// - 只返回以 `attachments/` 为前缀的相对路径。
+/// - 不递归进入非预期子目录，不返回目录条目。
+#[tauri::command]
+pub async fn list_attachment_files(
+    app: tauri::AppHandle,
+) -> Result<Vec<String>, String> {
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+    tokio::task::spawn_blocking(move || {
+        let attach_dir = ensure_attachments_base_dir_from_document(&doc_dir)?;
+        let mut result = Vec::new();
+        let entries =
+            std::fs::read_dir(&attach_dir).map_err(|e| format!("读取附件目录失败: {e}"))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("读取目录条目失败: {e}"))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|e| format!("读取文件类型失败: {e}"))?;
+            if !file_type.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            // 跳过临时文件
+            if name.starts_with(".tmp-") {
+                continue;
+            }
+            let relative = format!("{ATTACHMENTS_SUBDIR}/{name}");
+            if is_safe_relative_path(&relative) {
+                result.push(relative);
+            }
+        }
+        result.sort();
+        Ok(result)
+    })
+    .await
+    .map_err(|e| format!("附件文件列表线程失败: {e}"))?
+}
+
+// ---------------------------------------------------------------------------
+// Tauri 命令：删除附件文件
+// ---------------------------------------------------------------------------
+
+/// 删除指定相对路径的附件文件。
+///
+/// 要求：
+/// - 必须复用安全路径校验。
+/// - 只按路径删除，不自行推断 Domain state。
+/// - 文件不存在时返回 `deleted: false`。
+#[tauri::command]
+pub async fn delete_attachment_file(
+    app: tauri::AppHandle,
+    relative_path: String,
+) -> Result<AttachmentDeleteResult, String> {
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+    tokio::task::spawn_blocking(move || {
+        let base = ensure_sonotes_base_dir_from_document(&doc_dir)?;
+        let _attach_dir = ensure_attachments_base_dir_from_document(&doc_dir)?;
+        let resolved = resolve_attachment_path_missing_safe(&base, &relative_path)?;
+        if !resolved.exists() {
+            return Ok(AttachmentDeleteResult {
+                deleted: false,
+                relative_path,
+            });
+        }
+        if !resolved.is_file() {
+            return Err("附件路径存在但不是普通文件".to_string());
+        }
+        std::fs::remove_file(&resolved).map_err(|e| format!("删除附件文件失败: {e}"))?;
+        Ok(AttachmentDeleteResult {
+            deleted: true,
+            relative_path,
+        })
+    })
+    .await
+    .map_err(|e| format!("附件删除线程失败: {e}"))?
+}
+
 // ===========================================================================
 // 单元测试
 // ===========================================================================
@@ -819,6 +1090,129 @@ mod tests {
                 let name = entry.file_name().to_string_lossy().to_string();
                 !name.starts_with(".tmp-") && !name.starts_with(".lock-")
             }));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // write_attachment_from_bytes_blocking
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bytes_write_produces_content_addressed_file() {
+        let root = test_dir("bytes-write");
+        let attach_dir = root.join("attachments");
+        std::fs::create_dir_all(&attach_dir).expect("create attach dir");
+
+        let data = b"hello clipboard png bytes";
+        let result = write_attachment_from_bytes_blocking(
+            attach_dir.clone(),
+            data,
+            "clipboard-image.png".to_string(),
+            "image/png".to_string(),
+        )
+        .expect("bytes write");
+
+        assert_eq!(result.filename, "clipboard-image.png");
+        assert_eq!(result.mime_type, "image/png");
+        assert_eq!(result.size, data.len() as u64);
+        assert_eq!(result.bytes_written, data.len() as u64);
+        assert!(result.relative_path.starts_with("attachments/"));
+        assert!(result.relative_path.ends_with(".png"));
+        assert_eq!(result.hash.len(), 64);
+
+        let final_path = attach_dir.join(format!("{}.png", result.hash));
+        assert!(final_path.exists());
+        assert_eq!(std::fs::read(&final_path).expect("read final"), data);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bytes_write_deduplicates_same_content() {
+        let root = test_dir("bytes-dedupe");
+        let attach_dir = root.join("attachments");
+        std::fs::create_dir_all(&attach_dir).expect("create attach dir");
+
+        let data = b"same png bytes for dedup";
+        let first = write_attachment_from_bytes_blocking(
+            attach_dir.clone(),
+            data,
+            "clipboard-image.png".to_string(),
+            "image/png".to_string(),
+        )
+        .expect("first");
+        let second = write_attachment_from_bytes_blocking(
+            attach_dir.clone(),
+            data,
+            "clipboard-image.png".to_string(),
+            "image/png".to_string(),
+        )
+        .expect("second");
+
+        assert_eq!(first.hash, second.hash);
+        assert_eq!(first.relative_path, second.relative_path);
+        assert_eq!(first.bytes_written, data.len() as u64);
+        assert_eq!(second.bytes_written, 0);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // list / delete 辅助逻辑
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn list_and_delete_attachment_files() {
+        let root = test_dir("list-del");
+        let attach_dir = root.join("attachments");
+        std::fs::create_dir_all(&attach_dir).expect("create attach dir");
+
+        let a = write_attachment_from_bytes_blocking(
+            attach_dir.clone(),
+            b"file-a",
+            "a.txt".to_string(),
+            "text/plain".to_string(),
+        )
+        .expect("write a");
+        let b = write_attachment_from_bytes_blocking(
+            attach_dir.clone(),
+            b"file-b-content",
+            "b.txt".to_string(),
+            "text/plain".to_string(),
+        )
+        .expect("write b");
+
+        // 临时文件应被过滤
+        std::fs::write(attach_dir.join(".tmp-deadbeef"), b"tmp").expect("write tmp");
+
+        // 模拟 list 逻辑
+        let mut listed = Vec::new();
+        for entry in std::fs::read_dir(&attach_dir).expect("read dir") {
+            let entry = entry.expect("entry");
+            if !entry.file_type().expect("ft").is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(".tmp-") {
+                continue;
+            }
+            let relative = format!("{ATTACHMENTS_SUBDIR}/{name}");
+            if is_safe_relative_path(&relative) {
+                listed.push(relative);
+            }
+        }
+        listed.sort();
+
+        assert_eq!(listed.len(), 2);
+        assert!(listed.contains(&a.relative_path));
+        assert!(listed.contains(&b.relative_path));
+
+        let a_file = root.join(&a.relative_path);
+        assert!(a_file.exists());
+        std::fs::remove_file(&a_file).expect("delete a");
+        assert!(!a_file.exists());
+        assert!(root.join(&b.relative_path).exists());
 
         let _ = std::fs::remove_dir_all(root);
     }

@@ -8,6 +8,10 @@
  * - write_attachment_from_path
  * - attachment_exists
  * - read_attachment_metadata
+ * - save_image_from_system_clipboard
+ * - resolve_attachment_path
+ * - list_attachment_files
+ * - delete_attachment_file
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -48,6 +52,14 @@ export interface AttachmentFileMetadata {
   relativePath: string;
   /** 创建时间（毫秒级 Unix 时间戳） */
   createdAt: number;
+}
+
+/** 附件删除结果 */
+export interface AttachmentDeleteResult {
+  /** 是否实际执行了删除（文件不存在时为 false） */
+  deleted: boolean;
+  /** 被删除文件的相对路径 */
+  relativePath: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +108,58 @@ export async function readAttachmentMetadata(
   relativePath: string,
 ): Promise<AttachmentFileMetadata> {
   return invoke<AttachmentFileMetadata>('read_attachment_metadata', {
+    relativePath,
+  });
+}
+
+/**
+ * 从系统剪贴板读取图片，编码为 PNG 后写入附件目录。
+ *
+ * Rust 侧负责读取剪贴板 RGBA 数据、编码 PNG 和内容寻址写入。
+ * 前端只发送轻量命令，不传输图片 bytes。
+ *
+ * 剪贴板无图片或图片超限时返回可区分错误。
+ */
+export async function saveImageFromSystemClipboard(): Promise<AttachmentWriteResult> {
+  return invoke<AttachmentWriteResult>('save_image_from_system_clipboard');
+}
+
+/**
+ * 将附件相对路径解析为绝对路径，供 `convertFileSrc` 生成预览来源。
+ *
+ * 返回值只作为运行时 UI 层预览输入，不写入 store 或 data.json。
+ * 若路径非法或文件不存在，返回错误。
+ *
+ * @param relativePath 相对路径，例如 `attachments/<sha256>.<ext>`
+ */
+export async function resolveAttachmentPath(
+  relativePath: string,
+): Promise<string> {
+  return invoke<string>('resolve_attachment_path', { relativePath });
+}
+
+/**
+ * 列出 `attachments/` 目录下所有普通文件的安全相对路径。
+ *
+ * 返回值按字典序排列，每个元素以 `attachments/` 为前缀。
+ * 可用于孤儿附件扫描。
+ */
+export async function listAttachmentFiles(): Promise<string[]> {
+  return invoke<string[]>('list_attachment_files');
+}
+
+/**
+ * 删除指定相对路径的附件文件。
+ *
+ * 只删除已通过路径校验的附件文件，不推断 Domain state。
+ * 文件不存在时返回 `{ deleted: false }`。
+ *
+ * @param relativePath 相对路径，例如 `attachments/<sha256>.<ext>`
+ */
+export async function deleteAttachmentFile(
+  relativePath: string,
+): Promise<AttachmentDeleteResult> {
+  return invoke<AttachmentDeleteResult>('delete_attachment_file', {
     relativePath,
   });
 }
