@@ -6,7 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { Crosshair, Pin, X } from "lucide-react";
 import { NoteVisuals } from "./note-render/NoteVisuals";
-import { NoteAttachments } from "./note-render/NoteAttachments";
+import { ImageNoteBody } from "./note-render/ImageNoteBody";
 import type { DetachedNoteSnapshot, DetachedNoteMissingPayload, DetachedNoteThemePayload } from "../types/detachedNoteSnapshot";
 import { DETACHED_NOTE_EVENTS } from "../types/detachedNoteSnapshot";
 import { cn } from "../utils/cn";
@@ -278,6 +278,22 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   const renderNoteBody = (scrollable: boolean) => {
     if (!snapshot || snapshot.isCollapsed) return null;
 
+    if (snapshot.kind === 'image') {
+      return (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <ImageNoteBody
+            attachment={snapshot.attachments?.[0]}
+            alt={snapshot.title || snapshot.attachments?.[0]?.filename || '图片便签'}
+          />
+          {snapshot.content && (
+            <div className="px-4 pb-3 text-sm leading-relaxed text-text-secondary dark:text-text-primary">
+              {snapshot.content}
+            </div>
+          )}
+        </div>
+      );
+    }
+
     return (
       <>
         <div
@@ -311,11 +327,6 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
           >
             {snapshot.content || <span className="text-text-tertiary">记点什么…</span>}
           </div>
-          <NoteAttachments
-            noteId={snapshot.noteId}
-            attachments={snapshot.attachments ?? []}
-            readOnly
-          />
         </div>
       </>
     );

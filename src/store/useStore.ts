@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { LayoutNote, Note, AppConfig, StorageData, StorageDataInput, STORAGE_SCHEMA_VERSION, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus, NoteHighlight, NoteHighlightReason, AttachmentRef } from './types';
 
 import { db } from './db';
-import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes, sanitizeAttachments } from './normalization';
+import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes, sanitizeNoteAttachments } from './normalization';
 import { createUndoRedoHistory, pushHistoryEntry, undoHistory, redoHistory, clearDomainHistory as clearDomainHistoryFn, type HistoryStack, type HistoryEntry } from './undoRedoHistory';
 import { applyDomainPatch, type DomainPatch } from './domainPatches';
 import type { DomainState } from './domainStore';
@@ -648,8 +648,8 @@ export const useStore = create<State>()(
            if (n.height !== undefined && n.editingHeight === undefined) { n.editingHeight = n.height; }
            delete n.width;
            delete n.height;
-           n.attachments = sanitizeAttachments(n.attachments);
-        });
+           n.attachments = sanitizeNoteAttachments(n);
+         });
       }
 
       finalData.schemaVersion = STORAGE_SCHEMA_VERSION;

@@ -48,6 +48,15 @@ export const sanitizeAttachments = (attachments: unknown): AttachmentRef[] =>
     })
     : [];
 
+export const sanitizeNoteAttachments = (note: Pick<Note, 'kind' | 'attachments'>): AttachmentRef[] | undefined => {
+  if (note.kind !== 'image') {
+    return undefined;
+  }
+
+  const cleaned = sanitizeAttachments(note.attachments);
+  return cleaned.length > 0 ? cleaned : undefined;
+};
+
 export const createEmptyNormalizedNotesState = (): NormalizedNotesState => ({
   notesById: {},
   allNoteIds: [],

@@ -606,7 +606,7 @@ describe('StorageService 附件迁移与归一化', () => {
     vi.clearAllMocks();
   });
 
-  it('v1 旧数据（无 attachments 字段）安全加载，每个 note 补齐 attachments: []', async () => {
+  it('v1 旧数据（无 attachments 字段）安全加载，文本便签不补附件字段', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
       schemaVersion: 1,
       storageUpdatedAt: 100,
@@ -624,11 +624,11 @@ describe('StorageService 附件迁移与归一化', () => {
 
     expect(result.data.notes).toHaveLength(2);
     expect(result.data.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
-    expect(result.data.notes[0].attachments).toEqual([]);
-    expect(result.data.notes[1].attachments).toEqual([]);
+    expect(result.data.notes[0].attachments).toBeUndefined();
+    expect(result.data.notes[1].attachments).toBeUndefined();
   });
 
-  it('合法 AttachmentRef 在迁移后完整保留', async () => {
+  it('文本便签上的 AttachmentRef 在迁移后被剔除', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [{
         id: 'with-ref',
@@ -636,6 +636,32 @@ describe('StorageService 附件迁移与归一化', () => {
         x: 0,
         y: 0,
         title: '有附件',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 10,
+        attachments: [VALID_REF],
+      }],
+      storageUpdatedAt: 100,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+
+    const result = await bootstrap();
+    const note = result.data.notes[0];
+
+    expect(note.attachments).toBeUndefined();
+  });
+
+  it('图片便签上的 AttachmentRef 在迁移后完整保留', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'image-with-ref',
+        kind: 'image',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '图片',
         content: '',
         color: '#FFFFFF',
         z: 1,
@@ -680,11 +706,7 @@ describe('StorageService 附件迁移与归一化', () => {
     vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
 
     const result = await bootstrap();
-    const ref = result.data.notes[0].attachments?.[0];
-
-    expect(ref).toEqual(VALID_REF);
-    expect(ref).not.toHaveProperty('base64');
-    expect(ref).not.toHaveProperty('data');
+    expect(result.data.notes[0].attachments).toBeUndefined();
   });
 
   it('畸形附件条目被过滤，合法条目保留', async () => {
@@ -720,11 +742,10 @@ describe('StorageService 附件迁移与归一化', () => {
     const result = await bootstrap();
     const note = result.data.notes[0];
 
-    expect(note.attachments).toHaveLength(1);
-    expect(note.attachments?.[0]).toEqual(VALID_REF);
+    expect(note.attachments).toBeUndefined();
   });
 
-  it('attachments 为非数组值时归一化为空数组', async () => {
+  it('attachments 为非数组值时文本便签剔除附件字段', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [{
         id: 'non-array',
@@ -745,7 +766,7 @@ describe('StorageService 附件迁移与归一化', () => {
 
     const result = await bootstrap();
 
-    expect(result.data.notes[0].attachments).toEqual([]);
+    expect(result.data.notes[0].attachments).toBeUndefined();
   });
 
   it('bootstrap 输出 schemaVersion 为 2', async () => {
@@ -786,6 +807,6 @@ describe('StorageService 附件迁移与归一化', () => {
     const result = await bootstrap();
 
     expect(result.source).toBe('WAL');
-    expect(result.data.notes[0].attachments).toEqual([]);
+    expect(result.data.notes[0].attachments).toBeUndefined();
   });
 });

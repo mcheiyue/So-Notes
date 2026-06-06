@@ -51,7 +51,7 @@ const emitTheme = (noteId: string): Promise<void> =>
 const cloneAttachments = (attachments: AttachmentRef[] | undefined): AttachmentRef[] | undefined =>
   attachments && attachments.length > 0 ? attachments.map((attachment) => ({ ...attachment })) : undefined;
 
-const syncDetachedNote = (noteId: string, note: { title: string; content: string; color: string; collapsed?: boolean; attachments?: AttachmentRef[]; deletedAt?: number | null } | undefined): void => {
+const syncDetachedNote = (noteId: string, note: { kind?: 'text' | 'image'; title: string; content: string; color: string; collapsed?: boolean; attachments?: AttachmentRef[]; deletedAt?: number | null } | undefined): void => {
   if (!note || note.deletedAt) {
     clearPendingTimer(noteId);
     emitMissing(noteId);
@@ -64,6 +64,7 @@ const syncDetachedNote = (noteId: string, note: { title: string; content: string
     pendingTimers.delete(noteId);
     const snapshot: DetachedNoteSnapshot = {
       noteId,
+      kind: note.kind,
       title: note.title,
       content: note.content,
       color: note.color,

@@ -4,7 +4,7 @@ import { DEFAULT_BOARD, DEFAULT_CONFIG, STORAGE_SCHEMA_VERSION } from '../../sto
 import { db } from '../../store/db';
 import type { DomainState } from '../../store/domainStore';
 import { setDomainPersistenceBridge } from '../../store/domainStore';
-import { denormalizeNotes, sanitizeAttachments } from '../../store/normalization';
+import { denormalizeNotes, sanitizeNoteAttachments } from '../../store/normalization';
 import type { BootstrapResult, SyncAction, StorageDataSource, AttachOptions, AttachResult, PersistenceStatus } from './types';
 import {
   readDiskStorageData,
@@ -55,8 +55,8 @@ const migrateAndSanitize = (data: StorageData): StorageData => {
       if (n.title === undefined) n.title = '';
       if (!n.boardId) n.boardId = 'default';
       if (!n.updatedAt) n.updatedAt = n.createdAt || Date.now();
-      n.attachments = sanitizeAttachments(n.attachments);
-    });
+        n.attachments = sanitizeNoteAttachments(n);
+      });
   }
 
   if (!data.boards || data.boards.length === 0) {

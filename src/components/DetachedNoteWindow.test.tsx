@@ -244,17 +244,16 @@ describe('DetachedNoteWindow 按钮行为', () => {
     expect(noteEl!.className).toContain('rounded-xl');
   });
 
-  it('撕下窗口只读渲染图片附件预览且不显示移除按钮', async () => {
+  it('文本撕下窗口不再渲染附件预览', async () => {
     const attachment = createAttachment();
     await renderWindow();
     simulateSnapshot(createSnapshot({ attachments: [attachment] }));
 
     await vi.waitFor(() => {
-      expect(container.querySelector('[data-testid="note-attachments"]')).not.toBeNull();
-      expect(container.querySelector('img')?.getAttribute('src')).toBe(`asset://localhost//abs/${attachment.relativePath}`);
+      expect(container.querySelector('[data-note-visuals="true"]')).not.toBeNull();
     });
 
-    expect(container.querySelector(`[data-testid="attachment-remove-${attachment.id}"]`)).toBeNull();
+    expect(container.querySelector('[data-testid="note-attachments"]')).toBeNull();
   });
 
   it('点击定位按钮向主窗口发送 locate 事件', async () => {

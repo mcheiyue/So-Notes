@@ -6,7 +6,7 @@ import { useUIStore, uiSelectors } from '../store/uiStore';
 import { useStore } from '../store/useStore';
 import { appController } from '../controllers/appController';
 import { NoteVisuals } from './note-render/NoteVisuals';
-import { NoteAttachments } from './note-render/NoteAttachments';
+import { ImageNoteBody } from './note-render/ImageNoteBody';
 import { Z_INDEX } from '../constants/layout';
 import { cn } from '../utils/cn';
 import { useDarkMode } from '../hooks/useDarkMode';
@@ -120,6 +120,7 @@ const DetachedNoteShell: React.FC<{
       if (!note) {
         return {
           available: false,
+          kind: 'text' as const,
           title: '',
           content: '',
           color: '',
@@ -128,11 +129,12 @@ const DetachedNoteShell: React.FC<{
       }
       return {
         available: note.deletedAt == null,
+        kind: note.kind ?? 'text',
         title: note.title,
         content: note.content,
         color: note.color,
         isCollapsed: note.collapsed ?? false,
-        attachments: note.attachments ?? [],
+        attachments: note.attachments,
       };
     }),
   );
@@ -233,7 +235,7 @@ const DetachedNoteShell: React.FC<{
             </>
           }
         >
-          {!noteSnapshot.isCollapsed && (
+          {!noteSnapshot.isCollapsed && noteSnapshot.kind !== 'image' && (
             <>
               <div data-note-title-region="true" className="px-4 pt-3 pb-1">
                 <div className={cn('w-full truncate text-text-primary font-bold text-[16px]', noteSnapshot.title ? 'block' : 'hidden')}>
@@ -244,13 +246,21 @@ const DetachedNoteShell: React.FC<{
                 <div className="w-full px-4 text-text-secondary dark:text-text-primary font-normal text-[15px] leading-relaxed">
                   {noteSnapshot.content || <span className="text-text-tertiary">记点什么…</span>}
                 </div>
-                <NoteAttachments
-                  noteId={noteId}
-                  attachments={noteSnapshot.attachments ?? []}
-                  readOnly
-                />
               </div>
             </>
+          )}
+          {!noteSnapshot.isCollapsed && noteSnapshot.kind === 'image' && (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <ImageNoteBody
+                attachment={noteSnapshot.attachments?.[0]}
+                alt={noteSnapshot.title || noteSnapshot.attachments?.[0]?.filename || '图片便签'}
+              />
+              {noteSnapshot.content && (
+                <div className="px-4 pb-3 text-sm leading-relaxed text-text-secondary dark:text-text-primary">
+                  {noteSnapshot.content}
+                </div>
+              )}
+            </div>
           )}
         </NoteVisuals>
       </div>
