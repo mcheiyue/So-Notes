@@ -18,7 +18,7 @@ export interface RemoveNotePatch {
 export interface UpdateFieldsPatch {
   type: 'update-fields';
   noteId: string;
-  fields: Partial<Pick<Note, 'title' | 'content' | 'color' | 'collapsed' | 'updatedAt' | 'z' | 'width' | 'height' | 'editingWidth' | 'editingHeight' | 'boardId' | 'deletedAt'>>;
+  fields: Partial<Pick<Note, 'title' | 'content' | 'color' | 'collapsed' | 'updatedAt' | 'z' | 'width' | 'height' | 'editingWidth' | 'editingHeight' | 'boardId' | 'deletedAt' | 'attachments'>>;
 }
 
 /** 更新单张便签的位置 x/y */

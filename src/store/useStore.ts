@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { invoke } from '@tauri-apps/api/core';
-import { LayoutNote, Note, AppConfig, StorageData, StorageDataInput, STORAGE_SCHEMA_VERSION, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus, NoteHighlight, NoteHighlightReason } from './types';
+import { LayoutNote, Note, AppConfig, StorageData, StorageDataInput, STORAGE_SCHEMA_VERSION, DEFAULT_CONFIG, NOTE_COLORS, ContextMenuState, Board, DEFAULT_BOARD, ViewMode, ViewportState, AppCanvasState, InteractionState, ThemeMode, ShellRectState, SaveResult, StickyDragStatus, NoteHighlight, NoteHighlightReason, AttachmentRef } from './types';
 
 import { db } from './db';
 import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes, sanitizeAttachments } from './normalization';
@@ -151,6 +151,8 @@ interface State {
   commitNoteEditingSize: (noteId: string, newWidth: number, newHeight: number, beforeResize: NoteResizeSnapshot) => void;
   captureMoveSnapshot: (positions: Record<string, { x: number; y: number; updatedAt: number }>) => void;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number, status?: StickyDragStatus) => void;
+  addAttachmentToNote: (noteId: string, attachment: AttachmentRef) => void;
+  removeAttachmentFromNote: (noteId: string, attachmentId: string) => void;
   
   // New Actions for v1.1.1 & v1.1.2
   duplicateNote: (id: string) => void;
@@ -1813,6 +1815,60 @@ export const useStore = create<State>()(
           createdAt: updatedAt,
           undo: { type: 'update-fields', noteId, fields: { editingWidth: beforeResize.editingWidth, editingHeight: beforeResize.editingHeight, updatedAt: beforeResize.updatedAt } },
           redo: { type: 'update-fields', noteId, fields: { editingWidth: clampedWidth, editingHeight: clampedHeight, updatedAt } },
+        };
+        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
+      });
+    },
+
+    addAttachmentToNote: (noteId, attachment) => {
+      set((state) => {
+        const note = getNoteById(state, noteId);
+        if (!note) return;
+
+        const existingAttachments = note.attachments ?? [];
+        if (existingAttachments.some((ref) => ref.id === attachment.id)) return;
+
+        const prevUpdatedAt = note.updatedAt;
+        const updatedAt = Date.now();
+        const prevAttachments = existingAttachments;
+        note.attachments = [...existingAttachments, { ...attachment }];
+        note.updatedAt = updatedAt;
+
+        const entry: HistoryEntry<DomainPatch> = {
+          id: crypto.randomUUID(),
+          label: 'add-attachment',
+          createdAt: updatedAt,
+          undo: { type: 'update-fields', noteId, fields: { attachments: prevAttachments.length > 0 ? [...prevAttachments] : undefined, updatedAt: prevUpdatedAt } },
+          redo: { type: 'update-fields', noteId, fields: { attachments: [...note.attachments], updatedAt } },
+        };
+        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
+      });
+    },
+
+    removeAttachmentFromNote: (noteId, attachmentId) => {
+      set((state) => {
+        const note = getNoteById(state, noteId);
+        if (!note) return;
+
+        const existingAttachments = note.attachments ?? [];
+        const targetIndex = existingAttachments.findIndex((ref) => ref.id === attachmentId);
+        if (targetIndex === -1) return;
+
+        const prevUpdatedAt = note.updatedAt;
+        const updatedAt = Date.now();
+        const prevAttachments = [...existingAttachments];
+        note.attachments = existingAttachments.filter((ref) => ref.id !== attachmentId);
+        if (note.attachments.length === 0) {
+          note.attachments = undefined;
+        }
+        note.updatedAt = updatedAt;
+
+        const entry: HistoryEntry<DomainPatch> = {
+          id: crypto.randomUUID(),
+          label: 'remove-attachment',
+          createdAt: updatedAt,
+          undo: { type: 'update-fields', noteId, fields: { attachments: [...prevAttachments], updatedAt: prevUpdatedAt } },
+          redo: { type: 'update-fields', noteId, fields: { attachments: note.attachments ? [...note.attachments] : undefined, updatedAt } },
         };
         state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
       });
