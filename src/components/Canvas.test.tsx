@@ -24,6 +24,22 @@ vi.mock('react-draggable', () => ({
   DraggableCore: ({ children }: { children: React.ReactNode }) => children,
 }));
 
+const { mockSaveImageFromSystemClipboard } = vi.hoisted(() => ({
+  mockSaveImageFromSystemClipboard: vi.fn(async () => ({
+    hash: 'a'.repeat(64),
+    filename: 'clipboard-image.png',
+    mimeType: 'image/png',
+    size: 1024,
+    relativePath: `attachments/${'a'.repeat(64)}.png`,
+    createdAt: 1000,
+    bytesWritten: 1024,
+  })),
+}));
+
+vi.mock('../services/storage/attachmentPersistence', () => ({
+  saveImageFromSystemClipboard: mockSaveImageFromSystemClipboard,
+}));
+
 import { Canvas } from './Canvas';
 import { useStore } from '../store/useStore';
 import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
@@ -82,6 +98,7 @@ describe('Canvas 空白命中判定', () => {
     useStore.setState(useStore.getInitialState(), true);
     resetViewportSpawnSequenceForTests();
     setEdgePushDragLeader(null);
+    mockSaveImageFromSystemClipboard.mockClear();
     const normalized = normalizeNotes([createNote()]);
     useStore.setState({
       ...normalized,
@@ -1295,6 +1312,183 @@ describe('Canvas 空白命中判定', () => {
       x: 300,
       y: 400,
       type: 'CANVAS',
+    });
+  });
+
+  it('图片粘贴：单选一个未删除便签时追加附件到该便签', async () => {
+    const addAttachmentToNote = vi.fn();
+    useStore.setState({ addAttachmentToNote, selectedIds: ['note-1'] });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        getData: () => '',
+        items: [{ type: 'image/png', kind: 'file' }],
+      },
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(pasteEvent);
+    });
+
+    expect(mockSaveImageFromSystemClipboard).toHaveBeenCalledTimes(1);
+    expect(addAttachmentToNote).toHaveBeenCalledTimes(1);
+    expect(addAttachmentToNote).toHaveBeenCalledWith(
+      'note-1',
+      expect.objectContaining({
+        hash: 'a'.repeat(64),
+        filename: 'clipboard-image.png',
+        mimeType: 'image/png',
+        size: 1024,
+        relativePath: `attachments/${'a'.repeat(64)}.png`,
+        createdAt: 1000,
+      }),
+    );
+    expect(addAttachmentToNote.mock.calls[0][1].id).toBeTruthy();
+  });
+
+  it('图片粘贴：未选中便签时创建新便签并附加图片', async () => {
+    useStore.setState({ selectedIds: [] });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        getData: () => '',
+        items: [{ type: 'image/png', kind: 'file' }],
+      },
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(pasteEvent);
+    });
+
+    expect(mockSaveImageFromSystemClipboard).toHaveBeenCalledTimes(1);
+    const createdId = useStore.getState().selectedIds[0];
+    expect(createdId).toBeTruthy();
+    expect(useStore.getState().notesById[createdId]?.attachments).toEqual([
+      expect.objectContaining({
+        hash: 'a'.repeat(64),
+        filename: 'clipboard-image.png',
+        mimeType: 'image/png',
+        relativePath: `attachments/${'a'.repeat(64)}.png`,
+      }),
+    ]);
+  });
+
+  it('图片粘贴：多选便签时创建新便签而非批量追加', async () => {
+    useStore.setState({ selectedIds: ['note-1', 'note-other'] });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        getData: () => '',
+        items: [{ type: 'image/jpeg', kind: 'file' }],
+      },
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(pasteEvent);
+    });
+
+    expect(mockSaveImageFromSystemClipboard).toHaveBeenCalledTimes(1);
+    const createdId = useStore.getState().selectedIds[0];
+    expect(createdId).toBeTruthy();
+    expect(createdId).not.toBe('note-1');
+    expect(createdId).not.toBe('note-other');
+    expect(useStore.getState().notesById['note-1']?.attachments).toBeUndefined();
+    expect(useStore.getState().notesById[createdId]?.attachments).toEqual([
+      expect.objectContaining({
+        hash: 'a'.repeat(64),
+        filename: 'clipboard-image.png',
+        mimeType: 'image/png',
+        relativePath: `attachments/${'a'.repeat(64)}.png`,
+      }),
+    ]);
+  });
+
+  it('图片粘贴：输入框/文本域内粘贴不触发 saveImageFromSystemClipboard', async () => {
+    mockSaveImageFromSystemClipboard.mockClear();
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    const input = document.createElement('input');
+    canvasRoot!.appendChild(input);
+
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        getData: () => '',
+        items: [{ type: 'image/png', kind: 'file' }],
+      },
+    });
+
+    await act(async () => {
+      input.dispatchEvent(pasteEvent);
+    });
+
+    expect(mockSaveImageFromSystemClipboard).not.toHaveBeenCalled();
+
+    input.remove();
+  });
+
+  it('图片粘贴：SVG 图片不进入图片路径，回退到文本智能粘贴', async () => {
+    mockSaveImageFromSystemClipboard.mockClear();
+    const addNotesWithContentBatch = vi.fn(() => ['svg-note']);
+    useStore.setState({ addNotesWithContentBatch });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        getData: () => 'some svg text',
+        items: [{ type: 'image/svg+xml', kind: 'file' }],
+      },
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(pasteEvent);
+    });
+
+    expect(mockSaveImageFromSystemClipboard).not.toHaveBeenCalled();
+    expect(addNotesWithContentBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('文本智能粘贴在图片粘贴实现后仍保持原行为', async () => {
+    mockSaveImageFromSystemClipboard.mockClear();
+    const addNotesWithContentBatch = vi.fn(() => ['text-note']);
+    const openSmartPasteSplitPanel = vi.fn();
+    useStore.setState({ addNotesWithContentBatch, openSmartPasteSplitPanel });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: { getData: () => '第一行\n第二行' },
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(pasteEvent);
+    });
+
+    expect(mockSaveImageFromSystemClipboard).not.toHaveBeenCalled();
+    expect(addNotesWithContentBatch).toHaveBeenCalledWith([
+      { content: '第一行\n第二行', x: 550, y: 132 },
+    ]);
+    expect(openSmartPasteSplitPanel).toHaveBeenCalledWith({
+      noteId: 'text-note',
+      result: expect.objectContaining({ kind: 'lines', source: '第一行\n第二行' }),
     });
   });
 });

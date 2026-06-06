@@ -13,6 +13,8 @@ import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetr
 import { getNoteElement } from "../utils/noteElementRegistry";
 import { buildSmartPasteNoteInputs, parseSmartPaste } from "../utils/smartPaste";
 import { getViewportSpawnOrigin } from "../utils/spawnPosition";
+import { saveImageFromSystemClipboard } from "../services/storage/attachmentPersistence";
+import type { AttachmentRef } from "../store/types";
 import { attach } from "../services/storage/StorageService";
 import { CanvasEngine } from "../canvas/CanvasEngine";
 import { useCanvasGlobalListeners } from "../hooks/useCanvasGlobalListeners";
@@ -367,7 +369,7 @@ export const Canvas: React.FC = () => {
     useStore.getState().addNote(x, y);
   };
 
-  const handlePaste = (e: React.ClipboardEvent) => {
+  const handlePaste = async (e: React.ClipboardEvent) => {
     if (isDragInteractionLocked()) {
       return;
     }
@@ -382,6 +384,55 @@ export const Canvas: React.FC = () => {
       return;
     }
 
+    // 图片优先：检测剪贴板中的光栅图片项（拒绝 SVG）
+    const clipboardItems = e.clipboardData.items;
+    let hasRasterImage = false;
+    if (clipboardItems) {
+      for (let i = 0; i < clipboardItems.length; i++) {
+        const itemType = clipboardItems[i].type;
+        if (itemType.startsWith('image/') && itemType !== 'image/svg+xml') {
+          hasRasterImage = true;
+          break;
+        }
+      }
+    }
+
+    if (hasRasterImage) {
+      e.preventDefault();
+      try {
+        const writeResult = await saveImageFromSystemClipboard();
+        const attachmentRef: AttachmentRef = {
+          id: crypto.randomUUID(),
+          hash: writeResult.hash,
+          filename: writeResult.filename,
+          mimeType: writeResult.mimeType,
+          size: writeResult.size,
+          relativePath: writeResult.relativePath,
+          createdAt: writeResult.createdAt,
+        };
+
+        const currentStore = useStore.getState();
+        const nonDeletedSelectedIds = currentStore.selectedIds.filter(
+          (id) => !currentStore.layoutNotesById[id]?.deletedAt,
+        );
+
+        if (nonDeletedSelectedIds.length === 1) {
+          currentStore.addAttachmentToNote(nonDeletedSelectedIds[0], attachmentRef);
+        } else {
+          // 零选中或多选：在视口中心创建新便签并附加图片
+          const vp = useViewportStore.getState().viewport;
+          const origin = getViewportSpawnOrigin(vp);
+          currentStore.addNote(origin.x, origin.y);
+          const newNoteId = useStore.getState().selectedIds[0];
+          useStore.getState().addAttachmentToNote(newNoteId, attachmentRef);
+        }
+      } catch (error) {
+        console.warn('图片粘贴失败，已跳过附件创建。', error);
+      }
+      return;
+    }
+
+    // 文本智能粘贴（原有行为）
     const text = e.clipboardData.getData('text/plain');
     const vp = useViewportStore.getState().viewport;
     const origin = getViewportSpawnOrigin(vp);
