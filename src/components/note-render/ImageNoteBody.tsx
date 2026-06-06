@@ -4,6 +4,7 @@ import { ImageIcon, RefreshCw } from "lucide-react";
 import type { AttachmentRef } from "../../store/types";
 import { resolveAttachmentPath } from "../../services/storage/attachmentPersistence";
 import { cn } from "../../utils/cn";
+import { Z_INDEX } from "../../constants/layout";
 
 type ImageBodyState =
   | { status: "loading" }
@@ -17,6 +18,7 @@ interface ImageNoteBodyProps {
 
 export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt }) => {
   const [state, setState] = useState<ImageBodyState>({ status: "loading" });
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -46,6 +48,19 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt })
     };
   }, [attachment]);
 
+  useEffect(() => {
+    if (!isPreviewOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsPreviewOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isPreviewOpen]);
+
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center px-3 pb-3">
       {state.status === "loading" && (
@@ -55,15 +70,50 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt })
       )}
 
       {state.status === "ready" && (
-        <img
-          src={state.assetUrl}
-          alt={alt}
-          className={cn(
-            "h-full min-h-40 w-full rounded-lg border border-border-subtle object-contain",
-            "bg-black/5 dark:bg-white/5",
+        <>
+          <button
+            type="button"
+            data-testid="image-note-preview-trigger"
+            className="h-full min-h-40 w-full cursor-zoom-in overflow-hidden rounded-xl border border-border-subtle bg-black/5 text-left shadow-sm dark:bg-white/5"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsPreviewOpen(true);
+            }}
+            aria-label={`查看图片 ${alt}`}
+          >
+            <img
+              src={state.assetUrl}
+              alt={alt}
+              className={cn(
+                "h-full min-h-40 w-full object-contain",
+                "bg-black/5 dark:bg-white/5",
+              )}
+              loading="lazy"
+            />
+          </button>
+
+          {isPreviewOpen && (
+            <button
+              type="button"
+              data-testid="image-note-preview-overlay"
+              className="fixed inset-0 flex cursor-zoom-out items-center justify-center bg-black/65 p-6 backdrop-blur-sm"
+              style={{ zIndex: Z_INDEX.SPOTLIGHT }}
+              onClick={(event) => {
+                event.stopPropagation();
+                setIsPreviewOpen(false);
+              }}
+              aria-label="关闭图片预览"
+            >
+              <div className="max-h-full max-w-full overflow-hidden rounded-[1.25rem] border border-white/15 bg-black/10 shadow-2xl">
+                <img
+                  src={state.assetUrl}
+                  alt={alt}
+                  className="block max-h-[85vh] max-w-[85vw] object-contain"
+                />
+              </div>
+            </button>
           )}
-          loading="lazy"
-        />
+        </>
       )}
 
       {state.status === "missing" && (

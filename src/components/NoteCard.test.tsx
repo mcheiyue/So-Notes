@@ -552,37 +552,30 @@ describe('NoteCard 头部交互边界', () => {
     expect(article?.className).toContain('note-card');
   });
 
-  it('展开便签渲染图片附件预览并允许移除引用', async () => {
+  it('展开图片便签渲染主图预览且不再显示附件条', async () => {
     const attachment = createAttachment();
     useStore.setState({
-      ...normalizeNotes([createNote({ attachments: [attachment] })]),
+      ...normalizeNotes([createNote({ kind: 'image', title: 'photo.png', attachments: [attachment] })]),
     });
 
     await renderNoteCard();
 
     await vi.waitFor(() => {
-      expect(container.querySelector('[data-testid="note-attachments"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
       expect(container.querySelector('img')?.getAttribute('src')).toBe(`asset://localhost//abs/${attachment.relativePath}`);
     });
 
-    const removeButton = container.querySelector(`[data-testid="attachment-remove-${attachment.id}"]`) as HTMLButtonElement | null;
-    expect(removeButton).not.toBeNull();
-
-    await act(async () => {
-      removeButton?.click();
-    });
-
-    expect(useStore.getState().notesById['note-1']?.attachments).toBeUndefined();
+    expect(container.querySelector('[data-testid="note-attachments"]')).toBeNull();
   });
 
-  it('折叠便签不渲染图片附件预览', async () => {
+  it('折叠图片便签不渲染主图预览', async () => {
     useStore.setState({
-      ...normalizeNotes([createNote({ collapsed: true, attachments: [createAttachment()] })]),
+      ...normalizeNotes([createNote({ kind: 'image', collapsed: true, attachments: [createAttachment()] })]),
     });
 
     await renderNoteCard();
 
-    expect(container.querySelector('[data-testid="note-attachments"]')).toBeNull();
+    expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).toBeNull();
     expect(resolveAttachmentPathMock).not.toHaveBeenCalled();
   });
 
