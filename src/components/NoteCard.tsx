@@ -23,6 +23,7 @@ import {
 } from "../utils/edgePushDragCompensation";
 import { NoteVisuals } from "./note-render/NoteVisuals";
 import { NoteAttachments } from "./note-render/NoteAttachments";
+import { ImageNoteBody } from "./note-render/ImageNoteBody";
 import { saveImageFromSystemClipboard } from "../services/storage/attachmentPersistence";
 import type { AttachmentRef } from "../store/types";
 
@@ -61,7 +62,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
   const setIsDragging = useStore(state => state.setIsDragging);
   const commitNoteEditingSize = useStore(state => state.commitNoteEditingSize);
-  const addAttachmentToNote = useStore(state => state.addAttachmentToNote);
+  const addImageNotesBatch = useStore(state => state.addImageNotesBatch);
   
   const isStickyDragging = useStore(state => state.stickyDrag.id === id);
   const isSelected = useUIStore(state => state.selectedIds.includes(id));
@@ -525,7 +526,11 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         relativePath: writeResult.relativePath,
         createdAt: writeResult.createdAt,
       };
-      addAttachmentToNote(note.id, attachmentRef);
+      addImageNotesBatch([{
+        x: note.x + LAYOUT.NOTE_WIDTH + 20,
+        y: note.y,
+        attachment: attachmentRef,
+      }]);
     } catch (error) {
       console.warn('图片粘贴失败，已跳过附件创建。', error);
     }
@@ -623,6 +628,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   };
 
   const shouldShowResizeHandle = !isStatic && !note.collapsed && (isSelected || isEditing);
+  const isImageNote = note.kind === 'image';
+  const primaryImage = note.attachments?.[0];
 
   // 拖拽时禁用尺寸过渡，避免 CSS transition 与 JS transform 拖拽产生冲突。
   const transitionClass = isDragActive || isStickyDragging || isResizing
@@ -800,7 +807,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         </header>
 
         {/* Content */}
-        {!note.collapsed && (
+            {!note.collapsed && !isImageNote && (
             <div className="flex-1 pb-4 pt-0 flex flex-col gap-1 min-h-0 relative">
               <div className="px-4">
                   <input 
@@ -874,6 +881,34 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 />
               )}
             </div>
+        )}
+
+        {!note.collapsed && isImageNote && (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <ImageNoteBody attachment={primaryImage} alt={note.title || primaryImage?.filename || "图片便签"} />
+            {(isEditing || note.content) && (
+              <textarea
+                ref={textareaRef}
+                value={note.content}
+                placeholder="添加说明…"
+                className={cn(
+                  "w-full resize-none bg-transparent outline-none px-4 pb-3",
+                  "text-text-secondary dark:text-text-primary text-sm leading-relaxed",
+                  "placeholder-text-tertiary/75 dark:placeholder-text-secondary/75",
+                  "selection:bg-blue-200/50 dark:selection:bg-blue-200/35",
+                  "overflow-hidden"
+                )}
+                onChange={(e) => updateNote(note.id, e.target.value)}
+                onFocus={handleContentFocus}
+                onBlur={handleContentBlur}
+                onPaste={handleInputPaste}
+                onMouseDownCapture={handleMouseDown}
+                spellCheck={false}
+                rows={1}
+                readOnly={isStatic}
+              />
+            )}
+          </div>
         )}
 
         {shouldShowResizeHandle && (

@@ -444,14 +444,16 @@ export const Canvas: React.FC = () => {
         );
 
         if (nonDeletedSelectedIds.length === 1) {
-          currentStore.addAttachmentToNote(nonDeletedSelectedIds[0], attachmentRef);
+          const selectedNote = currentStore.notesById[nonDeletedSelectedIds[0]];
+          currentStore.addImageNotesBatch([{
+            x: (selectedNote?.x ?? getViewportSpawnOrigin(useViewportStore.getState().viewport).x) + IMAGE_DROP_STAGGER_OFFSET_X,
+            y: (selectedNote?.y ?? getViewportSpawnOrigin(useViewportStore.getState().viewport).y) + IMAGE_DROP_STAGGER_OFFSET_Y,
+            attachment: attachmentRef,
+          }]);
         } else {
-          // 零选中或多选：在视口中心创建新便签并附加图片
           const vp = useViewportStore.getState().viewport;
           const origin = getViewportSpawnOrigin(vp);
-          currentStore.addNote(origin.x, origin.y);
-          const newNoteId = useStore.getState().selectedIds[0];
-          useStore.getState().addAttachmentToNote(newNoteId, attachmentRef);
+          currentStore.addImageNotesBatch([{ x: origin.x, y: origin.y, attachment: attachmentRef }]);
         }
       } catch (error) {
         console.warn('图片粘贴失败，已跳过附件创建。', error);
@@ -554,7 +556,7 @@ export const Canvas: React.FC = () => {
         attachment: entry.attachment,
       }));
 
-      useStore.getState().addNotesWithAttachmentsBatch(batchInputs);
+      useStore.getState().addImageNotesBatch(batchInputs);
     } catch (batchError) {
       console.warn('批量创建便签失败，执行附件补偿删除。', batchError);
       for (const entry of writeResults) {

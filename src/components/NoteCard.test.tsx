@@ -248,9 +248,9 @@ describe('NoteCard 头部交互边界', () => {
     expect(textarea?.className).not.toContain('dark:selection:text-slate-950');
   });
 
-  it('正文输入框图片粘贴追加附件到当前便签，不走文本插入', async () => {
-    const addAttachmentToNote = vi.fn();
-    useStore.setState({ addAttachmentToNote });
+  it('正文输入框图片粘贴在当前便签旁创建图片便签，不走文本插入', async () => {
+    const addImageNotesBatch = vi.fn();
+    useStore.setState({ addImageNotesBatch });
     await renderNoteCard();
 
     const textarea = container.querySelector('textarea[placeholder="记点什么…"]') as HTMLTextAreaElement | null;
@@ -269,21 +269,24 @@ describe('NoteCard 头部交互边界', () => {
 
     expect(pasteEvent.defaultPrevented).toBe(true);
     expect(saveImageFromSystemClipboardMock).toHaveBeenCalledTimes(1);
-    expect(addAttachmentToNote).toHaveBeenCalledTimes(1);
-    expect(addAttachmentToNote).toHaveBeenCalledWith(
-      'note-1',
+    expect(addImageNotesBatch).toHaveBeenCalledTimes(1);
+    expect(addImageNotesBatch).toHaveBeenCalledWith([
       expect.objectContaining({
-        hash: 'b'.repeat(64),
-        filename: 'clipboard-image.png',
-        mimeType: 'image/png',
-        relativePath: `attachments/${'b'.repeat(64)}.png`,
+        x: 400,
+        y: 140,
+        attachment: expect.objectContaining({
+          hash: 'b'.repeat(64),
+          filename: 'clipboard-image.png',
+          mimeType: 'image/png',
+          relativePath: `attachments/${'b'.repeat(64)}.png`,
+        }),
       }),
-    );
+    ]);
   });
 
   it('标题输入框文本粘贴不拦截，保留原生输入行为', async () => {
-    const addAttachmentToNote = vi.fn();
-    useStore.setState({ addAttachmentToNote });
+    const addImageNotesBatch = vi.fn();
+    useStore.setState({ addImageNotesBatch });
     await renderNoteCard();
 
     const titleInput = container.querySelector('input[placeholder="标题"]') as HTMLInputElement | null;
@@ -302,7 +305,7 @@ describe('NoteCard 头部交互边界', () => {
 
     expect(pasteEvent.defaultPrevented).toBe(false);
     expect(saveImageFromSystemClipboardMock).not.toHaveBeenCalled();
-    expect(addAttachmentToNote).not.toHaveBeenCalled();
+    expect(addImageNotesBatch).not.toHaveBeenCalled();
   });
 
   it('尺寸拖拽期间禁用 width/height 过渡', async () => {

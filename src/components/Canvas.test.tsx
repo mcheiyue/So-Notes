@@ -1343,9 +1343,8 @@ describe('Canvas 空白命中判定', () => {
     });
   });
 
-  it('图片粘贴：单选一个未删除便签时追加附件到该便签', async () => {
-    const addAttachmentToNote = vi.fn();
-    useStore.setState({ addAttachmentToNote, selectedIds: ['note-1'] });
+  it('图片粘贴：单选一个未删除便签时在旁边创建图片便签', async () => {
+    useStore.setState({ selectedIds: ['note-1'] });
 
     await renderCanvas();
 
@@ -1363,19 +1362,23 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(mockSaveImageFromSystemClipboard).toHaveBeenCalledTimes(1);
-    expect(addAttachmentToNote).toHaveBeenCalledTimes(1);
-    expect(addAttachmentToNote).toHaveBeenCalledWith(
-      'note-1',
+    const createdId = useStore.getState().selectedIds[0];
+    expect(createdId).toBeTruthy();
+    expect(createdId).not.toBe('note-1');
+    expect(useStore.getState().notesById['note-1']?.attachments).toBeUndefined();
+
+    const note = useStore.getState().notesById[createdId];
+    expect(note?.kind).toBe('image');
+    expect(note?.x).toBe(150);
+    expect(note?.y).toBe(170);
+    expect(note?.attachments).toEqual([
       expect.objectContaining({
         hash: 'a'.repeat(64),
         filename: 'clipboard-image.png',
         mimeType: 'image/png',
-        size: 1024,
         relativePath: `attachments/${'a'.repeat(64)}.png`,
-        createdAt: 1000,
       }),
-    );
-    expect(addAttachmentToNote.mock.calls[0][1].id).toBeTruthy();
+    ]);
   });
 
   it('图片粘贴：未选中便签时创建新便签并附加图片', async () => {
@@ -1399,6 +1402,7 @@ describe('Canvas 空白命中判定', () => {
     expect(mockSaveImageFromSystemClipboard).toHaveBeenCalledTimes(1);
     const createdId = useStore.getState().selectedIds[0];
     expect(createdId).toBeTruthy();
+    expect(useStore.getState().notesById[createdId]?.kind).toBe('image');
     expect(useStore.getState().notesById[createdId]?.attachments).toEqual([
       expect.objectContaining({
         hash: 'a'.repeat(64),
@@ -1433,6 +1437,7 @@ describe('Canvas 空白命中判定', () => {
     expect(createdId).not.toBe('note-1');
     expect(createdId).not.toBe('note-other');
     expect(useStore.getState().notesById['note-1']?.attachments).toBeUndefined();
+    expect(useStore.getState().notesById[createdId]?.kind).toBe('image');
     expect(useStore.getState().notesById[createdId]?.attachments).toEqual([
       expect.objectContaining({
         hash: 'a'.repeat(64),
@@ -1570,8 +1575,8 @@ describe('Canvas 空白命中判定', () => {
   });
 
   it('文件拖到非空白目标时阻止默认行为但不创建便签', async () => {
-    const addNotesWithAttachmentsBatch = vi.fn(() => []);
-    useStore.setState({ addNotesWithAttachmentsBatch });
+    const addImageNotesBatch = vi.fn(() => []);
+    useStore.setState({ addImageNotesBatch });
 
     await renderCanvas();
 
@@ -1589,7 +1594,7 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
-    expect(addNotesWithAttachmentsBatch).not.toHaveBeenCalled();
+    expect(addImageNotesBatch).not.toHaveBeenCalled();
   });
 
   let canvasRoot: HTMLDivElement | null = null;
@@ -1622,6 +1627,10 @@ describe('Canvas 空白命中判定', () => {
     const noteId = state.selectedIds[0];
     const note = state.notesById[noteId];
     expect(note).toBeDefined();
+    expect(note!.kind).toBe('image');
+    expect(note!.title).toBe('photo.png');
+    expect(note!.editingWidth).toBe(LAYOUT.IMAGE_NOTE_WIDTH);
+    expect(note!.editingHeight).toBe(LAYOUT.IMAGE_NOTE_HEIGHT);
     expect(note!.attachments).toBeDefined();
     expect(note!.attachments!.length).toBe(1);
     expect(note!.attachments![0].filename).toBe('photo.png');
@@ -1654,6 +1663,8 @@ describe('Canvas 空白命中判定', () => {
 
     const state = useStore.getState();
     const note = state.notesById[state.selectedIds[0]];
+    expect(note?.kind).toBe('image');
+    expect(note?.title).toBe('drop.png');
     expect(note?.attachments?.[0].filename).toBe('drop.png');
     expect(note?.attachments?.[0].hash).toBe('e'.repeat(64));
   });
@@ -1719,7 +1730,7 @@ describe('Canvas 空白命中判定', () => {
 
     expect(state.domainHistory.undoStack.length).toBeGreaterThan(0);
     const lastEntry = state.domainHistory.undoStack[state.domainHistory.undoStack.length - 1];
-    expect(lastEntry.label).toBe('drop-images');
+    expect(lastEntry.label).toBe('create-image-notes');
 
     const undoResult = useStore.getState().undoDomainChange();
     expect(undoResult).toBe(true);
@@ -1742,8 +1753,8 @@ describe('Canvas 空白命中判定', () => {
   });
 
   it('拖入 SVG 和非图片文件被拒绝，不创建便签', async () => {
-    const addNotesWithAttachmentsBatch = vi.fn(() => []);
-    useStore.setState({ addNotesWithAttachmentsBatch });
+    const addImageNotesBatch = vi.fn(() => []);
+    useStore.setState({ addImageNotesBatch });
     mockWriteAttachmentFromPath.mockClear();
 
     await renderCanvas();
@@ -1765,7 +1776,7 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(mockWriteAttachmentFromPath).not.toHaveBeenCalled();
-    expect(addNotesWithAttachmentsBatch).not.toHaveBeenCalled();
+    expect(addImageNotesBatch).not.toHaveBeenCalled();
   });
 
   it('writeAttachmentFromPath 部分失败时只创建成功的便签', async () => {

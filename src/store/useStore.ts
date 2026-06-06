@@ -154,8 +154,7 @@ interface State {
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number, status?: StickyDragStatus) => void;
   addAttachmentToNote: (noteId: string, attachment: AttachmentRef) => void;
   removeAttachmentFromNote: (noteId: string, attachmentId: string) => void;
-  /** 批量创建带附件的便签，作为单条 Undo/Redo 历史提交 */
-  addNotesWithAttachmentsBatch: (inputs: Array<{ x: number; y: number; attachment: AttachmentRef }>) => string[];
+  addImageNotesBatch: (inputs: Array<{ x: number; y: number; attachment: AttachmentRef }>) => string[];
   
   // New Actions for v1.1.1 & v1.1.2
   duplicateNote: (id: string) => void;
@@ -1877,7 +1876,7 @@ export const useStore = create<State>()(
       });
     },
 
-    addNotesWithAttachmentsBatch: (inputs) => {
+    addImageNotesBatch: (inputs) => {
       if (inputs.length === 0) {
         return [];
       }
@@ -1891,14 +1890,17 @@ export const useStore = create<State>()(
         inputs.forEach((input, index) => {
           const newNote: Note = {
             id: createdIds[index],
+            kind: 'image',
             boardId,
-            title: '',
+            title: input.attachment.filename,
             content: '',
             x: input.x,
             y: input.y,
             z: startZ + index + 1,
             color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
             collapsed: false,
+            editingWidth: LAYOUT.IMAGE_NOTE_WIDTH,
+            editingHeight: LAYOUT.IMAGE_NOTE_HEIGHT,
             createdAt,
             updatedAt: createdAt,
             attachments: [{ ...input.attachment }],
@@ -1918,7 +1920,7 @@ export const useStore = create<State>()(
 
         const entry: HistoryEntry<DomainPatch> = {
           id: crypto.randomUUID(),
-          label: 'drop-images',
+            label: 'create-image-notes',
           createdAt: Date.now(),
           undo: {
             type: 'compound-patch',
