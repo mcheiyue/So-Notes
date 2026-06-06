@@ -153,6 +153,8 @@ interface State {
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number, status?: StickyDragStatus) => void;
   addAttachmentToNote: (noteId: string, attachment: AttachmentRef) => void;
   removeAttachmentFromNote: (noteId: string, attachmentId: string) => void;
+  /** 批量创建带附件的便签，作为单条 Undo/Redo 历史提交 */
+  addNotesWithAttachmentsBatch: (inputs: Array<{ x: number; y: number; attachment: AttachmentRef }>) => string[];
   
   // New Actions for v1.1.1 & v1.1.2
   duplicateNote: (id: string) => void;
@@ -1872,6 +1874,64 @@ export const useStore = create<State>()(
         };
         state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
       });
+    },
+
+    addNotesWithAttachmentsBatch: (inputs) => {
+      if (inputs.length === 0) {
+        return [];
+      }
+
+      const boardId = get().currentBoardId;
+      const createdAt = Date.now();
+      const startZ = get().config.maxZ;
+      const createdIds = inputs.map(() => crypto.randomUUID());
+
+      set((state) => {
+        inputs.forEach((input, index) => {
+          const newNote: Note = {
+            id: createdIds[index],
+            boardId,
+            title: '',
+            content: '',
+            x: input.x,
+            y: input.y,
+            z: startZ + index + 1,
+            color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
+            collapsed: false,
+            createdAt,
+            updatedAt: createdAt,
+            attachments: [{ ...input.attachment }],
+          };
+
+          appendNoteToNormalizedState(state, newNote);
+        });
+
+        state.config.maxZ += inputs.length;
+        state.selectedIds = createdIds;
+        state.recentlyCreatedIds = createdIds;
+        assignNoteHighlights(state, createdIds, 'created');
+
+        const createdNotes = createdIds
+          .map((id) => state.notesById[id])
+          .filter((n): n is Note => n !== undefined);
+
+        const entry: HistoryEntry<DomainPatch> = {
+          id: crypto.randomUUID(),
+          label: 'drop-images',
+          createdAt: Date.now(),
+          undo: {
+            type: 'compound-patch',
+            patches: createdNotes.map((n) => ({ type: 'remove-note' as const, noteId: n.id })),
+          },
+          redo: {
+            type: 'compound-patch',
+            patches: createdNotes.map((n) => ({ type: 'add-note' as const, note: { ...n } })),
+          },
+        };
+        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
+      });
+
+      return createdIds;
     },
 
     captureMoveSnapshot: (positions) => {

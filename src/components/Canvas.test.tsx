@@ -24,7 +24,7 @@ vi.mock('react-draggable', () => ({
   DraggableCore: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-const { mockSaveImageFromSystemClipboard } = vi.hoisted(() => ({
+const { mockSaveImageFromSystemClipboard, mockWriteAttachmentFromPath, mockDeleteAttachmentFile } = vi.hoisted(() => ({
   mockSaveImageFromSystemClipboard: vi.fn(async () => ({
     hash: 'a'.repeat(64),
     filename: 'clipboard-image.png',
@@ -34,10 +34,25 @@ const { mockSaveImageFromSystemClipboard } = vi.hoisted(() => ({
     createdAt: 1000,
     bytesWritten: 1024,
   })),
+  mockWriteAttachmentFromPath: vi.fn(async (_sourcePath: string, filename: string, mimeType?: string) => ({
+    hash: 'b'.repeat(64),
+    filename,
+    mimeType: mimeType ?? 'application/octet-stream',
+    size: 2048,
+    relativePath: `attachments/${'b'.repeat(64)}.png`,
+    createdAt: 2000,
+    bytesWritten: 2048,
+  })),
+  mockDeleteAttachmentFile: vi.fn(async (relativePath: string) => ({
+    deleted: true,
+    relativePath,
+  })),
 }));
 
 vi.mock('../services/storage/attachmentPersistence', () => ({
   saveImageFromSystemClipboard: mockSaveImageFromSystemClipboard,
+  writeAttachmentFromPath: mockWriteAttachmentFromPath,
+  deleteAttachmentFile: mockDeleteAttachmentFile,
 }));
 
 import { Canvas } from './Canvas';
@@ -99,6 +114,8 @@ describe('Canvas 空白命中判定', () => {
     resetViewportSpawnSequenceForTests();
     setEdgePushDragLeader(null);
     mockSaveImageFromSystemClipboard.mockClear();
+    mockWriteAttachmentFromPath.mockClear();
+    mockDeleteAttachmentFile.mockClear();
     const normalized = normalizeNotes([createNote()]);
     useStore.setState({
       ...normalized,
@@ -1490,5 +1507,284 @@ describe('Canvas 空白命中判定', () => {
       noteId: 'text-note',
       result: expect.objectContaining({ kind: 'lines', source: '第一行\n第二行' }),
     });
+  });
+
+  const createMockFile = (name: string, type: string, path?: string): File => {
+    const file = new File(['dummy'], name, { type });
+    if (path) {
+      Object.defineProperty(file, 'path', { value: path, configurable: true });
+    }
+    return file;
+  };
+
+  const createFileDragEvent = (
+    type: 'dragover' | 'drop',
+    files: File[],
+    options: { clientX?: number; clientY?: number; target?: Element } = {},
+  ): Event => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    const fileList = Object.assign(files, { item: (i: number) => files[i] ?? null });
+    Object.defineProperty(event, 'dataTransfer', {
+      value: {
+        types: ['Files'],
+        files: fileList,
+        items: files.map((f) => ({ kind: 'file', type: f.type, getAsFile: () => f })),
+        dropEffect: 'none',
+      },
+    });
+    if (options.clientX !== undefined) {
+      Object.defineProperty(event, 'clientX', { value: options.clientX });
+      Object.defineProperty(event, 'clientY', { value: options.clientY ?? 0 });
+    }
+    if (options.target) {
+      Object.defineProperty(event, 'target', { value: options.target });
+    }
+    return event;
+  };
+
+  it('文件拖入 dragover 时阻止浏览器默认行为', async () => {
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    const pngFile = createMockFile('test.png', 'image/png', '/path/to/test.png');
+    const dragoverEvent = createFileDragEvent('dragover', [pngFile]);
+
+    const preventDefaultSpy = vi.spyOn(dragoverEvent, 'preventDefault');
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(dragoverEvent);
+    });
+
+    expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('文件拖到非空白目标时阻止默认行为但不创建便签', async () => {
+    const addNotesWithAttachmentsBatch = vi.fn(() => []);
+    useStore.setState({ addNotesWithAttachmentsBatch });
+
+    await renderCanvas();
+
+    const noteHeader = container.querySelector('.drag-handle') as HTMLElement | null;
+    expect(noteHeader).not.toBeNull();
+
+    const pngFile = createMockFile('test.png', 'image/png', '/path/to/test.png');
+    const dropEvent = createFileDragEvent('drop', [pngFile], { target: noteHeader! });
+
+    const preventDefaultSpy = vi.spyOn(dropEvent, 'preventDefault');
+
+    await act(async () => {
+      canvasRoot = container.firstElementChild as HTMLDivElement | null;
+      canvasRoot?.dispatchEvent(dropEvent);
+    });
+
+    expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
+    expect(addNotesWithAttachmentsBatch).not.toHaveBeenCalled();
+  });
+
+  let canvasRoot: HTMLDivElement | null = null;
+
+  it('拖入单张 PNG 到空白画布创建一个带附件的便签', async () => {
+    await renderCanvas();
+
+    canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 10, top: 20, right: 1290, bottom: 740,
+      width: 1280, height: 720, x: 10, y: 20, toJSON: () => ({}),
+    } as DOMRect));
+
+    const pngFile = createMockFile('photo.png', 'image/png', '/home/user/photo.png');
+    const dropEvent = createFileDragEvent('drop', [pngFile], {
+      clientX: 200, clientY: 300,
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(dropEvent);
+    });
+
+    expect(mockWriteAttachmentFromPath).toHaveBeenCalledTimes(1);
+    expect(mockWriteAttachmentFromPath).toHaveBeenCalledWith(
+      '/home/user/photo.png', 'photo.png', 'image/png',
+    );
+
+    const state = useStore.getState();
+    expect(state.selectedIds.length).toBe(1);
+    const noteId = state.selectedIds[0];
+    const note = state.notesById[noteId];
+    expect(note).toBeDefined();
+    expect(note!.attachments).toBeDefined();
+    expect(note!.attachments!.length).toBe(1);
+    expect(note!.attachments![0].filename).toBe('photo.png');
+    expect(note!.attachments![0].hash).toBe('b'.repeat(64));
+  });
+
+  it('拖入多张图片创建多张层叠便签，一条撤销移除全部', async () => {
+    mockWriteAttachmentFromPath.mockClear();
+    let hashCounter = 0;
+    mockWriteAttachmentFromPath.mockImplementation(async (_sp: string, filename: string, mimeType?: string) => {
+      hashCounter += 1;
+      const hash = hashCounter.toString().padStart(64, 'c');
+      return {
+        hash,
+        filename,
+        mimeType: mimeType ?? 'application/octet-stream',
+        size: 1024,
+        relativePath: `attachments/${hash}.png`,
+        createdAt: 3000 + hashCounter,
+        bytesWritten: 1024,
+      };
+    });
+
+    await renderCanvas();
+
+    canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 0, top: 0, right: 1280, bottom: 720,
+      width: 1280, height: 720, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect));
+
+    const file1 = createMockFile('a.png', 'image/png', '/a.png');
+    const file2 = createMockFile('b.jpg', 'image/jpeg', '/b.jpg');
+    const file3 = createMockFile('c.webp', 'image/webp', '/c.webp');
+    const dropEvent = createFileDragEvent('drop', [file1, file2, file3], {
+      clientX: 100, clientY: 200,
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(dropEvent);
+    });
+
+    expect(mockWriteAttachmentFromPath).toHaveBeenCalledTimes(3);
+
+    const state = useStore.getState();
+    expect(state.selectedIds.length).toBe(3);
+
+    const note1 = state.notesById[state.selectedIds[0]];
+    const note2 = state.notesById[state.selectedIds[1]];
+    const note3 = state.notesById[state.selectedIds[2]];
+    expect(note1).toBeDefined();
+    expect(note2).toBeDefined();
+    expect(note3).toBeDefined();
+
+    expect(note1!.x).toBe(140);
+    expect(note1!.y).toBe(260);
+    expect(note2!.x).toBe(170);
+    expect(note2!.y).toBe(290);
+    expect(note3!.x).toBe(200);
+    expect(note3!.y).toBe(320);
+
+    expect(note1!.attachments![0].filename).toBe('a.png');
+    expect(note2!.attachments![0].filename).toBe('b.jpg');
+    expect(note3!.attachments![0].filename).toBe('c.webp');
+
+    expect(state.domainHistory.undoStack.length).toBeGreaterThan(0);
+    const lastEntry = state.domainHistory.undoStack[state.domainHistory.undoStack.length - 1];
+    expect(lastEntry.label).toBe('drop-images');
+
+    const undoResult = useStore.getState().undoDomainChange();
+    expect(undoResult).toBe(true);
+
+    const afterUndo = useStore.getState();
+    expect(afterUndo.notesById[state.selectedIds[0]]).toBeUndefined();
+    expect(afterUndo.notesById[state.selectedIds[1]]).toBeUndefined();
+    expect(afterUndo.notesById[state.selectedIds[2]]).toBeUndefined();
+    expect(afterUndo.selectedIds.length).toBe(0);
+
+    mockWriteAttachmentFromPath.mockImplementation(async (_sp: string, filename: string, mimeType?: string) => ({
+      hash: 'b'.repeat(64),
+      filename,
+      mimeType: mimeType ?? 'application/octet-stream',
+      size: 2048,
+      relativePath: `attachments/${'b'.repeat(64)}.png`,
+      createdAt: 2000,
+      bytesWritten: 2048,
+    }));
+  });
+
+  it('拖入 SVG 和非图片文件被拒绝，不创建便签', async () => {
+    const addNotesWithAttachmentsBatch = vi.fn(() => []);
+    useStore.setState({ addNotesWithAttachmentsBatch });
+    mockWriteAttachmentFromPath.mockClear();
+
+    await renderCanvas();
+
+    canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 0, top: 0, right: 1280, bottom: 720,
+      width: 1280, height: 720, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect));
+
+    const svgFile = createMockFile('icon.svg', 'image/svg+xml', '/icon.svg');
+    const txtFile = createMockFile('readme.txt', 'text/plain', '/readme.txt');
+    const dropEvent = createFileDragEvent('drop', [svgFile, txtFile], {
+      clientX: 100, clientY: 200,
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(dropEvent);
+    });
+
+    expect(mockWriteAttachmentFromPath).not.toHaveBeenCalled();
+    expect(addNotesWithAttachmentsBatch).not.toHaveBeenCalled();
+  });
+
+  it('writeAttachmentFromPath 部分失败时只创建成功的便签', async () => {
+    mockWriteAttachmentFromPath.mockClear();
+    let callCount = 0;
+    mockWriteAttachmentFromPath.mockImplementation(async (_sp: string, filename: string, mimeType?: string) => {
+      callCount += 1;
+      if (callCount === 2) {
+        throw new Error('磁盘空间不足');
+      }
+      const hash = callCount.toString().padStart(64, 'd');
+      return {
+        hash,
+        filename,
+        mimeType: mimeType ?? 'application/octet-stream',
+        size: 1024,
+        relativePath: `attachments/${hash}.png`,
+        createdAt: 4000 + callCount,
+        bytesWritten: 1024,
+      };
+    });
+
+    await renderCanvas();
+
+    canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 0, top: 0, right: 1280, bottom: 720,
+      width: 1280, height: 720, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect));
+
+    const file1 = createMockFile('ok1.png', 'image/png', '/ok1.png');
+    const file2 = createMockFile('fail.png', 'image/png', '/fail.png');
+    const file3 = createMockFile('ok3.png', 'image/png', '/ok3.png');
+    const dropEvent = createFileDragEvent('drop', [file1, file2, file3], {
+      clientX: 100, clientY: 200,
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(dropEvent);
+    });
+
+    expect(mockWriteAttachmentFromPath).toHaveBeenCalledTimes(3);
+
+    const state = useStore.getState();
+    expect(state.selectedIds.length).toBe(2);
+    const note1 = state.notesById[state.selectedIds[0]];
+    const note2 = state.notesById[state.selectedIds[1]];
+    expect(note1).toBeDefined();
+    expect(note1!.attachments![0].filename).toBe('ok1.png');
+    expect(note2).toBeDefined();
+    expect(note2!.attachments![0].filename).toBe('ok3.png');
+
+    mockWriteAttachmentFromPath.mockImplementation(async (_sp: string, filename: string, mimeType?: string) => ({
+      hash: 'b'.repeat(64),
+      filename,
+      mimeType: mimeType ?? 'application/octet-stream',
+      size: 2048,
+      relativePath: `attachments/${'b'.repeat(64)}.png`,
+      createdAt: 2000,
+      bytesWritten: 2048,
+    }));
   });
 });

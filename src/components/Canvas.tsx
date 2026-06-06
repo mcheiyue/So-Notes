@@ -13,7 +13,7 @@ import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetr
 import { getNoteElement } from "../utils/noteElementRegistry";
 import { buildSmartPasteNoteInputs, parseSmartPaste } from "../utils/smartPaste";
 import { getViewportSpawnOrigin } from "../utils/spawnPosition";
-import { saveImageFromSystemClipboard } from "../services/storage/attachmentPersistence";
+import { saveImageFromSystemClipboard, writeAttachmentFromPath, deleteAttachmentFile } from "../services/storage/attachmentPersistence";
 import type { AttachmentRef } from "../store/types";
 import { attach } from "../services/storage/StorageService";
 import { CanvasEngine } from "../canvas/CanvasEngine";
@@ -28,6 +28,33 @@ const CANVAS_NON_BLANK_SELECTOR = [
   '[data-canvas-hit="blocked"]',
   '.minimap-interaction-area',
 ].join(', ');
+
+const ALLOWED_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]);
+
+const IMAGE_DROP_STAGGER_OFFSET_X = 30;
+const IMAGE_DROP_STAGGER_OFFSET_Y = 30;
+
+const isFileDragEvent = (e: React.DragEvent): boolean => {
+  return e.dataTransfer.types.includes('Files');
+};
+
+/**
+ * 从 File 对象提取本地文件路径。
+ * Tauri / Electron WebView 的 File 对象暴露 .path 属性，
+ * 标准浏览器中不存在该属性，返回 null。
+ */
+const getFilePathFromFile = (file: File): string | null => {
+  const candidate = file as File & { path?: string };
+  if (typeof candidate.path === 'string' && candidate.path.length > 0) {
+    return candidate.path;
+  }
+  return null;
+};
 
 const getEventTargetElement = (target: EventTarget | null): Element | null => {
   if (target instanceof Element) {
@@ -451,6 +478,101 @@ export const Canvas: React.FC = () => {
     }
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!isFileDragEvent(e)) {
+      return;
+    }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    if (!isFileDragEvent(e)) {
+      return;
+    }
+
+    e.preventDefault();
+
+    if (!isBlankCanvasTarget(e.target)) {
+      return;
+    }
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) {
+      return;
+    }
+
+    const acceptedFiles: File[] = [];
+    for (const file of files) {
+      if (ALLOWED_IMAGE_MIME_TYPES.has(file.type)) {
+        acceptedFiles.push(file);
+      }
+    }
+
+    if (acceptedFiles.length === 0) {
+      return;
+    }
+
+    const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
+    const vp = useViewportStore.getState().viewport;
+    const baseX = localPoint.x + vp.x;
+    const baseY = localPoint.y + vp.y;
+
+    const writeResults: Array<{ file: File; attachment: AttachmentRef }> = [];
+    const failedFiles: string[] = [];
+
+    for (const file of acceptedFiles) {
+      const sourcePath = getFilePathFromFile(file);
+      if (!sourcePath) {
+        failedFiles.push(file.name);
+        continue;
+      }
+
+      try {
+        const result = await writeAttachmentFromPath(sourcePath, file.name, file.type);
+        writeResults.push({
+          file,
+          attachment: {
+            id: crypto.randomUUID(),
+            hash: result.hash,
+            filename: result.filename,
+            mimeType: result.mimeType,
+            size: result.size,
+            relativePath: result.relativePath,
+            createdAt: result.createdAt,
+          },
+        });
+      } catch (writeError) {
+        console.warn('附件写入失败，已跳过。', file.name, writeError);
+        failedFiles.push(file.name);
+      }
+    }
+
+    if (writeResults.length === 0) {
+      return;
+    }
+
+    // 补偿：如果 store 提交前发生不可恢复错误，清理已写入但未入 Domain 的附件
+    try {
+      const batchInputs = writeResults.map((entry, index) => ({
+        x: baseX + index * IMAGE_DROP_STAGGER_OFFSET_X,
+        y: baseY + index * IMAGE_DROP_STAGGER_OFFSET_Y,
+        attachment: entry.attachment,
+      }));
+
+      useStore.getState().addNotesWithAttachmentsBatch(batchInputs);
+    } catch (batchError) {
+      console.warn('批量创建便签失败，执行附件补偿删除。', batchError);
+      for (const entry of writeResults) {
+        try {
+          await deleteAttachmentFile(entry.attachment.relativePath);
+        } catch (compensationError) {
+          console.warn('附件补偿删除失败，将由孤儿附件扫描处理。', entry.attachment.relativePath, compensationError);
+        }
+      }
+    }
+  };
+
   const handleGlobalDown = (e: React.MouseEvent) => {
     const isBlankTarget = isBlankCanvasTarget(e.target);
 
@@ -507,6 +629,8 @@ export const Canvas: React.FC = () => {
       )}
       onDoubleClick={handleDoubleClick}
       onPaste={handlePaste}
+      onDragOverCapture={handleDragOver}
+      onDropCapture={handleDrop}
       onMouseMove={handleMouseMove}
       onMouseDown={handleGlobalDown}
       onMouseUp={handleGlobalUp}
