@@ -579,6 +579,42 @@ describe('NoteCard 头部交互边界', () => {
     expect(resolveAttachmentPathMock).not.toHaveBeenCalled();
   });
 
+  it('展开图片便签点击预览后覆盖层挂载在 document.body 而非便签卡片内部', async () => {
+    const attachment = createAttachment();
+    useStore.setState({
+      ...normalizeNotes([createNote({ kind: 'image', title: 'photo.png', attachments: [attachment] })]),
+    });
+
+    await renderNoteCard();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    const trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.click();
+    });
+
+    expect(container.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+
+    const overlayOnBody = document.body.querySelector('[data-testid="image-note-preview-overlay"]') as HTMLElement | null;
+    expect(overlayOnBody).not.toBeNull();
+    expect(overlayOnBody?.className).toContain('fixed');
+    expect(overlayOnBody?.className).toContain('inset-0');
+
+    const previewImg = overlayOnBody?.querySelector('img') as HTMLImageElement | null;
+    expect(previewImg).not.toBeNull();
+    expect(previewImg?.className).toContain('rounded-xl');
+    expect(previewImg?.className).toContain('border');
+
+    await act(async () => {
+      overlayOnBody?.click();
+    });
+
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+  });
+
   it('深色模式视觉样式与 NoteVisuals 独立渲染一致（共享视觉渲染能力）', async () => {
     useStore.setState({
       ...normalizeNotes([createNote({ color: '#fef9c3' })]),

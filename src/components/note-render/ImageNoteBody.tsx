@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ImageIcon, RefreshCw } from "lucide-react";
 import type { AttachmentRef } from "../../store/types";
@@ -14,9 +15,10 @@ type ImageBodyState =
 interface ImageNoteBodyProps {
   attachment?: AttachmentRef;
   alt: string;
+  isExpanded?: boolean;
 }
 
-export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt }) => {
+export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, isExpanded = true }) => {
   const [state, setState] = useState<ImageBodyState>({ status: "loading" });
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
@@ -74,9 +76,13 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt })
           <button
             type="button"
             data-testid="image-note-preview-trigger"
-            className="h-full min-h-40 w-full cursor-zoom-in overflow-hidden rounded-xl border border-border-subtle bg-black/5 text-left shadow-sm dark:bg-white/5"
+            className={cn(
+              "h-full min-h-40 w-full overflow-hidden rounded-xl border border-border-subtle bg-black/5 text-left shadow-sm dark:bg-white/5",
+              isExpanded ? "cursor-zoom-in" : "cursor-default",
+            )}
             onClick={(event) => {
               event.stopPropagation();
+              if (!isExpanded) return;
               setIsPreviewOpen(true);
             }}
             aria-label={`查看图片 ${alt}`}
@@ -92,27 +98,27 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt })
             />
           </button>
 
-          {isPreviewOpen && (
-            <button
-              type="button"
-              data-testid="image-note-preview-overlay"
-              className="fixed inset-0 flex cursor-zoom-out items-center justify-center bg-black/65 p-6 backdrop-blur-sm"
-              style={{ zIndex: Z_INDEX.SPOTLIGHT }}
-              onClick={(event) => {
-                event.stopPropagation();
-                setIsPreviewOpen(false);
-              }}
-              aria-label="关闭图片预览"
-            >
-              <div className="max-h-full max-w-full overflow-hidden rounded-[1.25rem] border border-white/15 bg-black/10 shadow-2xl">
+          {isPreviewOpen &&
+            createPortal(
+              <button
+                type="button"
+                data-testid="image-note-preview-overlay"
+                className="fixed inset-0 flex cursor-zoom-out items-center justify-center bg-black/65 p-6 backdrop-blur-sm"
+                style={{ zIndex: Z_INDEX.SPOTLIGHT }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsPreviewOpen(false);
+                }}
+                aria-label="关闭图片预览"
+              >
                 <img
                   src={state.assetUrl}
                   alt={alt}
-                  className="block max-h-[85vh] max-w-[85vw] object-contain"
+                  className="block max-h-[85vh] max-w-[85vw] rounded-xl border border-white/15 object-contain shadow-2xl"
                 />
-              </div>
-            </button>
-          )}
+              </button>,
+              document.body,
+            )}
         </>
       )}
 

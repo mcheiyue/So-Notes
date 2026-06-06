@@ -49,7 +49,7 @@ describe('ImageNoteBody', () => {
     container.remove();
   });
 
-  it('主图点击后打开覆盖层并保持圆角裁剪容器', async () => {
+  it('主图点击后打开覆盖层，覆盖层通过 portal 挂载在 document.body', async () => {
     const attachment = createAttachment();
     resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
 
@@ -69,16 +69,98 @@ describe('ImageNoteBody', () => {
       trigger.click();
     });
 
-    const overlay = container.querySelector('[data-testid="image-note-preview-overlay"]') as HTMLButtonElement | null;
-    expect(overlay).not.toBeNull();
-    const frame = overlay?.querySelector('div');
-    expect(frame?.className).toContain('overflow-hidden');
-    expect(frame?.className).toContain('rounded-[1.25rem]');
+    const overlayInContainer = container.querySelector('[data-testid="image-note-preview-overlay"]');
+    expect(overlayInContainer).toBeNull();
+
+    const overlayOnBody = document.body.querySelector('[data-testid="image-note-preview-overlay"]') as HTMLButtonElement | null;
+    expect(overlayOnBody).not.toBeNull();
+    expect(overlayOnBody?.className).toContain('fixed');
+    expect(overlayOnBody?.className).toContain('inset-0');
 
     await act(async () => {
-      overlay?.click();
+      overlayOnBody?.click();
     });
 
-    expect(container.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+  });
+
+  it('覆盖层预览图直接带有 border、rounded-xl 与 overflow 裁剪', async () => {
+    const attachment = createAttachment();
+    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+
+    await act(async () => {
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" />);
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    const trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.click();
+    });
+
+    const overlayOnBody = document.body.querySelector('[data-testid="image-note-preview-overlay"]') as HTMLButtonElement | null;
+    expect(overlayOnBody).not.toBeNull();
+
+    const previewImg = overlayOnBody?.querySelector('img') as HTMLImageElement | null;
+    expect(previewImg).not.toBeNull();
+    expect(previewImg?.className).toContain('rounded-xl');
+    expect(previewImg?.className).toContain('border');
+    expect(previewImg?.className).toContain('object-contain');
+
+    await act(async () => {
+      overlayOnBody?.click();
+    });
+  });
+
+  it('isExpanded=false 时点击主图不打开预览', async () => {
+    const attachment = createAttachment();
+    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+
+    await act(async () => {
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isExpanded={false} />);
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    const trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
+    expect(trigger.className).toContain('cursor-default');
+    expect(trigger.className).not.toContain('cursor-zoom-in');
+
+    await act(async () => {
+      trigger.click();
+    });
+
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+  });
+
+  it('Escape 键关闭已打开的预览', async () => {
+    const attachment = createAttachment();
+    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+
+    await act(async () => {
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" />);
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    const trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.click();
+    });
+
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).not.toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
   });
 });
