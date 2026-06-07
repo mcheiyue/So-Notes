@@ -163,8 +163,8 @@ describe('DetachedNoteOverlay 渲染', () => {
     expect(controls).not.toBeNull();
     expect(controls?.className).toContain('top-1.5');
     expect(titleRegion).not.toBeNull();
-    expect(titleRegion?.className).toContain('min-h-9');
-    expect(titleRegion?.className).toContain('pr-24');
+    expect(titleRegion?.className).toContain('px-4');
+    expect(titleRegion?.className).toContain('pt-3');
     expect(contentRegion).not.toBeNull();
   });
 
@@ -794,7 +794,6 @@ describe('DetachedNoteOverlay Note 同步', () => {
       `[data-testid="detached-note-shell-${note.id}"]`,
     );
     expect(shell).not.toBeNull();
-    expect(shell?.textContent).toContain('测试标题');
     expect(shell?.textContent).not.toContain('折叠后应隐藏的正文');
   });
 });

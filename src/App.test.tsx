@@ -532,8 +532,8 @@ describe('App WindowShell 组合契约', () => {
       showAllHandler?.();
     });
 
-    expect(invokeMock).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'note-show-1' });
-    expect(invokeMock).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'note-show-2' });
+    expect(invokeMock).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'note-show-1', keepAlwaysOnTop: false });
+    expect(invokeMock).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'note-show-2', keepAlwaysOnTop: false });
   });
 
   it('收到 detached-note:locate 事件后调用 locateDetachedNote 编排定位', async () => {
