@@ -34,6 +34,7 @@ fs4 = "0.13.1"
 rand = "0.10.1"
 sha2 = "0.10"
 image = { version = "0.25", default-features = false, features = ["png"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
