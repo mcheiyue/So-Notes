@@ -128,6 +128,55 @@ describe('detachedNoteSnapshotSync', () => {
     );
   });
 
+  it('新增撕下窗口后延迟补发图片便签快照，避免窗口监听器晚就绪丢首帧', () => {
+    const attachment = createAttachment();
+    useStore.setState((state) => {
+      state.notesById['n1'].kind = 'image';
+      state.notesById['n1'].attachments = [attachment];
+      state.notesById['n1'].title = 'photo.png';
+      state.notesById['n1'].content = '';
+    });
+
+    startDetachedNoteSnapshotSync();
+
+    useStore.setState({
+      detachedNotes: [{ noteId: 'n1', position: { x: 0, y: 0 }, isPinned: false }],
+    });
+
+    expect(emitToMock).not.toHaveBeenCalledWith(
+      'detached-note-n1',
+      DETACHED_NOTE_EVENTS.SNAPSHOT,
+      expect.anything(),
+    );
+
+    vi.advanceTimersByTime(100);
+
+    expect(emitToMock).toHaveBeenCalledWith(
+      'detached-note-n1',
+      DETACHED_NOTE_EVENTS.SNAPSHOT,
+      expect.objectContaining({
+        noteId: 'n1',
+        kind: 'image',
+        title: 'photo.png',
+        attachments: [attachment],
+      }),
+    );
+
+    emitToMock.mockClear();
+    vi.advanceTimersByTime(350);
+
+    expect(emitToMock).toHaveBeenCalledWith(
+      'detached-note-n1',
+      DETACHED_NOTE_EVENTS.SNAPSHOT,
+      expect.objectContaining({
+        noteId: 'n1',
+        kind: 'image',
+        title: 'photo.png',
+        attachments: [attachment],
+      }),
+    );
+  });
+
   it('没有撕下窗口的便签变更不发送快照', () => {
     useStore.setState({
       detachedNotes: [],

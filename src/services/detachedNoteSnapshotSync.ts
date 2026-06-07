@@ -5,6 +5,7 @@ import { DETACHED_NOTE_EVENTS } from '../types/detachedNoteSnapshot';
 import type { AttachmentRef, ThemeMode } from '../store/types';
 
 const SNAPSHOT_THROTTLE_MS = 100;
+const DETACHED_OPEN_RETRY_MS = 350;
 
 const detachedNoteLabel = (noteId: string): string =>
   `detached-note-${noteId}`;
@@ -51,7 +52,25 @@ const emitTheme = (noteId: string): Promise<void> =>
 const cloneAttachments = (attachments: AttachmentRef[] | undefined): AttachmentRef[] | undefined =>
   attachments && attachments.length > 0 ? attachments.map((attachment) => ({ ...attachment })) : undefined;
 
-const syncDetachedNote = (noteId: string, note: { kind?: 'text' | 'image'; title: string; content: string; color: string; collapsed?: boolean; attachments?: AttachmentRef[]; deletedAt?: number | null } | undefined): void => {
+const buildSnapshot = (
+  noteId: string,
+  note: { kind?: 'text' | 'image'; title: string; content: string; color: string; collapsed?: boolean; attachments?: AttachmentRef[]; deletedAt?: number | null },
+): DetachedNoteSnapshot => ({
+  noteId,
+  kind: note.kind,
+  title: note.title,
+  content: note.content,
+  color: note.color,
+  isCollapsed: note.collapsed ?? false,
+  attachments: cloneAttachments(note.attachments),
+  deletedAt: note.deletedAt,
+});
+
+const syncDetachedNote = (
+  noteId: string,
+  note: { kind?: 'text' | 'image'; title: string; content: string; color: string; collapsed?: boolean; attachments?: AttachmentRef[]; deletedAt?: number | null } | undefined,
+  options: { retryAfterOpen?: boolean } = {},
+): void => {
   if (!note || note.deletedAt) {
     clearPendingTimer(noteId);
     emitMissing(noteId);
@@ -62,28 +81,30 @@ const syncDetachedNote = (noteId: string, note: { kind?: 'text' | 'image'; title
 
   const timer = setTimeout(() => {
     pendingTimers.delete(noteId);
-    const snapshot: DetachedNoteSnapshot = {
-      noteId,
-      kind: note.kind,
-      title: note.title,
-      content: note.content,
-      color: note.color,
-      isCollapsed: note.collapsed ?? false,
-      attachments: cloneAttachments(note.attachments),
-      deletedAt: note.deletedAt,
-    };
+    const snapshot = buildSnapshot(noteId, note);
     emitSnapshot(noteId, snapshot);
+
+    if (options.retryAfterOpen) {
+      setTimeout(() => {
+        const currentNote = useStore.getState().notesById[noteId];
+        if (!currentNote || currentNote.deletedAt) {
+          emitMissing(noteId);
+          return;
+        }
+        emitSnapshot(noteId, buildSnapshot(noteId, currentNote));
+      }, DETACHED_OPEN_RETRY_MS);
+    }
   }, SNAPSHOT_THROTTLE_MS);
 
   pendingTimers.set(noteId, timer);
 };
 
-const syncAllDetachedNotes = (): void => {
+const syncAllDetachedNotes = (options: { retryAfterOpen?: boolean } = {}): void => {
   const { notesById, detachedNotes } = useStore.getState();
 
   for (const entry of detachedNotes) {
     const note = notesById[entry.noteId];
-    syncDetachedNote(entry.noteId, note);
+    syncDetachedNote(entry.noteId, note, options);
   }
 };
 
@@ -110,7 +131,7 @@ export const startDetachedNoteSnapshotSync = (): (() => void) => {
     }
 
     if (detachedChanged || notesChanged) {
-      syncAllDetachedNotes();
+      syncAllDetachedNotes({ retryAfterOpen: detachedChanged });
     }
 
     if (detachedChanged || themeChanged) {
@@ -130,16 +151,7 @@ export const startDetachedNoteSnapshotSync = (): (() => void) => {
         if (!note || note.deletedAt) {
           emitMissing(noteId);
         } else {
-          const snapshot: DetachedNoteSnapshot = {
-            noteId,
-            kind: note.kind,
-            title: note.title,
-            content: note.content,
-            color: note.color,
-            isCollapsed: note.collapsed ?? false,
-            attachments: cloneAttachments(note.attachments),
-            deletedAt: note.deletedAt,
-          };
+          const snapshot = buildSnapshot(noteId, note);
           emitSnapshot(noteId, snapshot);
         }
       },
