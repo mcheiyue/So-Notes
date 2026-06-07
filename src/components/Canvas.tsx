@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback, useMemo, Profiler } from "react";
+import React, { useRef, useEffect, useCallback, useMemo, useState, Profiler } from "react";
 import { useStore } from "../store/useStore";
 import { useViewportStore } from "../store";
 import { NoteCard } from "./NoteCard";
@@ -43,6 +43,12 @@ const isFileDragEvent = (e: React.DragEvent): boolean => {
   return e.dataTransfer.types.includes('Files');
 };
 
+const hasAcceptedImageDragItem = (dataTransfer: DataTransfer): boolean => {
+  return Array.from(dataTransfer.items).some(
+    (item) => item.kind === 'file' && ALLOWED_IMAGE_MIME_TYPES.has(item.type),
+  );
+};
+
 /**
  * 从 File 对象提取本地文件路径。
  * Tauri / Electron WebView 的 File 对象暴露 .path 属性，
@@ -73,6 +79,10 @@ const isBlankCanvasTarget = (target: EventTarget | null): boolean => {
   return !targetElement || !targetElement.closest(CANVAS_NON_BLANK_SELECTOR);
 };
 
+const isNoteCanvasTarget = (target: EventTarget | null): boolean => {
+  return Boolean(getEventTargetElement(target)?.closest('.note-card'));
+};
+
 const isDragInteractionLocked = (): boolean => {
   const vpState = useViewportStore.getState();
   return vpState.interaction.isDragging || getEdgePushDragLeader() !== null || vpState.stickyDrag.id !== null;
@@ -88,6 +98,7 @@ export const Canvas: React.FC = () => {
   const isDragging = useViewportStore((s) => s.interaction.isDragging);
   const edgePush = useViewportStore((s) => s.interaction.edgePush);
   const viewport = useViewportStore((s) => s.viewport);
+  const [isImageDropOnNoteHintVisible, setIsImageDropOnNoteHintVisible] = useState(false);
 
   const notesById = useStore((s) => s.notesById);
   const layoutNotesById = useStore((s) => s.layoutNotesById);
@@ -482,10 +493,20 @@ export const Canvas: React.FC = () => {
 
   const handleDragOver = (e: React.DragEvent) => {
     if (!isFileDragEvent(e)) {
+      setIsImageDropOnNoteHintVisible(false);
       return;
     }
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
+    setIsImageDropOnNoteHintVisible(
+      hasAcceptedImageDragItem(e.dataTransfer) && isNoteCanvasTarget(e.target),
+    );
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (e.currentTarget === e.target) {
+      setIsImageDropOnNoteHintVisible(false);
+    }
   };
 
   const handleDrop = async (e: React.DragEvent) => {
@@ -494,8 +515,9 @@ export const Canvas: React.FC = () => {
     }
 
     e.preventDefault();
+    setIsImageDropOnNoteHintVisible(false);
 
-    if (!isBlankCanvasTarget(e.target)) {
+    if (!isBlankCanvasTarget(e.target) && !isNoteCanvasTarget(e.target)) {
       return;
     }
 
@@ -626,6 +648,7 @@ export const Canvas: React.FC = () => {
       onDoubleClick={handleDoubleClick}
       onPaste={handlePaste}
       onDragOverCapture={handleDragOver}
+      onDragLeaveCapture={handleDragLeave}
       onDropCapture={handleDrop}
       onMouseMove={handleMouseMove}
       onMouseDown={handleGlobalDown}
@@ -704,7 +727,17 @@ export const Canvas: React.FC = () => {
             按 Space 退出
         </div>
       )}
-      
+
+      {isImageDropOnNoteHintVisible && (
+        <div
+          className="fixed top-6 left-1/2 -translate-x-1/2 px-4 py-2 bg-secondary-bg/85 text-text-secondary border border-border-subtle shadow-lg rounded-full text-xs font-medium backdrop-blur-xl pointer-events-none transition-all animate-in fade-in zoom-in-95 duration-200 select-none"
+          style={{ zIndex: Z_INDEX.PAN_MODE_BADGE }}
+          data-testid="image-drop-on-note-hint"
+        >
+          将在此处创建图片便签
+        </div>
+      )}
+
       {stickyDragId && (
         <div 
             className="fixed bottom-10 left-0 w-full text-center pointer-events-none"

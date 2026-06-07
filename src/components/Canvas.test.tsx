@@ -1574,27 +1574,48 @@ describe('Canvas 空白命中判定', () => {
     expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('文件拖到非空白目标时阻止默认行为但不创建便签', async () => {
-    const addImageNotesBatch = vi.fn(() => []);
-    useStore.setState({ addImageNotesBatch });
-
+  it('图片文件拖到已有便签上时提示并仍创建独立图片便签', async () => {
     await renderCanvas();
+
+    canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    canvasRoot!.getBoundingClientRect = vi.fn(() => ({
+      left: 10, top: 20, right: 1290, bottom: 740,
+      width: 1280, height: 720, x: 10, y: 20, toJSON: () => ({}),
+    } as DOMRect));
 
     const noteHeader = container.querySelector('.drag-handle') as HTMLElement | null;
     expect(noteHeader).not.toBeNull();
 
     const pngFile = createMockFile('test.png', 'image/png', '/path/to/test.png');
-    const dropEvent = createFileDragEvent('drop', [pngFile], { target: noteHeader! });
+    const dragoverEvent = createFileDragEvent('dragover', [pngFile], { target: noteHeader! });
+    const dropEvent = createFileDragEvent('drop', [pngFile], {
+      target: noteHeader!,
+      clientX: 210,
+      clientY: 320,
+    });
+
+    await act(async () => {
+      canvasRoot?.dispatchEvent(dragoverEvent);
+    });
+
+    expect(container.querySelector('[data-testid="image-drop-on-note-hint"]')?.textContent).toBe('将在此处创建图片便签');
 
     const preventDefaultSpy = vi.spyOn(dropEvent, 'preventDefault');
 
     await act(async () => {
-      canvasRoot = container.firstElementChild as HTMLDivElement | null;
       canvasRoot?.dispatchEvent(dropEvent);
     });
 
     expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
-    expect(addImageNotesBatch).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="image-drop-on-note-hint"]')).toBeNull();
+    expect(mockWriteAttachmentFromPath).toHaveBeenCalledWith('/path/to/test.png', 'test.png', 'image/png');
+
+    const state = useStore.getState();
+    const createdNote = state.notesById[state.selectedIds[0]];
+    expect(createdNote?.kind).toBe('image');
+    expect(createdNote?.title).toBe('test.png');
+    expect(createdNote?.x).toBe(240);
+    expect(createdNote?.y).toBe(360);
   });
 
   let canvasRoot: HTMLDivElement | null = null;
