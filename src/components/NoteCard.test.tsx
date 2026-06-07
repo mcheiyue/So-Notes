@@ -618,6 +618,40 @@ describe('NoteCard 头部交互边界', () => {
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
+  it('图片便签复制失败时给出可见失败反馈', async () => {
+    const attachment = createAttachment();
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    imageFromPathMock.mockRejectedValueOnce(new Error('缺少 image-png feature'));
+    useStore.setState({
+      ...normalizeNotes([createNote({ kind: 'image', title: 'photo.png', content: '', attachments: [attachment] })]),
+    });
+
+    await renderNoteCard();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    await act(async () => {
+      rootRegion?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+
+    const copyButton = container.querySelector('[aria-label="复制内容"]') as HTMLButtonElement | null;
+    expect(copyButton).not.toBeNull();
+
+    await act(async () => {
+      copyButton?.click();
+    });
+
+    await vi.waitFor(() => {
+      expect(copyButton?.className).toContain('text-red-500');
+    });
+    expect(writeImageMock).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to copy note:', expect.any(Error));
+    consoleErrorSpy.mockRestore();
+  });
+
   it('折叠图片便签不渲染主图预览', async () => {
     useStore.setState({
       ...normalizeNotes([createNote({ kind: 'image', collapsed: true, attachments: [createAttachment()] })]),

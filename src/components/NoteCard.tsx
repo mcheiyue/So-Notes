@@ -86,7 +86,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [isDragActive, setIsDragActive] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const titleBeforeEditRef = useRef(note?.title ?? '');
@@ -467,10 +467,12 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         } else {
           await navigator.clipboard.writeText(note.title ? `${note.title}\n${note.content}` : note.content);
         }
-        setIsCopied(true);
-        setTimeout(() => setIsCopied(false), 2000);
+        setCopyStatus('success');
+        setTimeout(() => setCopyStatus('idle'), 2000);
       } catch (err) {
         console.error('Failed to copy note:', err);
+        setCopyStatus('error');
+        setTimeout(() => setCopyStatus('idle'), 2000);
       }
   };
 
@@ -739,19 +741,21 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             )}
 
             {shouldRenderCopyButton && (
-                <Tooltip content={isCopied ? "已复制" : "复制内容"} disabled={disableHeaderTooltips}>
+                <Tooltip content={copyStatus === 'success' ? "已复制" : copyStatus === 'error' ? "复制失败" : "复制内容"} disabled={disableHeaderTooltips}>
                     <button
                         type="button"
                         className={cn(
                             "note-action p-1.5 rounded-md transition-all duration-200 flex-shrink-0",
-                            isCopied 
-                                ? "text-text-secondary" 
+                            copyStatus === 'success'
+                                ? "text-text-secondary"
+                                : copyStatus === 'error'
+                                ? "text-red-500"
                                 : "hover:bg-black/5 dark:hover:bg-white/5 text-text-tertiary hover:text-text-secondary"
                         )}
                         aria-label="复制内容"
                         onClick={handleCopy}
                     >
-                        {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                        {copyStatus === 'success' ? <Check className="w-4 h-4" /> : copyStatus === 'error' ? <X className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                     </button>
                 </Tooltip>
             )}
