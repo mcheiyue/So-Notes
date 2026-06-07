@@ -22,6 +22,7 @@ import {
 } from "../services/storage/attachmentPersistence";
 import type { AttachmentRef } from "../store/types";
 import { attach } from "../services/storage/StorageService";
+import * as persistenceFacade from "../services/storage/PersistenceFacade";
 import { CanvasEngine } from "../canvas/CanvasEngine";
 import { useCanvasGlobalListeners } from "../hooks/useCanvasGlobalListeners";
 import { getImageDimensionsFromFile, getImageDimensionsFromRelativePath } from "../utils/imageDimensions";
@@ -302,11 +303,13 @@ export const Canvas: React.FC = () => {
         },
       });
       storageHandleRef.current = handle;
+      persistenceFacade.attach(handle);
     };
     bootstrap();
 
     return () => {
       cancelled = true;
+      persistenceFacade.detach();
       storageHandleRef.current?.detach();
       storageHandleRef.current = null;
     };

@@ -527,6 +527,69 @@ describe('StorageService.attach', () => {
     handle.detach();
   });
 
+  it('pause 取消挂起写入并抑制后续领域变更调度', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk, walThrottleMs: 100, diskDebounceMs: 200 });
+
+    capturedBridgeCallback!(makeDomainState());
+    handle.pause();
+
+    expect(handle.isPaused()).toBe(true);
+
+    capturedBridgeCallback!(makeDomainState());
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(writeWAL).not.toHaveBeenCalled();
+    expect(writeDisk).not.toHaveBeenCalled();
+
+    handle.detach();
+  });
+
+  it('resume 后新的领域变更重新触发持久化调度', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk, walThrottleMs: 100, diskDebounceMs: 200 });
+
+    handle.pause();
+    capturedBridgeCallback!(makeDomainState());
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(writeWAL).not.toHaveBeenCalled();
+    expect(writeDisk).not.toHaveBeenCalled();
+
+    handle.resume();
+    expect(handle.isPaused()).toBe(false);
+
+    capturedBridgeCallback!(makeDomainState());
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(writeWAL).toHaveBeenCalledTimes(1);
+    expect(writeDisk).toHaveBeenCalledTimes(1);
+
+    handle.detach();
+  });
+
+  it('pause 后仍允许 flushPersistNow 立即刷新已有脏数据', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk, walThrottleMs: 100, diskDebounceMs: 200 });
+
+    capturedBridgeCallback!(makeDomainState());
+    handle.pause();
+
+    const result = await handle.flushPersistNow();
+
+    expect(result).toBe(true);
+    expect(writeWAL).toHaveBeenCalledTimes(1);
+    expect(writeDisk).toHaveBeenCalledTimes(1);
+
+    handle.detach();
+  });
+
   it('flushPersistNow 强制立即写入', async () => {
     const writeWAL = vi.fn(async () => true);
     const writeDisk = vi.fn(async () => true);

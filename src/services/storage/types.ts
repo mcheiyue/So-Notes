@@ -58,6 +58,13 @@ export interface AttachOptions {
 }
 
 /**
+ * 持久化暂停状态。
+ * - active: 正常运行，领域变更会触发持久化
+ * - paused: 暂停中，挂起的写入被取消，新的领域变更不触发持久化
+ */
+export type PersistPauseState = 'active' | 'paused';
+
+/**
  * attach() 返回的控制句柄。
  */
 export interface AttachResult {
@@ -67,4 +74,16 @@ export interface AttachResult {
   readonly flushPersistNow: () => Promise<boolean>;
   /** 查询当前持久化状态 */
   readonly getStatus: () => PersistenceStatus;
+  /**
+   * 暂停持久化：取消挂起的 WAL/磁盘写入定时器，
+   * 后续领域变更不再调度写入，直到调用 resume()。
+   */
+  readonly pause: () => void;
+  /**
+   * 恢复持久化：允许后续领域变更重新触发写入调度。
+   * 不会自动 flush；调用方应在恢复前确保已通过 flushPersistNow() 保存最新状态。
+   */
+  readonly resume: () => void;
+  /** 查询当前暂停状态 */
+  readonly isPaused: () => boolean;
 }

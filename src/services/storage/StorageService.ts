@@ -173,6 +173,7 @@ export function attach(options?: AttachOptions): AttachResult {
   let status: PersistenceStatus = 'idle';
   let dirty = false;
   let detached = false;
+  let paused = false;
 
   let walTimer: ReturnType<typeof setTimeout> | null = null;
   let diskTimer: ReturnType<typeof setTimeout> | null = null;
@@ -265,7 +266,7 @@ export function attach(options?: AttachOptions): AttachResult {
   };
 
   const onDomainStateChanged = (state: DomainState) => {
-    if (detached) return;
+    if (detached || paused) return;
     latestState = state;
     dirty = true;
     setStatus('dirty');
@@ -356,5 +357,26 @@ export function attach(options?: AttachOptions): AttachResult {
     }
   };
 
-  return { detach, flushPersistNow, getStatus: () => status };
+  const pause = () => {
+    if (detached || paused) return;
+    paused = true;
+
+    if (walTimer !== null) {
+      clearTimeout(walTimer);
+      walTimer = null;
+    }
+    if (diskTimer !== null) {
+      clearTimeout(diskTimer);
+      diskTimer = null;
+    }
+  };
+
+  const resume = () => {
+    if (detached || !paused) return;
+    paused = false;
+  };
+
+  const isPaused = (): boolean => paused;
+
+  return { detach, flushPersistNow, getStatus: () => status, pause, resume, isPaused };
 }
