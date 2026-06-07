@@ -637,6 +637,7 @@ pub fn run() {
             attachments::resolve_attachment_path,
             attachments::list_attachment_files,
             attachments::delete_attachment_file,
+            backup::create_local_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

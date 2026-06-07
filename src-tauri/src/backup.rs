@@ -4,9 +4,14 @@
 //! 备份文件结构：
 //! - `manifest.json`：备份清单元数据
 //! - `data.json`：便签/看板数据
-//! - `attachments/<hash>.<ext>`：附件文件（仅允许一级扁平目录）
+//! - `attachments/<hash>.<ext>`：图片文件（仅允许一级扁平目录）
 
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
+use std::collections::HashSet;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use tauri::Manager;
 
 // ---------------------------------------------------------------------------
 // 备份格式版本
@@ -20,6 +25,18 @@ pub const BACKUP_FORMAT_VERSION: u32 = 1;
 // ---------------------------------------------------------------------------
 // 备份清单类型
 // ---------------------------------------------------------------------------
+
+/// 备份中单个图片文件的元数据条目。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupAttachmentEntry {
+    /// Zip 内的条目路径，如 `attachments/abc123.png`。
+    pub zip_entry_path: String,
+    /// 文件的 SHA-256 哈希（64 字符十六进制）。
+    pub sha256: String,
+    /// 文件字节数。
+    pub size: u64,
+}
 
 /// 备份清单（`manifest.json` 的内容）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,8 +54,10 @@ pub struct BackupManifest {
     pub note_count: u32,
     /// 备份中包含的看板数量。
     pub board_count: u32,
-    /// 备份中包含的附件文件数量。
+    /// 备份中包含的图片文件数量。
     pub attachment_count: u32,
+    /// 图片文件元数据与校验信息，用于恢复时验证完整性。
+    pub attachments: Vec<BackupAttachmentEntry>,
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +76,7 @@ pub struct BackupResult {
     pub note_count: u32,
     /// 看板数量。
     pub board_count: u32,
-    /// 附件数量。
+    /// 图片文件数量。
     pub attachment_count: u32,
     /// 错误信息（失败时）。
     pub error: Option<String>,
@@ -73,7 +92,7 @@ pub struct RestoreResult {
     pub note_count: u32,
     /// 看板数量。
     pub board_count: u32,
-    /// 附件数量。
+    /// 图片文件数量。
     pub attachment_count: u32,
     /// 错误信息（失败时）。
     pub error: Option<String>,
@@ -157,13 +176,278 @@ pub fn validate_zip_entry_path(entry_name: &str) -> Result<(), String> {
         ["attachments", filename] => {
             // 文件名不能是 . 或 ..（已被上方检查拦截，这里再次确认）
             if *filename == "." || *filename == ".." {
-                return Err(format!("附件文件名不能为 . 或 ..: {entry_name:?}"));
+                return Err(format!("图片文件名不能为 . 或 ..: {entry_name:?}"));
             }
             Ok(())
         }
         // 其他所有模式均拒绝
         _ => Err(format!("zip 条目路径不在允许范围内: {entry_name:?}")),
     }
+}
+
+// ---------------------------------------------------------------------------
+// 内部：data.json 最小解析结构
+// ---------------------------------------------------------------------------
+
+/// 用于解析 `data.json` 的最小 StorageData 结构。
+///
+/// 只提取看板数量、便签列表及图片引用，其余字段忽略。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageDataForBackup {
+    boards: Vec<serde_json::Value>,
+    notes: Vec<NoteForBackup>,
+}
+
+/// 用于解析 `data.json` 的最小 Note 结构。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteForBackup {
+    #[serde(default)]
+    attachments: Option<Vec<AttachmentRefForBackup>>,
+}
+
+/// 用于解析 `data.json` 的最小 AttachmentRef 结构。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentRefForBackup {
+    relative_path: String,
+}
+
+// ---------------------------------------------------------------------------
+// 内部辅助函数
+// ---------------------------------------------------------------------------
+
+/// 从所有便签中收集去重后的图片文件引用。
+///
+/// 遍历所有便签（包括废纸篓中的便签），提取其图片引用中的 `relative_path`，
+/// 经过 `validate_zip_entry_path` 验证后去重返回。
+fn collect_unique_image_refs(data: &StorageDataForBackup) -> Result<Vec<String>, String> {
+    let mut seen = HashSet::new();
+    let mut refs = Vec::new();
+
+    for note in &data.notes {
+        if let Some(attachments) = &note.attachments {
+            for att in attachments {
+                if seen.insert(att.relative_path.clone()) {
+                    // 验证路径格式：必须为 attachments/<safe_filename>
+                    validate_zip_entry_path(&att.relative_path)?;
+                    refs.push(att.relative_path.clone());
+                }
+            }
+        }
+    }
+
+    Ok(refs)
+}
+
+/// 如果目标路径已存在，生成带后缀 `_1`、`_2` 的确定性安全兄弟路径。
+///
+/// 保证不静默覆盖已有文件。当所有 `_1` 至 `_999` 均被占用时，
+/// 回退到附加毫秒时间戳。
+fn resolve_unique_backup_path(target: &Path) -> PathBuf {
+    if !target.exists() {
+        return target.to_path_buf();
+    }
+
+    let stem = target.file_stem().unwrap_or_default().to_string_lossy();
+    let ext = target
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let parent = target.parent().unwrap_or(Path::new("."));
+
+    for i in 1_u32..=999 {
+        let candidate = parent.join(format!("{stem}_{i}{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    // 极端回退：附加时间戳
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    parent.join(format!("{stem}_{now}{ext}"))
+}
+
+// ---------------------------------------------------------------------------
+// 备份核心逻辑
+// ---------------------------------------------------------------------------
+
+/// 备份核心逻辑，不依赖 Tauri 运行时，便于单元测试。
+///
+/// - `sonotes_base`：SoNotes 数据基础目录（`<Documents>/SoNotes/`）
+/// - `target_path`：备份文件目标路径
+fn create_local_backup_inner(
+    sonotes_base: &Path,
+    target_path: &Path,
+) -> Result<BackupResult, String> {
+    // 1. 读取 data.json
+    let data_path = sonotes_base.join("data.json");
+    let data_json =
+        std::fs::read_to_string(&data_path).map_err(|e| format!("读取 data.json 失败: {e}"))?;
+
+    // 2. 解析 data.json
+    let storage_data: StorageDataForBackup =
+        serde_json::from_str(&data_json).map_err(|e| format!("解析 data.json 失败: {e}"))?;
+
+    // 3. 统计
+    let board_count = storage_data.boards.len() as u32;
+    let note_count = storage_data.notes.len() as u32;
+
+    // 4. 收集去重后的图片文件引用
+    let image_refs = collect_unique_image_refs(&storage_data)?;
+    let attachment_count = image_refs.len() as u32;
+
+    let mut validated_images = Vec::new();
+    if !image_refs.is_empty() {
+        let canonical_base = sonotes_base
+            .canonicalize()
+            .map_err(|e| format!("SoNotes 目录规范化失败: {e}"))?;
+        let canonical_attach = canonical_base
+            .join("attachments")
+            .canonicalize()
+            .map_err(|e| format!("图片文件目录规范化失败: {e}"))?;
+
+        for ref_path in &image_refs {
+            validate_zip_entry_path(ref_path)?;
+
+            let file_path = sonotes_base.join(ref_path);
+            let canonical_file = file_path
+                .canonicalize()
+                .map_err(|_| format!("图片文件不存在或无法访问: {ref_path}"))?;
+            if !canonical_file.starts_with(&canonical_attach) {
+                return Err(format!("图片文件路径超出图片文件目录边界: {ref_path}"));
+            }
+
+            validated_images.push((ref_path.clone(), file_path));
+        }
+    }
+
+    let resolved_path = resolve_unique_backup_path(target_path);
+
+    if let Some(parent) = resolved_path.parent() {
+        if !parent.exists() {
+            return Err(format!("备份目标目录不存在: {}", parent.display()));
+        }
+    }
+
+    let zip_file =
+        std::fs::File::create(&resolved_path).map_err(|e| format!("创建 zip 文件失败: {e}"))?;
+    let mut zip = zip::ZipWriter::new(zip_file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    validate_zip_entry_path("data.json")?;
+    zip.start_file("data.json", options)
+        .map_err(|e| format!("写入 zip 条目 data.json 失败: {e}"))?;
+    zip.write_all(data_json.as_bytes())
+        .map_err(|e| format!("写入 data.json 内容失败: {e}"))?;
+
+    let mut attachment_entries = Vec::new();
+    for (ref_path, file_path) in &validated_images {
+        // 验证路径格式（collect_unique_image_refs 已验证，这里做双重确认）
+        validate_zip_entry_path(ref_path)?;
+
+        let mut file = std::fs::File::open(file_path)
+            .map_err(|e| format!("打开图片文件失败: {ref_path} ({e})"))?;
+
+        let mut hasher = sha2::Sha256::new();
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut total_size: u64 = 0;
+
+        zip.start_file(ref_path, options)
+            .map_err(|e| format!("写入 zip 条目 {ref_path} 失败: {e}"))?;
+
+        loop {
+            let bytes_read = file
+                .read(&mut buf)
+                .map_err(|e| format!("读取图片文件失败: {ref_path} ({e})"))?;
+            if bytes_read == 0 {
+                break;
+            }
+            hasher.update(&buf[..bytes_read]);
+            zip.write_all(&buf[..bytes_read])
+                .map_err(|e| format!("写入 zip 图片内容失败: {ref_path} ({e})"))?;
+            total_size += bytes_read as u64;
+        }
+
+        let hash_bytes = hasher.finalize();
+        let sha256 = hash_bytes
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+
+        attachment_entries.push(BackupAttachmentEntry {
+            zip_entry_path: ref_path.clone(),
+            sha256,
+            size: total_size,
+        });
+    }
+
+    let manifest = BackupManifest {
+        app: "SoNotes".to_string(),
+        format_version: BACKUP_FORMAT_VERSION,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        created_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64,
+        note_count,
+        board_count,
+        attachment_count,
+        attachments: attachment_entries,
+    };
+
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| format!("序列化 manifest.json 失败: {e}"))?;
+
+    validate_zip_entry_path("manifest.json")?;
+    zip.start_file("manifest.json", options)
+        .map_err(|e| format!("写入 zip 条目 manifest.json 失败: {e}"))?;
+    zip.write_all(manifest_json.as_bytes())
+        .map_err(|e| format!("写入 manifest.json 内容失败: {e}"))?;
+
+    zip.finish()
+        .map_err(|e| format!("完成 zip 文件失败: {e}"))?;
+
+    Ok(BackupResult {
+        success: true,
+        backup_path: Some(resolved_path.to_string_lossy().to_string()),
+        note_count,
+        board_count,
+        attachment_count,
+        error: None,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Tauri 命令
+// ---------------------------------------------------------------------------
+
+/// 创建本地 zip 备份。
+///
+/// 从已刷新到磁盘的 `data.json` 读取数据，收集所有图片文件引用，
+/// 创建包含 `manifest.json`、`data.json` 和 `attachments/<filename>` 的 zip 备份。
+///
+/// 如果 `target_path` 已存在，不会静默覆盖，而是生成带后缀的安全兄弟路径。
+#[tauri::command]
+pub async fn create_local_backup(
+    app: tauri::AppHandle,
+    target_path: String,
+) -> Result<BackupResult, String> {
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+    let sonotes_base = doc_dir.join("SoNotes");
+    let target = PathBuf::from(target_path);
+
+    tokio::task::spawn_blocking(move || create_local_backup_inner(&sonotes_base, &target))
+        .await
+        .map_err(|e| format!("备份线程失败: {e}"))?
 }
 
 // ===========================================================================
@@ -173,6 +457,106 @@ pub fn validate_zip_entry_path(entry_name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 为每个测试创建独立临时目录，避免相互污染。
+    fn test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sonotes-backup-{name}-{:032x}",
+            rand::random::<u128>()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        dir
+    }
+
+    /// 生成最简 data.json 字符串。
+    fn minimal_data_json(boards: &[serde_json::Value], notes: &[serde_json::Value]) -> String {
+        serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": boards,
+            "notes": notes,
+            "currentBoardId": "",
+            "config": { "version": 1, "maxZ": 1, "themeMode": "light" }
+        })
+        .to_string()
+    }
+
+    /// 生成一张文本便签 JSON（无图片引用）。
+    fn text_note(id: &str, board_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "kind": "text",
+            "boardId": board_id,
+            "x": 0, "y": 0,
+            "title": "", "content": "",
+            "color": "yellow",
+            "z": 1,
+            "createdAt": 0, "updatedAt": 0
+        })
+    }
+
+    /// 生成一张图片便签 JSON，引用指定的 relative_path。
+    fn image_note(id: &str, board_id: &str, relative_path: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "kind": "image",
+            "boardId": board_id,
+            "x": 0, "y": 0,
+            "title": "", "content": "",
+            "color": "yellow",
+            "z": 1,
+            "createdAt": 0, "updatedAt": 0,
+            "attachments": [{
+                "id": format!("{id}-att"),
+                "hash": "",
+                "filename": "",
+                "mimeType": "image/png",
+                "size": 0,
+                "relativePath": relative_path,
+                "createdAt": 0
+            }]
+        })
+    }
+
+    /// 生成一张处于废纸篓的图片便签 JSON（有 deletedAt）。
+    fn trashed_image_note(id: &str, board_id: &str, relative_path: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "kind": "image",
+            "boardId": board_id,
+            "x": 0, "y": 0,
+            "title": "", "content": "",
+            "color": "yellow",
+            "z": 1,
+            "createdAt": 0, "updatedAt": 0,
+            "deletedAt": 1700000000000_u64,
+            "attachments": [{
+                "id": format!("{id}-att"),
+                "hash": "",
+                "filename": "",
+                "mimeType": "image/png",
+                "size": 0,
+                "relativePath": relative_path,
+                "createdAt": 0
+            }]
+        })
+    }
+
+    /// 用已知内容创建一个图片文件，返回其 `attachments/<sha256>.<ext>` 相对路径。
+    fn create_attachment_file(attach_dir: &Path, content: &[u8], ext: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(content);
+        let hash: String = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let filename = format!("{hash}.{ext}");
+        std::fs::write(attach_dir.join(&filename), content).expect("write attachment");
+        format!("attachments/{filename}")
+    }
 
     // -----------------------------------------------------------------------
     // validate_zip_entry_path：接受的路径
@@ -200,10 +584,12 @@ mod tests {
 
     #[test]
     fn accepts_attachment_with_long_hash_name() {
-        assert!(validate_zip_entry_path(
-            "attachments/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.jpg"
-        )
-        .is_ok());
+        assert!(
+            validate_zip_entry_path(
+                "attachments/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.jpg"
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -426,6 +812,11 @@ mod tests {
             note_count: 42,
             board_count: 3,
             attachment_count: 7,
+            attachments: vec![BackupAttachmentEntry {
+                zip_entry_path: "attachments/abc.png".to_string(),
+                sha256: "a".repeat(64),
+                size: 1024,
+            }],
         };
 
         let json = serde_json::to_string(&manifest).expect("序列化失败");
@@ -438,6 +829,8 @@ mod tests {
         assert_eq!(deserialized.note_count, 42);
         assert_eq!(deserialized.board_count, 3);
         assert_eq!(deserialized.attachment_count, 7);
+        assert_eq!(deserialized.attachments.len(), 1);
+        assert_eq!(deserialized.attachments[0].sha256, "a".repeat(64));
     }
 
     #[test]
@@ -449,7 +842,12 @@ mod tests {
             created_at: 0,
             note_count: 0,
             board_count: 0,
-            attachment_count: 0,
+            attachment_count: 1,
+            attachments: vec![BackupAttachmentEntry {
+                zip_entry_path: "attachments/test.png".to_string(),
+                sha256: "a".repeat(64),
+                size: 100,
+            }],
         };
 
         let json = serde_json::to_string(&manifest).expect("序列化失败");
@@ -463,6 +861,10 @@ mod tests {
         assert!(json.contains("\"boardCount\""), "应使用 camelCase: {json}");
         assert!(
             json.contains("\"attachmentCount\""),
+            "应使用 camelCase: {json}"
+        );
+        assert!(
+            json.contains("\"zipEntryPath\""),
             "应使用 camelCase: {json}"
         );
     }
@@ -509,5 +911,449 @@ mod tests {
 
         assert!(!deserialized.success);
         assert_eq!(deserialized.error, Some("清单验证失败".to_string()));
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_unique_backup_path
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unique_path_returns_original_when_not_exists() {
+        let dir = test_dir("unique-original");
+        let target = dir.join("backup.zip");
+        assert_eq!(resolve_unique_backup_path(&target), target);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unique_path_returns_sibling_when_exists() {
+        let dir = test_dir("unique-sibling");
+        let target = dir.join("backup.zip");
+        std::fs::write(&target, "existing").unwrap();
+        let resolved = resolve_unique_backup_path(&target);
+        assert_eq!(resolved, dir.join("backup_1.zip"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unique_path_skips_existing_siblings() {
+        let dir = test_dir("unique-skip");
+        let target = dir.join("backup.zip");
+        std::fs::write(&target, "v0").unwrap();
+        std::fs::write(dir.join("backup_1.zip"), "v1").unwrap();
+        let resolved = resolve_unique_backup_path(&target);
+        assert_eq!(resolved, dir.join("backup_2.zip"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unique_path_handles_no_extension() {
+        let dir = test_dir("unique-noext");
+        let target = dir.join("backup");
+        std::fs::write(&target, "existing").unwrap();
+        let resolved = resolve_unique_backup_path(&target);
+        assert_eq!(resolved, dir.join("backup_1"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // create_local_backup_inner：无图片引用
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backup_no_attachments() {
+        let root = test_dir("no-attachments");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[text_note("n1", "b1")],
+        );
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target).unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.note_count, 1);
+        assert_eq!(result.board_count, 1);
+        assert_eq!(result.attachment_count, 0);
+        assert!(result.backup_path.as_ref().unwrap().ends_with("backup.zip"));
+
+        // 验证 zip 内容
+        let zip_file = std::fs::File::open(result.backup_path.unwrap()).unwrap();
+        let mut archive = zip::ZipArchive::new(zip_file).unwrap();
+        assert!(archive.by_name("manifest.json").is_ok());
+        assert!(archive.by_name("data.json").is_ok());
+
+        let manifest: BackupManifest =
+            serde_json::from_reader(archive.by_name("manifest.json").unwrap()).unwrap();
+        assert_eq!(manifest.app, "SoNotes");
+        assert!(manifest.attachments.is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // create_local_backup_inner：图片便签引用附件
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backup_with_image_note_attachments() {
+        let root = test_dir("with-attachments");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let img_content = b"fake png image bytes here";
+        let rel_path = create_attachment_file(&attach_dir, img_content, "png");
+
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[text_note("n1", "b1"), image_note("n2", "b1", &rel_path)],
+        );
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target).unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.note_count, 2);
+        assert_eq!(result.board_count, 1);
+        assert_eq!(result.attachment_count, 1);
+
+        // 验证 zip 内附件文件可读
+        let zip_file = std::fs::File::open(result.backup_path.unwrap()).unwrap();
+        let mut archive = zip::ZipArchive::new(zip_file).unwrap();
+        let entry_name = rel_path.clone();
+        let mut entry = archive.by_name(&entry_name).unwrap();
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut buf).unwrap();
+        assert_eq!(buf, img_content);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // create_local_backup_inner：废纸篓中的图片便签也被收集
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backup_includes_trashed_image_notes() {
+        let root = test_dir("trashed-images");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let img_content = b"trashed image content";
+        let rel_path = create_attachment_file(&attach_dir, img_content, "jpg");
+
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[
+                text_note("n1", "b1"),
+                trashed_image_note("n2", "b1", &rel_path),
+            ],
+        );
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target).unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.note_count, 2, "废纸篓便签应计入便签总数");
+        assert_eq!(result.attachment_count, 1, "废纸篓图片应被收集");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // create_local_backup_inner：重复图片引用去重
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backup_deduplicates_image_refs() {
+        let root = test_dir("dedupe-refs");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let img_content = b"same image referenced twice";
+        let rel_path = create_attachment_file(&attach_dir, img_content, "png");
+
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[
+                image_note("n1", "b1", &rel_path),
+                image_note("n2", "b1", &rel_path),
+            ],
+        );
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target).unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.note_count, 2);
+        assert_eq!(result.attachment_count, 1, "重复引用应去重为 1 个");
+
+        // 验证 zip 中只有一个附件条目
+        let zip_file = std::fs::File::open(result.backup_path.unwrap()).unwrap();
+        let mut archive = zip::ZipArchive::new(zip_file).unwrap();
+        let manifest: BackupManifest =
+            serde_json::from_reader(archive.by_name("manifest.json").unwrap()).unwrap();
+        assert_eq!(manifest.attachments.len(), 1);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // create_local_backup_inner：引用的图片文件缺失时失败
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backup_fails_on_missing_attachment_file() {
+        let root = test_dir("missing-file");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+        // 不创建实际文件
+
+        let missing_rel_path =
+            "attachments/0000000000000000000000000000000000000000000000000000000000000000.png";
+        let data = minimal_data_json(&[], &[image_note("n1", "b1", missing_rel_path)]);
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target);
+
+        assert!(result.is_err(), "缺失图片文件应导致备份失败");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("不存在") || err.contains("无法访问"),
+            "错误信息应提及文件不存在: {err}"
+        );
+        assert!(!target.exists(), "失败时不应留下半成品备份文件");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // create_local_backup_inner：清单包含 SHA-256
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backup_manifest_contains_sha256() {
+        let root = test_dir("manifest-sha256");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let img_content = b"content for sha256 verification";
+        let rel_path = create_attachment_file(&attach_dir, img_content, "png");
+
+        // 计算期望的 SHA-256
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(img_content);
+        let expected_sha256: String = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+
+        let data = minimal_data_json(&[], &[image_note("n1", "b1", &rel_path)]);
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target).unwrap();
+
+        assert!(result.success);
+
+        let zip_file = std::fs::File::open(result.backup_path.unwrap()).unwrap();
+        let mut archive = zip::ZipArchive::new(zip_file).unwrap();
+        let manifest: BackupManifest =
+            serde_json::from_reader(archive.by_name("manifest.json").unwrap()).unwrap();
+
+        assert_eq!(manifest.attachments.len(), 1);
+        assert_eq!(
+            manifest.attachments[0].sha256, expected_sha256,
+            "manifest 中的 SHA-256 应与文件内容匹配"
+        );
+        assert_eq!(
+            manifest.attachments[0].size,
+            img_content.len() as u64,
+            "manifest 中的 size 应与文件大小匹配"
+        );
+        assert_eq!(manifest.attachments[0].zip_entry_path, rel_path);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // create_local_backup_inner：目标路径已存在时生成唯一兄弟路径
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backup_existing_target_gets_unique_sibling() {
+        let root = test_dir("existing-target");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data = minimal_data_json(&[], &[]);
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        std::fs::write(&target, "pre-existing content").unwrap();
+
+        let result = create_local_backup_inner(&sonotes_base, &target).unwrap();
+
+        assert!(result.success);
+        let backup_path = result.backup_path.unwrap();
+        assert!(
+            backup_path.ends_with("_1.zip"),
+            "应使用 _1 后缀: {backup_path}"
+        );
+        assert!(std::path::Path::new(&backup_path).exists());
+        // 原始文件不应被覆盖
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "pre-existing content"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // create_local_backup_inner：不安全的图片引用路径被拒绝
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backup_rejects_unsafe_attachment_path_traversal() {
+        let root = test_dir("unsafe-traversal");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data = minimal_data_json(
+            &[],
+            &[image_note("n1", "b1", "attachments/../../etc/passwd")],
+        );
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target);
+
+        assert!(result.is_err(), "路径穿越应被拒绝");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("相对路径段") || err.contains("zip 条目"),
+            "错误信息应提及路径验证: {err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn backup_rejects_unsafe_attachment_path_absolute() {
+        let root = test_dir("unsafe-absolute");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data = minimal_data_json(&[], &[image_note("n1", "b1", "/etc/passwd")]);
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target);
+
+        assert!(result.is_err(), "绝对路径应被拒绝");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn backup_rejects_unsafe_attachment_path_windows_drive() {
+        let root = test_dir("unsafe-drive");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data = minimal_data_json(&[], &[image_note("n1", "b1", "C:/Windows/System32/config")]);
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target);
+
+        assert!(result.is_err(), "Windows 盘符路径应被拒绝");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn backup_rejects_unsafe_attachment_path_nested() {
+        let root = test_dir("unsafe-nested");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data = minimal_data_json(&[], &[image_note("n1", "b1", "attachments/sub/file.png")]);
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target);
+
+        assert!(result.is_err(), "嵌套路径应被拒绝");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // create_local_backup_inner：data.json 不存在时失败
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backup_fails_when_data_json_missing() {
+        let root = test_dir("no-data-json");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+        // 不创建 data.json
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target);
+
+        assert!(result.is_err(), "data.json 缺失应导致失败");
+        let err = result.unwrap_err();
+        assert!(err.contains("data.json"), "错误信息应提及 data.json: {err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // create_local_backup_inner：zip 内条目使用正斜杠
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backup_zip_entries_use_forward_slashes() {
+        let root = test_dir("forward-slashes");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let img_content = b"test forward slash";
+        let rel_path = create_attachment_file(&attach_dir, img_content, "png");
+
+        let data = minimal_data_json(&[], &[image_note("n1", "b1", &rel_path)]);
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target).unwrap();
+
+        let zip_file = std::fs::File::open(result.backup_path.unwrap()).unwrap();
+        let mut archive = zip::ZipArchive::new(zip_file).unwrap();
+        for i in 0..archive.len() {
+            let entry = archive.by_index(i).unwrap();
+            let name = entry.name();
+            assert!(!name.contains('\\'), "zip 条目不应包含反斜杠: {name}");
+        }
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
