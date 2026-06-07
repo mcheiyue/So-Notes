@@ -11,6 +11,7 @@ import {
   normalizeStorageDataMetadata,
   getLatestUpdateTimestamp,
 } from './tauriPersistence';
+import { resolveAttachmentAssetUrlCached } from './attachmentPersistence';
 
 export const STORAGE_SERVICE_MODULE = 'StorageService' as const;
 
@@ -71,6 +72,21 @@ const migrateAndSanitize = (data: StorageData): StorageData => {
   return data;
 };
 
+const prehydrateImageNoteAssetUrls = async (notes: Note[]): Promise<void> => {
+  const imageRelativePaths = notes
+    .filter((note) => note.kind === 'image')
+    .flatMap((note) => note.attachments ?? [])
+    .map((attachment) => attachment.relativePath);
+
+  if (imageRelativePaths.length === 0) return;
+
+  await Promise.allSettled(
+    Array.from(new Set(imageRelativePaths)).map((relativePath) =>
+      resolveAttachmentAssetUrlCached(relativePath),
+    ),
+  );
+};
+
 const resolveSyncAction = (source: StorageDataSource, data: StorageData): SyncAction => {
   if (source === 'DISK') return { type: 'SYNC_DISK_TO_WAL', data };
   if (source === 'WAL') return { type: 'SYNC_WAL_TO_DISK' };
@@ -106,6 +122,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
   }
 
   finalData = migrateAndSanitize(finalData);
+  await prehydrateImageNoteAssetUrls(finalData.notes);
 
   return {
     source,

@@ -21,6 +21,14 @@ vi.mock('../../store/domainStore', () => ({
   }),
 }));
 
+const { resolveAttachmentAssetUrlCachedMock } = vi.hoisted(() => ({
+  resolveAttachmentAssetUrlCachedMock: vi.fn(async (relativePath: string) => `asset://localhost/${relativePath}`),
+}));
+
+vi.mock('./attachmentPersistence', () => ({
+  resolveAttachmentAssetUrlCached: resolveAttachmentAssetUrlCachedMock,
+}));
+
 import { invoke } from '@tauri-apps/api/core';
 import { db } from '../../store/db';
 import { setDomainPersistenceBridge } from '../../store/domainStore';
@@ -45,6 +53,7 @@ const makeDiskJson = (data: DiskJsonFixture): string =>
 describe('StorageService.bootstrap', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resolveAttachmentAssetUrlCachedMock.mockImplementation(async (relativePath: string) => `asset://localhost/${relativePath}`);
   });
 
   it('disk 更新时选择 DISK 来源', async () => {
@@ -834,6 +843,32 @@ describe('StorageService 附件迁移与归一化', () => {
 
     expect(note.attachments).toHaveLength(1);
     expect(note.attachments?.[0]).toEqual(VALID_REF);
+  });
+
+  it('启动加载图片便签后会预水合图片资源 URL 缓存', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'image-with-ref',
+        kind: 'image',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '图片',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10,
+        updatedAt: 10,
+        attachments: [VALID_REF],
+      }],
+      storageUpdatedAt: 100,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+
+    const result = await bootstrap();
+
+    expect(result.data.notes[0].kind).toBe('image');
+    expect(resolveAttachmentAssetUrlCachedMock).toHaveBeenCalledWith(VALID_REF.relativePath);
   });
 
   it('附件迁移会剥离多余字段，避免二进制残留进入 Domain state', async () => {

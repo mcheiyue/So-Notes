@@ -457,7 +457,7 @@ describe('DataTransferService', () => {
       expect(parsed.payload.notes[0].attachments[0].id).toBe('att-full');
     });
 
-    it('导入时保留有效附件引用并丢弃无效条目', async () => {
+    it('导入文本便签时移除附件引用并丢弃无效条目', async () => {
       vi.spyOn(globalThis.crypto, 'randomUUID')
         .mockReturnValueOnce('imp-board-0000-4000-8000-0000000000')
         .mockReturnValueOnce('imp-note-0000-4000-8000-000000000000');
@@ -499,9 +499,8 @@ describe('DataTransferService', () => {
 
       expect(result.status).toBe('success');
       const importedNote = state.notesById['imp-note-0000-4000-8000-000000000000'];
-      expect(importedNote.attachments).toHaveLength(1);
-      expect(importedNote.attachments?.[0]?.id).toBe('att-ok');
-      expect(importedNote.attachments?.[0]?.relativePath).toBe(`attachments/${HASH_C}.png`);
+      expect(importedNote.kind).toBe('text');
+      expect(importedNote.attachments).toBeUndefined();
     });
 
     it('导入便签无附件时状态不包含 attachments 字段', async () => {
