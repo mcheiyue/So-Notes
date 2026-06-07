@@ -184,6 +184,7 @@ const chooseNoteColor = (color?: string): string => color ?? NOTE_COLORS[Math.fl
 
 const createDomainNote = (state: DomainState, input: AddNoteInput, id: string, createdAt: number, z: number): Note => ({
   id,
+  kind: 'text',
   boardId: resolveTargetBoardId(state, input.boardId),
   title: input.title ?? '',
   content: input.content ?? '',

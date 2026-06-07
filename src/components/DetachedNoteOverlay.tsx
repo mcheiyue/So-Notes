@@ -129,7 +129,7 @@ const DetachedNoteShell: React.FC<{
       }
       return {
         available: note.deletedAt == null,
-        kind: note.kind ?? 'text',
+        kind: note.kind,
         title: note.title,
         content: note.content,
         color: note.color,

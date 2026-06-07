@@ -7,7 +7,7 @@ import type { AttachmentRef, NoteColor, ThemeMode } from '../store/types';
  */
 export interface DetachedNoteSnapshot {
   noteId: string;
-  kind?: 'text' | 'image';
+  kind: 'text' | 'image';
   title: string;
   content: string;
   color: NoteColor;

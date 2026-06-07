@@ -136,6 +136,7 @@ export function generateNote(
   
   return {
     id: generateId('note'),
+    kind: 'text',
     boardId,
     x: position.x,
     y: position.y,

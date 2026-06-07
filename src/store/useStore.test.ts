@@ -23,7 +23,7 @@ import { openFile } from '../utils/fileSystem';
 import { invoke } from '@tauri-apps/api/core';
 import { createEmptyNormalizedNotesState, denormalizeNotes, normalizeNotes } from './normalization';
 import { STORAGE_SCHEMA_VERSION } from './types';
-import type { AttachmentRef } from './types';
+import type { AttachmentRef, Note } from './types';
 import { LAYOUT } from '../constants/layout';
 import { registerActiveNoteDragFinalizer } from '../utils/activeNoteDrag';
 import { parseSmartPaste } from '../utils/smartPaste';
@@ -46,6 +46,7 @@ describe('v1.4.0 StorageData 演进契约', () => {
     vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
       notes: [{
         id: 'legacy-note',
+        kind: 'text',
         boardId: 'legacy-board',
         x: 10,
         y: 20,
@@ -89,6 +90,7 @@ describe('v1.4.0 StorageData 演进契约', () => {
       storageUpdatedAt: 5000,
       notes: [{
         id: 'wal-note',
+        kind: 'text',
         boardId: 'wal-board',
         x: 10,
         y: 20,
@@ -132,6 +134,7 @@ describe('useStore 布局持久化契约', () => {
       ...normalizeNotes([
         {
           id: 'note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -144,6 +147,7 @@ describe('useStore 布局持久化契约', () => {
         },
         {
           id: 'note-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -264,6 +268,7 @@ describe('useStore 布局持久化契约', () => {
       ...normalizeNotes([
         {
           id: 'note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -277,6 +282,7 @@ describe('useStore 布局持久化契约', () => {
         },
         {
           id: 'note-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -304,6 +310,7 @@ describe('useStore 布局持久化契约', () => {
       ...normalizeNotes([
         {
           id: 'note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -316,6 +323,7 @@ describe('useStore 布局持久化契约', () => {
         },
         {
           id: 'note-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -343,6 +351,7 @@ describe('useStore 布局持久化契约', () => {
       ...normalizeNotes([
         {
           id: 'note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -356,6 +365,7 @@ describe('useStore 布局持久化契约', () => {
         },
         {
           id: 'note-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -383,6 +393,7 @@ describe('useStore 布局持久化契约', () => {
       ...normalizeNotes([
         {
           id: 'old-note',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 10,
@@ -395,6 +406,7 @@ describe('useStore 布局持久化契约', () => {
         },
         {
           id: 'new-note',
+          kind: 'text',
           boardId: 'default',
           x: 600,
           y: 600,
@@ -422,6 +434,7 @@ describe('useStore 布局持久化契约', () => {
       ...normalizeNotes([
         {
           id: 'blue-note',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 10,
@@ -434,6 +447,7 @@ describe('useStore 布局持久化契约', () => {
         },
         {
           id: 'white-note',
+          kind: 'text',
           boardId: 'default',
           x: 600,
           y: 600,
@@ -518,6 +532,7 @@ describe('useStore 布局持久化契约', () => {
       ...normalizeNotes([
         {
           id: 'note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -530,6 +545,7 @@ describe('useStore 布局持久化契约', () => {
         },
         {
           id: 'note-cross',
+          kind: 'text',
           boardId: 'other-board',
           x: 50,
           y: 60,
@@ -657,6 +673,7 @@ describe('useStore 导入契约', () => {
         boards: [{ id: 'backup-board', name: '主板', icon: '💼', createdAt: 10 }],
         notes: [{
           id: 'backup-note',
+          kind: 'text',
           boardId: 'backup-board',
           x: 10,
           y: 20,
@@ -705,6 +722,7 @@ describe('useStore 导入契约', () => {
         boards: [{ id: 'single-board', name: '灵感板', icon: '💡', createdAt: 10 }],
         notes: [{
           id: 'single-note',
+          kind: 'text',
           boardId: 'single-board',
           x: 30,
           y: 40,
@@ -788,6 +806,7 @@ describe('useStore 导入契约', () => {
         notes: [
           {
             id: 'valid-note',
+            kind: 'text',
             boardId: 'import-board',
             x: 10,
             y: 20,
@@ -922,6 +941,7 @@ describe('useStore 导入契约', () => {
         boards: [{ id: 'rollback-board', name: '回滚板', icon: '↩️', createdAt: 10 }],
         notes: [{
           id: 'rollback-note',
+          kind: 'text',
           boardId: 'rollback-board',
           x: 10,
           y: 20,
@@ -967,6 +987,7 @@ describe('useStore 导入契约', () => {
         boards: [{ id: 'wal-board', name: 'WAL板', icon: '💾', createdAt: 10 }],
         notes: [{
           id: 'wal-note',
+          kind: 'text',
           boardId: 'wal-board',
           x: 10,
           y: 20,
@@ -1009,6 +1030,7 @@ describe('useStore 保存状态可见性契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'save-note',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1105,6 +1127,7 @@ describe('v1.3.0 并发与代际契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'gen-note',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1557,6 +1580,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'color-note',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1589,6 +1613,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'same-color-note',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1616,6 +1641,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'collapse-note',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1731,6 +1757,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'edit-title',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1770,6 +1797,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'edit-content',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1805,6 +1833,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'edit-both',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1845,6 +1874,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'no-change',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1880,6 +1910,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'move-note',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1925,6 +1956,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'move-only',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1953,6 +1985,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'no-snapshot',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -1978,6 +2011,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     useStore.setState({
       ...normalizeNotes([{
         id: 'same-pos',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -2008,6 +2042,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'multi-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -2020,6 +2055,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
         },
         {
           id: 'multi-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -2052,6 +2088,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'stale-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -2064,6 +2101,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
         },
         {
           id: 'stale-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -2103,6 +2141,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'mm-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -2115,6 +2154,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
         },
         {
           id: 'mm-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -2180,6 +2220,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'md-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -2192,6 +2233,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
         },
         {
           id: 'md-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -2235,6 +2277,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'mn-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -2247,6 +2290,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
         },
         {
           id: 'mn-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -2287,6 +2331,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'ms-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -2299,6 +2344,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
         },
         {
           id: 'ms-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -2332,6 +2378,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'mc-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -2344,6 +2391,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
         },
         {
           id: 'mc-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -2410,6 +2458,7 @@ describe('v1.4.3 领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'visible-note',
+          kind: 'text',
           boardId: 'default',
           x: 100,
           y: 120,
@@ -2445,6 +2494,7 @@ describe('v1.4.4 软删除与废纸篓恢复领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'sd-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -2457,6 +2507,7 @@ describe('v1.4.4 软删除与废纸篓恢复领域撤销/重做契约', () => {
         },
         {
           id: 'sd-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -2469,6 +2520,7 @@ describe('v1.4.4 软删除与废纸篓恢复领域撤销/重做契约', () => {
         },
         {
           id: 'sd-3',
+          kind: 'text',
           boardId: 'default',
           x: 50,
           y: 60,
@@ -2697,6 +2749,7 @@ describe('v1.4.4 软删除与废纸篓恢复领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'sd-1',
+          kind: 'text',
           boardId: 'board-b',
           x: 10,
           y: 20,
@@ -2916,6 +2969,7 @@ describe('v1.4.4 归拢领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'ar-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -2928,6 +2982,7 @@ describe('v1.4.4 归拢领域撤销/重做契约', () => {
         },
         {
           id: 'ar-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -2940,6 +2995,7 @@ describe('v1.4.4 归拢领域撤销/重做契约', () => {
         },
         {
           id: 'ar-3',
+          kind: 'text',
           boardId: 'default',
           x: 50,
           y: 60,
@@ -3000,6 +3056,7 @@ describe('v1.4.4 归拢领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'same-1',
+          kind: 'text',
           boardId: 'default',
           x: 100,
           y: 120,
@@ -3105,6 +3162,7 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'sm-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -3117,6 +3175,7 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
         },
         {
           id: 'sm-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -3129,6 +3188,7 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
         },
         {
           id: 'sm-3',
+          kind: 'text',
           boardId: 'default',
           x: 50,
           y: 60,
@@ -3219,6 +3279,7 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'cross-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -3231,6 +3292,7 @@ describe('v1.4.4 拆分与合并领域撤销/重做契约', () => {
         },
         {
           id: 'cross-2',
+          kind: 'text',
           boardId: 'other-board',
           x: 50,
           y: 60,
@@ -3404,6 +3466,7 @@ describe('v1.4.4 便签编辑尺寸偏好撤销/重做契约', () => {
       ...normalizeNotes([
         {
           id: 'rs-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -3416,6 +3479,7 @@ describe('v1.4.4 便签编辑尺寸偏好撤销/重做契约', () => {
         },
         {
           id: 'rs-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -3629,6 +3693,7 @@ describe('v1.4.7 附件迁移与归一化契约', () => {
       storageUpdatedAt: 100,
       notes: [{
         id: 'legacy-no-att',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 20,
@@ -3661,6 +3726,7 @@ describe('v1.4.7 附件迁移与归一化契约', () => {
       storageUpdatedAt: 200,
       notes: [{
         id: 'with-ref',
+        kind: 'text',
         boardId: 'default',
         x: 0,
         y: 0,
@@ -3721,6 +3787,7 @@ describe('v1.4.7 附件迁移与归一化契约', () => {
       storageUpdatedAt: 300,
       notes: [{
         id: 'mixed',
+        kind: 'text',
         boardId: 'default',
         x: 0,
         y: 0,
@@ -3756,6 +3823,7 @@ describe('v1.4.7 附件迁移与归一化契约', () => {
       storageUpdatedAt: 400,
       notes: [{
         id: 'non-array-att',
+        kind: 'text',
         boardId: 'default',
         x: 0,
         y: 0,
@@ -3778,9 +3846,10 @@ describe('v1.4.7 附件迁移与归一化契约', () => {
   });
 
   it('denormalizeNotes 透传附件引用，normalizeNotes + denormalizeRoundTrip 保留附件', () => {
-    const notes = [
+    const notes: Note[] = [
       {
         id: 'att-rt-1',
+        kind: 'text',
         boardId: 'default',
         x: 0,
         y: 0,
@@ -3794,6 +3863,7 @@ describe('v1.4.7 附件迁移与归一化契约', () => {
       },
       {
         id: 'att-rt-2',
+        kind: 'text',
         boardId: 'default',
         x: 10,
         y: 10,
@@ -3829,6 +3899,7 @@ describe('v1.4.7 附件迁移与归一化契约', () => {
       storageUpdatedAt: 500,
       notes: [{
         id: 'persist-ref',
+        kind: 'text',
         boardId: 'default',
         x: 0,
         y: 0,
@@ -3870,6 +3941,7 @@ describe('v1.4.8 附件引用领域动作契约', () => {
       ...normalizeNotes([
         {
           id: 'att-note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -3883,6 +3955,7 @@ describe('v1.4.8 附件引用领域动作契约', () => {
         },
         {
           id: 'att-note-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,

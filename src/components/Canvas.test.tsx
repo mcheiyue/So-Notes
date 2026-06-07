@@ -97,6 +97,7 @@ import { resolveDragStopWorldPosition } from '../utils/dragCoordinates';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
+  kind: 'text',
   boardId: 'default',
   x: 120,
   y: 140,
@@ -399,7 +400,7 @@ describe('Canvas 空白命中判定', () => {
     useStore.setState({
       selectedIds: [],
       layoutNotesById: createLayoutNotesById({
-        'note-target': { id: 'note-target', boardId: 'default', x: 500, y: 500, width: 260, height: 200, z: 1, deletedAt: null, title: 't', content: 'c', color: '#fff', collapsed: false, createdAt: 1, updatedAt: 1 },
+        'note-target': { id: 'note-target', kind: 'text', boardId: 'default', x: 500, y: 500, width: 260, height: 200, z: 1, deletedAt: null, title: 't', content: 'c', color: '#fff', collapsed: false, createdAt: 1, updatedAt: 1 },
       }),
       boardNoteIds: { 'default': ['note-target'] },
     });

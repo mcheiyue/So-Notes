@@ -137,6 +137,7 @@ describe('ContextMenu shell 坐标合同', () => {
       ...normalizeNotes([
         {
           id: 'note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -149,6 +150,7 @@ describe('ContextMenu shell 坐标合同', () => {
         },
         {
           id: 'note-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
@@ -191,6 +193,7 @@ describe('ContextMenu shell 坐标合同', () => {
       ...normalizeNotes([
         {
           id: 'note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -280,6 +283,7 @@ describe('ContextMenu 撕下便签菜单项', () => {
       ...normalizeNotes([
         {
           id: 'note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -362,6 +366,7 @@ describe('ContextMenu 撕下便签菜单项', () => {
       ...normalizeNotes([
         {
           id: 'note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -374,6 +379,7 @@ describe('ContextMenu 撕下便签菜单项', () => {
         },
         {
           id: 'note-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,

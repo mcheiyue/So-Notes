@@ -52,13 +52,35 @@ describe('StorageService.bootstrap', () => {
     const walTime = 1000;
 
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
-      notes: [{ id: 'd1', boardId: 'default', x: 10, y: 20, title: 'Disk', content: '', color: '#FFFFFF', z: 1, createdAt: 100, updatedAt: diskTime }],
+      notes: [{
+        id: 'd1',
+        kind: 'text',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: 'Disk',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: diskTime
+      }],
       storageUpdatedAt: diskTime,
     }));
     vi.mocked(db.loadWAL).mockResolvedValueOnce({
       schemaVersion: STORAGE_SCHEMA_VERSION,
       storageUpdatedAt: walTime,
-      notes: [{ id: 'w1', boardId: 'default', x: 5, y: 5, title: 'WAL', content: '', color: '#FFFFFF', z: 1, createdAt: 50, updatedAt: walTime }],
+      notes: [{
+        id: 'w1',
+        kind: 'text',
+        boardId: 'default',
+        x: 5,
+        y: 5,
+        title: 'WAL',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 50, updatedAt: walTime
+      }],
       boards: [DEFAULT_BOARD],
       currentBoardId: DEFAULT_BOARD.id,
       config: DEFAULT_CONFIG,
@@ -78,13 +100,35 @@ describe('StorageService.bootstrap', () => {
     const time = 5000;
 
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
-      notes: [{ id: 'd1', boardId: 'default', x: 0, y: 0, title: '', content: '', color: '#FFFFFF', z: 1, createdAt: 100, updatedAt: time }],
+      notes: [{
+        id: 'd1',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: time
+      }],
       storageUpdatedAt: time,
     }));
     vi.mocked(db.loadWAL).mockResolvedValueOnce({
       schemaVersion: STORAGE_SCHEMA_VERSION,
       storageUpdatedAt: time + 1,
-      notes: [{ id: 'w1', boardId: 'default', x: 0, y: 0, title: '', content: '', color: '#FFFFFF', z: 1, createdAt: 100, updatedAt: time + 1 }],
+      notes: [{
+        id: 'w1',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: time + 1
+      }],
       boards: [DEFAULT_BOARD],
       currentBoardId: DEFAULT_BOARD.id,
       config: DEFAULT_CONFIG,
@@ -111,7 +155,18 @@ describe('StorageService.bootstrap', () => {
     vi.mocked(db.loadWAL).mockResolvedValueOnce({
       schemaVersion: STORAGE_SCHEMA_VERSION,
       storageUpdatedAt: walTime,
-      notes: [{ id: 'w1', boardId: 'default', x: 5, y: 5, title: 'WAL', content: '', color: '#FFFFFF', z: 1, createdAt: 50, updatedAt: walTime }],
+      notes: [{
+        id: 'w1',
+        kind: 'text',
+        boardId: 'default',
+        x: 5,
+        y: 5,
+        title: 'WAL',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 50, updatedAt: walTime
+      }],
       boards: [DEFAULT_BOARD],
       currentBoardId: DEFAULT_BOARD.id,
       config: DEFAULT_CONFIG,
@@ -128,7 +183,18 @@ describe('StorageService.bootstrap', () => {
 
   it('WAL 为空时回退到 disk', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
-      notes: [{ id: 'd1', boardId: 'default', x: 0, y: 0, title: '', content: '', color: '#FFFFFF', z: 1, createdAt: 100, updatedAt: 200 }],
+      notes: [{
+        id: 'd1',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: 200
+      }],
       storageUpdatedAt: 200,
     }));
     vi.mocked(db.loadWAL).mockResolvedValueOnce({
@@ -168,7 +234,18 @@ describe('StorageService.bootstrap', () => {
 
   it('旧版缺少 schemaVersion 和 storageUpdatedAt 的数据被正确规范化', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
-      notes: [{ id: 'old', boardId: 'default', x: 0, y: 0, title: 'Old', content: '', color: '#FFFFFF', z: 1, createdAt: 100, updatedAt: 888 }],
+      notes: [{
+        id: 'old',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: 'Old',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: 888
+      }],
       boards: [DEFAULT_BOARD],
       currentBoardId: DEFAULT_BOARD.id,
       config: DEFAULT_CONFIG,
@@ -185,7 +262,18 @@ describe('StorageService.bootstrap', () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [
         { id: 'neg', boardId: '', x: -5, y: -10, content: '', color: '#FFFFFF', z: 1, createdAt: 100, updatedAt: 0 },
-        { id: 'ok', boardId: 'b1', x: 100, y: 200, title: 'Good', content: '', color: '#FFFFFF', z: 2, createdAt: 200, updatedAt: 200 },
+        {
+          id: 'ok',
+          kind: 'text',
+          boardId: 'b1',
+          x: 100,
+          y: 200,
+          title: 'Good',
+          content: '',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 200, updatedAt: 200
+        },
       ],
       boards: [{ id: 'b1', name: 'Board 1', icon: '💡', createdAt: 100 }],
       currentBoardId: 'b1',
@@ -210,7 +298,18 @@ describe('StorageService.bootstrap', () => {
 
   it('boards 为空时回退为默认看板，currentBoardId 被修正', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
-      notes: [{ id: 'n1', boardId: 'ghost', x: 0, y: 0, title: '', content: '', color: '#FFFFFF', z: 1, createdAt: 100, updatedAt: 100 }],
+      notes: [{
+        id: 'n1',
+        kind: 'text',
+        boardId: 'ghost',
+        x: 0,
+        y: 0,
+        title: '',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: 100
+      }],
       boards: [],
       currentBoardId: 'nonexistent',
       storageUpdatedAt: 100,
@@ -228,7 +327,18 @@ describe('StorageService.bootstrap', () => {
     vi.mocked(db.loadWAL).mockResolvedValueOnce({
       schemaVersion: STORAGE_SCHEMA_VERSION,
       storageUpdatedAt: 42,
-      notes: [{ id: 'w1', boardId: 'default', x: 0, y: 0, title: '', content: '', color: '#FFFFFF', z: 1, createdAt: 10, updatedAt: 42 }],
+      notes: [{
+        id: 'w1',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10, updatedAt: 42
+      }],
       boards: [DEFAULT_BOARD],
       currentBoardId: DEFAULT_BOARD.id,
       config: DEFAULT_CONFIG,
@@ -258,8 +368,30 @@ describe('StorageService.bootstrap', () => {
   it('config.maxZ 被校准为 max(现有 maxZ, notes.length)', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [
-        { id: 'a', boardId: 'default', x: 0, y: 0, title: '', content: '', color: '#FFFFFF', z: 50, createdAt: 10, updatedAt: 10 },
-        { id: 'b', boardId: 'default', x: 0, y: 0, title: '', content: '', color: '#FFFFFF', z: 3, createdAt: 10, updatedAt: 10 },
+        {
+          id: 'a',
+          kind: 'text',
+          boardId: 'default',
+          x: 0,
+          y: 0,
+          title: '',
+          content: '',
+          color: '#FFFFFF',
+          z: 50,
+          createdAt: 10, updatedAt: 10
+        },
+        {
+          id: 'b',
+          kind: 'text',
+          boardId: 'default',
+          x: 0,
+          y: 0,
+          title: '',
+          content: '',
+          color: '#FFFFFF',
+          z: 3,
+          createdAt: 10, updatedAt: 10
+        },
       ],
       config: { ...DEFAULT_CONFIG, maxZ: 2 },
       storageUpdatedAt: 10,
@@ -276,6 +408,7 @@ const makeDomainState = () => ({
   notesById: {
     'note-1': {
       id: 'note-1',
+      kind: 'text',
       boardId: DEFAULT_BOARD.id,
       x: 10,
       y: 20,
@@ -611,8 +744,30 @@ describe('StorageService 附件迁移与归一化', () => {
       schemaVersion: 1,
       storageUpdatedAt: 100,
       notes: [
-        { id: 'old-1', boardId: 'default', x: 0, y: 0, title: '旧', content: '', color: '#FFFFFF', z: 1, createdAt: 10, updatedAt: 10 },
-        { id: 'old-2', boardId: 'default', x: 10, y: 10, title: '旧二', content: '', color: '#FFFFFF', z: 2, createdAt: 20, updatedAt: 20 },
+        {
+          id: 'old-1',
+          kind: 'text',
+          boardId: 'default',
+          x: 0,
+          y: 0,
+          title: '旧',
+          content: '',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 10, updatedAt: 10
+        },
+        {
+          id: 'old-2',
+          kind: 'text',
+          boardId: 'default',
+          x: 10,
+          y: 10,
+          title: '旧二',
+          content: '',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 20, updatedAt: 20
+        },
       ],
       boards: [DEFAULT_BOARD],
       currentBoardId: DEFAULT_BOARD.id,
@@ -632,6 +787,7 @@ describe('StorageService 附件迁移与归一化', () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [{
         id: 'with-ref',
+        kind: 'text',
         boardId: 'default',
         x: 0,
         y: 0,
@@ -690,6 +846,7 @@ describe('StorageService 附件迁移与归一化', () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [{
         id: 'dirty-ref',
+        kind: 'text',
         boardId: 'default',
         x: 0,
         y: 0,
@@ -724,6 +881,7 @@ describe('StorageService 附件迁移与归一化', () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [{
         id: 'mixed',
+        kind: 'text',
         boardId: 'default',
         x: 0,
         y: 0,
@@ -749,6 +907,7 @@ describe('StorageService 附件迁移与归一化', () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [{
         id: 'non-array',
+        kind: 'text',
         boardId: 'default',
         x: 0,
         y: 0,
@@ -771,7 +930,18 @@ describe('StorageService 附件迁移与归一化', () => {
 
   it('bootstrap 输出 schemaVersion 为 2', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
-      notes: [{ id: 'v2', boardId: 'default', x: 0, y: 0, title: '', content: '', color: '#FFFFFF', z: 1, createdAt: 10, updatedAt: 10 }],
+      notes: [{
+        id: 'v2',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 10, updatedAt: 10
+      }],
       storageUpdatedAt: 10,
     }));
     vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
@@ -789,6 +959,7 @@ describe('StorageService 附件迁移与归一化', () => {
       storageUpdatedAt: 500,
       notes: [{
         id: 'wal-note',
+        kind: 'text',
         boardId: 'default',
         x: 0,
         y: 0,

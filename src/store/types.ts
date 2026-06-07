@@ -92,7 +92,7 @@ export interface AttachmentRef {
 
 export interface Note {
   id: string;
-  kind?: 'text' | 'image';
+  kind: 'text' | 'image';
   boardId: string; // New field
   x: number;
   y: number;

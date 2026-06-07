@@ -8,6 +8,7 @@ const HASH_C = 'c'.repeat(64);
 
 const makeNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
+  kind: 'text',
   boardId: 'board-1',
   x: 10,
   y: 20,
@@ -270,6 +271,7 @@ describe('DataTransferService', () => {
             boards: [{ id: 'import-board', name: '主板', icon: '📥', createdAt: 10 }],
             notes: [{
               id: 'import-note',
+              kind: 'text',
               boardId: 'import-board',
               x: 10,
               y: 20,
@@ -312,6 +314,7 @@ describe('DataTransferService', () => {
             boards: [{ id: 'rb-board', name: '回滚板', icon: '↩️', createdAt: 10 }],
             notes: [{
               id: 'rb-note',
+              kind: 'text',
               boardId: 'rb-board',
               x: 10,
               y: 20,
@@ -358,6 +361,7 @@ describe('DataTransferService', () => {
             boards: [{ id: 'wal-board', name: 'WAL板', icon: '💾', createdAt: 10 }],
             notes: [{
               id: 'wal-note',
+              kind: 'text',
               boardId: 'wal-board',
               x: 10,
               y: 20,
@@ -470,8 +474,10 @@ describe('DataTransferService', () => {
             boards: [{ id: 'imp-board', name: '附件板', icon: '📎', createdAt: 10 }],
             notes: [{
               id: 'imp-note',
+              kind: 'text',
               boardId: 'imp-board',
-              x: 10, y: 20,
+              x: 10,
+              y: 20,
               title: '附件便签',
               content: '内容',
               color: '#FFFFFF',
@@ -515,8 +521,10 @@ describe('DataTransferService', () => {
             boards: [{ id: 'noatt-board', name: '无附件板', icon: '📄', createdAt: 10 }],
             notes: [{
               id: 'noatt-note',
+              kind: 'text',
               boardId: 'noatt-board',
-              x: 10, y: 20,
+              x: 10,
+              y: 20,
               title: '普通便签',
               content: '内容',
               color: '#FFFFFF',

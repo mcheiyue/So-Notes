@@ -17,6 +17,7 @@ const makeBoard = (overrides: Partial<Board> = {}): Board => ({
 
 const makeNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
+  kind: 'text',
   boardId: 'board-1',
   x: 10,
   y: 20,
@@ -371,6 +372,7 @@ describe('dataTransfer 附件引用导入', () => {
     const board = makeBoard({ id: 'att-board', name: '附件板' });
     const noteData = {
       id: 'note-mixed',
+      kind: 'text',
       boardId: 'att-board',
       x: 10,
       y: 20,
@@ -418,8 +420,14 @@ describe('dataTransfer 附件引用导入', () => {
     const board = makeBoard({ id: 'bin-board', name: '二进制板' });
     const noteData = {
       id: 'note-bin',
+      kind: 'text',
       boardId: 'bin-board',
-      x: 10, y: 20, title: 't', content: 'c', color: '#FFF', z: 1,
+      x: 10,
+      y: 20,
+      title: 't',
+      content: 'c',
+      color: '#FFF',
+      z: 1,
       createdAt: 100, updatedAt: 100,
       attachments: [{
         ...makeAttachmentRef({ id: 'att-with-binary' }),
@@ -473,8 +481,14 @@ describe('dataTransfer 附件引用导入', () => {
     const board = makeBoard({ id: 'mal-board', name: '畸形板' });
     const noteData = {
       id: 'note-mal',
+      kind: 'text',
       boardId: 'mal-board',
-      x: 10, y: 20, title: 't', content: 'c', color: '#FFF', z: 1,
+      x: 10,
+      y: 20,
+      title: 't',
+      content: 'c',
+      color: '#FFF',
+      z: 1,
       createdAt: 100, updatedAt: 100,
       attachments: 'not-an-array',
     };
@@ -502,8 +516,14 @@ describe('dataTransfer 附件引用导入', () => {
     const board = makeBoard({ id: 'weird-board', name: '怪异板' });
     const noteData = {
       id: 'note-weird',
+      kind: 'text',
       boardId: 'weird-board',
-      x: 10, y: 20, title: 't', content: 'c', color: '#FFF', z: 1,
+      x: 10,
+      y: 20,
+      title: 't',
+      content: 'c',
+      color: '#FFF',
+      z: 1,
       createdAt: 100, updatedAt: 100,
       attachments: [42, null, true, undefined, 'string', makeAttachmentRef({ id: 'only-valid' })],
     };

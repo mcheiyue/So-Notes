@@ -553,6 +553,7 @@ describe('App WindowShell 组合契约', () => {
       notesById: {
         'note-locate-1': {
           id: 'note-locate-1',
+          kind: 'text',
           boardId: 'default',
           title: '定位测试',
           content: '',
@@ -591,6 +592,7 @@ describe('App 撕下窗口集成契约', () => {
 
   const createIntegrationNote = (overrides: Record<string, unknown> = {}) => ({
     id: 'note-int-1',
+    kind: 'text' as const,
     boardId: 'default',
     title: '集成标题',
     content: '集成正文内容',

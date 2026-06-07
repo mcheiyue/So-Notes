@@ -7,6 +7,7 @@ import { applyDomainPatch } from './domainPatches';
 function makeNote(overrides: Partial<Note> = {}): Note {
   return {
     id: 'note-1',
+    kind: 'text',
     boardId: 'default',
     x: 100,
     y: 200,

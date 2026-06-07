@@ -45,6 +45,7 @@ const resetUIStore = () => {
 
 const createTestNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-test-1',
+  kind: 'text',
   boardId: 'default',
   title: '测试标题',
   content: '测试正文内容',

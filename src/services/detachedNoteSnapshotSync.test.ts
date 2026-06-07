@@ -38,6 +38,7 @@ import { DETACHED_NOTE_EVENTS } from '../types/detachedNoteSnapshot';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
+  kind: 'text',
   boardId: 'default',
   x: 100,
   y: 200,

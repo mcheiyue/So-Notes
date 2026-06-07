@@ -35,19 +35,20 @@ const setInputValue = (input: HTMLInputElement, value: string) => {
 };
 
 const createDeletedNote = (overrides: Partial<Note> = {}): Note => ({
-    id: 'note-1',
-    boardId: 'default',
-    x: 100,
-    y: 100,
-    title: '会议纪要',
-    content: '讨论了项目进度和分工',
-    color: '#FFFFFF',
-    z: 1,
-    collapsed: false,
-    createdAt: 1,
-    updatedAt: 2,
-    deletedAt: 1000,
-    ...overrides,
+  id: 'note-1',
+  kind: 'text',
+  boardId: 'default',
+  x: 100,
+  y: 100,
+  title: '会议纪要',
+  content: '讨论了项目进度和分工',
+  color: '#FFFFFF',
+  z: 1,
+  collapsed: false,
+  createdAt: 1,
+  updatedAt: 2,
+  deletedAt: 1000,
+  ...overrides,
 });
 
 describe('TrashGrid 废纸篓搜索', () => {

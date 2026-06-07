@@ -420,6 +420,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
       ...normalizeNotes([
         {
           id: 'active-note',
+          kind: 'text',
           boardId: 'board-2',
           x: 0,
           y: 0,
@@ -432,6 +433,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
         },
         {
           id: 'deleted-note',
+          kind: 'text',
           boardId: 'board-2',
           x: 0,
           y: 0,
@@ -678,6 +680,7 @@ describe('BoardDock 附件一致性管理入口', () => {
       ...normalizeNotes([
         {
           id: 'trash-note',
+          kind: 'text',
           boardId: 'default',
           x: 0,
           y: 0,

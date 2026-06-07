@@ -28,6 +28,7 @@ const makeRef = (overrides: Partial<AttachmentRef> & Pick<AttachmentRef, 'hash'>
 });
 
 const makeNote = (overrides: Partial<Note> & Pick<Note, 'id' | 'boardId'>): Note => ({
+  kind: 'text',
   x: 0,
   y: 0,
   title: 't',

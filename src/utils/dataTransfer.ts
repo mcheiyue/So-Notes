@@ -354,6 +354,7 @@ const normalizeLegacyNote = (
   const createdAt = getNumberOrFallback(rawNote.createdAt, Date.now());
   const nextNote: Note = {
     id: getStringOrFallback(rawNote.id, `legacy-note-${noteIndex + 1}`),
+    kind: 'text',
     boardId: getStringOrFallback(rawNote.boardId, fallbackBoardId),
     x: getNumberOrFallback(rawNote.x, 20 + noteIndex * 10),
     y: getNumberOrFallback(rawNote.y, 20 + noteIndex * 10),

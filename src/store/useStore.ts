@@ -973,6 +973,7 @@ export const useStore = create<State>()(
         splitInputs.forEach((input, index) => {
           const newNote: Note = {
             id: createdIds[index],
+            kind: 'text',
             boardId: existingNote.boardId,
             title: '',
             content: input.content,
@@ -1003,6 +1004,7 @@ export const useStore = create<State>()(
     addNote: (x, y) => {
       const newNote: Note = {
         id: crypto.randomUUID(),
+        kind: 'text',
         boardId: get().currentBoardId,
         title: '',
         content: '',
@@ -1036,6 +1038,7 @@ export const useStore = create<State>()(
     addNoteWithContent: (x, y, content) => {
       const newNote: Note = {
         id: crypto.randomUUID(),
+        kind: 'text',
         boardId: get().currentBoardId,
         title: '',
         content: content,
@@ -1084,6 +1087,7 @@ export const useStore = create<State>()(
         normalizedNotes.forEach((note, index) => {
           const newNote: Note = {
             id: createdIds[index],
+            kind: 'text',
             boardId,
             title: '',
             content: note.content,
@@ -1372,6 +1376,7 @@ export const useStore = create<State>()(
         set((state) => {
             const newNote: Note = {
                 id: mergedId,
+                kind: 'text',
                 boardId: sortedNotes[0].boardId,
                 title: '',
                 content: mergedContent,
@@ -1446,6 +1451,7 @@ export const useStore = create<State>()(
             splitInputs.forEach((input, index) => {
                 const newNote: Note = {
                     id: createdIds[index],
+                    kind: 'text',
                     boardId: originalNote.boardId,
                     title: '',
                     content: input.content,

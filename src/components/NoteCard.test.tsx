@@ -94,6 +94,7 @@ const hexToRgbaString = (hex: string, alpha: number): string => {
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
+  kind: 'text',
   boardId: 'default',
   x: 120,
   y: 140,

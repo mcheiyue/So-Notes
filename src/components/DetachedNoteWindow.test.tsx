@@ -76,6 +76,7 @@ function triggerResize(height: number) {
 
 const createSnapshot = (overrides: Partial<DetachedNoteSnapshot> = {}): DetachedNoteSnapshot => ({
   noteId: 'note-test-1',
+  kind: 'text',
   title: '测试标题',
   content: '测试正文',
   color: '#FFFFFF',

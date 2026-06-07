@@ -26,6 +26,7 @@ describe('legacyDomainBridge', () => {
   it('挂载时将旧 useStore 的 Domain 快照同步到 domainStore', () => {
     const note: Note = {
       id: 'note-a',
+      kind: 'text',
       boardId: 'default',
       x: 10,
       y: 20,

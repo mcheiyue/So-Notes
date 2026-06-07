@@ -54,7 +54,7 @@ const cloneAttachments = (attachments: AttachmentRef[] | undefined): AttachmentR
 
 const buildSnapshot = (
   noteId: string,
-  note: { kind?: 'text' | 'image'; title: string; content: string; color: string; collapsed?: boolean; attachments?: AttachmentRef[]; deletedAt?: number | null },
+  note: { kind: 'text' | 'image'; title: string; content: string; color: string; collapsed?: boolean; attachments?: AttachmentRef[]; deletedAt?: number | null },
 ): DetachedNoteSnapshot => ({
   noteId,
   kind: note.kind,
@@ -68,7 +68,7 @@ const buildSnapshot = (
 
 const syncDetachedNote = (
   noteId: string,
-  note: { kind?: 'text' | 'image'; title: string; content: string; color: string; collapsed?: boolean; attachments?: AttachmentRef[]; deletedAt?: number | null } | undefined,
+  note: { kind: 'text' | 'image'; title: string; content: string; color: string; collapsed?: boolean; attachments?: AttachmentRef[]; deletedAt?: number | null } | undefined,
   options: { retryAfterOpen?: boolean } = {},
 ): void => {
   if (!note || note.deletedAt) {

@@ -70,6 +70,7 @@ describe('AttachmentRef 与 Note.attachments', () => {
   it('Note.attachments 为可选字段，缺失时不报错', () => {
     const note: Note = {
       id: 'n-1',
+      kind: 'text',
       boardId: 'default',
       x: 0,
       y: 0,
@@ -95,6 +96,7 @@ describe('AttachmentRef 与 Note.attachments', () => {
     };
     const note: Note = {
       id: 'n-2',
+      kind: 'text',
       boardId: 'default',
       x: 10,
       y: 20,

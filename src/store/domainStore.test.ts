@@ -31,6 +31,7 @@ describe('domainStore 只读骨架', () => {
     state.notesById = {
       noteA: {
         id: 'noteA',
+        kind: 'text',
         boardId: state.currentBoardId,
         x: 0,
         y: 0,
@@ -43,6 +44,7 @@ describe('domainStore 只读骨架', () => {
       },
       noteB: {
         id: 'noteB',
+        kind: 'text',
         boardId: state.currentBoardId,
         x: 0,
         y: 0,

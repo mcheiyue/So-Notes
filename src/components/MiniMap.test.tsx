@@ -43,6 +43,7 @@ describe('MiniMap 看板隔离', () => {
     const normalized = normalizeNotes([
       {
         id: 'note-a',
+        kind: 'text',
         boardId: 'default',
         x: 100,
         y: 120,
@@ -55,6 +56,7 @@ describe('MiniMap 看板隔离', () => {
       },
       {
         id: 'note-b',
+        kind: 'text',
         boardId: 'board-2',
         x: 3000,
         y: 2400,
@@ -67,6 +69,7 @@ describe('MiniMap 看板隔离', () => {
       },
       {
         id: 'note-c',
+        kind: 'text',
         boardId: 'default',
         x: 200,
         y: 220,
@@ -169,6 +172,7 @@ describe('MiniMap 看板隔离', () => {
     const normalized = normalizeNotes([
       {
         id: 'collapsed-note',
+        kind: 'text',
         boardId: 'default',
         x: 100,
         y: 120,
@@ -182,6 +186,7 @@ describe('MiniMap 看板隔离', () => {
       },
       {
         id: 'expanded-note',
+        kind: 'text',
         boardId: 'default',
         x: 260,
         y: 120,
@@ -217,6 +222,7 @@ describe('MiniMap 看板隔离', () => {
     const normalized = normalizeNotes([
       {
         id: 'default-height',
+        kind: 'text',
         boardId: 'default',
         x: 100,
         y: 120,
@@ -229,6 +235,7 @@ describe('MiniMap 看板隔离', () => {
       },
       {
         id: 'another-height',
+        kind: 'text',
         boardId: 'default',
         x: 260,
         y: 120,

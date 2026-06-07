@@ -17,6 +17,7 @@ describe('SelectionActionBar', () => {
       ...normalizeNotes([
         {
           id: 'note-1',
+          kind: 'text',
           boardId: 'default',
           x: 10,
           y: 20,
@@ -29,6 +30,7 @@ describe('SelectionActionBar', () => {
         },
         {
           id: 'note-2',
+          kind: 'text',
           boardId: 'default',
           x: 30,
           y: 40,
