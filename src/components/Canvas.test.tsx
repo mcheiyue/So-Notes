@@ -24,7 +24,14 @@ vi.mock('react-draggable', () => ({
   DraggableCore: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-const { mockSaveImageFromSystemClipboard, mockWriteAttachmentFromBytes, mockWriteAttachmentFromPath, mockDeleteAttachmentFile } = vi.hoisted(() => ({
+const {
+  mockSaveImageFromSystemClipboard,
+  mockWriteAttachmentFromBytes,
+  mockWriteAttachmentFromPath,
+  mockDeleteAttachmentFile,
+  mockGetImageDimensionsFromFile,
+  mockGetImageDimensionsFromRelativePath,
+} = vi.hoisted(() => ({
   mockSaveImageFromSystemClipboard: vi.fn(async () => ({
     hash: 'a'.repeat(64),
     filename: 'clipboard-image.png',
@@ -56,6 +63,8 @@ const { mockSaveImageFromSystemClipboard, mockWriteAttachmentFromBytes, mockWrit
     deleted: true,
     relativePath,
   })),
+  mockGetImageDimensionsFromFile: vi.fn(async () => ({ width: 1920, height: 1080 })),
+  mockGetImageDimensionsFromRelativePath: vi.fn(async () => ({ width: 1080, height: 1920 })),
 }));
 
 vi.mock('../services/storage/attachmentPersistence', () => ({
@@ -63,6 +72,11 @@ vi.mock('../services/storage/attachmentPersistence', () => ({
   writeAttachmentFromBytes: mockWriteAttachmentFromBytes,
   writeAttachmentFromPath: mockWriteAttachmentFromPath,
   deleteAttachmentFile: mockDeleteAttachmentFile,
+}));
+
+vi.mock('../utils/imageDimensions', () => ({
+  getImageDimensionsFromFile: mockGetImageDimensionsFromFile,
+  getImageDimensionsFromRelativePath: mockGetImageDimensionsFromRelativePath,
 }));
 
 import { Canvas } from './Canvas';
@@ -127,6 +141,10 @@ describe('Canvas 空白命中判定', () => {
     mockWriteAttachmentFromBytes.mockClear();
     mockWriteAttachmentFromPath.mockClear();
     mockDeleteAttachmentFile.mockClear();
+    mockGetImageDimensionsFromFile.mockClear();
+    mockGetImageDimensionsFromFile.mockResolvedValue({ width: 1920, height: 1080 });
+    mockGetImageDimensionsFromRelativePath.mockClear();
+    mockGetImageDimensionsFromRelativePath.mockResolvedValue({ width: 1080, height: 1920 });
     const normalized = normalizeNotes([createNote()]);
     useStore.setState({
       ...normalized,
@@ -1650,8 +1668,9 @@ describe('Canvas 空白命中判定', () => {
     expect(note).toBeDefined();
     expect(note!.kind).toBe('image');
     expect(note!.title).toBe('photo.png');
-    expect(note!.editingWidth).toBe(LAYOUT.IMAGE_NOTE_WIDTH);
-    expect(note!.editingHeight).toBe(LAYOUT.IMAGE_NOTE_HEIGHT);
+    expect(mockGetImageDimensionsFromFile).toHaveBeenCalledWith(pngFile);
+    expect(note!.editingWidth).toBe(LAYOUT.IMAGE_NOTE_MAX_WIDTH);
+    expect(note!.editingHeight).toBe(450);
     expect(note!.attachments).toBeDefined();
     expect(note!.attachments!.length).toBe(1);
     expect(note!.attachments![0].filename).toBe('photo.png');

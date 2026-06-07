@@ -18,6 +18,7 @@ import type { AttachmentRef } from "../store/types";
 import { attach } from "../services/storage/StorageService";
 import { CanvasEngine } from "../canvas/CanvasEngine";
 import { useCanvasGlobalListeners } from "../hooks/useCanvasGlobalListeners";
+import { getImageDimensionsFromFile, getImageDimensionsFromRelativePath } from "../utils/imageDimensions";
 
 
 
@@ -449,6 +450,8 @@ export const Canvas: React.FC = () => {
           createdAt: writeResult.createdAt,
         };
 
+        const dims = await getImageDimensionsFromRelativePath(writeResult.relativePath);
+
         const currentStore = useStore.getState();
         const nonDeletedSelectedIds = currentStore.selectedIds.filter(
           (id) => !currentStore.layoutNotesById[id]?.deletedAt,
@@ -460,11 +463,19 @@ export const Canvas: React.FC = () => {
             x: (selectedNote?.x ?? getViewportSpawnOrigin(useViewportStore.getState().viewport).x) + IMAGE_DROP_STAGGER_OFFSET_X,
             y: (selectedNote?.y ?? getViewportSpawnOrigin(useViewportStore.getState().viewport).y) + IMAGE_DROP_STAGGER_OFFSET_Y,
             attachment: attachmentRef,
+            originalWidth: dims?.width,
+            originalHeight: dims?.height,
           }]);
         } else {
           const vp = useViewportStore.getState().viewport;
           const origin = getViewportSpawnOrigin(vp);
-          currentStore.addImageNotesBatch([{ x: origin.x, y: origin.y, attachment: attachmentRef }]);
+          currentStore.addImageNotesBatch([{
+            x: origin.x,
+            y: origin.y,
+            attachment: attachmentRef,
+            originalWidth: dims?.width,
+            originalHeight: dims?.height,
+          }]);
         }
       } catch (error) {
         console.warn('图片粘贴失败，已跳过附件创建。', error);
@@ -542,13 +553,16 @@ export const Canvas: React.FC = () => {
     const baseX = localPoint.x + vp.x;
     const baseY = localPoint.y + vp.y;
 
-    const writeResults: Array<{ file: File; attachment: AttachmentRef }> = [];
+    const writeResults: Array<{ file: File; attachment: AttachmentRef; dims: { width: number; height: number } | null }> = [];
     for (const file of acceptedFiles) {
       const sourcePath = getFilePathFromFile(file);
       try {
-        const result = sourcePath
-          ? await writeAttachmentFromPath(sourcePath, file.name, file.type)
-          : await writeAttachmentFromBytes(await file.arrayBuffer(), file.name, file.type);
+        const [result, dims] = await Promise.all([
+          sourcePath
+            ? writeAttachmentFromPath(sourcePath, file.name, file.type)
+            : writeAttachmentFromBytes(await file.arrayBuffer(), file.name, file.type),
+          getImageDimensionsFromFile(file),
+        ]);
         writeResults.push({
           file,
           attachment: {
@@ -560,6 +574,7 @@ export const Canvas: React.FC = () => {
             relativePath: result.relativePath,
             createdAt: result.createdAt,
           },
+          dims,
         });
       } catch (writeError) {
         console.warn('附件写入失败，已跳过。', file.name, writeError);
@@ -576,6 +591,8 @@ export const Canvas: React.FC = () => {
         x: baseX + index * IMAGE_DROP_STAGGER_OFFSET_X,
         y: baseY + index * IMAGE_DROP_STAGGER_OFFSET_Y,
         attachment: entry.attachment,
+        originalWidth: entry.dims?.width,
+        originalHeight: entry.dims?.height,
       }));
 
       useStore.getState().addImageNotesBatch(batchInputs);

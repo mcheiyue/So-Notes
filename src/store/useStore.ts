@@ -17,6 +17,7 @@ import { finalizeActiveNoteDrag } from '../utils/activeNoteDrag';
 import { buildSmartPasteNoteInputs, splitParagraphs } from '../utils/smartPaste';
 import type { SmartPasteNoteInput, SmartPasteOptionId, SmartPasteResult } from '../utils/smartPaste';
 import { LAYOUT } from '../constants/layout';
+import { computeImageNoteSize } from '../utils/imageNoteSize';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -154,7 +155,7 @@ interface State {
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number, status?: StickyDragStatus) => void;
   addAttachmentToNote: (noteId: string, attachment: AttachmentRef) => void;
   removeAttachmentFromNote: (noteId: string, attachmentId: string) => void;
-  addImageNotesBatch: (inputs: Array<{ x: number; y: number; attachment: AttachmentRef }>) => string[];
+  addImageNotesBatch: (inputs: Array<{ x: number; y: number; attachment: AttachmentRef; originalWidth?: number; originalHeight?: number }>) => string[];
   
   // New Actions for v1.1.1 & v1.1.2
   duplicateNote: (id: string) => void;
@@ -1888,6 +1889,7 @@ export const useStore = create<State>()(
 
       set((state) => {
         inputs.forEach((input, index) => {
+          const { editingWidth, editingHeight } = computeImageNoteSize(input.originalWidth, input.originalHeight);
           const newNote: Note = {
             id: createdIds[index],
             kind: 'image',
@@ -1899,8 +1901,8 @@ export const useStore = create<State>()(
             z: startZ + index + 1,
             color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
             collapsed: false,
-            editingWidth: LAYOUT.IMAGE_NOTE_WIDTH,
-            editingHeight: LAYOUT.IMAGE_NOTE_HEIGHT,
+            editingWidth,
+            editingHeight,
             createdAt,
             updatedAt: createdAt,
             attachments: [{ ...input.attachment }],

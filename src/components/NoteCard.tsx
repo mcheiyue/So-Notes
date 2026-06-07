@@ -27,6 +27,7 @@ import { NoteVisuals } from "./note-render/NoteVisuals";
 import { ImageNoteBody } from "./note-render/ImageNoteBody";
 import { resolveAttachmentPath, saveImageFromSystemClipboard } from "../services/storage/attachmentPersistence";
 import type { AttachmentRef } from "../store/types";
+import { getImageDimensionsFromRelativePath } from "../utils/imageDimensions";
 
 interface NoteCardProps {
   id: string;
@@ -535,10 +536,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         relativePath: writeResult.relativePath,
         createdAt: writeResult.createdAt,
       };
+      const dims = await getImageDimensionsFromRelativePath(writeResult.relativePath);
       addImageNotesBatch([{
         x: note.x + LAYOUT.NOTE_WIDTH + 20,
         y: note.y,
         attachment: attachmentRef,
+        originalWidth: dims?.width,
+        originalHeight: dims?.height,
       }]);
     } catch (error) {
       console.warn('图片粘贴失败，已跳过附件创建。', error);

@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
-const { convertFileSrcMock, resolveAttachmentPathMock, saveImageFromSystemClipboardMock, writeImageMock, imageFromPathMock } = vi.hoisted(() => ({
+const {
+  convertFileSrcMock,
+  resolveAttachmentPathMock,
+  saveImageFromSystemClipboardMock,
+  writeImageMock,
+  imageFromPathMock,
+  getImageDimensionsFromRelativePathMock,
+} = vi.hoisted(() => ({
   convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
   resolveAttachmentPathMock: vi.fn(async (path: string) => `/abs/${path}`),
   saveImageFromSystemClipboardMock: vi.fn(async () => ({
@@ -16,6 +23,7 @@ const { convertFileSrcMock, resolveAttachmentPathMock, saveImageFromSystemClipbo
   })),
   writeImageMock: vi.fn(async () => undefined),
   imageFromPathMock: vi.fn(async (path: string) => ({ path, __tauriImage: true })),
+  getImageDimensionsFromRelativePathMock: vi.fn(async () => ({ width: 1080, height: 1920 })),
 }));
 
 vi.mock('@tauri-apps/api/image', () => ({
@@ -36,6 +44,10 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('../services/storage/attachmentPersistence', () => ({
   resolveAttachmentPath: resolveAttachmentPathMock,
   saveImageFromSystemClipboard: saveImageFromSystemClipboardMock,
+}));
+
+vi.mock('../utils/imageDimensions', () => ({
+  getImageDimensionsFromRelativePath: getImageDimensionsFromRelativePathMock,
 }));
 
 vi.mock('../store/db', () => ({
@@ -124,6 +136,8 @@ describe('NoteCard 头部交互边界', () => {
     saveImageFromSystemClipboardMock.mockClear();
     writeImageMock.mockClear();
     imageFromPathMock.mockClear();
+    getImageDimensionsFromRelativePathMock.mockClear();
+    getImageDimensionsFromRelativePathMock.mockResolvedValue({ width: 1080, height: 1920 });
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn(async () => undefined),
@@ -288,11 +302,14 @@ describe('NoteCard 头部交互边界', () => {
 
     expect(pasteEvent.defaultPrevented).toBe(true);
     expect(saveImageFromSystemClipboardMock).toHaveBeenCalledTimes(1);
+    expect(getImageDimensionsFromRelativePathMock).toHaveBeenCalledWith(`attachments/${'b'.repeat(64)}.png`);
     expect(addImageNotesBatch).toHaveBeenCalledTimes(1);
     expect(addImageNotesBatch).toHaveBeenCalledWith([
       expect.objectContaining({
         x: 400,
         y: 140,
+        originalWidth: 1080,
+        originalHeight: 1920,
         attachment: expect.objectContaining({
           hash: 'b'.repeat(64),
           filename: 'clipboard-image.png',
