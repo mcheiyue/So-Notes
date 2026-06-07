@@ -132,6 +132,7 @@ export const startDetachedNoteSnapshotSync = (): (() => void) => {
         } else {
           const snapshot: DetachedNoteSnapshot = {
             noteId,
+            kind: note.kind,
             title: note.title,
             content: note.content,
             color: note.color,

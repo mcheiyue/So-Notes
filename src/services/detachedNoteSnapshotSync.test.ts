@@ -33,7 +33,7 @@ import {
 } from './detachedNoteSnapshotSync';
 import { useStore } from '../store/useStore';
 import { normalizeNotes } from '../store/normalization';
-import type { Note } from '../store/types';
+import type { AttachmentRef, Note } from '../store/types';
 import { DETACHED_NOTE_EVENTS } from '../types/detachedNoteSnapshot';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
@@ -48,6 +48,17 @@ const createNote = (overrides: Partial<Note> = {}): Note => ({
   collapsed: false,
   createdAt: 1,
   updatedAt: 1,
+  ...overrides,
+});
+
+const createAttachment = (overrides: Partial<AttachmentRef> = {}): AttachmentRef => ({
+  id: 'att-1',
+  hash: 'a'.repeat(64),
+  filename: 'photo.png',
+  mimeType: 'image/png',
+  size: 1024,
+  relativePath: `attachments/${'a'.repeat(64)}.png`,
+  createdAt: 1,
   ...overrides,
 });
 
@@ -288,6 +299,41 @@ describe('detachedNoteSnapshotSync', () => {
         content: '内容1',
         color: '#fef9c3',
         isCollapsed: false,
+      }),
+    );
+  });
+
+  it('收到 READY 事件后图片便签首帧快照包含 kind 与附件', () => {
+    const attachment = createAttachment();
+    useStore.setState({
+      detachedNotes: [{ noteId: 'n1', position: { x: 0, y: 0 }, isPinned: false }],
+    });
+    useStore.setState((state) => {
+      state.notesById['n1'].kind = 'image';
+      state.notesById['n1'].attachments = [attachment];
+      state.notesById['n1'].title = 'photo.png';
+      state.notesById['n1'].content = '';
+    });
+
+    startDetachedNoteSnapshotSync();
+
+    const readyCall = (listenMock.mock.calls as unknown as ListenCall[]).find(
+      (call: unknown[]) => call[0] === DETACHED_NOTE_EVENTS.READY,
+    );
+    expect(readyCall).toBeDefined();
+
+    const readyCallback = readyCall![1];
+    readyCallback({ payload: { noteId: 'n1' } });
+
+    expect(emitToMock).toHaveBeenCalledWith(
+      'detached-note-n1',
+      DETACHED_NOTE_EVENTS.SNAPSHOT,
+      expect.objectContaining({
+        noteId: 'n1',
+        kind: 'image',
+        title: 'photo.png',
+        content: '',
+        attachments: [attachment],
       }),
     );
   });
