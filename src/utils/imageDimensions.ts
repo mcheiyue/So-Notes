@@ -8,7 +8,7 @@
  * 加载失败时返回 null，调用方回退到默认尺寸。
  */
 
-import { resolveAttachmentPath } from '../services/storage/attachmentPersistence';
+import { resolveAttachmentAssetUrlCached } from '../services/storage/attachmentPersistence';
 
 /** 从 File 对象读取图片自然尺寸。 */
 export function getImageDimensionsFromFile(file: File): Promise<{ width: number; height: number } | null> {
@@ -33,9 +33,7 @@ export async function getImageDimensionsFromRelativePath(
   relativePath: string,
 ): Promise<{ width: number; height: number } | null> {
   try {
-    const absolutePath = await resolveAttachmentPath(relativePath);
-    const { convertFileSrc } = await import('@tauri-apps/api/core');
-    const assetUrl = convertFileSrc(absolutePath);
+    const assetUrl = await resolveAttachmentAssetUrlCached(relativePath);
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });

@@ -29,6 +29,8 @@ const {
   mockWriteAttachmentFromBytes,
   mockWriteAttachmentFromPath,
   mockDeleteAttachmentFile,
+  mockGetCachedAttachmentAssetUrl,
+  mockResolveAttachmentAssetUrlCached,
   mockGetImageDimensionsFromFile,
   mockGetImageDimensionsFromRelativePath,
 } = vi.hoisted(() => ({
@@ -63,6 +65,8 @@ const {
     deleted: true,
     relativePath,
   })),
+  mockGetCachedAttachmentAssetUrl: vi.fn((relativePath: string) => `asset://localhost//abs/${relativePath}`),
+  mockResolveAttachmentAssetUrlCached: vi.fn(async (relativePath: string) => `asset://localhost//abs/${relativePath}`),
   mockGetImageDimensionsFromFile: vi.fn(async () => ({ width: 1920, height: 1080 })),
   mockGetImageDimensionsFromRelativePath: vi.fn(async () => ({ width: 1080, height: 1920 })),
 }));
@@ -72,6 +76,8 @@ vi.mock('../services/storage/attachmentPersistence', () => ({
   writeAttachmentFromBytes: mockWriteAttachmentFromBytes,
   writeAttachmentFromPath: mockWriteAttachmentFromPath,
   deleteAttachmentFile: mockDeleteAttachmentFile,
+  getCachedAttachmentAssetUrl: mockGetCachedAttachmentAssetUrl,
+  resolveAttachmentAssetUrlCached: mockResolveAttachmentAssetUrlCached,
 }));
 
 vi.mock('../utils/imageDimensions', () => ({
@@ -142,6 +148,10 @@ describe('Canvas 空白命中判定', () => {
     mockWriteAttachmentFromBytes.mockClear();
     mockWriteAttachmentFromPath.mockClear();
     mockDeleteAttachmentFile.mockClear();
+    mockGetCachedAttachmentAssetUrl.mockClear();
+    mockGetCachedAttachmentAssetUrl.mockImplementation((relativePath: string) => `asset://localhost//abs/${relativePath}`);
+    mockResolveAttachmentAssetUrlCached.mockClear();
+    mockResolveAttachmentAssetUrlCached.mockImplementation(async (relativePath: string) => `asset://localhost//abs/${relativePath}`);
     mockGetImageDimensionsFromFile.mockClear();
     mockGetImageDimensionsFromFile.mockResolvedValue({ width: 1920, height: 1080 });
     mockGetImageDimensionsFromRelativePath.mockClear();
@@ -1676,6 +1686,7 @@ describe('Canvas 空白命中判定', () => {
     expect(note!.attachments!.length).toBe(1);
     expect(note!.attachments![0].filename).toBe('photo.png');
     expect(note!.attachments![0].hash).toBe('b'.repeat(64));
+    expect(mockResolveAttachmentAssetUrlCached).toHaveBeenCalledWith(note!.attachments![0].relativePath);
   });
 
   it('拖入无本地路径的 PNG 时走字节写入回退', async () => {

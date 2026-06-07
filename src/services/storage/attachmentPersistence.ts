@@ -15,9 +15,10 @@
  * - delete_attachment_file
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
 const attachmentPathCache = new Map<string, string>();
+const attachmentAssetUrlCache = new Map<string, string>();
 
 // ---------------------------------------------------------------------------
 // 类型定义（与 Rust 侧 serde camelCase 输出对齐）
@@ -178,13 +179,31 @@ export async function resolveAttachmentPathCached(relativePath: string): Promise
   return resolvedPath;
 }
 
+export function getCachedAttachmentAssetUrl(relativePath: string): string | undefined {
+  return attachmentAssetUrlCache.get(relativePath);
+}
+
+export async function resolveAttachmentAssetUrlCached(relativePath: string): Promise<string> {
+  const cachedAssetUrl = getCachedAttachmentAssetUrl(relativePath);
+  if (cachedAssetUrl !== undefined) {
+    return cachedAssetUrl;
+  }
+
+  const resolvedPath = await resolveAttachmentPathCached(relativePath);
+  const assetUrl = convertFileSrc(resolvedPath);
+  attachmentAssetUrlCache.set(relativePath, assetUrl);
+  return assetUrl;
+}
+
 export function invalidateAttachmentPathCache(relativePath?: string): void {
   if (relativePath === undefined) {
     attachmentPathCache.clear();
+    attachmentAssetUrlCache.clear();
     return;
   }
 
   attachmentPathCache.delete(relativePath);
+  attachmentAssetUrlCache.delete(relativePath);
 }
 
 /**

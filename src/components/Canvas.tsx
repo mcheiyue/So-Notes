@@ -13,7 +13,13 @@ import { getNoteVisualHeight, getNoteVisualWidth } from "../utils/noteVisualMetr
 import { getNoteElement } from "../utils/noteElementRegistry";
 import { buildSmartPasteNoteInputs, parseSmartPaste } from "../utils/smartPaste";
 import { getViewportSpawnOrigin } from "../utils/spawnPosition";
-import { saveImageFromSystemClipboard, writeAttachmentFromBytes, writeAttachmentFromPath, deleteAttachmentFile } from "../services/storage/attachmentPersistence";
+import {
+  saveImageFromSystemClipboard,
+  writeAttachmentFromBytes,
+  writeAttachmentFromPath,
+  deleteAttachmentFile,
+  resolveAttachmentAssetUrlCached,
+} from "../services/storage/attachmentPersistence";
 import type { AttachmentRef } from "../store/types";
 import { attach } from "../services/storage/StorageService";
 import { CanvasEngine } from "../canvas/CanvasEngine";
@@ -563,6 +569,10 @@ export const Canvas: React.FC = () => {
             : writeAttachmentFromBytes(await file.arrayBuffer(), file.name, file.type),
           getImageDimensionsFromFile(file),
         ]);
+        await resolveAttachmentAssetUrlCached(result.relativePath).catch((hydrateError) => {
+          console.warn('图片资源预水合失败，后续渲染将显示占位。', result.relativePath, hydrateError);
+          return null;
+        });
         writeResults.push({
           file,
           attachment: {

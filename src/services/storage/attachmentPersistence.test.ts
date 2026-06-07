@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
+  convertFileSrc: vi.fn((path: string) => `asset://localhost/${path}`),
 }));
 
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import {
   attachmentExists,
   readAttachmentMetadata,
@@ -14,6 +15,8 @@ import {
   resolveAttachmentPath,
   getCachedAttachmentPath,
   resolveAttachmentPathCached,
+  getCachedAttachmentAssetUrl,
+  resolveAttachmentAssetUrlCached,
   invalidateAttachmentPathCache,
   listAttachmentFiles,
   deleteAttachmentFile,
@@ -185,6 +188,53 @@ describe('attachmentPersistence', () => {
 
     expect(getCachedAttachmentPath('attachments/a.png')).toBeUndefined();
     expect(getCachedAttachmentPath('attachments/b.png')).toBeUndefined();
+  });
+
+  it('getCachedAttachmentAssetUrl 在缓存未命中时返回 undefined', () => {
+    expect(getCachedAttachmentAssetUrl('attachments/missing.png')).toBeUndefined();
+  });
+
+  it('resolveAttachmentAssetUrlCached 首次解析后复用 assetUrl 缓存', async () => {
+    const relativePath = 'attachments/asset-cached.png';
+    vi.mocked(invoke).mockResolvedValueOnce('/abs/attachments/asset-cached.png');
+
+    await expect(resolveAttachmentAssetUrlCached(relativePath))
+      .resolves.toBe('asset://localhost//abs/attachments/asset-cached.png');
+    await expect(resolveAttachmentAssetUrlCached(relativePath))
+      .resolves.toBe('asset://localhost//abs/attachments/asset-cached.png');
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith('resolve_attachment_path', { relativePath });
+    expect(convertFileSrc).toHaveBeenCalledTimes(1);
+    expect(convertFileSrc).toHaveBeenCalledWith('/abs/attachments/asset-cached.png');
+    expect(getCachedAttachmentPath(relativePath)).toBe('/abs/attachments/asset-cached.png');
+    expect(getCachedAttachmentAssetUrl(relativePath)).toBe('asset://localhost//abs/attachments/asset-cached.png');
+  });
+
+  it('invalidateAttachmentPathCache 可同步清理指定 assetUrl 缓存项', async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce('/abs/a.png')
+      .mockResolvedValueOnce('/abs/b.png');
+
+    await resolveAttachmentAssetUrlCached('attachments/a.png');
+    await resolveAttachmentAssetUrlCached('attachments/b.png');
+    invalidateAttachmentPathCache('attachments/a.png');
+
+    expect(getCachedAttachmentAssetUrl('attachments/a.png')).toBeUndefined();
+    expect(getCachedAttachmentAssetUrl('attachments/b.png')).toBe('asset://localhost//abs/b.png');
+  });
+
+  it('invalidateAttachmentPathCache 不传路径时清空全部 assetUrl 缓存', async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce('/abs/a.png')
+      .mockResolvedValueOnce('/abs/b.png');
+
+    await resolveAttachmentAssetUrlCached('attachments/a.png');
+    await resolveAttachmentAssetUrlCached('attachments/b.png');
+    invalidateAttachmentPathCache();
+
+    expect(getCachedAttachmentAssetUrl('attachments/a.png')).toBeUndefined();
+    expect(getCachedAttachmentAssetUrl('attachments/b.png')).toBeUndefined();
   });
 
   it('listAttachmentFiles 调用 Rust 列表命令', async () => {

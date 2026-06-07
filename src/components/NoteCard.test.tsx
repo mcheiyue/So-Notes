@@ -5,6 +5,7 @@ import { createRoot, Root } from 'react-dom/client';
 const {
   convertFileSrcMock,
   resolveAttachmentPathMock,
+  getCachedAttachmentAssetUrlMock,
   saveImageFromSystemClipboardMock,
   writeImageMock,
   imageFromPathMock,
@@ -12,6 +13,7 @@ const {
 } = vi.hoisted(() => ({
   convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
   resolveAttachmentPathMock: vi.fn(async (path: string) => `/abs/${path}`),
+  getCachedAttachmentAssetUrlMock: vi.fn((path: string) => `asset://localhost//abs/${path}`),
   saveImageFromSystemClipboardMock: vi.fn(async () => ({
     hash: 'b'.repeat(64),
     filename: 'clipboard-image.png',
@@ -43,6 +45,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('../services/storage/attachmentPersistence', () => ({
   resolveAttachmentPath: resolveAttachmentPathMock,
+  getCachedAttachmentAssetUrl: getCachedAttachmentAssetUrlMock,
   saveImageFromSystemClipboard: saveImageFromSystemClipboardMock,
 }));
 
@@ -134,6 +137,8 @@ describe('NoteCard 头部交互边界', () => {
     convertFileSrcMock.mockClear();
     resolveAttachmentPathMock.mockClear();
     resolveAttachmentPathMock.mockImplementation(async (path: string) => `/abs/${path}`);
+    getCachedAttachmentAssetUrlMock.mockClear();
+    getCachedAttachmentAssetUrlMock.mockImplementation((path: string) => `asset://localhost//abs/${path}`);
     saveImageFromSystemClipboardMock.mockClear();
     writeImageMock.mockClear();
     imageFromPathMock.mockClear();

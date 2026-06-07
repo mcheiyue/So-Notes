@@ -2,7 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
-const { emitMock, invokeMock, listenMock, startDraggingMock, setSizeMock, convertFileSrcMock, resolveAttachmentPathMock } = vi.hoisted(() => ({
+const {
+  emitMock,
+  invokeMock,
+  listenMock,
+  startDraggingMock,
+  setSizeMock,
+  convertFileSrcMock,
+  resolveAttachmentPathMock,
+  getCachedAttachmentAssetUrlMock,
+} = vi.hoisted(() => ({
   emitMock: vi.fn(),
   invokeMock: vi.fn(),
   listenMock: vi.fn(),
@@ -10,6 +19,7 @@ const { emitMock, invokeMock, listenMock, startDraggingMock, setSizeMock, conver
   setSizeMock: vi.fn().mockResolvedValue(undefined),
   convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
   resolveAttachmentPathMock: vi.fn(async (path: string) => `/abs/${path}`),
+  getCachedAttachmentAssetUrlMock: vi.fn((path: string) => `asset://localhost//abs/${path}`),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -24,6 +34,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('../services/storage/attachmentPersistence', () => ({
   resolveAttachmentPath: resolveAttachmentPathMock,
+  getCachedAttachmentAssetUrl: getCachedAttachmentAssetUrlMock,
 }));
 
 vi.mock('@tauri-apps/api/window', () => ({
@@ -125,6 +136,8 @@ describe('DetachedNoteWindow 按钮行为', () => {
     convertFileSrcMock.mockClear();
     resolveAttachmentPathMock.mockClear();
     resolveAttachmentPathMock.mockImplementation(async (path: string) => `/abs/${path}`);
+    getCachedAttachmentAssetUrlMock.mockClear();
+    getCachedAttachmentAssetUrlMock.mockImplementation((path: string) => `asset://localhost//abs/${path}`);
     resizeCallback = null;
     listenMock.mockResolvedValue(vi.fn());
     emitMock.mockResolvedValue(undefined);
