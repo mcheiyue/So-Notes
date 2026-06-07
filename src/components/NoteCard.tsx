@@ -1,5 +1,7 @@
 import React, { useRef, useState, useLayoutEffect, useEffect } from "react";
 import { DraggableCore, DraggableEvent } from "react-draggable";
+import { Image } from "@tauri-apps/api/image";
+import { writeImage } from "@tauri-apps/plugin-clipboard-manager";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
 import { NOTE_UI_COLORS } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
@@ -23,7 +25,7 @@ import {
 } from "../utils/edgePushDragCompensation";
 import { NoteVisuals } from "./note-render/NoteVisuals";
 import { ImageNoteBody } from "./note-render/ImageNoteBody";
-import { saveImageFromSystemClipboard } from "../services/storage/attachmentPersistence";
+import { resolveAttachmentPath, saveImageFromSystemClipboard } from "../services/storage/attachmentPersistence";
 import type { AttachmentRef } from "../store/types";
 
 interface NoteCardProps {
@@ -458,7 +460,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const handleCopy = async (e: React.MouseEvent) => {
       e.stopPropagation();
       try {
-        await navigator.clipboard.writeText(note.title ? `${note.title}\n${note.content}` : note.content);
+        if (note.kind === 'image' && note.attachments?.[0]) {
+          const absPath = await resolveAttachmentPath(note.attachments[0].relativePath);
+          const image = await Image.fromPath(absPath);
+          await writeImage(image);
+        } else {
+          await navigator.clipboard.writeText(note.title ? `${note.title}\n${note.content}` : note.content);
+        }
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), 2000);
       } catch (err) {

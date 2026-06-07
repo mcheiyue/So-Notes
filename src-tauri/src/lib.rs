@@ -1,11 +1,12 @@
 use std::{
     fs,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use tauri::{
+    Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_positioner::{Position, WindowExt};
@@ -202,19 +203,31 @@ fn is_detached_note_label(label: &str) -> bool {
 
 /// 检查是否有任一撕下便签窗口当前持有 OS 焦点
 fn any_detached_window_focused(app: &tauri::AppHandle) -> bool {
-    app.webview_windows()
-        .iter()
-        .any(|(label, window)| is_detached_note_label(label) && window.is_focused().unwrap_or(false))
+    app.webview_windows().iter().any(|(label, window)| {
+        is_detached_note_label(label) && window.is_focused().unwrap_or(false)
+    })
 }
 
-fn restore_detached_note_window(window: &WebviewWindow) -> Result<(), String> {
+fn restore_detached_note_window(
+    window: &WebviewWindow,
+    keep_always_on_top: bool,
+) -> Result<(), String> {
     let _ = window.unminimize();
+    let _ = window.set_always_on_top(true);
     window
         .show()
         .map_err(|e| format!("显示撕下窗口失败: {e}"))?;
     window
         .set_focus()
         .map_err(|e| format!("聚焦撕下窗口失败: {e}"))?;
+
+    if !keep_always_on_top {
+        let window_for_restore = window.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let _ = window_for_restore.set_always_on_top(false);
+        });
+    }
 
     Ok(())
 }
@@ -225,29 +238,26 @@ async fn open_detached_note_window(
     note_id: String,
     spawn_x: Option<f64>,
     spawn_y: Option<f64>,
+    keep_always_on_top: Option<bool>,
 ) -> Result<(), String> {
     let label = detached_note_label(&note_id);
 
     if let Some(window) = app.get_webview_window(&label) {
-        restore_detached_note_window(&window)?;
+        restore_detached_note_window(&window, keep_always_on_top.unwrap_or(false))?;
         return Ok(());
     }
 
     let detached_url = format!("detached.html?noteId={}", note_id);
-    let mut builder = WebviewWindowBuilder::new(
-        &app,
-        &label,
-        WebviewUrl::App(detached_url.into()),
-    )
-    .title("SoNotes - 便签")
-    .inner_size(260.0, 280.0)
-    .min_inner_size(260.0, 100.0)
-    .decorations(false)
-    .transparent(true)
-    .shadow(false)
-    .resizable(true)
-    .visible(false)
-    .skip_taskbar(true);
+    let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(detached_url.into()))
+        .title("SoNotes - 便签")
+        .inner_size(260.0, 280.0)
+        .min_inner_size(260.0, 100.0)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(true)
+        .visible(false)
+        .skip_taskbar(true);
 
     if let (Some(sx), Some(sy)) = (spawn_x, spawn_y) {
         if let Some(main_win) = app.get_webview_window("main") {
@@ -273,22 +283,28 @@ async fn open_detached_note_window(
         }
     }
 
-    builder
+    let window = builder
         .build()
         .map_err(|e| format!("创建撕下窗口失败: {e}"))?;
+
+    restore_detached_note_window(&window, keep_always_on_top.unwrap_or(false))?;
 
     Ok(())
 }
 
 #[tauri::command]
-async fn show_detached_note_window(app: tauri::AppHandle, note_id: String) -> Result<(), String> {
+async fn show_detached_note_window(
+    app: tauri::AppHandle,
+    note_id: String,
+    keep_always_on_top: Option<bool>,
+) -> Result<(), String> {
     let label = detached_note_label(&note_id);
 
     let window = app
         .get_webview_window(&label)
         .ok_or_else(|| format!("撕下窗口 {label} 不存在"))?;
 
-    restore_detached_note_window(&window)
+    restore_detached_note_window(&window, keep_always_on_top.unwrap_or(false))
 }
 
 #[tauri::command]

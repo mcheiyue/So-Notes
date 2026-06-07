@@ -346,7 +346,7 @@ describe('appController 撕下便签方法', () => {
     expect(detached).toHaveLength(1);
     expect(detached[0].noteId).toBe('n1');
     expect(detached[0].isPinned).toBe(false);
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith('open_detached_note_window', { noteId: 'n1', spawnX: 50, spawnY: 120 });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('open_detached_note_window', { noteId: 'n1', spawnX: 50, spawnY: 120, keepAlwaysOnTop: false });
   });
 
   it('detachNote 对已撕下的 Note 不重复添加但仍聚焦 Rust 窗口', () => {
@@ -354,7 +354,7 @@ describe('appController 撕下便签方法', () => {
     vi.mocked(invoke).mockClear();
     appController.detachNote('n1');
     expect(useUIStore.getState().detachedNotes).toHaveLength(1);
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith('open_detached_note_window', { noteId: 'n1', spawnX: 50, spawnY: 120 });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('open_detached_note_window', { noteId: 'n1', spawnX: 50, spawnY: 120, keepAlwaysOnTop: false });
   });
 
   it('detachNote 不修改领域状态和 Undo 历史', () => {
@@ -400,8 +400,8 @@ describe('appController 撕下便签方法', () => {
 
     appController.showAllDetachedNotes();
 
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'n1' });
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'n2' });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'n1', keepAlwaysOnTop: false });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'n2', keepAlwaysOnTop: false });
   });
 
   it('showAllDetachedNotes 在没有撕下窗口时不调用 Rust', () => {
@@ -426,6 +426,33 @@ describe('appController 撕下便签方法', () => {
 
     appController.toggleDetachedNotePin('n1');
     expect(useUIStore.getState().detachedNotes[0].isPinned).toBe(false);
+  });
+
+  it('detachNote 重新显示已置顶撕下窗口时保留置顶状态', () => {
+    appController.detachNote('n1');
+    appController.toggleDetachedNotePin('n1');
+    vi.mocked(invoke).mockClear();
+
+    appController.detachNote('n1');
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('open_detached_note_window', {
+      noteId: 'n1',
+      spawnX: 50,
+      spawnY: 120,
+      keepAlwaysOnTop: true,
+    });
+  });
+
+  it('showAllDetachedNotes 显示已置顶撕下窗口时保留置顶状态', () => {
+    appController.detachNote('n1');
+    appController.detachNote('n2');
+    appController.toggleDetachedNotePin('n1');
+    vi.mocked(invoke).mockClear();
+
+    appController.showAllDetachedNotes();
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'n1', keepAlwaysOnTop: true });
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('show_detached_note_window', { noteId: 'n2', keepAlwaysOnTop: false });
   });
 
   it('focusDetachedNote 将目标撕下视图移动到活跃栈末尾', () => {

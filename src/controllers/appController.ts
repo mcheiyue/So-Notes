@@ -292,7 +292,8 @@ export const appController = {
       uiState.addDetachedNote(noteId, { x, y });
     }
 
-    invoke('open_detached_note_window', { noteId, spawnX: x, spawnY: y }).catch(() => undefined);
+    const keepAlwaysOnTop = uiState.detachedNotes.find((d) => d.noteId === noteId)?.isPinned ?? false;
+    invoke('open_detached_note_window', { noteId, spawnX: x, spawnY: y, keepAlwaysOnTop }).catch(() => undefined);
   },
 
   closeDetachedNote: (noteId: string): void => {
@@ -300,8 +301,8 @@ export const appController = {
   },
 
   showAllDetachedNotes: (): void => {
-    for (const { noteId } of useUIStore.getState().detachedNotes) {
-      invoke('show_detached_note_window', { noteId }).catch(() => undefined);
+    for (const { noteId, isPinned } of useUIStore.getState().detachedNotes) {
+      invoke('show_detached_note_window', { noteId, keepAlwaysOnTop: isPinned }).catch(() => undefined);
     }
   },
 

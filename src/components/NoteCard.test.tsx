@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
-const { convertFileSrcMock, resolveAttachmentPathMock, saveImageFromSystemClipboardMock } = vi.hoisted(() => ({
+const { convertFileSrcMock, resolveAttachmentPathMock, saveImageFromSystemClipboardMock, writeImageMock, imageFromPathMock } = vi.hoisted(() => ({
   convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
   resolveAttachmentPathMock: vi.fn(async (path: string) => `/abs/${path}`),
   saveImageFromSystemClipboardMock: vi.fn(async () => ({
@@ -14,6 +14,18 @@ const { convertFileSrcMock, resolveAttachmentPathMock, saveImageFromSystemClipbo
     createdAt: 2,
     bytesWritten: 2048,
   })),
+  writeImageMock: vi.fn(async () => undefined),
+  imageFromPathMock: vi.fn(async (path: string) => ({ path, __tauriImage: true })),
+}));
+
+vi.mock('@tauri-apps/api/image', () => ({
+  Image: {
+    fromPath: imageFromPathMock,
+  },
+}));
+
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
+  writeImage: writeImageMock,
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -110,6 +122,13 @@ describe('NoteCard 头部交互边界', () => {
     resolveAttachmentPathMock.mockClear();
     resolveAttachmentPathMock.mockImplementation(async (path: string) => `/abs/${path}`);
     saveImageFromSystemClipboardMock.mockClear();
+    writeImageMock.mockClear();
+    imageFromPathMock.mockClear();
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn(async () => undefined),
+      },
+    });
     useStore.setState({
       ...normalizeNotes([createNote()]),
       currentBoardId: 'default',
@@ -566,6 +585,37 @@ describe('NoteCard 头部交互边界', () => {
     });
 
     expect(container.querySelector('[data-testid="note-attachments"]')).toBeNull();
+  });
+
+  it('图片便签复制按钮复制图片本身而不是文件名文本', async () => {
+    const attachment = createAttachment();
+    useStore.setState({
+      ...normalizeNotes([createNote({ kind: 'image', title: 'photo.png', content: '', attachments: [attachment] })]),
+    });
+
+    await renderNoteCard();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    await act(async () => {
+      rootRegion?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+
+    const copyButton = container.querySelector('[aria-label="复制内容"]') as HTMLButtonElement | null;
+    expect(copyButton).not.toBeNull();
+
+    await act(async () => {
+      copyButton?.click();
+    });
+
+    await vi.waitFor(() => {
+      expect(imageFromPathMock).toHaveBeenCalledWith(`/abs/${attachment.relativePath}`);
+      expect(writeImageMock).toHaveBeenCalledWith({ path: `/abs/${attachment.relativePath}`, __tauriImage: true });
+    });
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
   it('折叠图片便签不渲染主图预览', async () => {
