@@ -99,6 +99,34 @@ pub struct RestoreResult {
 }
 
 // ---------------------------------------------------------------------------
+// 恢复专用解析类型
+// ---------------------------------------------------------------------------
+
+/// 用于恢复时解析 `data.json` 的结构。
+///
+/// 与 `StorageDataForBackup` 不同，此类型要求 `schemaVersion` 字段存在，
+/// 并为每个便签要求 `id` 和 `kind` 字段，以便进行完整的恢复验证。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageDataForRestore {
+    schema_version: u32,
+    #[serde(default)]
+    current_board_id: Option<String>,
+    boards: Vec<serde_json::Value>,
+    notes: Vec<NoteForRestore>,
+}
+
+/// 用于恢复时解析便签的结构。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteForRestore {
+    id: String,
+    kind: String,
+    #[serde(default)]
+    attachments: Option<Vec<AttachmentRefForBackup>>,
+}
+
+// ---------------------------------------------------------------------------
 // Zip 条目路径验证
 // ---------------------------------------------------------------------------
 
@@ -270,6 +298,385 @@ fn resolve_unique_backup_path(target: &Path) -> PathBuf {
         .unwrap_or_default()
         .as_millis();
     parent.join(format!("{stem}_{now}{ext}"))
+}
+
+// ---------------------------------------------------------------------------
+// 恢复验证常量与辅助函数
+// ---------------------------------------------------------------------------
+
+const SUPPORTED_SCHEMA_VERSIONS: &[u32] = &[1, 2];
+const VALID_NOTE_KINDS: &[&str] = &["text", "image"];
+
+fn compute_sha256(data: &[u8]) -> String {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(data);
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+fn is_valid_hash_stem(stem: &str) -> bool {
+    stem.len() == 64 && stem.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn restore_data_file(data_bak: &Path, data_path: &Path, had_old_data: bool) {
+    let _ = std::fs::remove_file(data_path);
+    if had_old_data {
+        let _ = std::fs::rename(data_bak, data_path);
+    }
+}
+
+fn restore_attachment_dir(attach_bak: &Path, attach_dir: &Path, had_old_attach: bool) {
+    let _ = std::fs::remove_dir_all(attach_dir);
+    if had_old_attach {
+        let _ = std::fs::rename(attach_bak, attach_dir);
+    }
+}
+
+/// 验证恢复后的 `data.json` 内容符合 SoNotes 契约。
+///
+/// - `schemaVersion` 在支持列表中
+/// - `currentBoardId`（非空时）引用的看板必须存在
+/// - 便签 `kind` 值合法
+/// - Text Note 不得携带附件引用
+/// - Image Note 必须恰好有一个 `attachments/<hash>.<ext>` 引用，且文件名主干是合法哈希
+/// - 每个数据引用的图片必须在清单中存在
+/// - 清单中的每个图片必须被数据引用（拒绝孤立条目）
+/// - 图片文件内容 SHA-256、大小与清单匹配，文件名主干与内容哈希一致
+fn validate_restored_data(
+    data: &StorageDataForRestore,
+    manifest: &BackupManifest,
+    attachment_contents: &std::collections::HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    if manifest.attachment_count != manifest.attachments.len() as u32 {
+        return Err(format!(
+            "备份清单图片数量不匹配: attachmentCount={}, attachments={}",
+            manifest.attachment_count,
+            manifest.attachments.len()
+        ));
+    }
+
+    let mut manifest_paths: HashSet<String> = HashSet::new();
+    for att in &manifest.attachments {
+        validate_zip_entry_path(&att.zip_entry_path)?;
+        if !manifest_paths.insert(att.zip_entry_path.clone()) {
+            return Err(format!(
+                "备份清单中存在重复图片条目: {}",
+                att.zip_entry_path
+            ));
+        }
+    }
+
+    if !SUPPORTED_SCHEMA_VERSIONS.contains(&data.schema_version) {
+        return Err(format!("不支持的 schemaVersion: {}", data.schema_version));
+    }
+
+    if let Some(ref board_id) = data.current_board_id {
+        if !board_id.is_empty() {
+            let board_exists = data.boards.iter().any(|b| {
+                b.get("id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s == board_id)
+                    .unwrap_or(false)
+            });
+            if !board_exists {
+                return Err(format!("currentBoardId 引用了不存在的看板: {board_id}"));
+            }
+        }
+    }
+
+    let mut data_image_refs: HashSet<String> = HashSet::new();
+
+    for note in &data.notes {
+        if !VALID_NOTE_KINDS.contains(&note.kind.as_str()) {
+            return Err(format!("便签 {} 的 kind 值无效: {}", note.id, note.kind));
+        }
+
+        match note.kind.as_str() {
+            "text" => {
+                if let Some(ref attachments) = note.attachments {
+                    if !attachments.is_empty() {
+                        return Err(format!("文本便签 {} 不应包含图片引用", note.id));
+                    }
+                }
+            }
+            "image" => {
+                let attachments = note
+                    .attachments
+                    .as_ref()
+                    .ok_or_else(|| format!("图片便签 {} 缺少附件引用", note.id))?;
+
+                if attachments.len() != 1 {
+                    return Err(format!(
+                        "图片便签 {} 应恰好有一个附件引用，实际有 {} 个",
+                        note.id,
+                        attachments.len()
+                    ));
+                }
+
+                let rel_path = &attachments[0].relative_path;
+                validate_zip_entry_path(rel_path)?;
+
+                let file_stem = Path::new(rel_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .ok_or_else(|| {
+                        format!(
+                            "图片便签 {} 的附件路径无法提取文件名: {}",
+                            note.id, rel_path
+                        )
+                    })?;
+
+                if !is_valid_hash_stem(file_stem) {
+                    return Err(format!(
+                        "图片便签 {} 的附件文件名不是合法哈希: {}",
+                        note.id, rel_path
+                    ));
+                }
+
+                data_image_refs.insert(rel_path.clone());
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    for ref_path in &data_image_refs {
+        if !manifest_paths.contains(ref_path) {
+            return Err(format!("数据中引用的图片 {ref_path} 不在备份清单中"));
+        }
+    }
+
+    for att in &manifest.attachments {
+        if !data_image_refs.contains(&att.zip_entry_path) {
+            return Err(format!(
+                "备份清单中的图片 {} 未被数据引用",
+                att.zip_entry_path
+            ));
+        }
+    }
+
+    for att in &manifest.attachments {
+        let content = attachment_contents
+            .get(&att.zip_entry_path)
+            .ok_or_else(|| format!("zip 中缺少图片文件: {}", att.zip_entry_path))?;
+
+        let actual_hash = compute_sha256(content);
+
+        if actual_hash != att.sha256 {
+            return Err(format!(
+                "图片文件 {} 的 SHA-256 不匹配: 期望 {}, 实际 {}",
+                att.zip_entry_path, att.sha256, actual_hash
+            ));
+        }
+
+        if content.len() as u64 != att.size {
+            return Err(format!(
+                "图片文件 {} 的大小不匹配: 期望 {} 字节, 实际 {} 字节",
+                att.zip_entry_path,
+                att.size,
+                content.len()
+            ));
+        }
+
+        let file_stem = Path::new(&att.zip_entry_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+
+        if file_stem != actual_hash {
+            return Err(format!(
+                "图片文件 {} 的文件名哈希与内容哈希不匹配: 文件名 {}, 内容 {}",
+                att.zip_entry_path, file_stem, actual_hash
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 恢复核心逻辑
+// ---------------------------------------------------------------------------
+
+fn restore_local_backup_inner(
+    sonotes_base: &Path,
+    source_zip_path: &Path,
+) -> Result<RestoreResult, String> {
+    // -- Phase 1: 扫描 zip 条目，验证路径安全，检测重复 --
+    let zip_file =
+        std::fs::File::open(source_zip_path).map_err(|e| format!("打开备份文件失败: {e}"))?;
+    let mut archive =
+        zip::ZipArchive::new(zip_file).map_err(|e| format!("读取 zip 文件失败: {e}"))?;
+
+    let mut has_manifest = false;
+    let mut has_data = false;
+    let mut seen_entries: HashSet<String> = HashSet::new();
+    let mut manifest_content: Option<String> = None;
+    let mut data_content: Option<Vec<u8>> = None;
+    let mut attachment_contents: std::collections::HashMap<String, Vec<u8>> =
+        std::collections::HashMap::new();
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 zip 条目失败: {e}"))?;
+        let name = entry.name().to_string();
+
+        validate_zip_entry_path(&name)?;
+
+        if !seen_entries.insert(name.clone()) {
+            return Err(format!("zip 中存在重复条目: {name}"));
+        }
+
+        match name.as_str() {
+            "manifest.json" => {
+                has_manifest = true;
+                let mut buf = String::new();
+                entry
+                    .read_to_string(&mut buf)
+                    .map_err(|e| format!("读取 manifest.json 失败: {e}"))?;
+                manifest_content = Some(buf);
+            }
+            "data.json" => {
+                has_data = true;
+                let mut buf = Vec::new();
+                entry
+                    .read_to_end(&mut buf)
+                    .map_err(|e| format!("读取 data.json 失败: {e}"))?;
+                data_content = Some(buf);
+            }
+            path if path.starts_with("attachments/") => {
+                let mut buf = Vec::new();
+                entry
+                    .read_to_end(&mut buf)
+                    .map_err(|e| format!("读取附件失败: {path} ({e})"))?;
+                attachment_contents.insert(name, buf);
+            }
+            other => {
+                return Err(format!("zip 中包含未知条目: {other}"));
+            }
+        }
+    }
+
+    if !has_manifest {
+        return Err("备份文件缺少 manifest.json".to_string());
+    }
+    if !has_data {
+        return Err("备份文件缺少 data.json".to_string());
+    }
+
+    // -- Phase 2: 解析并验证清单 --
+    let manifest: BackupManifest = serde_json::from_str(&manifest_content.unwrap())
+        .map_err(|e| format!("解析 manifest.json 失败: {e}"))?;
+
+    if manifest.app != "SoNotes" {
+        return Err(format!(
+            "备份清单中的应用标识不匹配: 期望 SoNotes, 实际 {}",
+            manifest.app
+        ));
+    }
+    if manifest.format_version == 0 || manifest.format_version > BACKUP_FORMAT_VERSION {
+        return Err(format!("不支持的备份格式版本: {}", manifest.format_version));
+    }
+
+    // -- Phase 3: 解析 data.json --
+    let raw_data = data_content.unwrap();
+    let data_json: StorageDataForRestore =
+        serde_json::from_slice(&raw_data).map_err(|e| format!("解析 data.json 失败: {e}"))?;
+
+    // -- Phase 4: 验证数据完整性 --
+    validate_restored_data(&data_json, &manifest, &attachment_contents)?;
+
+    let note_count = data_json.notes.len() as u32;
+    let board_count = data_json.boards.len() as u32;
+    let attachment_count = manifest.attachment_count;
+
+    // -- Phase 5: 暂存提取内容到临时目录 --
+    let staging_id = format!("{:016x}", rand::random::<u64>());
+    let staging_dir = sonotes_base.join(format!(".restore_staging_{staging_id}"));
+    std::fs::create_dir_all(&staging_dir).map_err(|e| format!("创建暂存目录失败: {e}"))?;
+
+    std::fs::write(staging_dir.join("data.json"), &raw_data)
+        .map_err(|e| format!("写入暂存 data.json 失败: {e}"))?;
+
+    if !attachment_contents.is_empty() {
+        let staging_attach = staging_dir.join("attachments");
+        std::fs::create_dir_all(&staging_attach)
+            .map_err(|e| format!("创建暂存附件目录失败: {e}"))?;
+
+        for (name, content) in &attachment_contents {
+            let target = staging_dir.join(name);
+            std::fs::write(&target, content)
+                .map_err(|e| format!("写入暂存附件失败: {name} ({e})"))?;
+        }
+    }
+
+    // -- Phase 6: 原子替换 --
+    let old_data_path = sonotes_base.join("data.json");
+    let old_attach_dir = sonotes_base.join("attachments");
+
+    let uid = format!("{:016x}", rand::random::<u64>());
+    let data_bak = sonotes_base.join(format!(".data.json.bak.{uid}"));
+    let attach_old = sonotes_base.join(format!(".attachments_old.{uid}"));
+
+    // 备份旧 data.json
+    let had_old_data = old_data_path.exists();
+    if had_old_data {
+        std::fs::rename(&old_data_path, &data_bak)
+            .map_err(|e| format!("备份旧 data.json 失败: {e}"))?;
+    }
+
+    // 移入新 data.json
+    if let Err(e) = std::fs::rename(staging_dir.join("data.json"), &old_data_path) {
+        if had_old_data {
+            let _ = std::fs::rename(&data_bak, &old_data_path);
+        }
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        return Err(format!("替换 data.json 失败: {e}"));
+    }
+
+    // 备份旧 attachments 目录
+    let had_old_attach = old_attach_dir.exists();
+    if had_old_attach {
+        if let Err(e) = std::fs::rename(&old_attach_dir, &attach_old) {
+            restore_data_file(&data_bak, &old_data_path, had_old_data);
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return Err(format!("备份旧附件目录失败: {e}"));
+        }
+    }
+
+    // 移入新 attachments 目录
+    let staged_attach = staging_dir.join("attachments");
+    let has_new_attach = staged_attach.exists();
+
+    if has_new_attach {
+        if let Err(e) = std::fs::rename(&staged_attach, &old_attach_dir) {
+            restore_attachment_dir(&attach_old, &old_attach_dir, had_old_attach);
+            restore_data_file(&data_bak, &old_data_path, had_old_data);
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return Err(format!("替换附件目录失败: {e}"));
+        }
+    }
+
+    // 成功：清理临时文件
+    if had_old_data {
+        let _ = std::fs::remove_file(&data_bak);
+    }
+    if had_old_attach {
+        let _ = std::fs::remove_dir_all(&attach_old);
+    }
+    let _ = std::fs::remove_dir_all(&staging_dir);
+
+    Ok(RestoreResult {
+        success: true,
+        note_count,
+        board_count,
+        attachment_count,
+        error: None,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -448,6 +855,28 @@ pub async fn create_local_backup(
     tokio::task::spawn_blocking(move || create_local_backup_inner(&sonotes_base, &target))
         .await
         .map_err(|e| format!("备份线程失败: {e}"))?
+}
+
+/// 从本地 zip 备份文件恢复数据。
+///
+/// 验证 zip 结构、清单元数据与数据完整性后，通过临时暂存与原子替换
+/// 将 `data.json` 和 `attachments/` 完整恢复到 SoNotes 数据目录。
+/// 失败时保留原有数据不变。
+#[tauri::command]
+pub async fn restore_local_backup(
+    app: tauri::AppHandle,
+    source_zip_path: String,
+) -> Result<RestoreResult, String> {
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("获取文档目录失败: {e}"))?;
+    let sonotes_base = doc_dir.join("SoNotes");
+    let source = PathBuf::from(source_zip_path);
+
+    tokio::task::spawn_blocking(move || restore_local_backup_inner(&sonotes_base, &source))
+        .await
+        .map_err(|e| format!("恢复线程失败: {e}"))?
 }
 
 // ===========================================================================
@@ -1353,6 +1782,768 @@ mod tests {
             let name = entry.name();
             assert!(!name.contains('\\'), "zip 条目不应包含反斜杠: {name}");
         }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // restore_local_backup_inner 测试辅助函数
+    // =======================================================================
+
+    fn compute_test_sha256(data: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    fn minimal_restore_manifest(attachments: Vec<BackupAttachmentEntry>) -> BackupManifest {
+        BackupManifest {
+            app: "SoNotes".to_string(),
+            format_version: BACKUP_FORMAT_VERSION,
+            app_version: "1.4.9".to_string(),
+            created_at: 1700000000000,
+            note_count: 0,
+            board_count: 0,
+            attachment_count: attachments.len() as u32,
+            attachments,
+        }
+    }
+
+    fn build_test_zip(
+        manifest_json: &str,
+        data_json: &str,
+        attachments: &[(&str, &[u8])],
+    ) -> PathBuf {
+        let dir = test_dir("build-zip");
+        let zip_path = dir.join("backup.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(manifest_json.as_bytes()).unwrap();
+
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(data_json.as_bytes()).unwrap();
+
+        for (path, content) in attachments {
+            zip.start_file(path, options).unwrap();
+            zip.write_all(content).unwrap();
+        }
+
+        zip.finish().unwrap();
+        zip_path
+    }
+
+    fn make_image_attachment_entry(path: &str, content: &[u8]) -> BackupAttachmentEntry {
+        BackupAttachmentEntry {
+            zip_entry_path: path.to_string(),
+            sha256: compute_test_sha256(content),
+            size: content.len() as u64,
+        }
+    }
+
+    fn restore_data_json_with_board(board_id: &str, notes: &[serde_json::Value]) -> String {
+        serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": board_id, "name": "看板", "icon": "📋", "createdAt": 0}],
+            "notes": notes,
+            "currentBoardId": board_id,
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string()
+    }
+
+    // =======================================================================
+    // restore_local_backup_inner：成功恢复
+    // =======================================================================
+
+    #[test]
+    fn restore_success_no_attachments() {
+        let root = test_dir("restore-ok-noatt");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = restore_data_json_with_board("b1", &[text_note("n1", "b1")]);
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap();
+        assert!(result.success);
+        assert_eq!(result.note_count, 1);
+        assert_eq!(result.board_count, 1);
+        assert_eq!(result.attachment_count, 0);
+
+        let restored = std::fs::read_to_string(sonotes_base.join("data.json")).unwrap();
+        assert!(restored.contains("\"n1\""));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_success_with_attachments() {
+        let root = test_dir("restore-ok-att");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let img_content = b"restore test image bytes";
+        let hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{hash}.png");
+
+        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+        let att_entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![att_entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let result = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap();
+        assert!(result.success);
+        assert_eq!(result.attachment_count, 1);
+
+        let restored_att = std::fs::read(sonotes_base.join(&rel_path)).unwrap();
+        assert_eq!(restored_att, img_content);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_success_replaces_existing_data() {
+        let root = test_dir("restore-replace");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        std::fs::write(sonotes_base.join("data.json"), "{\"old\": true}").unwrap();
+
+        let data_json = restore_data_json_with_board("b1", &[text_note("n1", "b1")]);
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap();
+        assert!(result.success);
+
+        let restored = std::fs::read_to_string(sonotes_base.join("data.json")).unwrap();
+        assert!(restored.contains("\"n1\""));
+        assert!(!restored.contains("\"old\""));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // restore_local_backup_inner：缺失 manifest / data
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_missing_manifest() {
+        let root = test_dir("restore-no-manifest");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let zip_path = root.join("bad.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+        zip.finish().unwrap();
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("manifest.json"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_missing_data_json() {
+        let root = test_dir("restore-no-data");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+
+        let zip_path = root.join("bad.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(manifest_json.as_bytes()).unwrap();
+        zip.finish().unwrap();
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("data.json"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // restore_local_backup_inner：清单验证失败
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_manifest_app_mismatch() {
+        let root = test_dir("restore-app-mismatch");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = restore_data_json_with_board("b1", &[]);
+        let mut manifest = minimal_restore_manifest(vec![]);
+        manifest.app = "OtherApp".to_string();
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("SoNotes") || err.contains("不匹配"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_unsupported_format_version() {
+        let root = test_dir("restore-bad-fmt-ver");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = restore_data_json_with_board("b1", &[]);
+        let mut manifest = minimal_restore_manifest(vec![]);
+        manifest.format_version = 999;
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("格式版本") || err.contains("format"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // restore_local_backup_inner：data.json 数据验证失败
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_invalid_schema_version() {
+        let root = test_dir("restore-bad-schema");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 999,
+            "boards": [],
+            "notes": [],
+            "currentBoardId": "",
+            "config": {}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("schemaVersion"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_current_board_id_not_found() {
+        let root = test_dir("restore-missing-board");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [],
+            "currentBoardId": "nonexistent",
+            "config": {}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("currentBoardId") || err.contains("看板"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_invalid_note_kind() {
+        let root = test_dir("restore-bad-kind");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{"id": "n1", "kind": "video", "boardId": "b1",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0}],
+            "currentBoardId": "b1",
+            "config": {}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("kind"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_text_note_with_attachments() {
+        let root = test_dir("restore-text-with-att");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "text", "boardId": "b1",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0,
+                "attachments": [{"id": "a1", "hash": "", "filename": "",
+                    "mimeType": "image/png", "size": 0,
+                    "relativePath": "attachments/abc.png", "createdAt": 0}]
+            }],
+            "currentBoardId": "b1",
+            "config": {}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("文本便签") || err.contains("附件"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_image_note_missing_attachment() {
+        let root = test_dir("restore-img-no-att");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "image", "boardId": "b1",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0
+            }],
+            "currentBoardId": "b1",
+            "config": {}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("图片便签") || err.contains("缺少"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_image_note_two_attachments() {
+        let root = test_dir("restore-img-two-att");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "image", "boardId": "b1",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0,
+                "attachments": [
+                    {"id": "a1", "hash": "", "filename": "", "mimeType": "image/png",
+                        "size": 0, "relativePath": "attachments/aaa.png", "createdAt": 0},
+                    {"id": "a2", "hash": "", "filename": "", "mimeType": "image/png",
+                        "size": 0, "relativePath": "attachments/bbb.png", "createdAt": 0}
+                ]
+            }],
+            "currentBoardId": "b1",
+            "config": {}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("恰好有一个") || err.contains("附件"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_image_note_invalid_hash_stem() {
+        let root = test_dir("restore-img-bad-stem");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "image", "boardId": "b1",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0,
+                "attachments": [{
+                    "id": "a1", "hash": "", "filename": "", "mimeType": "image/png",
+                    "size": 0, "relativePath": "attachments/not-a-hash.png", "createdAt": 0
+                }]
+            }],
+            "currentBoardId": "b1",
+            "config": {}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("合法哈希") || err.contains("hash"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // restore_local_backup_inner：附件 SHA/大小不匹配
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_attachment_sha_mismatch() {
+        let root = test_dir("restore-sha-mismatch");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let img_content = b"real image content";
+        let hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{hash}.png");
+
+        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+
+        let mut bad_entry = make_image_attachment_entry(&rel_path, img_content);
+        bad_entry.sha256 = "0".repeat(64);
+
+        let manifest = minimal_restore_manifest(vec![bad_entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("SHA-256") || err.contains("不匹配"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_attachment_size_mismatch() {
+        let root = test_dir("restore-size-mismatch");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let img_content = b"real image content";
+        let hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{hash}.png");
+
+        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+
+        let mut bad_entry = make_image_attachment_entry(&rel_path, img_content);
+        bad_entry.size = 999999;
+
+        let manifest = minimal_restore_manifest(vec![bad_entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("大小") || err.contains("size"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_attachment_filename_hash_mismatch() {
+        let root = test_dir("restore-fname-mismatch");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let img_content = b"image content for hash test";
+        let _real_hash = compute_test_sha256(img_content);
+        let fake_hash = "aabbccdd".repeat(8);
+        let rel_path = format!("attachments/{fake_hash}.png");
+
+        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+
+        let entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("文件名哈希") || err.contains("不匹配"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // restore_local_backup_inner：清单与数据引用不一致
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_extra_manifest_attachment_not_referenced() {
+        let root = test_dir("restore-extra-manifest");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = restore_data_json_with_board("b1", &[]);
+
+        let orphan_content = b"orphan image";
+        let orphan_entry = make_image_attachment_entry("attachments/orphan.png", orphan_content);
+        let manifest = minimal_restore_manifest(vec![orphan_entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(
+            &manifest_json,
+            &data_json,
+            &[("attachments/orphan.png", orphan_content)],
+        );
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("未被数据引用") || err.contains("not referenced"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_data_ref_missing_in_zip() {
+        let root = test_dir("restore-missing-zip-att");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let img_content = b"some image";
+        let hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{hash}.png");
+
+        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+        let entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("缺少") || err.contains("不在备份清单中"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // restore_local_backup_inner：zip 安全验证
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_zip_slash_traversal() {
+        let root = test_dir("restore-zip-slip");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let zip_path = root.join("slip.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("../escape.txt", options).unwrap();
+        zip.write_all(b"escaped").unwrap();
+        zip.finish().unwrap();
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("相对路径段") || err.contains("zip 条目"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_duplicate_manifest() {
+        let root = test_dir("restore-dup-manifest");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let zip_path = root.join("dup.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+
+        let dup_result = zip.start_file("manifest.json", options);
+        assert!(dup_result.is_err(), "zip crate 应拒绝重复条目");
+        let err_msg = dup_result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Duplicate") || err_msg.contains("duplicate"),
+            "错误应提及重复: {err_msg}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_unknown_entry() {
+        let root = test_dir("restore-unknown-entry");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = restore_data_json_with_board("b1", &[]);
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+
+        let zip_path = root.join("unknown.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(manifest_json.as_bytes()).unwrap();
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(data_json.as_bytes()).unwrap();
+        zip.start_file("malware.exe", options).unwrap();
+        zip.write_all(b"bad").unwrap();
+        zip.finish().unwrap();
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("不在允许范围内") || err.contains("未知条目"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // restore_local_backup_inner：原子性 — 失败不改变现有文件
+    // =======================================================================
+
+    #[test]
+    fn restore_failure_preserves_existing_data() {
+        let root = test_dir("restore-fail-preserve");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let original_data = "{\"original\": true}";
+        std::fs::write(sonotes_base.join("data.json"), original_data).unwrap();
+        std::fs::write(attach_dir.join("old.png"), b"old image").unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 999,
+            "boards": [],
+            "notes": [],
+            "currentBoardId": "",
+            "config": {}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path);
+        assert!(err.is_err());
+
+        let preserved = std::fs::read_to_string(sonotes_base.join("data.json")).unwrap();
+        assert_eq!(preserved, original_data, "data.json 应保持不变");
+        assert!(attach_dir.join("old.png").exists(), "旧附件应保持不变");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // restore_local_backup_inner：成功后旧附件被移除
+    // =======================================================================
+
+    #[test]
+    fn restore_success_removes_old_attachments() {
+        let root = test_dir("restore-remove-old");
+        let sonotes_base = root.join("SoNotes");
+        let old_attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&old_attach_dir).unwrap();
+        std::fs::write(old_attach_dir.join("old_a.png"), b"old a").unwrap();
+        std::fs::write(old_attach_dir.join("old_b.jpg"), b"old b").unwrap();
+
+        let img_content = b"new image content here";
+        let hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{hash}.png");
+
+        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+        let entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let result = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap();
+        assert!(result.success);
+
+        assert!(
+            !old_attach_dir.join("old_a.png").exists(),
+            "旧附件 old_a.png 应被移除"
+        );
+        assert!(
+            !old_attach_dir.join("old_b.jpg").exists(),
+            "旧附件 old_b.jpg 应被移除"
+        );
+        assert!(
+            old_attach_dir.join(format!("{hash}.png")).exists(),
+            "新附件应存在"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_success_removes_old_attachments_when_new_has_none() {
+        let root = test_dir("restore-remove-old-no-new");
+        let sonotes_base = root.join("SoNotes");
+        let old_attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&old_attach_dir).unwrap();
+        std::fs::write(old_attach_dir.join("stale.png"), b"stale").unwrap();
+
+        let data_json = restore_data_json_with_board("b1", &[text_note("n1", "b1")]);
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap();
+        assert!(result.success);
+        assert!(!old_attach_dir.exists(), "旧附件目录应被整体移除");
 
         let _ = std::fs::remove_dir_all(root);
     }
