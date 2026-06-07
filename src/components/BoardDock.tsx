@@ -190,7 +190,7 @@ export const BoardDock = () => {
   const onOrphanCleanupClick = async () => {
     if (attachmentScanState.orphanPaths.length === 0) return;
     const confirmed = window.confirm(
-      `即将永久删除 ${attachmentScanState.orphanCount} 个孤儿附件文件本体（不只是移除引用），并同时清空撤销/重做历史。此操作不可撤销，是否继续？`,
+            `即将永久删除 ${attachmentScanState.orphanCount} 个孤儿图片文件本体，并同时清空撤销/重做历史。此操作不可撤销，是否继续？`,
     );
     if (!confirmed) return;
 
@@ -579,7 +579,7 @@ export const BoardDock = () => {
                             data-testid="attachment-scan-button"
                         >
                             <Search className="w-4 h-4 text-text-tertiary" />
-                            <span>{attachmentScanState.status === 'scanning' ? '扫描中…' : '检查附件一致性'}</span>
+                            <span>{attachmentScanState.status === 'scanning' ? '扫描中…' : '检查图片文件一致性'}</span>
                         </button>
 
                         {attachmentScanState.status === 'done' && (
@@ -588,7 +588,7 @@ export const BoardDock = () => {
                                 className="mx-3 mt-2 rounded-md border border-border-subtle bg-secondary-bg/70 px-3 py-2 text-xs leading-5 text-text-secondary"
                             >
                                 <p className="font-medium text-text-primary">
-                                    缺失引用 {attachmentScanState.missingCount}，孤儿附件 {attachmentScanState.orphanCount}
+                                    缺失图片 {attachmentScanState.missingCount}，孤儿图片 {attachmentScanState.orphanCount}
                                 </p>
                             </div>
                         )}
@@ -611,7 +611,7 @@ export const BoardDock = () => {
                                 data-testid="orphan-cleanup-button"
                             >
                                 <Trash2 className="w-4 h-4" />
-                                <span>清理孤儿附件 ({attachmentScanState.orphanCount})</span>
+                                <span>清理孤儿图片 ({attachmentScanState.orphanCount})</span>
                             </button>
                         )}
 

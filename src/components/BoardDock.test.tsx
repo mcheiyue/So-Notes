@@ -474,7 +474,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
   });
 });
 
-describe('BoardDock 附件一致性管理入口', () => {
+describe('BoardDock 图片文件一致性管理入口', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -555,10 +555,10 @@ describe('BoardDock 附件一致性管理入口', () => {
     await openDataSettings();
     const scanButton = container.querySelector('[data-testid="attachment-scan-button"]');
     expect(scanButton).not.toBeNull();
-    expect(scanButton?.textContent).toContain('检查附件一致性');
+    expect(scanButton?.textContent).toContain('检查图片文件一致性');
   });
 
-  it('扫描后显示缺失引用和孤儿附件计数', async () => {
+  it('扫描后显示缺失图片和孤儿图片计数', async () => {
     const { listAttachmentFiles } = await import('../services/storage/attachmentPersistence');
     const { detectMissingReferences, detectOrphanAttachments } = await import('../services/storage/attachmentConsistency');
 
@@ -574,12 +574,12 @@ describe('BoardDock 附件一致性管理入口', () => {
     ]);
 
     await openDataSettings();
-    await clickElement(findButtonByText('检查附件一致性'));
+    await clickElement(findButtonByText('检查图片文件一致性'));
 
     const result = container.querySelector('[data-testid="attachment-scan-result"]');
     expect(result).not.toBeNull();
-    expect(result?.textContent).toContain('缺失引用 1');
-    expect(result?.textContent).toContain('孤儿附件 1');
+    expect(result?.textContent).toContain('缺失图片 1');
+    expect(result?.textContent).toContain('孤儿图片 1');
   });
 
   it('孤儿数为 0 时不显示清理按钮', async () => {
@@ -591,7 +591,7 @@ describe('BoardDock 附件一致性管理入口', () => {
     vi.mocked(detectOrphanAttachments).mockReturnValue([]);
 
     await openDataSettings();
-    await clickElement(findButtonByText('检查附件一致性'));
+    await clickElement(findButtonByText('检查图片文件一致性'));
 
     const cleanupButton = container.querySelector('[data-testid="orphan-cleanup-button"]');
     expect(cleanupButton).toBeNull();
@@ -608,11 +608,11 @@ describe('BoardDock 附件一致性管理入口', () => {
     ]);
 
     await openDataSettings();
-    await clickElement(findButtonByText('检查附件一致性'));
+    await clickElement(findButtonByText('检查图片文件一致性'));
 
     const cleanupButton = container.querySelector('[data-testid="orphan-cleanup-button"]');
     expect(cleanupButton).not.toBeNull();
-    expect(cleanupButton?.textContent).toContain('清理孤儿附件');
+    expect(cleanupButton?.textContent).toContain('清理孤儿图片');
   });
 
   it('确认清理后删除孤儿文件并清空历史', async () => {
@@ -634,7 +634,7 @@ describe('BoardDock 附件一致性管理入口', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     await openDataSettings();
-    await clickElement(findButtonByText('检查附件一致性'));
+    await clickElement(findButtonByText('检查图片文件一致性'));
 
     const cleanupButton = container.querySelector('[data-testid="orphan-cleanup-button"]');
     await clickElement(cleanupButton);
@@ -657,7 +657,7 @@ describe('BoardDock 附件一致性管理入口', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     await openDataSettings();
-    await clickElement(findButtonByText('检查附件一致性'));
+    await clickElement(findButtonByText('检查图片文件一致性'));
 
     const cleanupButton = container.querySelector('[data-testid="orphan-cleanup-button"]');
     await clickElement(cleanupButton);
@@ -705,11 +705,11 @@ describe('BoardDock 附件一致性管理入口', () => {
     });
 
     await openDataSettings();
-    await clickElement(findButtonByText('检查附件一致性'));
+    await clickElement(findButtonByText('检查图片文件一致性'));
 
     const result = container.querySelector('[data-testid="attachment-scan-result"]');
     expect(result).not.toBeNull();
-    expect(result?.textContent).toContain('孤儿附件 0');
+    expect(result?.textContent).toContain('孤儿图片 0');
   });
 
   it('扫描出错时显示错误信息', async () => {
@@ -717,7 +717,7 @@ describe('BoardDock 附件一致性管理入口', () => {
     vi.mocked(listAttachmentFiles).mockRejectedValue(new Error('磁盘读取失败'));
 
     await openDataSettings();
-    await clickElement(findButtonByText('检查附件一致性'));
+    await clickElement(findButtonByText('检查图片文件一致性'));
 
     const errorEl = container.querySelector('[data-testid="attachment-scan-error"]');
     expect(errorEl).not.toBeNull();
