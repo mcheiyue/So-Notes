@@ -18,6 +18,7 @@ import { buildSmartPasteNoteInputs, splitParagraphs } from '../utils/smartPaste'
 import type { SmartPasteNoteInput, SmartPasteOptionId, SmartPasteResult } from '../utils/smartPaste';
 import { LAYOUT } from '../constants/layout';
 import { computeImageNoteSize } from '../utils/imageNoteSize';
+import { resolveAttachmentAssetUrlCached } from '../services/storage/attachmentPersistence';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -153,8 +154,6 @@ interface State {
   commitNoteEditingSize: (noteId: string, newWidth: number, newHeight: number, beforeResize: NoteResizeSnapshot) => void;
   captureMoveSnapshot: (positions: Record<string, { x: number; y: number; updatedAt: number }>) => void;
   setStickyDrag: (id: string | null, offsetX?: number, offsetY?: number, status?: StickyDragStatus) => void;
-  addAttachmentToNote: (noteId: string, attachment: AttachmentRef) => void;
-  removeAttachmentFromNote: (noteId: string, attachmentId: string) => void;
   addImageNotesBatch: (inputs: Array<{ x: number; y: number; attachment: AttachmentRef; originalWidth?: number; originalHeight?: number }>) => string[];
   
   // New Actions for v1.1.1 & v1.1.2
@@ -433,6 +432,21 @@ const resolveRestoreBoardId = (
   return state.boards[0]?.id ?? null;
 };
 
+const prehydrateImageNoteAssetUrls = async (notes: Note[]): Promise<void> => {
+  const imageRelativePaths = notes
+    .filter((note) => note.kind === 'image')
+    .flatMap((note) => note.attachments ?? [])
+    .map((attachment) => attachment.relativePath);
+
+  if (imageRelativePaths.length === 0) return;
+
+  await Promise.allSettled(
+    Array.from(new Set(imageRelativePaths)).map((relativePath) =>
+      resolveAttachmentAssetUrlCached(relativePath),
+    ),
+  );
+};
+
 const clearDanglingNoteUiRefs = (state: State, removedNoteIds: ReadonlySet<string>) => {
   state.selectedIds = state.selectedIds.filter((id) => !removedNoteIds.has(id));
   state.recentlyCreatedIds = state.recentlyCreatedIds.filter((id) => !removedNoteIds.has(id));
@@ -654,6 +668,8 @@ export const useStore = create<State>()(
       }
 
       finalData.schemaVersion = STORAGE_SCHEMA_VERSION;
+
+      await prehydrateImageNoteAssetUrls(finalData.notes);
       
       // Ensure boards exist (Migration from v1.0.9)
       if (!finalData.boards || finalData.boards.length === 0) {
@@ -1824,60 +1840,6 @@ export const useStore = create<State>()(
           createdAt: updatedAt,
           undo: { type: 'update-fields', noteId, fields: { editingWidth: beforeResize.editingWidth, editingHeight: beforeResize.editingHeight, updatedAt: beforeResize.updatedAt } },
           redo: { type: 'update-fields', noteId, fields: { editingWidth: clampedWidth, editingHeight: clampedHeight, updatedAt } },
-        };
-        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
-      });
-    },
-
-    addAttachmentToNote: (noteId, attachment) => {
-      set((state) => {
-        const note = getNoteById(state, noteId);
-        if (!note) return;
-
-        const existingAttachments = note.attachments ?? [];
-        if (existingAttachments.some((ref) => ref.id === attachment.id)) return;
-
-        const prevUpdatedAt = note.updatedAt;
-        const updatedAt = Date.now();
-        const prevAttachments = existingAttachments;
-        note.attachments = [...existingAttachments, { ...attachment }];
-        note.updatedAt = updatedAt;
-
-        const entry: HistoryEntry<DomainPatch> = {
-          id: crypto.randomUUID(),
-          label: 'add-attachment',
-          createdAt: updatedAt,
-          undo: { type: 'update-fields', noteId, fields: { attachments: prevAttachments.length > 0 ? [...prevAttachments] : undefined, updatedAt: prevUpdatedAt } },
-          redo: { type: 'update-fields', noteId, fields: { attachments: [...note.attachments], updatedAt } },
-        };
-        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
-      });
-    },
-
-    removeAttachmentFromNote: (noteId, attachmentId) => {
-      set((state) => {
-        const note = getNoteById(state, noteId);
-        if (!note) return;
-
-        const existingAttachments = note.attachments ?? [];
-        const targetIndex = existingAttachments.findIndex((ref) => ref.id === attachmentId);
-        if (targetIndex === -1) return;
-
-        const prevUpdatedAt = note.updatedAt;
-        const updatedAt = Date.now();
-        const prevAttachments = [...existingAttachments];
-        note.attachments = existingAttachments.filter((ref) => ref.id !== attachmentId);
-        if (note.attachments.length === 0) {
-          note.attachments = undefined;
-        }
-        note.updatedAt = updatedAt;
-
-        const entry: HistoryEntry<DomainPatch> = {
-          id: crypto.randomUUID(),
-          label: 'remove-attachment',
-          createdAt: updatedAt,
-          undo: { type: 'update-fields', noteId, fields: { attachments: [...prevAttachments], updatedAt: prevUpdatedAt } },
-          redo: { type: 'update-fields', noteId, fields: { attachments: note.attachments ? [...note.attachments] : undefined, updatedAt } },
         };
         state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
       });

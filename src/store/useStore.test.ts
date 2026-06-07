@@ -17,6 +17,14 @@ vi.mock('../utils/fileSystem', () => ({
   openFile: vi.fn(async () => null),
 }));
 
+const { resolveAttachmentAssetUrlCachedMock } = vi.hoisted(() => ({
+  resolveAttachmentAssetUrlCachedMock: vi.fn(async (relativePath: string) => `asset://localhost/${relativePath}`),
+}));
+
+vi.mock('../services/storage/attachmentPersistence', () => ({
+  resolveAttachmentAssetUrlCached: resolveAttachmentAssetUrlCachedMock,
+}));
+
 import { useStore } from './useStore';
 import { db } from './db';
 import { openFile } from '../utils/fileSystem';
@@ -38,6 +46,7 @@ const getNote = (id: string) => useStore.getState().notesById[id];
 describe('v1.4.0 StorageData 演进契约', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resolveAttachmentAssetUrlCachedMock.mockImplementation(async (relativePath: string) => `asset://localhost/${relativePath}`);
     useStore.setState(useStore.getInitialState(), true);
   });
 
@@ -3778,6 +3787,7 @@ describe('v1.4.7 附件迁移与归一化契约', () => {
     const note = useStore.getState().notesById['with-image-ref'];
     expect(note.attachments).toHaveLength(1);
     expect(note.attachments?.[0]).toEqual(VALID_ATTACH_REF);
+    expect(resolveAttachmentAssetUrlCachedMock).toHaveBeenCalledWith(VALID_ATTACH_REF.relativePath);
   });
 
   it('init 后畸形附件条目被过滤，合法条目保留', async () => {
@@ -3929,265 +3939,6 @@ describe('v1.4.7 附件迁移与归一化契约', () => {
     expect(savedWal).toBeDefined();
     expect(savedWal.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
     expect(savedWal.notes[0].attachments).toBeUndefined();
-  });
-});
-
-describe('v1.4.8 附件引用领域动作契约', () => {
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
-    vi.clearAllMocks();
-    useStore.setState(useStore.getInitialState(), true);
-    useStore.setState({
-      ...normalizeNotes([
-        {
-          id: 'att-note-1',
-          kind: 'text',
-          boardId: 'default',
-          x: 10,
-          y: 20,
-          title: '有附件便签',
-          content: 'alpha',
-          color: '#FFFFFF',
-          z: 1,
-          createdAt: 100,
-          updatedAt: 100,
-          attachments: [{ ...VALID_ATTACH_REF }],
-        },
-        {
-          id: 'att-note-2',
-          kind: 'text',
-          boardId: 'default',
-          x: 30,
-          y: 40,
-          title: '无附件便签',
-          content: 'beta',
-          color: '#dbeafe',
-          z: 2,
-          createdAt: 200,
-          updatedAt: 200,
-        },
-      ]),
-      currentBoardId: 'default',
-      selectedIds: [],
-      viewport: { x: 0, y: 0, w: 1280, h: 720 },
-      config: { ...useStore.getState().config, maxZ: 2 },
-    });
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  describe('addAttachmentToNote', () => {
-    it('向无附件便签添加附件，更新 updatedAt 并创建历史', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().addAttachmentToNote('att-note-2', VALID_ATTACH_REF);
-
-      const note = getNote('att-note-2');
-      expect(note?.attachments).toHaveLength(1);
-      expect(note?.attachments?.[0]).toEqual(VALID_ATTACH_REF);
-      expect(note?.updatedAt).toBe(new Date('2026-06-06T10:00:00.000Z').getTime());
-
-      const undoStack = useStore.getState().domainHistory.undoStack;
-      expect(undoStack).toHaveLength(1);
-      expect(undoStack[0].label).toBe('add-attachment');
-      expect(undoStack[0].undo).toMatchObject({
-        type: 'update-fields',
-        noteId: 'att-note-2',
-        fields: { attachments: undefined, updatedAt: 200 },
-      });
-      expect(undoStack[0].redo).toMatchObject({
-        type: 'update-fields',
-        noteId: 'att-note-2',
-      });
-    });
-
-    it('向已有附件便签追加附件，保留已有引用', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().addAttachmentToNote('att-note-1', VALID_ATTACH_REF_2);
-
-      const note = getNote('att-note-1');
-      expect(note?.attachments).toHaveLength(2);
-      expect(note?.attachments?.[0]).toEqual(VALID_ATTACH_REF);
-      expect(note?.attachments?.[1]).toEqual(VALID_ATTACH_REF_2);
-      expect(note?.updatedAt).toBe(new Date('2026-06-06T10:00:00.000Z').getTime());
-    });
-
-    it('添加相同 attachment id 时为 no-op，不修改状态也不创建历史', () => {
-      const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
-      const updatedAtBefore = getNote('att-note-1')?.updatedAt;
-
-      useStore.getState().addAttachmentToNote('att-note-1', VALID_ATTACH_REF);
-
-      expect(getNote('att-note-1')?.attachments).toHaveLength(1);
-      expect(getNote('att-note-1')?.updatedAt).toBe(updatedAtBefore);
-      expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
-    });
-
-    it('便签不存在时为 no-op，不创建历史', () => {
-      const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
-
-      useStore.getState().addAttachmentToNote('non-existent', VALID_ATTACH_REF);
-
-      expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
-    });
-
-    it('撤销添加附件后恢复原始附件列表与 updatedAt', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().addAttachmentToNote('att-note-2', VALID_ATTACH_REF);
-
-      expect(getNote('att-note-2')?.attachments).toHaveLength(1);
-
-      useStore.getState().undoDomainChange();
-      expect(getNote('att-note-2')?.attachments).toBeUndefined();
-      expect(getNote('att-note-2')?.updatedAt).toBe(200);
-    });
-
-    it('重做添加附件后恢复附件引用与 updatedAt', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().addAttachmentToNote('att-note-2', VALID_ATTACH_REF);
-
-      useStore.getState().undoDomainChange();
-      expect(getNote('att-note-2')?.attachments).toBeUndefined();
-
-      useStore.getState().redoDomainChange();
-      expect(getNote('att-note-2')?.attachments).toHaveLength(1);
-      expect(getNote('att-note-2')?.attachments?.[0]).toEqual(VALID_ATTACH_REF);
-      expect(getNote('att-note-2')?.updatedAt).toBe(new Date('2026-06-06T10:00:00.000Z').getTime());
-    });
-
-    it('向已有附件便签追加后撤销，恢复到仅含原附件', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().addAttachmentToNote('att-note-1', VALID_ATTACH_REF_2);
-      expect(getNote('att-note-1')?.attachments).toHaveLength(2);
-
-      useStore.getState().undoDomainChange();
-      const note = getNote('att-note-1');
-      expect(note?.attachments).toHaveLength(1);
-      expect(note?.attachments?.[0]).toEqual(VALID_ATTACH_REF);
-      expect(note?.updatedAt).toBe(100);
-    });
-
-    it('向废纸篓便签添加附件同样生效并支持撤销/重做', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().deleteNote('att-note-2');
-      expect(getNote('att-note-2')?.deletedAt).toBeDefined();
-
-      useStore.getState().addAttachmentToNote('att-note-2', VALID_ATTACH_REF);
-      expect(getNote('att-note-2')?.attachments).toHaveLength(1);
-      expect(getNote('att-note-2')?.updatedAt).toBe(new Date('2026-06-06T10:00:00.000Z').getTime());
-
-      useStore.getState().undoDomainChange();
-      expect(getNote('att-note-2')?.attachments).toBeUndefined();
-      expect(getNote('att-note-2')?.updatedAt).toBe(200);
-
-      useStore.getState().redoDomainChange();
-      expect(getNote('att-note-2')?.attachments).toHaveLength(1);
-    });
-  });
-
-  describe('removeAttachmentFromNote', () => {
-    it('移除附件引用，更新 updatedAt 并创建历史', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().removeAttachmentFromNote('att-note-1', 'att-001');
-
-      const note = getNote('att-note-1');
-      expect(note?.attachments).toBeUndefined();
-      expect(note?.updatedAt).toBe(new Date('2026-06-06T10:00:00.000Z').getTime());
-
-      const undoStack = useStore.getState().domainHistory.undoStack;
-      expect(undoStack).toHaveLength(1);
-      expect(undoStack[0].label).toBe('remove-attachment');
-      expect(undoStack[0].undo).toMatchObject({
-        type: 'update-fields',
-        noteId: 'att-note-1',
-      });
-      expect(undoStack[0].redo).toMatchObject({
-        type: 'update-fields',
-        noteId: 'att-note-1',
-      });
-    });
-
-    it('多个附件中只移除目标引用，保留其余', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().addAttachmentToNote('att-note-1', VALID_ATTACH_REF_2);
-      expect(getNote('att-note-1')?.attachments).toHaveLength(2);
-
-      useStore.getState().removeAttachmentFromNote('att-note-1', 'att-002');
-      const note = getNote('att-note-1');
-      expect(note?.attachments).toHaveLength(1);
-      expect(note?.attachments?.[0].id).toBe('att-001');
-    });
-
-    it('移除不存在的 attachment id 时为 no-op，不修改状态也不创建历史', () => {
-      const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
-      const updatedAtBefore = getNote('att-note-1')?.updatedAt;
-
-      useStore.getState().removeAttachmentFromNote('att-note-1', 'non-existent-att');
-
-      expect(getNote('att-note-1')?.attachments).toHaveLength(1);
-      expect(getNote('att-note-1')?.updatedAt).toBe(updatedAtBefore);
-      expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
-    });
-
-    it('便签不存在时为 no-op，不创建历史', () => {
-      const undoCountBefore = useStore.getState().domainHistory.undoStack.length;
-
-      useStore.getState().removeAttachmentFromNote('non-existent', 'att-001');
-
-      expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountBefore);
-    });
-
-    it('撤销移除后恢复附件引用与 updatedAt', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().removeAttachmentFromNote('att-note-1', 'att-001');
-      expect(getNote('att-note-1')?.attachments).toBeUndefined();
-
-      useStore.getState().undoDomainChange();
-      const note = getNote('att-note-1');
-      expect(note?.attachments).toHaveLength(1);
-      expect(note?.attachments?.[0]).toEqual(VALID_ATTACH_REF);
-      expect(note?.updatedAt).toBe(100);
-    });
-
-    it('重做移除后再次移除附件引用', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().removeAttachmentFromNote('att-note-1', 'att-001');
-
-      useStore.getState().undoDomainChange();
-      expect(getNote('att-note-1')?.attachments).toHaveLength(1);
-
-      useStore.getState().redoDomainChange();
-      expect(getNote('att-note-1')?.attachments).toBeUndefined();
-      expect(getNote('att-note-1')?.updatedAt).toBe(new Date('2026-06-06T10:00:00.000Z').getTime());
-    });
-
-    it('从废纸篓便签移除附件同样生效并支持撤销/重做', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().deleteNote('att-note-1');
-      expect(getNote('att-note-1')?.deletedAt).toBeDefined();
-
-      useStore.getState().removeAttachmentFromNote('att-note-1', 'att-001');
-      expect(getNote('att-note-1')?.attachments).toBeUndefined();
-
-      useStore.getState().undoDomainChange();
-      expect(getNote('att-note-1')?.attachments).toHaveLength(1);
-      expect(getNote('att-note-1')?.attachments?.[0].id).toBe('att-001');
-
-      useStore.getState().redoDomainChange();
-      expect(getNote('att-note-1')?.attachments).toBeUndefined();
-    });
-
-    it('移除附件不影响同一附件在其他便签上的引用', () => {
-      vi.setSystemTime(new Date('2026-06-06T10:00:00.000Z'));
-      useStore.getState().addAttachmentToNote('att-note-2', VALID_ATTACH_REF);
-      expect(getNote('att-note-2')?.attachments).toHaveLength(1);
-
-      useStore.getState().removeAttachmentFromNote('att-note-1', 'att-001');
-      expect(getNote('att-note-1')?.attachments).toBeUndefined();
-      expect(getNote('att-note-2')?.attachments).toHaveLength(1);
-      expect(getNote('att-note-2')?.attachments?.[0]).toEqual(VALID_ATTACH_REF);
-    });
   });
 });
 
