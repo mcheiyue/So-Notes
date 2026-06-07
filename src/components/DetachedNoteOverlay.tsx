@@ -254,6 +254,7 @@ const DetachedNoteShell: React.FC<{
               <ImageNoteBody
                 attachment={noteSnapshot.attachments?.[0]}
                 alt={noteSnapshot.title || noteSnapshot.attachments?.[0]?.filename || '图片便签'}
+                isFocused={true}
               />
               {noteSnapshot.content && (
                 <div className="px-4 pb-3 text-sm leading-relaxed text-text-secondary dark:text-text-primary">

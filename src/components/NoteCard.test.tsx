@@ -579,10 +579,11 @@ describe('NoteCard 头部交互边界', () => {
     expect(resolveAttachmentPathMock).not.toHaveBeenCalled();
   });
 
-  it('展开图片便签点击预览后覆盖层挂载在 document.body 而非便签卡片内部', async () => {
+  it('展开图片便签点击预览后覆盖层挂载在 document.body 而非便签卡片内部（需先聚焦）', async () => {
     const attachment = createAttachment();
     useStore.setState({
       ...normalizeNotes([createNote({ kind: 'image', title: 'photo.png', attachments: [attachment] })]),
+      selectedIds: ['note-1'],
     });
 
     await renderNoteCard();
@@ -601,7 +602,8 @@ describe('NoteCard 头部交互边界', () => {
     const overlayOnBody = document.body.querySelector('[data-testid="image-note-preview-overlay"]') as HTMLElement | null;
     expect(overlayOnBody).not.toBeNull();
     expect(overlayOnBody?.className).toContain('fixed');
-    expect(overlayOnBody?.className).toContain('inset-0');
+    expect(overlayOnBody?.className).toContain('inset-2');
+    expect(overlayOnBody?.className).toContain('rounded-2xl');
 
     const previewImg = overlayOnBody?.querySelector('img') as HTMLImageElement | null;
     expect(previewImg).not.toBeNull();
@@ -613,6 +615,61 @@ describe('NoteCard 头部交互边界', () => {
     });
 
     expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+  });
+
+  it('未聚焦的展开图片便签点击预览不打开覆盖层', async () => {
+    const attachment = createAttachment();
+    useStore.setState({
+      ...normalizeNotes([createNote({ kind: 'image', title: 'photo.png', attachments: [attachment] })]),
+      selectedIds: [],
+    });
+
+    await renderNoteCard();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    const trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
+    expect(trigger.className).toContain('cursor-default');
+
+    await act(async () => {
+      trigger.click();
+    });
+
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+  });
+
+  it('未聚焦图片便签首次点击主图只聚焦，第二次点击才打开大图', async () => {
+    const attachment = createAttachment();
+    useStore.setState({
+      ...normalizeNotes([createNote({ kind: 'image', title: 'photo.png', attachments: [attachment] })]),
+      selectedIds: [],
+    });
+
+    await renderNoteCard();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    let trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      trigger.click();
+    });
+
+    expect(useStore.getState().selectedIds).toEqual(['note-1']);
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+
+    trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      trigger.click();
+    });
+
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).not.toBeNull();
   });
 
   it('深色模式视觉样式与 NoteVisuals 独立渲染一致（共享视觉渲染能力）', async () => {

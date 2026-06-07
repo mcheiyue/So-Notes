@@ -49,12 +49,12 @@ describe('ImageNoteBody', () => {
     container.remove();
   });
 
-  it('主图点击后打开覆盖层，覆盖层通过 portal 挂载在 document.body', async () => {
+  it('主图在 isFocused=true 时点击后打开覆盖层，覆盖层通过 portal 挂载在 document.body', async () => {
     const attachment = createAttachment();
     resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
 
     await act(async () => {
-      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" />);
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
     });
 
     await vi.waitFor(() => {
@@ -64,6 +64,7 @@ describe('ImageNoteBody', () => {
     const trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
     expect(trigger.className).toContain('rounded-xl');
     expect(trigger.className).toContain('overflow-hidden');
+    expect(trigger.className).toContain('cursor-zoom-in');
 
     await act(async () => {
       trigger.click();
@@ -75,7 +76,8 @@ describe('ImageNoteBody', () => {
     const overlayOnBody = document.body.querySelector('[data-testid="image-note-preview-overlay"]') as HTMLButtonElement | null;
     expect(overlayOnBody).not.toBeNull();
     expect(overlayOnBody?.className).toContain('fixed');
-    expect(overlayOnBody?.className).toContain('inset-0');
+    expect(overlayOnBody?.className).toContain('inset-2');
+    expect(overlayOnBody?.className).toContain('rounded-2xl');
 
     await act(async () => {
       overlayOnBody?.click();
@@ -89,7 +91,7 @@ describe('ImageNoteBody', () => {
     resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
 
     await act(async () => {
-      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" />);
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
     });
 
     await vi.waitFor(() => {
@@ -103,6 +105,7 @@ describe('ImageNoteBody', () => {
 
     const overlayOnBody = document.body.querySelector('[data-testid="image-note-preview-overlay"]') as HTMLButtonElement | null;
     expect(overlayOnBody).not.toBeNull();
+    expect(overlayOnBody?.className).toContain('rounded-2xl');
 
     const previewImg = overlayOnBody?.querySelector('img') as HTMLImageElement | null;
     expect(previewImg).not.toBeNull();
@@ -115,12 +118,12 @@ describe('ImageNoteBody', () => {
     });
   });
 
-  it('isExpanded=false 时点击主图不打开预览', async () => {
+  it('isFocused=false 时点击主图不打开预览（默认行为）', async () => {
     const attachment = createAttachment();
     resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
 
     await act(async () => {
-      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isExpanded={false} />);
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={false} />);
     });
 
     await vi.waitFor(() => {
@@ -143,7 +146,7 @@ describe('ImageNoteBody', () => {
     resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
 
     await act(async () => {
-      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" />);
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
     });
 
     await vi.waitFor(() => {
@@ -162,5 +165,60 @@ describe('ImageNoteBody', () => {
     });
 
     expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+  });
+
+  it('未传 isFocused 时默认不打开预览（便签未聚焦语义）', async () => {
+    const attachment = createAttachment();
+    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+
+    await act(async () => {
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" />);
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    const trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
+    expect(trigger.className).toContain('cursor-default');
+
+    await act(async () => {
+      trigger.click();
+    });
+
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+  });
+
+  it('同一次点击从未聚焦变为聚焦时不打开预览，下一次点击才打开', async () => {
+    const attachment = createAttachment();
+    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+
+    await act(async () => {
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={false} />);
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    let trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
+    });
+
+    trigger = container.querySelector('[data-testid="image-note-preview-trigger"]') as HTMLButtonElement;
+    await act(async () => {
+      trigger.click();
+    });
+
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).toBeNull();
+
+    await act(async () => {
+      trigger.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      trigger.click();
+    });
+
+    expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).not.toBeNull();
   });
 });

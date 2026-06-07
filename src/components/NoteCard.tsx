@@ -880,7 +880,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
             <ImageNoteBody
               attachment={primaryImage}
               alt={note.title || primaryImage?.filename || "图片便签"}
-              isExpanded={!note.collapsed}
+              isFocused={isSelected}
             />
             {(isEditing || note.content) && (
               <textarea

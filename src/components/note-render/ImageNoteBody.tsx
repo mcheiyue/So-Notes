@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ImageIcon, RefreshCw } from "lucide-react";
@@ -15,12 +15,13 @@ type ImageBodyState =
 interface ImageNoteBodyProps {
   attachment?: AttachmentRef;
   alt: string;
-  isExpanded?: boolean;
+  isFocused?: boolean;
 }
 
-export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, isExpanded = true }) => {
+export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, isFocused = false }) => {
   const [state, setState] = useState<ImageBodyState>({ status: "loading" });
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const pointerDownStartedFocusedRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -78,11 +79,16 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, i
             data-testid="image-note-preview-trigger"
             className={cn(
               "h-full min-h-40 w-full overflow-hidden rounded-xl border border-border-subtle bg-black/5 text-left shadow-sm dark:bg-white/5",
-              isExpanded ? "cursor-zoom-in" : "cursor-default",
+              isFocused ? "cursor-zoom-in" : "cursor-default",
             )}
+            onPointerDown={() => {
+              pointerDownStartedFocusedRef.current = isFocused;
+            }}
             onClick={(event) => {
               event.stopPropagation();
-              if (!isExpanded) return;
+              const pointerDownStartedFocused = pointerDownStartedFocusedRef.current ?? isFocused;
+              pointerDownStartedFocusedRef.current = null;
+              if (!isFocused || !pointerDownStartedFocused) return;
               setIsPreviewOpen(true);
             }}
             aria-label={`查看图片 ${alt}`}
@@ -103,7 +109,7 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, i
               <button
                 type="button"
                 data-testid="image-note-preview-overlay"
-                className="fixed inset-0 flex cursor-zoom-out items-center justify-center bg-black/65 p-6 backdrop-blur-sm"
+                className="fixed inset-2 flex cursor-zoom-out items-center justify-center rounded-2xl bg-black/65 p-6 backdrop-blur-sm"
                 style={{ zIndex: Z_INDEX.SPOTLIGHT }}
                 onClick={(event) => {
                   event.stopPropagation();

@@ -284,6 +284,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
           <ImageNoteBody
             attachment={snapshot.attachments?.[0]}
             alt={snapshot.title || snapshot.attachments?.[0]?.filename || '图片便签'}
+            isFocused={true}
           />
           {snapshot.content && (
             <div className="px-4 pb-3 text-sm leading-relaxed text-text-secondary dark:text-text-primary">
