@@ -17,6 +17,8 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
+const attachmentPathCache = new Map<string, string>();
+
 // ---------------------------------------------------------------------------
 // 类型定义（与 Rust 侧 serde camelCase 输出对齐）
 // ---------------------------------------------------------------------------
@@ -159,6 +161,30 @@ export async function resolveAttachmentPath(
   relativePath: string,
 ): Promise<string> {
   return invoke<string>('resolve_attachment_path', { relativePath });
+}
+
+export function getCachedAttachmentPath(relativePath: string): string | undefined {
+  return attachmentPathCache.get(relativePath);
+}
+
+export async function resolveAttachmentPathCached(relativePath: string): Promise<string> {
+  const cachedPath = getCachedAttachmentPath(relativePath);
+  if (cachedPath !== undefined) {
+    return cachedPath;
+  }
+
+  const resolvedPath = await resolveAttachmentPath(relativePath);
+  attachmentPathCache.set(relativePath, resolvedPath);
+  return resolvedPath;
+}
+
+export function invalidateAttachmentPathCache(relativePath?: string): void {
+  if (relativePath === undefined) {
+    attachmentPathCache.clear();
+    return;
+  }
+
+  attachmentPathCache.delete(relativePath);
 }
 
 /**

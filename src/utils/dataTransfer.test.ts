@@ -363,7 +363,7 @@ describe('dataTransfer 附件引用导入', () => {
     vi.restoreAllMocks();
   });
 
-  it('导入保留有效附件引用并丢弃无效条目', () => {
+  it('导入图片便签时保留有效附件引用并丢弃无效条目', () => {
     vi.spyOn(Date, 'now').mockReturnValue(999999);
     vi.spyOn(globalThis.crypto, 'randomUUID')
       .mockReturnValueOnce('att-board-0000-4000-8000-0000000000')
@@ -372,7 +372,7 @@ describe('dataTransfer 附件引用导入', () => {
     const board = makeBoard({ id: 'att-board', name: '附件板' });
     const noteData = {
       id: 'note-mixed',
-      kind: 'text',
+      kind: 'image',
       boardId: 'att-board',
       x: 10,
       y: 20,
@@ -411,7 +411,7 @@ describe('dataTransfer 附件引用导入', () => {
     }
   });
 
-  it('导入剥离附件中的二进制残留字段', () => {
+  it('导入图片便签时剥离附件中的二进制残留字段', () => {
     vi.spyOn(Date, 'now').mockReturnValue(888888);
     vi.spyOn(globalThis.crypto, 'randomUUID')
       .mockReturnValueOnce('bin-board-0000-4000-8000-0000000000')
@@ -420,7 +420,7 @@ describe('dataTransfer 附件引用导入', () => {
     const board = makeBoard({ id: 'bin-board', name: '二进制板' });
     const noteData = {
       id: 'note-bin',
-      kind: 'text',
+      kind: 'image',
       boardId: 'bin-board',
       x: 10,
       y: 20,
@@ -472,6 +472,144 @@ describe('dataTransfer 附件引用导入', () => {
     }
   });
 
+  it('导入文本便签时移除附件引用并记录迁移问题', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(444444);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('text-board-0000-4000-8000-000000000')
+      .mockReturnValueOnce('text-note-0000-4000-8000-0000000000');
+
+    const board = makeBoard({ id: 'text-board', name: '文本板' });
+    const noteData = makeNote({
+      id: 'text-with-attachment',
+      boardId: 'text-board',
+      attachments: [makeAttachmentRef({ id: 'text-att' })],
+    });
+
+    const result = processImport(JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: { boards: [board], notes: [noteData], currentBoardId: 'text-board' },
+    }));
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.data.notes).toHaveLength(1);
+      expect(result.data.notes[0].kind).toBe('text');
+      expect(result.data.notes[0].attachments).toBeUndefined();
+      expect(result.data.summary.migratedNotesCount).toBe(1);
+      expect(result.data.summary.issues.some(issue =>
+        issue.code === 'MIGRATED_NOTE' && issue.message.includes('文本便签包含附件'),
+      )).toBe(true);
+    }
+  });
+
+  it('缺少 kind 的当前格式便签会被跳过', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(333333);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('kind-board-0000-4000-8000-000000000');
+
+    const board = makeBoard({ id: 'kind-board', name: '类型板' });
+    const noteData = makeNote({ id: 'missing-kind', boardId: 'kind-board' }) as unknown as Record<string, unknown>;
+    delete noteData.kind;
+
+    const result = processImport(JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: { boards: [board], notes: [noteData], currentBoardId: 'kind-board' },
+    }));
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.data.notes).toHaveLength(0);
+      expect(result.data.summary.skippedNotesCount).toBe(1);
+      expect(result.data.summary.issues[0].code).toBe('INVALID_NOTE');
+    }
+  });
+
+  it('非法 kind 的当前格式便签会被跳过', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(222222);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('bad-kind-board-0000-4000-8000-000000');
+
+    const board = makeBoard({ id: 'bad-kind-board', name: '坏类型板' });
+    const noteData = {
+      ...makeNote({ id: 'bad-kind', boardId: 'bad-kind-board' }),
+      kind: 'card',
+    };
+
+    const result = processImport(JSON.stringify({
+      version: 1,
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      timestamp: 1,
+      payload: { boards: [board], notes: [noteData], currentBoardId: 'bad-kind-board' },
+    }));
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.data.notes).toHaveLength(0);
+      expect(result.data.summary.skippedNotesCount).toBe(1);
+      expect(result.data.summary.issues[0].code).toBe('INVALID_NOTE');
+    }
+  });
+
+  it('旧版附件导入为独立图片便签而不是挂回文本便签', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(111111);
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('legacy-board-0000-4000-8000-00000000')
+      .mockReturnValueOnce('legacy-text-0000-4000-8000-000000000')
+      .mockReturnValueOnce('legacy-img1-0000-4000-8000-000000000')
+      .mockReturnValueOnce('legacy-img2-0000-4000-8000-000000000');
+
+    const result = processImport(JSON.stringify({
+      source: 'so-notes',
+      type: 'FULL_BACKUP',
+      payload: {
+        notes: [{
+          id: 'legacy-note',
+          title: '旧便签',
+          content: '旧内容',
+          createdAt: 50,
+          attachments: [
+            makeAttachmentRef({ id: 'legacy-att-1', filename: 'one.png' }),
+            makeAttachmentRef({ id: 'legacy-att-2', hash: HASH_B, filename: 'two.jpg', relativePath: `attachments/${HASH_B}.jpg` }),
+          ],
+        }],
+      },
+    }));
+
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.data.notes).toHaveLength(3);
+      expect(result.data.notes[0]).toMatchObject({
+        id: 'legacy-text-0000-4000-8000-000000000',
+        kind: 'text',
+        title: '旧便签',
+        content: '旧内容',
+      });
+      expect(result.data.notes[0].attachments).toBeUndefined();
+      expect(result.data.notes[1]).toMatchObject({
+        id: 'legacy-img1-0000-4000-8000-000000000',
+        kind: 'image',
+        title: 'one.png',
+        content: '',
+      });
+      expect(result.data.notes[1].attachments?.[0]?.id).toBe('legacy-att-1');
+      expect(result.data.notes[2]).toMatchObject({
+        id: 'legacy-img2-0000-4000-8000-000000000',
+        kind: 'image',
+        title: 'two.jpg',
+        content: '',
+      });
+      expect(result.data.notes[2].attachments?.[0]?.id).toBe('legacy-att-2');
+      expect(result.data.summary.migratedNotesCount).toBe(3);
+    }
+  });
+
   it('畸形附件数组不破坏导入', () => {
     vi.spyOn(Date, 'now').mockReturnValue(666666);
     vi.spyOn(globalThis.crypto, 'randomUUID')
@@ -481,7 +619,7 @@ describe('dataTransfer 附件引用导入', () => {
     const board = makeBoard({ id: 'mal-board', name: '畸形板' });
     const noteData = {
       id: 'note-mal',
-      kind: 'text',
+      kind: 'image',
       boardId: 'mal-board',
       x: 10,
       y: 20,
@@ -516,7 +654,7 @@ describe('dataTransfer 附件引用导入', () => {
     const board = makeBoard({ id: 'weird-board', name: '怪异板' });
     const noteData = {
       id: 'note-weird',
-      kind: 'text',
+      kind: 'image',
       boardId: 'weird-board',
       x: 10,
       y: 20,

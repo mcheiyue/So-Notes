@@ -23,6 +23,11 @@ interface ImportParseMeta {
   createdDefaultBoard: boolean;
 }
 
+interface NormalizedImportNote {
+  note: Note;
+  migrated: boolean;
+}
+
 export interface ExportData {
   version: number;
   type: ExportType;
@@ -104,6 +109,9 @@ const isBoard = (value: unknown): value is Board => {
   );
 };
 
+const isNoteKind = (value: unknown): value is Note['kind'] =>
+  value === 'text' || value === 'image';
+
 const isNote = (value: unknown): value is Note => {
   if (!isRecord(value)) return false;
 
@@ -114,6 +122,7 @@ const isNote = (value: unknown): value is Note => {
     typeof value.y === 'number' &&
     typeof value.title === 'string' &&
     typeof value.content === 'string' &&
+    isNoteKind(value.kind) &&
     typeof value.color === 'string' &&
     typeof value.z === 'number' &&
     typeof value.createdAt === 'number' &&
@@ -340,45 +349,66 @@ const normalizeLegacyNote = (
   rawNote: unknown,
   noteIndex: number,
   fallbackBoardId: string,
-): {
-  note: Note | null;
-  migrated: boolean;
-} => {
+): NormalizedImportNote[] => {
   if (!isRecord(rawNote)) {
-    return {
-      note: null,
-      migrated: false,
-    };
+    return [];
   }
 
   const createdAt = getNumberOrFallback(rawNote.createdAt, Date.now());
+  const baseId = getStringOrFallback(rawNote.id, `legacy-note-${noteIndex + 1}`);
+  const boardId = getStringOrFallback(rawNote.boardId, fallbackBoardId);
+  const x = getNumberOrFallback(rawNote.x, 20 + noteIndex * 10);
+  const y = getNumberOrFallback(rawNote.y, 20 + noteIndex * 10);
+  const z = getNumberOrFallback(rawNote.z, noteIndex + 1);
+  const color = getStringOrFallback(rawNote.color, '#FFFFFF');
+  const updatedAt = getNumberOrFallback(rawNote.updatedAt, createdAt);
   const nextNote: Note = {
-    id: getStringOrFallback(rawNote.id, `legacy-note-${noteIndex + 1}`),
+    id: baseId,
     kind: 'text',
-    boardId: getStringOrFallback(rawNote.boardId, fallbackBoardId),
-    x: getNumberOrFallback(rawNote.x, 20 + noteIndex * 10),
-    y: getNumberOrFallback(rawNote.y, 20 + noteIndex * 10),
+    boardId,
+    x,
+    y,
     title: getStringOrFallback(rawNote.title, ''),
     content: typeof rawNote.content === 'string'
       ? rawNote.content
       : getStringOrFallback(rawNote.text, ''),
-    color: getStringOrFallback(rawNote.color, '#FFFFFF'),
-    z: getNumberOrFallback(rawNote.z, noteIndex + 1),
+    color,
+    z,
     collapsed: typeof rawNote.collapsed === 'boolean' ? rawNote.collapsed : false,
     createdAt,
-    updatedAt: getNumberOrFallback(rawNote.updatedAt, createdAt),
+    updatedAt,
   };
 
   if (rawNote.deletedAt === null || isFiniteNumber(rawNote.deletedAt)) {
     nextNote.deletedAt = rawNote.deletedAt;
   }
 
-  const migrated = !isNote(rawNote);
+  const sanitizedAttachments = sanitizeAttachments(rawNote.attachments).map(toCleanAttachmentRef);
+  const migrated = !isNote(rawNote) || sanitizedAttachments.length > 0;
+  const normalizedNotes: NormalizedImportNote[] = [{ note: nextNote, migrated }];
 
-  return {
-    note: nextNote,
-    migrated,
-  };
+  sanitizedAttachments.forEach((attachment, attachmentIndex) => {
+    normalizedNotes.push({
+      note: {
+        id: `${baseId}-image-${attachmentIndex + 1}`,
+        kind: 'image',
+        boardId,
+        x: x + 32 + attachmentIndex * 24,
+        y: y + 32 + attachmentIndex * 24,
+        title: attachment.filename,
+        content: '',
+        color,
+        z: z + attachmentIndex + 1,
+        collapsed: false,
+        createdAt,
+        updatedAt,
+        attachments: [attachment],
+      },
+      migrated: true,
+    });
+  });
+
+  return normalizedNotes;
 };
 
 const parseImportData = (jsonContent: string): {
@@ -577,11 +607,11 @@ export const processImport = (jsonContent: string, existingBoardNames: string[] 
   });
 
   data.payload.notes.forEach((rawNote, noteIndex) => {
-    const normalizedNote = parsed.compatibility === 'LEGACY'
+    const normalizedNotes = parsed.compatibility === 'LEGACY'
       ? normalizeLegacyNote(rawNote, noteIndex, data.payload.boards[0]?.id ?? DEFAULT_BOARD.id)
-      : { note: isNote(rawNote) ? rawNote : null, migrated: false };
+      : isNote(rawNote) ? [{ note: rawNote, migrated: false }] : [];
 
-    if (!normalizedNote.note) {
+    if (normalizedNotes.length === 0) {
       issues.push({
         ...buildImportIssue('INVALID_NOTE', `第 ${noteIndex + 1} 条便签结构无效，已跳过。`, 'error', {
           noteIndex,
@@ -590,37 +620,42 @@ export const processImport = (jsonContent: string, existingBoardNames: string[] 
       return;
     }
 
-    if (normalizedNote.migrated) {
-      migratedNotesCount += 1;
-      issues.push(buildImportIssue('MIGRATED_NOTE', `第 ${noteIndex + 1} 条便签缺少旧版字段，已按当前规则自动补全。`, 'warning', {
-        noteIndex,
-        noteId: normalizedNote.note.id,
-      }));
-    }
+    normalizedNotes.forEach((normalizedNote) => {
+      const newBoardId = boardIdMap.get(normalizedNote.note.boardId);
 
-    const newBoardId = boardIdMap.get(normalizedNote.note.boardId);
+      if (!newBoardId) {
+        issues.push({
+          ...buildImportIssue('ORPHAN_NOTE', `第 ${noteIndex + 1} 条便签所属看板不存在，已跳过。`, 'error', {
+            noteIndex,
+            noteId: normalizedNote.note.id,
+          }),
+        });
+        return;
+      }
 
-    if (!newBoardId) {
-      issues.push({
-        ...buildImportIssue('ORPHAN_NOTE', `第 ${noteIndex + 1} 条便签所属看板不存在，已跳过。`, 'error', {
+      const sanitizedAttachments = sanitizeAttachments(normalizedNote.note.attachments).map(toCleanAttachmentRef);
+      const { attachments: _rawRef, ...noteBase } = normalizedNote.note;
+      const shouldKeepAttachments = noteBase.kind === 'image' && sanitizedAttachments.length > 0;
+      const strippedTextAttachments = noteBase.kind === 'text' && sanitizedAttachments.length > 0;
+
+      if (normalizedNote.migrated || strippedTextAttachments) {
+        migratedNotesCount += 1;
+        issues.push(buildImportIssue('MIGRATED_NOTE', strippedTextAttachments
+          ? `第 ${noteIndex + 1} 条文本便签包含附件，已移除附件引用。`
+          : `第 ${noteIndex + 1} 条便签缺少旧版字段，已按当前规则自动补全。`, 'warning', {
           noteIndex,
           noteId: normalizedNote.note.id,
-        }),
+        }));
+      }
+
+      newNotes.push({
+        ...noteBase,
+        id: crypto.randomUUID(),
+        boardId: newBoardId,
+        createdAt: now,
+        updatedAt: now,
+        ...(shouldKeepAttachments ? { attachments: sanitizedAttachments } : {}),
       });
-      return;
-    }
-
-    const rawAttachments = isRecord(rawNote) ? rawNote.attachments : undefined;
-    const sanitizedAttachments = sanitizeAttachments(rawAttachments).map(toCleanAttachmentRef);
-
-    const { attachments: _rawRef, ...noteBase } = normalizedNote.note;
-    newNotes.push({
-      ...noteBase,
-      id: crypto.randomUUID(),
-      boardId: newBoardId,
-      createdAt: now,
-      updatedAt: now,
-      ...(sanitizedAttachments.length > 0 ? { attachments: sanitizedAttachments } : {}),
     });
   });
 

@@ -3,7 +3,10 @@ import { createPortal } from "react-dom";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ImageIcon, RefreshCw } from "lucide-react";
 import type { AttachmentRef } from "../../store/types";
-import { resolveAttachmentPath } from "../../services/storage/attachmentPersistence";
+import {
+  getCachedAttachmentPath,
+  resolveAttachmentPathCached,
+} from "../../services/storage/attachmentPersistence";
 import { cn } from "../../utils/cn";
 import { Z_INDEX } from "../../constants/layout";
 
@@ -32,9 +35,15 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, i
         return;
       }
 
+      const cachedPath = getCachedAttachmentPath(attachment.relativePath);
+      if (cachedPath !== undefined) {
+        setState({ status: "ready", assetUrl: convertFileSrc(cachedPath) });
+        return;
+      }
+
       setState({ status: "loading" });
       try {
-        const absPath = await resolveAttachmentPath(attachment.relativePath);
+        const absPath = await resolveAttachmentPathCached(attachment.relativePath);
         if (!disposed) {
           setState({ status: "ready", assetUrl: convertFileSrc(absPath) });
         }

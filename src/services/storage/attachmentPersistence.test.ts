@@ -12,6 +12,9 @@ import {
   writeAttachmentFromBytes,
   saveImageFromSystemClipboard,
   resolveAttachmentPath,
+  getCachedAttachmentPath,
+  resolveAttachmentPathCached,
+  invalidateAttachmentPathCache,
   listAttachmentFiles,
   deleteAttachmentFile,
   type AttachmentFileMetadata,
@@ -22,6 +25,7 @@ import {
 describe('attachmentPersistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    invalidateAttachmentPathCache();
   });
 
   it('writeAttachmentFromPath 调用 Rust 写入命令并透传结果', async () => {
@@ -139,6 +143,48 @@ describe('attachmentPersistence', () => {
     expect(invoke).toHaveBeenCalledWith('resolve_attachment_path', {
       relativePath: 'attachments/abc.png',
     });
+  });
+
+  it('getCachedAttachmentPath 在缓存未命中时返回 undefined', () => {
+    expect(getCachedAttachmentPath('attachments/missing.png')).toBeUndefined();
+  });
+
+  it('resolveAttachmentPathCached 首次解析后复用缓存', async () => {
+    const relativePath = 'attachments/cached.png';
+    vi.mocked(invoke).mockResolvedValueOnce('/abs/attachments/cached.png');
+
+    await expect(resolveAttachmentPathCached(relativePath)).resolves.toBe('/abs/attachments/cached.png');
+    await expect(resolveAttachmentPathCached(relativePath)).resolves.toBe('/abs/attachments/cached.png');
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith('resolve_attachment_path', { relativePath });
+    expect(getCachedAttachmentPath(relativePath)).toBe('/abs/attachments/cached.png');
+  });
+
+  it('invalidateAttachmentPathCache 可清理指定缓存项', async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce('/abs/a.png')
+      .mockResolvedValueOnce('/abs/b.png');
+
+    await resolveAttachmentPathCached('attachments/a.png');
+    await resolveAttachmentPathCached('attachments/b.png');
+    invalidateAttachmentPathCache('attachments/a.png');
+
+    expect(getCachedAttachmentPath('attachments/a.png')).toBeUndefined();
+    expect(getCachedAttachmentPath('attachments/b.png')).toBe('/abs/b.png');
+  });
+
+  it('invalidateAttachmentPathCache 不传路径时清空全部缓存', async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce('/abs/a.png')
+      .mockResolvedValueOnce('/abs/b.png');
+
+    await resolveAttachmentPathCached('attachments/a.png');
+    await resolveAttachmentPathCached('attachments/b.png');
+    invalidateAttachmentPathCache();
+
+    expect(getCachedAttachmentPath('attachments/a.png')).toBeUndefined();
+    expect(getCachedAttachmentPath('attachments/b.png')).toBeUndefined();
   });
 
   it('listAttachmentFiles 调用 Rust 列表命令', async () => {

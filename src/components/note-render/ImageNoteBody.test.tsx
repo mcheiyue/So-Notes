@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
-const { resolveAttachmentPathMock, convertFileSrcMock } = vi.hoisted(() => ({
-  resolveAttachmentPathMock: vi.fn(),
+const { getCachedAttachmentPathMock, resolveAttachmentPathCachedMock, convertFileSrcMock } = vi.hoisted(() => ({
+  getCachedAttachmentPathMock: vi.fn(),
+  resolveAttachmentPathCachedMock: vi.fn(),
   convertFileSrcMock: vi.fn((p: string) => `asset://localhost/${p}`),
 }));
 
@@ -13,7 +14,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 vi.mock('../../services/storage/attachmentPersistence', () => ({
-  resolveAttachmentPath: resolveAttachmentPathMock,
+  getCachedAttachmentPath: getCachedAttachmentPathMock,
+  resolveAttachmentPathCached: resolveAttachmentPathCachedMock,
 }));
 
 import { ImageNoteBody } from './ImageNoteBody';
@@ -35,7 +37,9 @@ describe('ImageNoteBody', () => {
   let root: Root;
 
   beforeEach(() => {
-    resolveAttachmentPathMock.mockReset();
+    getCachedAttachmentPathMock.mockReset();
+    getCachedAttachmentPathMock.mockReturnValue(undefined);
+    resolveAttachmentPathCachedMock.mockReset();
     convertFileSrcMock.mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -51,7 +55,7 @@ describe('ImageNoteBody', () => {
 
   it('主图在 isFocused=true 时点击后打开覆盖层，覆盖层通过 portal 挂载在 document.body', async () => {
     const attachment = createAttachment();
-    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+    resolveAttachmentPathCachedMock.mockResolvedValue('/abs/attachments/photo.png');
 
     await act(async () => {
       root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
@@ -88,7 +92,7 @@ describe('ImageNoteBody', () => {
 
   it('覆盖层预览图直接带有 border、rounded-xl 与 overflow 裁剪', async () => {
     const attachment = createAttachment();
-    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+    resolveAttachmentPathCachedMock.mockResolvedValue('/abs/attachments/photo.png');
 
     await act(async () => {
       root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
@@ -120,7 +124,7 @@ describe('ImageNoteBody', () => {
 
   it('isFocused=false 时点击主图不打开预览（默认行为）', async () => {
     const attachment = createAttachment();
-    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+    resolveAttachmentPathCachedMock.mockResolvedValue('/abs/attachments/photo.png');
 
     await act(async () => {
       root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={false} />);
@@ -143,7 +147,7 @@ describe('ImageNoteBody', () => {
 
   it('Escape 键关闭已打开的预览', async () => {
     const attachment = createAttachment();
-    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+    resolveAttachmentPathCachedMock.mockResolvedValue('/abs/attachments/photo.png');
 
     await act(async () => {
       root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
@@ -169,7 +173,7 @@ describe('ImageNoteBody', () => {
 
   it('未传 isFocused 时默认不打开预览（便签未聚焦语义）', async () => {
     const attachment = createAttachment();
-    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+    resolveAttachmentPathCachedMock.mockResolvedValue('/abs/attachments/photo.png');
 
     await act(async () => {
       root.render(<ImageNoteBody attachment={attachment} alt="图片便签" />);
@@ -191,7 +195,7 @@ describe('ImageNoteBody', () => {
 
   it('同一次点击从未聚焦变为聚焦时不打开预览，下一次点击才打开', async () => {
     const attachment = createAttachment();
-    resolveAttachmentPathMock.mockResolvedValue('/abs/attachments/photo.png');
+    resolveAttachmentPathCachedMock.mockResolvedValue('/abs/attachments/photo.png');
 
     await act(async () => {
       root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={false} />);
@@ -220,5 +224,19 @@ describe('ImageNoteBody', () => {
     });
 
     expect(document.body.querySelector('[data-testid="image-note-preview-overlay"]')).not.toBeNull();
+  });
+
+  it('缓存命中时直接渲染图片并跳过异步路径', async () => {
+    const attachment = createAttachment();
+    getCachedAttachmentPathMock.mockReturnValue('/abs/attachments/cached.png');
+
+    await act(async () => {
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
+    });
+
+    expect(container.querySelector('.animate-spin')).toBeNull();
+    expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    expect(resolveAttachmentPathCachedMock).not.toHaveBeenCalled();
+    expect(convertFileSrcMock).toHaveBeenCalledWith('/abs/attachments/cached.png');
   });
 });
