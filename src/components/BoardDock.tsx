@@ -1,12 +1,18 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
-import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search } from "lucide-react";
+import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw } from "lucide-react";
 import { Z_INDEX } from "../constants/layout";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { appController } from "../controllers/appController";
-import { listAttachmentFiles, deleteAttachmentFile, attachmentExists } from "../services/storage/attachmentPersistence";
+import { listAttachmentFiles, deleteAttachmentFile, attachmentExists, invalidateAttachmentPathCache } from "../services/storage/attachmentPersistence";
 import { detectMissingReferences, detectOrphanAttachments } from "../services/storage/attachmentConsistency";
+import { saveZipDialog, openZipDialog } from "../utils/fileSystem";
+import { createLocalBackup, restoreLocalBackup } from "../services/backup/BackupService";
+import * as persistenceFacade from "../services/storage/PersistenceFacade";
+import { readDiskStorageData } from "../services/storage/tauriPersistence";
+import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
+import { db } from "../store/db";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 type StoreState = ReturnType<typeof useStore.getState>;
@@ -71,6 +77,8 @@ export const BoardDock = () => {
   const [importFeedback, setImportFeedback] = useState<ImportFeedback | null>(null);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [zipOperation, setZipOperation] = useState<'idle' | 'backing-up' | 'restoring'>('idle');
+  const [zipFeedback, setZipFeedback] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
   const [attachmentScanState, setAttachmentScanState] = useState<{
     status: 'idle' | 'scanning' | 'done' | 'error';
     missingCount: number;
@@ -136,6 +144,8 @@ export const BoardDock = () => {
   useEffect(() => {
       if (!showSettings) {
           setImportFeedback(null);
+          setZipFeedback(null);
+          setZipOperation('idle');
           setSettingsView('MAIN');
           setAttachmentScanState({ status: 'idle', missingCount: 0, orphanCount: 0, orphanPaths: [], errorMessage: null });
       }
@@ -206,6 +216,142 @@ export const BoardDock = () => {
         status: 'error',
         errorMessage: err instanceof Error ? err.message : '清理失败',
       }));
+    }
+  };
+
+  const onZipBackupClick = async () => {
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+    const defaultName = `sonotes-backup-${timestamp}.zip`;
+    const targetPath = await saveZipDialog(defaultName);
+    if (!targetPath) return;
+
+    setZipFeedback(null);
+    setZipOperation('backing-up');
+    try {
+      const flushed = await persistenceFacade.flushNow();
+      if (!flushed) {
+        setZipFeedback({ status: 'error', message: '备份失败：当前数据尚未成功写入磁盘，请稍后重试。' });
+        return;
+      }
+      const result = await createLocalBackup(targetPath);
+      if (result.success) {
+        setZipFeedback({
+          status: 'success',
+          message: `备份成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。${result.backupPath ? `\n${result.backupPath}` : ''}`,
+        });
+      } else {
+        setZipFeedback({ status: 'error', message: `备份失败：${result.error ?? '未知错误'}` });
+      }
+    } catch (err) {
+      setZipFeedback({ status: 'error', message: `备份失败：${err instanceof Error ? err.message : '未知错误'}` });
+    } finally {
+      setZipOperation('idle');
+    }
+  };
+
+  const onZipRestoreClick = async () => {
+    const sourceZipPath = await openZipDialog();
+    if (!sourceZipPath) return;
+
+    const confirmed = window.confirm(
+      '即将从 zip 备份覆盖恢复所有数据（便签、看板、图片文件），当前本地数据将被替换。此操作不可撤销，是否继续？',
+    );
+    if (!confirmed) return;
+
+    setZipFeedback(null);
+    setZipOperation('restoring');
+    let pauseOccurred = false;
+    try {
+      const flushed = await persistenceFacade.flushNow();
+      if (!flushed) {
+        setZipFeedback({ status: 'error', message: '恢复失败：当前数据尚未成功写入磁盘，请稍后重试。' });
+        return;
+      }
+      persistenceFacade.pause();
+      pauseOccurred = true;
+
+      const result = await restoreLocalBackup(sourceZipPath);
+      if (!result.success) {
+        setZipFeedback({ status: 'error', message: `恢复失败：${result.error ?? '未知错误'}` });
+        return;
+      }
+
+      const restoredData = await readDiskStorageData('data.json');
+      if (!restoredData) {
+        setZipFeedback({ status: 'error', message: '恢复成功但无法读取磁盘数据，请重启应用。' });
+        return;
+      }
+
+      restoredData.notes.forEach((note) => {
+        note.boardId = note.boardId || 'default';
+        note.updatedAt = note.updatedAt || note.createdAt || Date.now();
+        note.title = note.title ?? '';
+        note.collapsed = note.collapsed ?? false;
+        note.attachments = sanitizeNoteAttachments(note);
+      });
+
+      if (!restoredData.boards || restoredData.boards.length === 0) {
+        restoredData.boards = [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }];
+        restoredData.currentBoardId = 'default';
+      }
+      if (!restoredData.currentBoardId || !restoredData.boards.some((b) => b.id === restoredData.currentBoardId)) {
+        restoredData.currentBoardId = restoredData.boards[0].id;
+      }
+
+      const normalizedNotes = normalizeNotes(restoredData.notes);
+      const activeBoard = restoredData.boards.find((b) => b.id === restoredData.currentBoardId);
+
+      useStore.setState((state) => ({
+        ...state,
+        notesById: normalizedNotes.notesById,
+        allNoteIds: normalizedNotes.allNoteIds,
+        boardNoteIds: normalizedNotes.boardNoteIds,
+        layoutNotesById: createLayoutNotesById(normalizedNotes.notesById),
+        boards: restoredData.boards,
+        currentBoardId: restoredData.currentBoardId,
+        config: restoredData.config,
+        viewMode: 'BOARD',
+        isDockVisible: true,
+        selectedIds: [],
+        recentlyCreatedIds: [],
+        noteHighlights: {},
+        detachedNotes: [],
+        domainHistory: { undoStack: [], redoStack: [], capacity: state.domainHistory.capacity },
+        isLoaded: true,
+        saveStatus: 'idle',
+        saveError: null,
+        isSaving: false,
+        ...(activeBoard?.viewport ? { viewport: { ...state.viewport, x: activeBoard.viewport.x, y: activeBoard.viewport.y } } : {}),
+      }));
+
+      const theme = restoredData.config.themeMode || 'system';
+      const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const shouldBeDark = theme === 'dark' || (theme === 'system' && isSystemDark);
+      if (shouldBeDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      localStorage.setItem('theme', theme);
+
+      await db.clearWAL();
+      invalidateAttachmentPathCache();
+
+      setZipFeedback({
+        status: 'success',
+        message: `恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
+      });
+    } catch (err) {
+      setZipFeedback({ status: 'error', message: `恢复失败：${err instanceof Error ? err.message : '未知错误'}` });
+    } finally {
+      if (pauseOccurred) {
+        try {
+          persistenceFacade.resume();
+        } catch (resumeError) {
+          console.warn('恢复持久化失败:', resumeError);
+        }
+      }
+      setZipOperation('idle');
     }
   };
 
@@ -490,7 +636,7 @@ export const BoardDock = () => {
                             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
                         >
                             <Download className="w-4 h-4 text-text-tertiary" />
-                            <span>全量备份 (JSON)</span>
+                            <span>导出 JSON</span>
                         </button>
 
                         {viewMode === 'BOARD' && (
@@ -513,7 +659,7 @@ export const BoardDock = () => {
                             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
                         >
         <Upload className="w-4 h-4 text-text-tertiary" />
-          <span>恢复备份</span>
+          <span>导入 JSON</span>
         </button>
 
         {exportStatus && (
@@ -531,8 +677,8 @@ export const BoardDock = () => {
                             >
                                 <p className={cn('font-medium', importFeedback.status === 'error' ? 'text-current' : 'text-text-primary')}>
                                     {importFeedback.status === 'cancelled'
-                                        ? '已取消恢复备份。'
-                                        : importFeedback.message || '恢复已完成。'}
+                                        ? '已取消导入。'
+                                        : importFeedback.message || '导入已完成。'}
                                 </p>
 
                                 {importFeedback.rolledBack && (
@@ -554,6 +700,45 @@ export const BoardDock = () => {
                                         ))}
                                     </div>
                                 )}
+                            </div>
+                        )}
+
+                        <div className="mx-3 my-1.5 border-t border-border-subtle" />
+
+                        <button
+                            type="button"
+                            onClick={onZipBackupClick}
+                            disabled={zipOperation !== 'idle'}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors disabled:opacity-50"
+                            data-testid="zip-backup-button"
+                        >
+                            <Archive className="w-4 h-4 text-text-tertiary" />
+                            <span>{zipOperation === 'backing-up' ? '备份中…' : '创建本地 zip 备份'}</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={onZipRestoreClick}
+                            disabled={zipOperation !== 'idle'}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors disabled:opacity-50"
+                            data-testid="zip-restore-button"
+                        >
+                            <RotateCcw className="w-4 h-4 text-text-tertiary" />
+                            <span>{zipOperation === 'restoring' ? '恢复中…' : '从 zip 覆盖恢复'}</span>
+                        </button>
+
+                        {zipFeedback && (
+                            <div
+                                data-testid="zip-feedback"
+                                role={zipFeedback.status === 'error' ? 'alert' : 'status'}
+                                aria-live="polite"
+                                className={zipFeedback.status === 'error'
+                                    ? 'mx-3 mt-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-600 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-400'
+                                    : 'mx-3 mt-2 rounded-md border border-border-subtle bg-secondary-bg/70 px-3 py-2 text-xs leading-5 text-text-secondary'}
+                            >
+                                <p className={cn('font-medium whitespace-pre-line', zipFeedback.status === 'error' ? 'text-current' : 'text-text-primary')}>
+                                    {zipFeedback.message}
+                                </p>
                             </div>
                         )}
 
