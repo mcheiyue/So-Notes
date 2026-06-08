@@ -38,6 +38,18 @@ vi.mock('../services/backup/BackupService', () => ({
   restoreLocalBackup: vi.fn(async () => ({ success: true, noteCount: 0, boardCount: 0, attachmentCount: 0 })),
 }));
 
+vi.mock('../services/backup/WebDavBackupService', () => ({
+  loadConfig: vi.fn(async () => ({ success: false })),
+  saveConfig: vi.fn(async () => ({ success: true })),
+  clearConfig: vi.fn(async () => ({ success: true })),
+  testConnection: vi.fn(async () => ({ success: true })),
+  createRemoteBackup: vi.fn(async () => ({ success: true, remoteFileName: 'backup.zip' })),
+  listBackups: vi.fn(async () => []),
+  downloadBackup: vi.fn(async () => ({ success: true, downloadToken: 'tok-1' })),
+  resolveDownloadedBackup: vi.fn(async () => ({ success: true, localPath: '/tmp/downloaded.zip' })),
+  cleanupDownloadedBackup: vi.fn(async () => ({ success: true })),
+}));
+
 vi.mock('../services/storage/PersistenceFacade', () => ({
   attach: vi.fn(),
   detach: vi.fn(),
@@ -997,5 +1009,305 @@ describe('BoardDock 图片文件一致性管理入口', () => {
     const errorEl = container.querySelector('[data-testid="attachment-scan-error"]');
     expect(errorEl).not.toBeNull();
     expect(errorEl?.textContent).toContain('磁盘读取失败');
+  });
+});
+
+describe('BoardDock WebDAV 远端备份/恢复', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const clickElement = async (element: Element | null) => {
+    expect(element).not.toBeNull();
+    await act(async () => {
+      element?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+  };
+
+  const findButtonByText = (text: string) => Array.from(container.querySelectorAll('button')).find(
+    (button) => button.textContent?.includes(text),
+  ) ?? null;
+
+  const getSettingsButton = () => container.querySelector('button[aria-label="打开设置"]');
+
+  const renderBoardDock = async () => {
+    await act(async () => {
+      root.render(<BoardDock />);
+    });
+  };
+
+  const openDataSettings = async () => {
+    await renderBoardDock();
+    await clickElement(getSettingsButton());
+    await clickElement(findButtonByText('数据管理'));
+  };
+
+  const openWebdavView = async () => {
+    await openDataSettings();
+    await clickElement(findButtonByText('远端备份/恢复'));
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } },
+      ],
+      currentBoardId: 'default',
+      isDockVisible: true,
+      viewMode: 'BOARD',
+      config: { ...useStore.getState().config, themeMode: 'system' },
+      saveStatus: 'idle',
+      saveError: null,
+      isSaving: false,
+      lastSavedAt: null,
+      switchBoard: vi.fn(),
+      createBoard: vi.fn(),
+      deleteBoard: vi.fn(),
+      updateBoard: vi.fn(),
+      reorderBoard: vi.fn(),
+      setDockVisible: vi.fn(),
+      setViewMode: vi.fn(),
+      clearSelection: vi.fn(),
+      exportAll: vi.fn(async () => undefined),
+      importFromFile: vi.fn(async () => ({ status: 'cancelled' as const })),
+      exportCurrentBoard: vi.fn(async () => undefined),
+      setThemeMode: vi.fn(),
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('数据管理区显示远端备份/恢复入口按钮', async () => {
+    await openDataSettings();
+    const entry = container.querySelector('[data-testid="webdav-entry-button"]');
+    expect(entry).not.toBeNull();
+    expect(entry?.textContent).toContain('远端备份/恢复');
+  });
+
+  it('点击入口后进入 WEBDAV 视图并显示配置输入框', async () => {
+    await openWebdavView();
+    expect(container.querySelector('[data-testid="webdav-server-url"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="webdav-username"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="webdav-password"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="webdav-remote-dir"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="webdav-save-config"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="webdav-test-connection"]')).not.toBeNull();
+  });
+
+  it('加载配置失败时显示错误反馈', async () => {
+    const { loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockRejectedValue(new Error('配置文件损坏'));
+
+    await openWebdavView();
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('加载配置失败：配置文件损坏');
+  });
+
+  it('保存配置调用 saveConfig 服务', async () => {
+    const { saveConfig } = await import('../services/backup/WebDavBackupService');
+    const { loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+    vi.mocked(saveConfig).mockResolvedValue({ success: true });
+
+    await openWebdavView();
+
+    const serverInput = container.querySelector('[data-testid="webdav-server-url"]') as HTMLInputElement;
+    const usernameInput = container.querySelector('[data-testid="webdav-username"]') as HTMLInputElement;
+
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(serverInput, 'https://dav.example.com');
+      serverInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(usernameInput, 'user1');
+      usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await clickElement(findButtonByText('保存配置'));
+
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverUrl: 'https://dav.example.com',
+        username: 'user1',
+      }),
+    );
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('配置已保存');
+  });
+
+  it('测试连接调用 testConnection 服务', async () => {
+    const { testConnection, loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+    vi.mocked(testConnection).mockResolvedValue({ success: true });
+
+    await openWebdavView();
+
+    const serverInput = container.querySelector('[data-testid="webdav-server-url"]') as HTMLInputElement;
+    const usernameInput = container.querySelector('[data-testid="webdav-username"]') as HTMLInputElement;
+
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(serverInput, 'https://dav.example.com');
+      serverInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(usernameInput, 'user1');
+      usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await clickElement(findButtonByText('测试连接'));
+
+    expect(testConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverUrl: 'https://dav.example.com',
+        username: 'user1',
+      }),
+    );
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('连接测试成功');
+  });
+
+  it('创建远端备份先调用 flushNow 再调用 createRemoteBackup', async () => {
+    const { createRemoteBackup, loadConfig, listBackups } = await import('../services/backup/WebDavBackupService');
+    const { flushNow } = await import('../services/storage/PersistenceFacade');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup-2026.zip' });
+    vi.mocked(listBackups).mockResolvedValue([]);
+    vi.mocked(flushNow).mockResolvedValue(true);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('创建远端备份'));
+
+    expect(flushNow).toHaveBeenCalled();
+    expect(createRemoteBackup).toHaveBeenCalledWith(
+      expect.objectContaining({ serverUrl: 'https://dav.example.com', username: 'user1' }),
+    );
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('远端备份已创建');
+  });
+
+  it('flushNow 失败时不调用 createRemoteBackup', async () => {
+    const { createRemoteBackup, loadConfig } = await import('../services/backup/WebDavBackupService');
+    const { flushNow } = await import('../services/storage/PersistenceFacade');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(flushNow).mockResolvedValue(false);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('创建远端备份'));
+
+    expect(flushNow).toHaveBeenCalled();
+    expect(createRemoteBackup).not.toHaveBeenCalled();
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('当前数据尚未成功写入磁盘');
+  });
+
+  it('刷新远端列表后渲染备份文件信息', async () => {
+    const { loadConfig, listBackups } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
+    ]);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+
+    const list = container.querySelector('[data-testid="webdav-backup-list"]');
+    expect(list).not.toBeNull();
+    expect(list?.textContent).toContain('backup-2026.zip');
+    expect(list?.textContent).toContain('100.0 KB');
+    expect(list?.textContent).toContain('2026-06-08T10:00:00Z');
+  });
+
+  it('远端恢复取消确认时不调用任何服务', async () => {
+    const { loadConfig, listBackups, downloadBackup } = await import('../services/backup/WebDavBackupService');
+    const { restoreLocalBackup } = await import('../services/backup/BackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
+    ]);
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+
+    const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
+    await clickElement(restoreBtn);
+
+    expect(downloadBackup).not.toHaveBeenCalled();
+    expect(restoreLocalBackup).not.toHaveBeenCalled();
+  });
+
+  it('远端恢复成功后调用完整流程并更新反馈', async () => {
+    const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup, cleanupDownloadedBackup } = await import('../services/backup/WebDavBackupService');
+    const { restoreLocalBackup } = await import('../services/backup/BackupService');
+    const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
+    const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
+    ]);
+    vi.mocked(downloadBackup).mockResolvedValue({ success: true, downloadToken: 'tok-abc' });
+    vi.mocked(resolveDownloadedBackup).mockResolvedValue({ success: true, localPath: '/tmp/dl.zip' });
+    vi.mocked(restoreLocalBackup).mockResolvedValue({
+      success: true, noteCount: 5, boardCount: 2, attachmentCount: 1,
+    });
+    vi.mocked(readDiskStorageData).mockResolvedValue({
+      schemaVersion: 1,
+      storageUpdatedAt: Date.now(),
+      notes: [
+        { id: 'r1', kind: 'text', boardId: 'default', x: 0, y: 0, title: '', content: '恢复便签', color: '#FFF', z: 1, collapsed: false, createdAt: 1, updatedAt: 1 },
+      ],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config },
+    });
+    vi.mocked(flushNow).mockResolvedValue(true);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+
+    const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
+    await clickElement(restoreBtn);
+
+    expect(flushNow).toHaveBeenCalled();
+    expect(pause).toHaveBeenCalled();
+    expect(downloadBackup).toHaveBeenCalledWith(
+      expect.objectContaining({ serverUrl: 'https://dav.example.com' }),
+      'backup-2026.zip',
+    );
+    expect(resolveDownloadedBackup).toHaveBeenCalledWith('tok-abc');
+    expect(restoreLocalBackup).toHaveBeenCalledWith('/tmp/dl.zip');
+    expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-abc');
+    expect(resume).toHaveBeenCalled();
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('远端恢复成功');
+    expect(feedback?.textContent).toContain('5 条便签');
+
+    const state = useStore.getState();
+    expect(state.notesById['r1']).toBeDefined();
+    expect(state.notesById['r1'].content).toBe('恢复便签');
   });
 });

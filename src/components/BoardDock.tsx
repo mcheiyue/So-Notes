@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
-import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw } from "lucide-react";
+import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw, Cloud, Wifi, RefreshCw, Save } from "lucide-react";
 import { Z_INDEX } from "../constants/layout";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { appController } from "../controllers/appController";
@@ -9,6 +9,7 @@ import { listAttachmentFiles, deleteAttachmentFile, attachmentExists, invalidate
 import { detectMissingReferences, detectOrphanAttachments } from "../services/storage/attachmentConsistency";
 import { saveZipDialog, openZipDialog } from "../utils/fileSystem";
 import { createLocalBackup, restoreLocalBackup } from "../services/backup/BackupService";
+import * as WebDavBackupService from "../services/backup/WebDavBackupService";
 import * as persistenceFacade from "../services/storage/PersistenceFacade";
 import { readDiskStorageData } from "../services/storage/tauriPersistence";
 import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
@@ -66,7 +67,7 @@ export const BoardDock = () => {
   } = store;
   const [isInputMode, setIsInputMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsView, setSettingsView] = useState<'MAIN' | 'DATA' | 'THEME' | 'DIAGNOSTICS'>('MAIN');
+  const [settingsView, setSettingsView] = useState<'MAIN' | 'DATA' | 'THEME' | 'DIAGNOSTICS' | 'WEBDAV'>('MAIN');
   const [newBoardName, setNewBoardName] = useState("");
   const [contextMenuBoard, setContextMenuBoard] = useState<{ id: string; name: string; x: number; y: number } | null>(null);
   
@@ -86,6 +87,19 @@ export const BoardDock = () => {
     orphanPaths: string[];
     errorMessage: string | null;
   }>({ status: 'idle', missingCount: 0, orphanCount: 0, orphanPaths: [], errorMessage: null });
+
+  // WebDAV state
+  const [webdavDraft, setWebdavDraft] = useState({
+    serverUrl: '',
+    username: '',
+    password: '',
+    remoteDir: 'SoNotes_Backups/',
+    rememberPassword: false,
+  });
+  const [webdavOperation, setWebdavOperation] = useState<'idle' | 'testing' | 'saving' | 'listing' | 'creating' | 'restoring'>('idle');
+  const [webdavFeedback, setWebdavFeedback] = useState<{ status: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [webdavBackups, setWebdavBackups] = useState<WebDavBackupService.WebDavRemoteBackup[]>([]);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const dockContainerRef = useRef<HTMLDivElement>(null);
@@ -148,8 +162,37 @@ export const BoardDock = () => {
           setZipOperation('idle');
           setSettingsView('MAIN');
           setAttachmentScanState({ status: 'idle', missingCount: 0, orphanCount: 0, orphanPaths: [], errorMessage: null });
+          setWebdavDraft({ serverUrl: '', username: '', password: '', remoteDir: 'SoNotes_Backups/', rememberPassword: false });
+          setWebdavOperation('idle');
+          setWebdavFeedback(null);
+          setWebdavBackups([]);
       }
   }, [showSettings]);
+
+  useEffect(() => {
+    if (settingsView !== 'WEBDAV') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await WebDavBackupService.loadConfig();
+        if (cancelled) return;
+        if (result.success) {
+          setWebdavDraft(prev => ({
+            ...prev,
+            serverUrl: result.serverUrl ?? '',
+            username: result.username ?? '',
+            remoteDir: result.remoteDir ?? 'SoNotes_Backups/',
+            password: '',
+          }));
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setWebdavFeedback({ status: 'error', message: `加载配置失败：${err instanceof Error ? err.message : '未知错误'}` });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [settingsView]);
 
   const onExportClick = async () => {
     try {
@@ -249,6 +292,67 @@ export const BoardDock = () => {
     }
   };
 
+  const applyRestoredDiskData = async (): Promise<boolean> => {
+    const restoredData = await readDiskStorageData('data.json');
+    if (!restoredData) return false;
+
+    restoredData.notes.forEach((note) => {
+      note.boardId = note.boardId || 'default';
+      note.updatedAt = note.updatedAt || note.createdAt || Date.now();
+      note.title = note.title ?? '';
+      note.collapsed = note.collapsed ?? false;
+      note.attachments = sanitizeNoteAttachments(note);
+    });
+
+    if (!restoredData.boards || restoredData.boards.length === 0) {
+      restoredData.boards = [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }];
+      restoredData.currentBoardId = 'default';
+    }
+    if (!restoredData.currentBoardId || !restoredData.boards.some((b) => b.id === restoredData.currentBoardId)) {
+      restoredData.currentBoardId = restoredData.boards[0].id;
+    }
+
+    const normalizedNotes = normalizeNotes(restoredData.notes);
+    const activeBoard = restoredData.boards.find((b) => b.id === restoredData.currentBoardId);
+
+    useStore.setState((state) => ({
+      ...state,
+      notesById: normalizedNotes.notesById,
+      allNoteIds: normalizedNotes.allNoteIds,
+      boardNoteIds: normalizedNotes.boardNoteIds,
+      layoutNotesById: createLayoutNotesById(normalizedNotes.notesById),
+      boards: restoredData.boards,
+      currentBoardId: restoredData.currentBoardId,
+      config: restoredData.config,
+      viewMode: 'BOARD',
+      isDockVisible: true,
+      selectedIds: [],
+      recentlyCreatedIds: [],
+      noteHighlights: {},
+      detachedNotes: [],
+      domainHistory: { undoStack: [], redoStack: [], capacity: state.domainHistory.capacity },
+      isLoaded: true,
+      saveStatus: 'idle',
+      saveError: null,
+      isSaving: false,
+      ...(activeBoard?.viewport ? { viewport: { ...state.viewport, x: activeBoard.viewport.x, y: activeBoard.viewport.y } } : {}),
+    }));
+
+    const theme = restoredData.config.themeMode || 'system';
+    const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const shouldBeDark = theme === 'dark' || (theme === 'system' && isSystemDark);
+    if (shouldBeDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('theme', theme);
+
+    await db.clearWAL();
+    invalidateAttachmentPathCache();
+    return true;
+  };
+
   const onZipRestoreClick = async () => {
     const sourceZipPath = await openZipDialog();
     if (!sourceZipPath) return;
@@ -276,66 +380,11 @@ export const BoardDock = () => {
         return;
       }
 
-      const restoredData = await readDiskStorageData('data.json');
-      if (!restoredData) {
+      const applied = await applyRestoredDiskData();
+      if (!applied) {
         setZipFeedback({ status: 'error', message: '恢复成功但无法读取磁盘数据，请重启应用。' });
         return;
       }
-
-      restoredData.notes.forEach((note) => {
-        note.boardId = note.boardId || 'default';
-        note.updatedAt = note.updatedAt || note.createdAt || Date.now();
-        note.title = note.title ?? '';
-        note.collapsed = note.collapsed ?? false;
-        note.attachments = sanitizeNoteAttachments(note);
-      });
-
-      if (!restoredData.boards || restoredData.boards.length === 0) {
-        restoredData.boards = [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }];
-        restoredData.currentBoardId = 'default';
-      }
-      if (!restoredData.currentBoardId || !restoredData.boards.some((b) => b.id === restoredData.currentBoardId)) {
-        restoredData.currentBoardId = restoredData.boards[0].id;
-      }
-
-      const normalizedNotes = normalizeNotes(restoredData.notes);
-      const activeBoard = restoredData.boards.find((b) => b.id === restoredData.currentBoardId);
-
-      useStore.setState((state) => ({
-        ...state,
-        notesById: normalizedNotes.notesById,
-        allNoteIds: normalizedNotes.allNoteIds,
-        boardNoteIds: normalizedNotes.boardNoteIds,
-        layoutNotesById: createLayoutNotesById(normalizedNotes.notesById),
-        boards: restoredData.boards,
-        currentBoardId: restoredData.currentBoardId,
-        config: restoredData.config,
-        viewMode: 'BOARD',
-        isDockVisible: true,
-        selectedIds: [],
-        recentlyCreatedIds: [],
-        noteHighlights: {},
-        detachedNotes: [],
-        domainHistory: { undoStack: [], redoStack: [], capacity: state.domainHistory.capacity },
-        isLoaded: true,
-        saveStatus: 'idle',
-        saveError: null,
-        isSaving: false,
-        ...(activeBoard?.viewport ? { viewport: { ...state.viewport, x: activeBoard.viewport.x, y: activeBoard.viewport.y } } : {}),
-      }));
-
-      const theme = restoredData.config.themeMode || 'system';
-      const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const shouldBeDark = theme === 'dark' || (theme === 'system' && isSystemDark);
-      if (shouldBeDark) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-      localStorage.setItem('theme', theme);
-
-      await db.clearWAL();
-      invalidateAttachmentPathCache();
 
       setZipFeedback({
         status: 'success',
@@ -352,6 +401,199 @@ export const BoardDock = () => {
         }
       }
       setZipOperation('idle');
+    }
+  };
+
+  const buildWebdavConfig = (): WebDavBackupService.WebDavConfig | null => {
+    if (!webdavDraft.serverUrl.trim() || !webdavDraft.username.trim()) {
+      setWebdavFeedback({ status: 'error', message: '请填写服务器地址和用户名。' });
+      return null;
+    }
+    return {
+      serverUrl: webdavDraft.serverUrl.trim(),
+      username: webdavDraft.username.trim(),
+      password: webdavDraft.password || undefined,
+      remoteDir: webdavDraft.remoteDir.trim() || undefined,
+    };
+  };
+
+  const onWebdavSaveConfig = async () => {
+    const config = buildWebdavConfig();
+    if (!config) return;
+    setWebdavFeedback(null);
+    setWebdavOperation('saving');
+    try {
+      const result = await WebDavBackupService.saveConfig({
+        ...config,
+        rememberPassword: webdavDraft.rememberPassword,
+      });
+      if (result.success) {
+        setWebdavFeedback({ status: 'success', message: '配置已保存。' });
+      } else {
+        setWebdavFeedback({ status: 'error', message: `保存失败：${result.error ?? '未知错误'}` });
+      }
+    } catch (err) {
+      setWebdavFeedback({ status: 'error', message: `保存失败：${err instanceof Error ? err.message : '未知错误'}` });
+    } finally {
+      setWebdavOperation('idle');
+    }
+  };
+
+  const onWebdavClearConfig = async () => {
+    setWebdavFeedback(null);
+    setWebdavOperation('saving');
+    try {
+      const result = await WebDavBackupService.clearConfig();
+      if (result.success) {
+        setWebdavDraft({ serverUrl: '', username: '', password: '', remoteDir: 'SoNotes_Backups/', rememberPassword: false });
+        setWebdavBackups([]);
+        setWebdavFeedback({ status: 'info', message: '配置已清除。' });
+      } else {
+        setWebdavFeedback({ status: 'error', message: `清除失败：${result.error ?? '未知错误'}` });
+      }
+    } catch (err) {
+      setWebdavFeedback({ status: 'error', message: `清除失败：${err instanceof Error ? err.message : '未知错误'}` });
+    } finally {
+      setWebdavOperation('idle');
+    }
+  };
+
+  const onWebdavTestConnection = async () => {
+    const config = buildWebdavConfig();
+    if (!config) return;
+    setWebdavFeedback(null);
+    setWebdavOperation('testing');
+    try {
+      const result = await WebDavBackupService.testConnection(config);
+      if (result.success) {
+        setWebdavFeedback({ status: 'success', message: '连接测试成功。' });
+      } else {
+        setWebdavFeedback({ status: 'error', message: `连接失败：${result.error ?? '未知错误'}` });
+      }
+    } catch (err) {
+      setWebdavFeedback({ status: 'error', message: `连接失败：${err instanceof Error ? err.message : '未知错误'}` });
+    } finally {
+      setWebdavOperation('idle');
+    }
+  };
+
+  const onWebdavListBackups = async () => {
+    const config = buildWebdavConfig();
+    if (!config) return;
+    setWebdavFeedback(null);
+    setWebdavOperation('listing');
+    try {
+      const backups = await WebDavBackupService.listBackups(config);
+      setWebdavBackups(backups);
+      if (backups.length === 0) {
+        setWebdavFeedback({ status: 'info', message: '远端无备份文件。' });
+      }
+    } catch (err) {
+      setWebdavFeedback({ status: 'error', message: `获取备份列表失败：${err instanceof Error ? err.message : '未知错误'}` });
+    } finally {
+      setWebdavOperation('idle');
+    }
+  };
+
+  const onWebdavCreateBackup = async () => {
+    const config = buildWebdavConfig();
+    if (!config) return;
+    setWebdavFeedback(null);
+    setWebdavOperation('creating');
+    try {
+      const flushed = await persistenceFacade.flushNow();
+      if (!flushed) {
+        setWebdavFeedback({ status: 'error', message: '创建远端备份失败：当前数据尚未成功写入磁盘，请稍后重试。' });
+        return;
+      }
+      const result = await WebDavBackupService.createRemoteBackup(config);
+      if (result.success) {
+        setWebdavFeedback({ status: 'success', message: `远端备份已创建：${result.remoteFileName ?? '完成'}` });
+        try {
+          const backups = await WebDavBackupService.listBackups(config);
+          setWebdavBackups(backups);
+        } catch {
+          // list refresh failure is non-critical
+        }
+      } else {
+        setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${result.error ?? '未知错误'}` });
+      }
+    } catch (err) {
+      setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${err instanceof Error ? err.message : '未知错误'}` });
+    } finally {
+      setWebdavOperation('idle');
+    }
+  };
+
+  const onWebdavRestore = async (fileName: string) => {
+    const confirmed = window.confirm(
+      `即将从远端备份 "${fileName}" 覆盖恢复所有数据（便签、看板、图片文件），当前本地数据将被替换。此操作不可撤销，是否继续？`,
+    );
+    if (!confirmed) return;
+
+    const config = buildWebdavConfig();
+    if (!config) return;
+
+    setWebdavFeedback(null);
+    setWebdavOperation('restoring');
+    let pauseOccurred = false;
+    let downloadToken: string | null = null;
+    try {
+      const flushed = await persistenceFacade.flushNow();
+      if (!flushed) {
+        setWebdavFeedback({ status: 'error', message: '恢复失败：当前数据尚未成功写入磁盘，请稍后重试。' });
+        return;
+      }
+      persistenceFacade.pause();
+      pauseOccurred = true;
+
+      const dlResult = await WebDavBackupService.downloadBackup(config, fileName);
+      if (!dlResult.success || !dlResult.downloadToken) {
+        setWebdavFeedback({ status: 'error', message: `下载失败：${dlResult.error ?? '未知错误'}` });
+        return;
+      }
+      downloadToken = dlResult.downloadToken;
+
+      const resolveResult = await WebDavBackupService.resolveDownloadedBackup(downloadToken);
+      if (!resolveResult.success || !resolveResult.localPath) {
+        setWebdavFeedback({ status: 'error', message: `解析下载文件失败：${resolveResult.error ?? '未知错误'}` });
+        return;
+      }
+
+      const result = await restoreLocalBackup(resolveResult.localPath);
+      if (!result.success) {
+        setWebdavFeedback({ status: 'error', message: `恢复失败：${result.error ?? '未知错误'}` });
+        return;
+      }
+
+      const applied = await applyRestoredDiskData();
+      if (!applied) {
+        setWebdavFeedback({ status: 'error', message: '恢复成功但无法读取磁盘数据，请重启应用。' });
+        return;
+      }
+
+      setWebdavFeedback({
+        status: 'success',
+        message: `远端恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
+      });
+    } catch (err) {
+      setWebdavFeedback({ status: 'error', message: `恢复失败：${err instanceof Error ? err.message : '未知错误'}` });
+    } finally {
+      if (downloadToken) {
+        try {
+          await WebDavBackupService.cleanupDownloadedBackup(downloadToken);
+        } catch (cleanupErr) {
+          console.warn('清理下载文件失败:', cleanupErr);
+        }
+      }
+      if (pauseOccurred) {
+        try {
+          persistenceFacade.resume();
+        } catch (resumeError) {
+          console.warn('恢复持久化失败:', resumeError);
+        }
+      }
+      setWebdavOperation('idle');
     }
   };
 
@@ -708,7 +950,7 @@ export const BoardDock = () => {
                         <button
                             type="button"
                             onClick={onZipBackupClick}
-                            disabled={zipOperation !== 'idle'}
+                            disabled={zipOperation !== 'idle' || webdavOperation !== 'idle'}
                             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors disabled:opacity-50"
                             data-testid="zip-backup-button"
                         >
@@ -719,7 +961,7 @@ export const BoardDock = () => {
                         <button
                             type="button"
                             onClick={onZipRestoreClick}
-                            disabled={zipOperation !== 'idle'}
+                            disabled={zipOperation !== 'idle' || webdavOperation !== 'idle'}
                             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors disabled:opacity-50"
                             data-testid="zip-restore-button"
                         >
@@ -800,6 +1042,21 @@ export const BoardDock = () => {
                             </button>
                         )}
 
+                        <div className="mx-3 my-1.5 border-t border-border-subtle" />
+
+                        <button
+                            type="button"
+                            onClick={() => setSettingsView('WEBDAV')}
+                            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
+                            data-testid="webdav-entry-button"
+                        >
+                            <div className="flex items-center gap-2">
+                                <Cloud className="w-4 h-4 text-text-tertiary" />
+                                <span>远端备份/恢复</span>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-text-tertiary" />
+                        </button>
+
         <button
           type="button"
           onClick={() => setSettingsView('DIAGNOSTICS')}
@@ -809,6 +1066,173 @@ export const BoardDock = () => {
                             <span>性能诊断</span>
                             <ChevronRight className="w-4 h-4 ml-auto text-text-tertiary" />
                         </button>
+                    </div>
+                )}
+
+                {settingsView === 'WEBDAV' && (
+                    <div className="py-1 min-w-[320px]">
+                        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border-subtle mb-1">
+                            <button
+                                type="button"
+                                onClick={() => setSettingsView('DATA')}
+                                className="p-1 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded text-text-secondary hover:text-text-primary transition-colors"
+                            >
+                                <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <span className="text-xs text-text-tertiary font-medium">远端备份/恢复 (WebDAV)</span>
+                        </div>
+
+                        <div className="px-3 py-2 space-y-2">
+                            <input
+                                type="text"
+                                placeholder="服务器地址 (https://…)"
+                                value={webdavDraft.serverUrl}
+                                onChange={(e) => setWebdavDraft(prev => ({ ...prev, serverUrl: e.target.value }))}
+                                className="w-full bg-secondary-bg/50 border border-border-subtle rounded px-2 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-blue-400"
+                                data-testid="webdav-server-url"
+                            />
+                            <input
+                                type="text"
+                                placeholder="用户名"
+                                value={webdavDraft.username}
+                                onChange={(e) => setWebdavDraft(prev => ({ ...prev, username: e.target.value }))}
+                                className="w-full bg-secondary-bg/50 border border-border-subtle rounded px-2 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-blue-400"
+                                data-testid="webdav-username"
+                            />
+                            <input
+                                type="password"
+                                placeholder="密码"
+                                value={webdavDraft.password}
+                                onChange={(e) => setWebdavDraft(prev => ({ ...prev, password: e.target.value }))}
+                                className="w-full bg-secondary-bg/50 border border-border-subtle rounded px-2 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-blue-400"
+                                data-testid="webdav-password"
+                            />
+                            <input
+                                type="text"
+                                placeholder="远端目录"
+                                value={webdavDraft.remoteDir}
+                                onChange={(e) => setWebdavDraft(prev => ({ ...prev, remoteDir: e.target.value }))}
+                                className="w-full bg-secondary-bg/50 border border-border-subtle rounded px-2 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-blue-400"
+                                data-testid="webdav-remote-dir"
+                            />
+                            <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={webdavDraft.rememberPassword}
+                                    onChange={(e) => setWebdavDraft(prev => ({ ...prev, rememberPassword: e.target.checked }))}
+                                    className="rounded"
+                                    data-testid="webdav-remember-password"
+                                />
+                                <span>记住密码</span>
+                            </label>
+                        </div>
+
+                        <div className="flex items-center gap-1 px-3 py-1">
+                            <button
+                                type="button"
+                                onClick={onWebdavSaveConfig}
+                                disabled={webdavOperation !== 'idle' || zipOperation !== 'idle'}
+                                className="flex items-center gap-1 px-2 py-1.5 text-xs text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded transition-colors disabled:opacity-50"
+                                data-testid="webdav-save-config"
+                            >
+                                <Save className="w-3.5 h-3.5" />
+                                <span>{webdavOperation === 'saving' ? '保存中…' : '保存配置'}</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={onWebdavClearConfig}
+                                disabled={webdavOperation !== 'idle' || zipOperation !== 'idle'}
+                                className="flex items-center gap-1 px-2 py-1.5 text-xs text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded transition-colors disabled:opacity-50"
+                                data-testid="webdav-clear-config"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>清除配置</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={onWebdavTestConnection}
+                                disabled={webdavOperation !== 'idle' || zipOperation !== 'idle'}
+                                className="flex items-center gap-1 px-2 py-1.5 text-xs text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded transition-colors disabled:opacity-50"
+                                data-testid="webdav-test-connection"
+                            >
+                                <Wifi className="w-3.5 h-3.5" />
+                                <span>{webdavOperation === 'testing' ? '测试中…' : '测试连接'}</span>
+                            </button>
+                        </div>
+
+                        <div className="mx-3 my-1.5 border-t border-border-subtle" />
+
+                        <div className="px-3 py-1 flex items-center gap-1">
+                            <button
+                                type="button"
+                                onClick={onWebdavListBackups}
+                                disabled={webdavOperation !== 'idle' || zipOperation !== 'idle'}
+                                className="flex items-center gap-1 px-2 py-1.5 text-xs text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded transition-colors disabled:opacity-50"
+                                data-testid="webdav-refresh-backups"
+                            >
+                                <RefreshCw className={cn("w-3.5 h-3.5", webdavOperation === 'listing' && "animate-spin")} />
+                                <span>{webdavOperation === 'listing' ? '刷新中…' : '刷新远端列表'}</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={onWebdavCreateBackup}
+                                disabled={webdavOperation !== 'idle' || zipOperation !== 'idle'}
+                                className="flex items-center gap-1 px-2 py-1.5 text-xs text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded transition-colors disabled:opacity-50"
+                                data-testid="webdav-create-backup"
+                            >
+                                <Upload className="w-3.5 h-3.5" />
+                                <span>{webdavOperation === 'creating' ? '创建中…' : '创建远端备份'}</span>
+                            </button>
+                        </div>
+
+                        {webdavBackups.length > 0 && (
+                            <div className="mx-3 my-2 space-y-1" data-testid="webdav-backup-list">
+                                {webdavBackups.map((backup) => (
+                                    <div
+                                        key={backup.fileName}
+                                        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded border border-border-subtle bg-secondary-bg/30 text-xs"
+                                    >
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-text-primary truncate font-medium">{backup.fileName}</p>
+                                            <p className="text-text-tertiary">
+                                                {backup.size != null ? `${(backup.size / 1024).toFixed(1)} KB` : ''}
+                                                {backup.size != null && backup.lastModified ? ' · ' : ''}
+                                                {backup.lastModified ?? ''}
+                                                {backup.readable ? '' : ' · 不可读'}
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => onWebdavRestore(backup.fileName)}
+                                            disabled={webdavOperation !== 'idle' || zipOperation !== 'idle'}
+                                            className="flex items-center gap-1 px-2 py-1 text-xs text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded transition-colors disabled:opacity-50 flex-shrink-0"
+                                            data-testid="webdav-restore-button"
+                                        >
+                                            <RotateCcw className="w-3.5 h-3.5" />
+                                            <span>恢复</span>
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {webdavFeedback && (
+                            <div
+                                data-testid="webdav-feedback"
+                                role={webdavFeedback.status === 'error' ? 'alert' : 'status'}
+                                aria-live="polite"
+                                className={cn(
+                                    'mx-3 mt-2 rounded-md border px-3 py-2 text-xs leading-5',
+                                    webdavFeedback.status === 'error'
+                                        ? 'border-red-100 bg-red-50 text-red-600 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-400'
+                                        : webdavFeedback.status === 'success'
+                                            ? 'border-green-100 bg-green-50 text-green-700 dark:border-green-900/50 dark:bg-green-900/30 dark:text-green-400'
+                                            : 'border-border-subtle bg-secondary-bg/70 text-text-secondary'
+                                )}
+                            >
+                                <p className="font-medium">{webdavFeedback.message}</p>
+                            </div>
+                        )}
                     </div>
                 )}
 
