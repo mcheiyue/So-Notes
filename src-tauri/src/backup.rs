@@ -398,6 +398,14 @@ fn restore_attachment_dir(attach_bak: &Path, attach_dir: &Path, had_old_attach: 
     }
 }
 
+fn ensure_uncompressed_size(label: &str, size: u64, limit: u64) -> Result<(), String> {
+    if size > limit {
+        return Err(format!("{label} 解压后大小超过上限: {size} 字节"));
+    }
+
+    Ok(())
+}
+
 fn validate_storage_data_contract(
     data: &StorageDataForRestore,
     attachment_contents: &std::collections::HashMap<String, Vec<u8>>,
@@ -623,15 +631,41 @@ fn validate_storage_data_contract(
     Ok(data_image_refs)
 }
 
-fn attachment_ref_for_path<'a>(
-    data: &'a StorageDataForRestore,
+fn validate_attachment_refs_for_path(
+    data: &StorageDataForRestore,
     relative_path: &str,
-) -> Option<&'a AttachmentRefForRestore> {
-    data.notes
+    sha256: &str,
+    size: u64,
+) -> Result<(), String> {
+    let mut matched = false;
+
+    for attachment in data
+        .notes
         .iter()
         .filter_map(|note| note.attachments.as_ref())
         .flat_map(|attachments| attachments.iter())
-        .find(|attachment| attachment.relative_path == relative_path)
+        .filter(|attachment| attachment.relative_path == relative_path)
+    {
+        matched = true;
+        if attachment.hash != sha256 {
+            return Err(format!(
+                "图片文件 {relative_path} 的 hash 与 data.json 不匹配: data={}, 实际={}",
+                attachment.hash, sha256
+            ));
+        }
+        if attachment.size != size as f64 {
+            return Err(format!(
+                "图片文件 {relative_path} 的 size 与 data.json 不匹配: data={}, 实际={}",
+                attachment.size, size
+            ));
+        }
+    }
+
+    if !matched {
+        return Err(format!("数据中缺少图片引用: {relative_path}"));
+    }
+
+    Ok(())
 }
 
 fn validate_restored_data(
@@ -751,12 +785,11 @@ fn restore_local_backup_inner(
         match name.as_str() {
             "manifest.json" => {
                 has_manifest = true;
-                if entry.size() > MAX_MANIFEST_JSON_UNCOMPRESSED_BYTES {
-                    return Err(format!(
-                        "manifest.json 解压后大小超过上限: {} 字节",
-                        entry.size()
-                    ));
-                }
+                ensure_uncompressed_size(
+                    "manifest.json",
+                    entry.size(),
+                    MAX_MANIFEST_JSON_UNCOMPRESSED_BYTES,
+                )?;
                 let mut buf = String::new();
                 entry
                     .read_to_string(&mut buf)
@@ -765,12 +798,7 @@ fn restore_local_backup_inner(
             }
             "data.json" => {
                 has_data = true;
-                if entry.size() > MAX_DATA_JSON_UNCOMPRESSED_BYTES {
-                    return Err(format!(
-                        "data.json 解压后大小超过上限: {} 字节",
-                        entry.size()
-                    ));
-                }
+                ensure_uncompressed_size("data.json", entry.size(), MAX_DATA_JSON_UNCOMPRESSED_BYTES)?;
                 let mut buf = Vec::new();
                 entry
                     .read_to_end(&mut buf)
@@ -778,12 +806,11 @@ fn restore_local_backup_inner(
                 data_content = Some(buf);
             }
             path if path.starts_with("attachments/") => {
-                if entry.size() > MAX_ATTACHMENT_UNCOMPRESSED_BYTES {
-                    return Err(format!(
-                        "附件 {path} 解压后大小超过上限: {} 字节",
-                        entry.size()
-                    ));
-                }
+                ensure_uncompressed_size(
+                    &format!("附件 {path}"),
+                    entry.size(),
+                    MAX_ATTACHMENT_UNCOMPRESSED_BYTES,
+                )?;
                 let mut buf = Vec::new();
                 entry
                     .read_to_end(&mut buf)
@@ -930,6 +957,11 @@ fn create_local_backup_inner(
     let data_path = sonotes_base.join("data.json");
     let data_json =
         std::fs::read_to_string(&data_path).map_err(|e| format!("读取 data.json 失败: {e}"))?;
+    ensure_uncompressed_size(
+        "data.json",
+        data_json.len() as u64,
+        MAX_DATA_JSON_UNCOMPRESSED_BYTES,
+    )?;
 
     // 2. 解析 data.json
     let storage_data: StorageDataForRestore =
@@ -1000,6 +1032,16 @@ fn create_local_backup_inner(
         let mut buf = vec![0u8; 64 * 1024];
         let mut total_size: u64 = 0;
 
+        let file_size = file
+            .metadata()
+            .map_err(|e| format!("读取图片文件元数据失败: {ref_path} ({e})"))?
+            .len();
+        ensure_uncompressed_size(
+            &format!("附件 {ref_path}"),
+            file_size,
+            MAX_ATTACHMENT_UNCOMPRESSED_BYTES,
+        )?;
+
         zip.start_file(ref_path, options)
             .map_err(|e| format!("写入 zip 条目 {ref_path} 失败: {e}"))?;
 
@@ -1022,20 +1064,7 @@ fn create_local_backup_inner(
             .map(|b| format!("{b:02x}"))
             .collect::<String>();
 
-        let attachment_ref = attachment_ref_for_path(&storage_data, ref_path)
-            .ok_or_else(|| format!("数据中缺少图片引用: {ref_path}"))?;
-        if attachment_ref.hash != sha256 {
-            return Err(format!(
-                "图片文件 {ref_path} 的 hash 与 data.json 不匹配: data={}, 实际={}",
-                attachment_ref.hash, sha256
-            ));
-        }
-        if attachment_ref.size != total_size as f64 {
-            return Err(format!(
-                "图片文件 {ref_path} 的 size 与 data.json 不匹配: data={}, 实际={}",
-                attachment_ref.size, total_size
-            ));
-        }
+        validate_attachment_refs_for_path(&storage_data, ref_path, &sha256, total_size)?;
 
         attachment_entries.push(BackupAttachmentEntry {
             zip_entry_path: ref_path.clone(),
@@ -1060,6 +1089,11 @@ fn create_local_backup_inner(
 
     let manifest_json = serde_json::to_string_pretty(&manifest)
         .map_err(|e| format!("序列化 manifest.json 失败: {e}"))?;
+    ensure_uncompressed_size(
+        "manifest.json",
+        manifest_json.len() as u64,
+        MAX_MANIFEST_JSON_UNCOMPRESSED_BYTES,
+    )?;
 
     validate_zip_entry_path("manifest.json")?;
     zip.start_file("manifest.json", options)
@@ -1829,6 +1863,73 @@ mod tests {
         let manifest: BackupManifest =
             serde_json::from_reader(archive.by_name("manifest.json").unwrap()).unwrap();
         assert_eq!(manifest.attachments.len(), 1);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn backup_rejects_bad_duplicate_attachment_ref_size() {
+        let root = test_dir("dedupe-bad-size");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let img_content = b"same image with dirty duplicate ref";
+        let rel_path = create_attachment_file(&attach_dir, img_content, "png");
+        let bad_size = img_content.len() as u64 + 1;
+
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[
+                image_note("n1", "b1", &rel_path, img_content.len() as u64),
+                image_note("n2", "b1", &rel_path, bad_size),
+            ],
+        );
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let err = create_local_backup_inner(&sonotes_base, &target).unwrap_err();
+
+        assert!(
+            err.contains("size 与 data.json 不匹配"),
+            "错误信息应提及重复引用的 size 不匹配: {err}"
+        );
+        assert!(!target.exists(), "失败时不应留下半成品备份文件");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn backup_rejects_attachment_over_uncompressed_limit() {
+        let root = test_dir("backup-large-attachment");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let rel_path = "attachments/0000000000000000000000000000000000000000000000000000000000000000.png";
+        let attachment_path = attach_dir.join("0000000000000000000000000000000000000000000000000000000000000000.png");
+        let file = std::fs::File::create(&attachment_path).unwrap();
+        file.set_len(MAX_ATTACHMENT_UNCOMPRESSED_BYTES + 1).unwrap();
+
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[image_note(
+                "n1",
+                "b1",
+                rel_path,
+                MAX_ATTACHMENT_UNCOMPRESSED_BYTES + 1,
+            )],
+        );
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let err = create_local_backup_inner(&sonotes_base, &target).unwrap_err();
+
+        assert!(
+            err.contains("解压后大小超过上限"),
+            "错误信息应提及附件大小上限: {err}"
+        );
+        assert!(!target.exists(), "失败时不应留下半成品备份文件");
 
         let _ = std::fs::remove_dir_all(root);
     }
