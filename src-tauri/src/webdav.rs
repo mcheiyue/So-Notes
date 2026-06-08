@@ -1,16 +1,14 @@
 //! WebDAV 远端备份基础类型、URL/目录规范化与配置持久化
 //!
-//! 本模块提供 WebDAV 远端备份的类型定义、URL 规范化、单级远端目录规范化、
-//! 远端备份文件名校验/生成、配置加载/保存/清除命令及对应单元测试。
-//!
-//! 当前阶段实现配置闭环、连接测试与远端备份列表读取；上传、下载与恢复编排后续补充。
+//! 本模块提供 WebDAV 远端备份的配置闭环、连接测试、远端列表、上传、下载与
+//! 下载 token 生命周期管理。
 
 use crate::backup;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 use url::Url;
 
@@ -49,6 +47,12 @@ const WEBDAV_DOWNLOADS_DIR_NAME: &str = "downloads";
 
 /// 上传同名冲突重试次数上限。
 const UPLOAD_RETRY_LIMIT: u32 = 3;
+
+/// 下载 token 有效期。过期 token 不再允许解析为本地恢复路径。
+const DOWNLOAD_TOKEN_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// WebDAV 临时文件启动清理阈值。
+const WEBDAV_TEMP_FILE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 // ---------------------------------------------------------------------------
 // 序列化类型（前端消费，camelCase）
@@ -689,6 +693,54 @@ fn propfind_request(
     req
 }
 
+fn webdav_request_with_auth(
+    client: &reqwest::Client,
+    method: reqwest::Method,
+    url: &str,
+    username: &str,
+    password: Option<&str>,
+) -> reqwest::RequestBuilder {
+    let mut req = client.request(method, url);
+    if let Some(pw) = password {
+        req = req.basic_auth(username, Some(pw));
+    } else if !username.is_empty() {
+        req = req.basic_auth(username, None::<&str>);
+    }
+    req
+}
+
+async fn ensure_remote_dir_exists(
+    client: &reqwest::Client,
+    dir_url: &str,
+    username: &str,
+    password: Option<&str>,
+) -> Result<(), String> {
+    let propfind_resp = propfind_request(dir_url, "0", username, password)
+        .send()
+        .await
+        .map_err(|_| "WebDAV 地址不可访问".to_string())?;
+
+    match propfind_resp.status().as_u16() {
+        200..=299 => return Ok(()),
+        401 | 403 => return Err("WebDAV 鉴权失败".to_string()),
+        404 => {}
+        status => return Err(format!("WebDAV 服务器返回异常状态码: {status}")),
+    }
+
+    let mkcol_method = reqwest::Method::from_bytes(b"MKCOL")
+        .map_err(|_| "远端备份目录不可用".to_string())?;
+    let mkcol_resp = webdav_request_with_auth(client, mkcol_method, dir_url, username, password)
+        .send()
+        .await
+        .map_err(|_| "远端备份目录不可用".to_string())?;
+
+    match mkcol_resp.status().as_u16() {
+        200 | 201 | 204 => Ok(()),
+        401 | 403 => Err("WebDAV 鉴权失败".to_string()),
+        status => Err(format!("远端备份目录不可用 (HTTP {status})")),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // PROPFIND XML 解析
 // ---------------------------------------------------------------------------
@@ -872,6 +924,12 @@ pub async fn webdav_test_connection(config: WebDavConfig) -> Result<WebDavConnec
     let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
     let dir_url = build_remote_dir_url(&base_url, &remote_dir);
 
+    let client = reqwest::Client::builder()
+        .user_agent("SoNotes/1.5")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|_| "WebDAV 地址不可访问".to_string())?;
+
     let resp = propfind_request(
         &dir_url,
         "0",
@@ -900,10 +958,23 @@ pub async fn webdav_test_connection(config: WebDavConfig) -> Result<WebDavConnec
             success: false,
             error: Some("WebDAV 鉴权失败".to_string()),
         }),
-        404 => Ok(WebDavConnectionResult {
-            success: false,
-            error: Some("远端备份目录不可用".to_string()),
-        }),
+        404 => match ensure_remote_dir_exists(
+            &client,
+            &dir_url,
+            &config.username,
+            config.password.as_deref(),
+        )
+        .await
+        {
+            Ok(()) => Ok(WebDavConnectionResult {
+                success: true,
+                error: None,
+            }),
+            Err(error) => Ok(WebDavConnectionResult {
+                success: false,
+                error: Some(error),
+            }),
+        },
         _ => Ok(WebDavConnectionResult {
             success: false,
             error: Some(format!("WebDAV 服务器返回异常状态码: {status}")),
@@ -956,6 +1027,7 @@ enum DownloadTokenState {
 #[derive(Debug, Clone)]
 struct DownloadTokenEntry {
     state: DownloadTokenState,
+    created_at: SystemTime,
 }
 
 fn download_tokens() -> &'static Mutex<HashMap<String, DownloadTokenEntry>> {
@@ -969,8 +1041,28 @@ fn store_download_token(token: &str, file_path: PathBuf) {
         token.to_string(),
         DownloadTokenEntry {
             state: DownloadTokenState::Ready { file_path },
+            created_at: SystemTime::now(),
         },
     );
+}
+
+#[cfg(test)]
+fn store_download_token_created_at(token: &str, file_path: PathBuf, created_at: SystemTime) {
+    let mut tokens = download_tokens().lock().unwrap();
+    tokens.insert(
+        token.to_string(),
+        DownloadTokenEntry {
+            state: DownloadTokenState::Ready { file_path },
+            created_at,
+        },
+    );
+}
+
+fn token_is_expired(entry: &DownloadTokenEntry) -> bool {
+    SystemTime::now()
+        .duration_since(entry.created_at)
+        .map(|age| age > DOWNLOAD_TOKEN_TTL)
+        .unwrap_or(false)
 }
 
 fn resolve_download_token(token: &str) -> Result<PathBuf, String> {
@@ -978,6 +1070,11 @@ fn resolve_download_token(token: &str) -> Result<PathBuf, String> {
     let entry = tokens
         .get_mut(token)
         .ok_or_else(|| "下载 token 无效".to_string())?;
+
+    if token_is_expired(entry) {
+        entry.state = DownloadTokenState::Cleaned;
+        return Err("下载 token 已过期".to_string());
+    }
 
     match &entry.state {
         DownloadTokenState::Ready { file_path } => {
@@ -995,6 +1092,11 @@ fn cleanup_download_token(token: &str) -> Result<PathBuf, String> {
     let entry = tokens
         .get_mut(token)
         .ok_or_else(|| "下载 token 无效".to_string())?;
+
+    if token_is_expired(entry) {
+        entry.state = DownloadTokenState::Cleaned;
+        return Ok(PathBuf::new());
+    }
 
     match &entry.state {
         DownloadTokenState::Ready { file_path } => {
@@ -1066,6 +1168,53 @@ fn generate_download_token() -> String {
     format!("webdav-dl-{:032x}", nanos)
 }
 
+fn is_stale_file(path: &Path, max_age: Duration) -> bool {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+        .map(|age| age > max_age)
+        .unwrap_or(false)
+}
+
+fn remove_stale_matching_files(dir: &Path, prefix: &str, max_age: Duration) -> Result<(), String> {
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("读取 WebDAV 临时目录失败: {e}"))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() || !validate_file_within_webdav_dir(&path, dir) {
+            continue;
+        }
+
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        if file_name.starts_with(prefix) && file_name.ends_with(".zip") && is_stale_file(&path, max_age) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    Ok(())
+}
+
+pub fn cleanup_webdav_temp_files(app: &tauri::AppHandle) -> Result<(), String> {
+    remove_stale_matching_files(
+        &webdav_pending_dir(app)?,
+        "webdav-pending-",
+        WEBDAV_TEMP_FILE_MAX_AGE,
+    )?;
+    remove_stale_matching_files(
+        &webdav_downloads_dir(app)?,
+        "webdav-dl-",
+        WEBDAV_TEMP_FILE_MAX_AGE,
+    )?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Tauri 命令：上传/下载/Token 生命周期
 // ---------------------------------------------------------------------------
@@ -1110,6 +1259,21 @@ pub async fn webdav_create_remote_backup(
         .map_err(|_| "远端备份上传失败，本地数据未受影响".to_string())?;
 
     let dir_url = build_remote_dir_url(&base_url, &remote_dir);
+    ensure_remote_dir_exists(
+        &client,
+        &dir_url,
+        &config.username,
+        config.password.as_deref(),
+    )
+    .await
+    .map_err(|error| {
+        if error == "WebDAV 鉴权失败" {
+            error
+        } else {
+            "远端备份上传失败，本地数据未受影响".to_string()
+        }
+    })?;
+
     let mut last_error = String::new();
 
     for attempt in 0..UPLOAD_RETRY_LIMIT {
@@ -1211,7 +1375,7 @@ pub async fn webdav_download_backup(
     match status {
         200..=299 => {}
         401 | 403 => return Err("WebDAV 鉴权失败".to_string()),
-        404 => return Err("远端备份目录不可用".to_string()),
+        404 => return Err("远端备份文件不存在".to_string()),
         _ => return Err(format!("远端备份下载失败 (HTTP {status})，本地数据未受影响")),
     }
 
@@ -2255,5 +2419,69 @@ mod tests {
 
         remove_download_token(&token);
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn token_resolve_rejects_expired_token() {
+        let tmp = std::env::temp_dir().join(format!("webdav-token-test-{:016x}", rand::random::<u64>()));
+        std::fs::write(&tmp, b"test").unwrap();
+
+        let token = generate_download_token();
+        store_download_token_created_at(
+            &token,
+            tmp.clone(),
+            SystemTime::now() - DOWNLOAD_TOKEN_TTL - Duration::from_secs(1),
+        );
+
+        let err = resolve_download_token(&token).unwrap_err();
+        assert!(err.contains("已过期"));
+
+        remove_download_token(&token);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn cleanup_expired_token_is_idempotent() {
+        let tmp = std::env::temp_dir().join(format!("webdav-token-test-{:016x}", rand::random::<u64>()));
+        std::fs::write(&tmp, b"test").unwrap();
+
+        let token = generate_download_token();
+        store_download_token_created_at(
+            &token,
+            tmp.clone(),
+            SystemTime::now() - DOWNLOAD_TOKEN_TTL - Duration::from_secs(1),
+        );
+
+        let cleaned = cleanup_download_token(&token).unwrap();
+        assert!(cleaned.as_os_str().is_empty());
+
+        remove_download_token(&token);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn stale_file_detection_respects_max_age() {
+        let missing = std::env::temp_dir().join(format!("missing-webdav-token-test-{:016x}", rand::random::<u64>()));
+        assert!(!is_stale_file(&missing, WEBDAV_TEMP_FILE_MAX_AGE));
+    }
+
+    #[test]
+    fn remove_stale_matching_files_only_removes_matching_zip() {
+        let dir = std::env::temp_dir().join(format!("webdav-cleanup-test-{:016x}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let matching = dir.join("webdav-dl-123.zip");
+        let non_matching = dir.join("other.zip");
+        let not_zip = dir.join("webdav-dl-123.tmp");
+        std::fs::write(&matching, b"zip").unwrap();
+        std::fs::write(&non_matching, b"zip").unwrap();
+        std::fs::write(&not_zip, b"tmp").unwrap();
+
+        remove_stale_matching_files(&dir, "webdav-dl-", Duration::ZERO).unwrap();
+
+        assert!(!matching.exists());
+        assert!(non_matching.exists());
+        assert!(not_zip.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

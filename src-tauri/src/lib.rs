@@ -369,6 +369,10 @@ pub fn run() {
                 persistence::IntentQueue::consumer_loop(rx).await;
             });
 
+            if let Err(error) = webdav::cleanup_webdav_temp_files(app.handle()) {
+                eprintln!("WebDAV 临时文件清理失败：{error}");
+            }
+
             let quick_capture_shortcut =
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyN);
             let toggle_window_shortcut =
