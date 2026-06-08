@@ -106,7 +106,7 @@ describe('StorageService.bootstrap', () => {
     expect(result.recovered).toBe(false);
   });
 
-  it('WAL 非空且时间戳 >= disk 时选择 WAL 来源', async () => {
+  it('DISK 与 WAL 同时间戳时选择 WAL 来源', async () => {
     const time = 5000;
 
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
@@ -126,7 +126,7 @@ describe('StorageService.bootstrap', () => {
     }));
     vi.mocked(db.loadWAL).mockResolvedValueOnce({
       schemaVersion: STORAGE_SCHEMA_VERSION,
-      storageUpdatedAt: time + 1,
+      storageUpdatedAt: time,
       notes: [{
         id: 'w1',
         kind: 'text',
@@ -137,7 +137,7 @@ describe('StorageService.bootstrap', () => {
         content: '',
         color: '#FFFFFF',
         z: 1,
-        createdAt: 100, updatedAt: time + 1
+        createdAt: 100, updatedAt: time
       }],
       boards: [DEFAULT_BOARD],
       currentBoardId: DEFAULT_BOARD.id,
@@ -149,7 +149,7 @@ describe('StorageService.bootstrap', () => {
     expect(result.source).toBe('WAL');
     expect(result.data.notes[0].id).toBe('w1');
     expect(result.syncAction.type).toBe('SYNC_WAL_TO_DISK');
-    expect(result.walTime).toBe(time + 1);
+    expect(result.walTime).toBe(time);
     expect(result.diskTime).toBe(time);
     expect(result.recovered).toBe(false);
   });
@@ -291,6 +291,38 @@ describe('StorageService.bootstrap', () => {
     vi.mocked(db.loadWAL).mockResolvedValueOnce({
       schemaVersion: STORAGE_SCHEMA_VERSION,
       storageUpdatedAt: 500,
+      boards: [DEFAULT_BOARD],
+      currentBoardId: DEFAULT_BOARD.id,
+      config: DEFAULT_CONFIG,
+    } as unknown as StorageData);
+
+    const result = await bootstrap();
+
+    expect(result.source).toBe('DISK');
+    expect(result.data.notes[0].id).toBe('d1');
+    expect(result.walTime).toBe(0);
+    expect(result.diskTime).toBe(200);
+  });
+
+  it('WAL notes 包含坏元素时不会阻断 DISK 回退', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'd1',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: 'DISK',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: 200
+      }],
+      storageUpdatedAt: 200,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      notes: [null],
       boards: [DEFAULT_BOARD],
       currentBoardId: DEFAULT_BOARD.id,
       config: DEFAULT_CONFIG,

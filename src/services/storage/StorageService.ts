@@ -53,7 +53,11 @@ const normalizeWalStorageData = (raw: unknown): StorageData | undefined => {
   if (!raw || typeof raw !== 'object') return undefined;
   if (!Array.isArray((raw as { notes?: unknown }).notes)) return undefined;
 
-  return normalizeStorageDataMetadata(raw as StorageData);
+  try {
+    return normalizeStorageDataMetadata(raw as StorageData);
+  } catch {
+    return undefined;
+  }
 };
 
 const migrateAndSanitize = (data: StorageData): StorageData => {
@@ -140,7 +144,11 @@ export async function bootstrap(): Promise<BootstrapResult> {
   const candidates = [
     { source: 'DISK' as const, data: diskData, time: diskTime },
     { source: 'WAL' as const, data: walData, time: walTime },
-  ].sort((left, right) => right.time - left.time);
+  ].sort((left, right) => {
+    if (left.time !== right.time) return right.time - left.time;
+    if (left.source === right.source) return 0;
+    return left.source === 'WAL' ? -1 : 1;
+  });
 
   let finalData: StorageData = defaultData;
   let source: StorageDataSource = 'NEW';

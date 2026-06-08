@@ -346,7 +346,11 @@ const normalizeWalStorageData = (raw: unknown): StorageData | undefined => {
   if (!raw || typeof raw !== 'object') return undefined;
   if (!Array.isArray((raw as { notes?: unknown }).notes)) return undefined;
 
-  return normalizeStorageDataMetadata(raw as StorageDataInput);
+  try {
+    return normalizeStorageDataMetadata(raw as StorageDataInput);
+  } catch {
+    return undefined;
+  }
 };
 
 const migrateAndSanitizeStorageData = (data: StorageData): StorageData => {
@@ -694,7 +698,11 @@ export const useStore = create<State>()(
       const candidates = [
         { source: 'DISK' as const, data: diskData, time: diskTime },
         { source: 'WAL' as const, data: normalizedWalData, time: walTime },
-      ].sort((left, right) => right.time - left.time);
+      ].sort((left, right) => {
+        if (left.time !== right.time) return right.time - left.time;
+        if (left.source === right.source) return 0;
+        return left.source === 'WAL' ? -1 : 1;
+      });
 
       for (const candidate of candidates) {
         const prepared = tryPrepareStorageSource(candidate.data);

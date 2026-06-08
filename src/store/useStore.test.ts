@@ -132,6 +132,60 @@ describe('v1.4.0 StorageData 演进契约', () => {
     expect(invoke).toHaveBeenCalledWith('load_content', { filename: 'data.json' });
   });
 
+  it('DISK 与 WAL 同时间戳时选择 WAL 避免压掉已写 WAL', async () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 5000,
+      notes: [{
+        id: 'wal-note',
+        kind: 'text',
+        boardId: 'wal-board',
+        x: 10,
+        y: 20,
+        title: 'WAL 数据',
+        content: '同时间戳应保留 WAL',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 5000,
+      }],
+      boards: [{ id: 'wal-board', name: 'WAL 看板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'wal-board',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    });
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 5000,
+      notes: [{
+        id: 'disk-note',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '磁盘数据',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 5000,
+      }],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    }));
+
+    await useStore.getState().init();
+
+    const state = useStore.getState();
+    expect(state.currentBoardId).toBe('wal-board');
+    expect(state.notesById['wal-note']?.title).toBe('WAL 数据');
+    expect(state.notesById['disk-note']).toBeUndefined();
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('较新 WAL 缺少 boards 但 notes 可迁移时会恢复 WAL 数据', async () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
@@ -180,6 +234,46 @@ describe('v1.4.0 StorageData 演进契约', () => {
     vi.mocked(db.loadWAL).mockResolvedValueOnce({
       schemaVersion: STORAGE_SCHEMA_VERSION,
       storageUpdatedAt: 5000,
+      boards: [{ id: 'wal-board', name: 'WAL 看板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'wal-board',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    } as unknown as StorageData);
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 1000,
+      notes: [{
+        id: 'disk-note',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '磁盘数据',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 1000,
+      }],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    }));
+
+    await useStore.getState().init();
+
+    const state = useStore.getState();
+    expect(state.currentBoardId).toBe('default');
+    expect(state.notesById['disk-note']?.title).toBe('磁盘数据');
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it('WAL notes 包含坏元素时不会阻断 DISK 回退', async () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      notes: [null],
       boards: [{ id: 'wal-board', name: 'WAL 看板', icon: '📌', createdAt: 0 }],
       currentBoardId: 'wal-board',
       config: { version: 2, maxZ: 1, themeMode: 'system' },
