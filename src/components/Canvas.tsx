@@ -21,8 +21,7 @@ import {
   resolveAttachmentAssetUrlCached,
 } from "../services/storage/attachmentPersistence";
 import type { AttachmentRef } from "../store/types";
-import { attach } from "../services/storage/StorageService";
-import * as persistenceFacade from "../services/storage/PersistenceFacade";
+
 import { CanvasEngine } from "../canvas/CanvasEngine";
 import { useCanvasGlobalListeners } from "../hooks/useCanvasGlobalListeners";
 import { getImageDimensionsFromFile, getImageDimensionsFromRelativePath } from "../utils/imageDimensions";
@@ -164,7 +163,6 @@ export const Canvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const worldLayerRef = useRef<HTMLDivElement>(null);
   const selectionBoxRef = useRef<HTMLDivElement>(null);
-  const storageHandleRef = useRef<ReturnType<typeof attach> | null>(null);
   const engineRef = useRef<CanvasEngine>(null);
   if (engineRef.current == null) {
     engineRef.current = new CanvasEngine();
@@ -276,44 +274,6 @@ export const Canvas: React.FC = () => {
       engine.dispose();
     };
   }, [engine]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const bootstrap = async () => {
-      if (!useStore.getState().isLoaded) {
-        await useStore.getState().init();
-        if (cancelled) return;
-      }
-
-      const handle = attach({
-        onStatusChange: (status) => {
-          switch (status) {
-            case 'writing-wal':
-            case 'writing-disk':
-              useStore.setState({ isSaving: true, saveStatus: 'saving', saveError: null });
-              break;
-            case 'idle':
-              useStore.setState({ isSaving: false, saveStatus: 'saved', saveError: null, lastSavedAt: Date.now() });
-              break;
-            case 'error':
-              useStore.setState({ isSaving: false, saveStatus: 'error', saveError: '持久化写入失败。' });
-              break;
-          }
-        },
-      });
-      storageHandleRef.current = handle;
-      persistenceFacade.attach(handle);
-    };
-    bootstrap();
-
-    return () => {
-      cancelled = true;
-      persistenceFacade.detach();
-      storageHandleRef.current?.detach();
-      storageHandleRef.current = null;
-    };
-  }, []);
 
   useEffect(() => {
     engine.syncEdgePushLoop();

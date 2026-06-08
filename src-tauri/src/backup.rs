@@ -104,16 +104,46 @@ pub struct RestoreResult {
 
 /// 用于恢复时解析 `data.json` 的结构。
 ///
-/// 与 `StorageDataForBackup` 不同，此类型要求 `schemaVersion` 字段存在，
-/// 并为每个便签要求 `id` 和 `kind` 字段，以便进行完整的恢复验证。
+/// 要求 `config`、`storageUpdatedAt` 和完整的 board/note 必填字段，
+/// 以便在恢复前完整校验 `StorageData` 契约。
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StorageDataForRestore {
     schema_version: u32,
     #[serde(default)]
     current_board_id: Option<String>,
-    boards: Vec<serde_json::Value>,
+    storage_updated_at: f64,
+    config: ConfigForRestore,
+    boards: Vec<BoardForRestore>,
     notes: Vec<NoteForRestore>,
+}
+
+/// 恢复时校验 config 对象的结构。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigForRestore {
+    version: f64,
+    max_z: f64,
+    theme_mode: String,
+}
+
+/// 恢复时校验看板对象的结构。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BoardForRestore {
+    id: String,
+    name: String,
+    icon: String,
+    created_at: f64,
+    #[serde(default)]
+    viewport: Option<BoardViewportForRestore>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BoardViewportForRestore {
+    x: f64,
+    y: f64,
 }
 
 /// 用于恢复时解析便签的结构。
@@ -123,7 +153,32 @@ struct NoteForRestore {
     id: String,
     kind: String,
     #[serde(default)]
-    attachments: Option<Vec<AttachmentRefForBackup>>,
+    board_id: Option<String>,
+    x: f64,
+    y: f64,
+    z: f64,
+    title: String,
+    content: String,
+    color: String,
+    created_at: f64,
+    updated_at: f64,
+    #[serde(default)]
+    deleted_at: Option<f64>,
+    #[serde(default)]
+    collapsed: Option<bool>,
+    #[serde(default)]
+    attachments: Option<Vec<AttachmentRefForRestore>>,
+}
+
+/// 恢复时校验图片引用的结构，包含 `hash` 字段。
+///
+/// 与 `AttachmentRefForBackup` 不同，此类型要求 `hash` 字段存在，
+/// 以便校验它等于文件名主干和实际 SHA-256 内容哈希。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentRefForRestore {
+    hash: String,
+    relative_path: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -336,16 +391,6 @@ fn restore_attachment_dir(attach_bak: &Path, attach_dir: &Path, had_old_attach: 
     }
 }
 
-/// 验证恢复后的 `data.json` 内容符合 SoNotes 契约。
-///
-/// - `schemaVersion` 在支持列表中
-/// - `currentBoardId`（非空时）引用的看板必须存在
-/// - 便签 `kind` 值合法
-/// - Text Note 不得携带附件引用
-/// - Image Note 必须恰好有一个 `attachments/<hash>.<ext>` 引用，且文件名主干是合法哈希
-/// - 每个数据引用的图片必须在清单中存在
-/// - 清单中的每个图片必须被数据引用（拒绝孤立条目）
-/// - 图片文件内容 SHA-256、大小与清单匹配，文件名主干与内容哈希一致
 fn validate_restored_data(
     data: &StorageDataForRestore,
     manifest: &BackupManifest,
@@ -374,25 +419,106 @@ fn validate_restored_data(
         return Err(format!("不支持的 schemaVersion: {}", data.schema_version));
     }
 
-    if let Some(ref board_id) = data.current_board_id {
-        if !board_id.is_empty() {
-            let board_exists = data.boards.iter().any(|b| {
-                b.get("id")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s == board_id)
-                    .unwrap_or(false)
-            });
-            if !board_exists {
-                return Err(format!("currentBoardId 引用了不存在的看板: {board_id}"));
+    if !data.storage_updated_at.is_finite() || data.storage_updated_at < 0.0 {
+        return Err(format!(
+            "storageUpdatedAt 必须为有限非负数，实际值: {}",
+            data.storage_updated_at
+        ));
+    }
+
+    if !data.config.version.is_finite() || data.config.version < 0.0 {
+        return Err("config.version 必须为有效非负数".to_string());
+    }
+    if !data.config.max_z.is_finite() || data.config.max_z < 0.0 {
+        return Err("config.maxZ 必须为有效非负数".to_string());
+    }
+    if data.config.theme_mode.is_empty() {
+        return Err("config.themeMode 不能为空".to_string());
+    }
+
+    let mut board_ids: HashSet<String> = HashSet::new();
+    for board in &data.boards {
+        if board.id.is_empty() {
+            return Err("看板 id 不能为空".to_string());
+        }
+        if board.name.is_empty() {
+            return Err(format!("看板 {} 的 name 不能为空", board.id));
+        }
+        if board.icon.is_empty() {
+            return Err(format!("看板 {} 的 icon 不能为空", board.id));
+        }
+        if !board.created_at.is_finite() || board.created_at < 0.0 {
+            return Err(format!("看板 {} 的 createdAt 必须为有效非负数", board.id));
+        }
+        if let Some(viewport) = &board.viewport {
+            if !viewport.x.is_finite() {
+                return Err(format!("看板 {} 的 viewport x 必须为有限数", board.id));
             }
+            if !viewport.y.is_finite() {
+                return Err(format!("看板 {} 的 viewport y 必须为有限数", board.id));
+            }
+        }
+        if !board_ids.insert(board.id.clone()) {
+            return Err(format!("看板 id 重复: {}", board.id));
+        }
+    }
+
+    if let Some(ref board_id) = data.current_board_id {
+        if !board_id.is_empty() && !board_ids.contains(board_id) {
+            return Err(format!("currentBoardId 引用了不存在的看板: {board_id}"));
         }
     }
 
     let mut data_image_refs: HashSet<String> = HashSet::new();
 
     for note in &data.notes {
+        if note.id.is_empty() {
+            return Err("便签 id 不能为空".to_string());
+        }
         if !VALID_NOTE_KINDS.contains(&note.kind.as_str()) {
             return Err(format!("便签 {} 的 kind 值无效: {}", note.id, note.kind));
+        }
+
+        if !note.x.is_finite() {
+            return Err(format!("便签 {} 的 x 坐标必须为有限数", note.id));
+        }
+        if !note.y.is_finite() {
+            return Err(format!("便签 {} 的 y 坐标必须为有限数", note.id));
+        }
+        if !note.z.is_finite() {
+            return Err(format!("便签 {} 的 z 坐标必须为有限数", note.id));
+        }
+        let _ = (&note.title, &note.content);
+        if note.color.is_empty() {
+            return Err(format!("便签 {} 的 color 不能为空", note.id));
+        }
+        if !note.created_at.is_finite() || note.created_at < 0.0 {
+            return Err(format!("便签 {} 的 createdAt 必须为有效非负数", note.id));
+        }
+        if !note.updated_at.is_finite() || note.updated_at < 0.0 {
+            return Err(format!("便签 {} 的 updatedAt 必须为有效非负数", note.id));
+        }
+        if let Some(deleted_at) = note.deleted_at {
+            if !deleted_at.is_finite() || deleted_at < 0.0 {
+                return Err(format!("便签 {} 的 deletedAt 必须为有效非负数", note.id));
+            }
+        }
+        if let Some(collapsed) = note.collapsed {
+            let _ = collapsed;
+        }
+
+        let is_trashed = note.deleted_at.is_some();
+        match &note.board_id {
+            Some(bid) if !bid.is_empty() => {
+                if !board_ids.contains(bid) {
+                    return Err(format!("便签 {} 引用了不存在的看板: {}", note.id, bid));
+                }
+            }
+            _ => {
+                if !is_trashed {
+                    return Err(format!("非废纸篓便签 {} 缺少有效的 boardId", note.id));
+                }
+            }
         }
 
         match note.kind.as_str() {
@@ -417,7 +543,13 @@ fn validate_restored_data(
                     ));
                 }
 
-                let rel_path = &attachments[0].relative_path;
+                let att = &attachments[0];
+
+                if att.hash.is_empty() {
+                    return Err(format!("图片便签 {} 的附件 hash 不能为空", note.id));
+                }
+
+                let rel_path = &att.relative_path;
                 validate_zip_entry_path(rel_path)?;
 
                 let file_stem = Path::new(rel_path)
@@ -435,6 +567,23 @@ fn validate_restored_data(
                         "图片便签 {} 的附件文件名不是合法哈希: {}",
                         note.id, rel_path
                     ));
+                }
+
+                if att.hash != file_stem {
+                    return Err(format!(
+                        "图片便签 {} 的附件 hash 与文件名不匹配: hash={}, 文件名={}",
+                        note.id, att.hash, file_stem
+                    ));
+                }
+
+                if let Some(content) = attachment_contents.get(rel_path) {
+                    let actual_hash = compute_sha256(content);
+                    if att.hash != actual_hash {
+                        return Err(format!(
+                            "图片便签 {} 的附件 hash 与内容 SHA-256 不匹配: hash={}, 实际={}",
+                            note.id, att.hash, actual_hash
+                        ));
+                    }
                 }
 
                 data_image_refs.insert(rel_path.clone());
@@ -741,8 +890,9 @@ fn create_local_backup_inner(
         }
     }
 
+    let temp_path = resolved_path.with_extension("zip.tmp");
     let zip_file =
-        std::fs::File::create(&resolved_path).map_err(|e| format!("创建 zip 文件失败: {e}"))?;
+        std::fs::File::create(&temp_path).map_err(|e| format!("创建临时 zip 文件失败: {e}"))?;
     let mut zip = zip::ZipWriter::new(zip_file);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
@@ -817,8 +967,15 @@ fn create_local_backup_inner(
     zip.write_all(manifest_json.as_bytes())
         .map_err(|e| format!("写入 manifest.json 内容失败: {e}"))?;
 
-    zip.finish()
-        .map_err(|e| format!("完成 zip 文件失败: {e}"))?;
+    if let Err(e) = zip.finish() {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(format!("完成 zip 文件失败: {e}"));
+    }
+
+    std::fs::rename(&temp_path, &resolved_path).map_err(|e| {
+        let _ = std::fs::remove_file(&temp_path);
+        format!("重命名备份文件失败: {e}")
+    })?;
 
     Ok(BackupResult {
         success: true,
@@ -963,6 +1120,33 @@ mod tests {
             "attachments": [{
                 "id": format!("{id}-att"),
                 "hash": "",
+                "filename": "",
+                "mimeType": "image/png",
+                "size": 0,
+                "relativePath": relative_path,
+                "createdAt": 0
+            }]
+        })
+    }
+
+    fn image_note_for_restore(
+        id: &str,
+        board_id: &str,
+        relative_path: &str,
+        hash: &str,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "kind": "image",
+            "boardId": board_id,
+            "x": 0, "y": 0,
+            "title": "", "content": "",
+            "color": "yellow",
+            "z": 1,
+            "createdAt": 0, "updatedAt": 0,
+            "attachments": [{
+                "id": format!("{id}-att"),
+                "hash": hash,
                 "filename": "",
                 "mimeType": "image/png",
                 "size": 0,
@@ -1898,7 +2082,10 @@ mod tests {
         let hash = compute_test_sha256(img_content);
         let rel_path = format!("attachments/{hash}.png");
 
-        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash)],
+        );
         let att_entry = make_image_attachment_entry(&rel_path, img_content);
         let manifest = minimal_restore_manifest(vec![att_entry]);
         let manifest_json = serde_json::to_string(&manifest).unwrap();
@@ -2036,10 +2223,11 @@ mod tests {
 
         let data_json = serde_json::json!({
             "schemaVersion": 999,
+            "storageUpdatedAt": 0,
             "boards": [],
             "notes": [],
             "currentBoardId": "",
-            "config": {}
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
         })
         .to_string();
         let manifest = minimal_restore_manifest(vec![]);
@@ -2060,10 +2248,11 @@ mod tests {
 
         let data_json = serde_json::json!({
             "schemaVersion": 2,
+            "storageUpdatedAt": 0,
             "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
             "notes": [],
             "currentBoardId": "nonexistent",
-            "config": {}
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
         })
         .to_string();
         let manifest = minimal_restore_manifest(vec![]);
@@ -2087,12 +2276,13 @@ mod tests {
 
         let data_json = serde_json::json!({
             "schemaVersion": 2,
+            "storageUpdatedAt": 0,
             "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
             "notes": [{"id": "n1", "kind": "video", "boardId": "b1",
                 "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
                 "z": 1, "createdAt": 0, "updatedAt": 0}],
             "currentBoardId": "b1",
-            "config": {}
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
         })
         .to_string();
         let manifest = minimal_restore_manifest(vec![]);
@@ -2113,6 +2303,7 @@ mod tests {
 
         let data_json = serde_json::json!({
             "schemaVersion": 2,
+            "storageUpdatedAt": 0,
             "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
             "notes": [{
                 "id": "n1", "kind": "text", "boardId": "b1",
@@ -2123,7 +2314,7 @@ mod tests {
                     "relativePath": "attachments/abc.png", "createdAt": 0}]
             }],
             "currentBoardId": "b1",
-            "config": {}
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
         })
         .to_string();
         let manifest = minimal_restore_manifest(vec![]);
@@ -2144,6 +2335,7 @@ mod tests {
 
         let data_json = serde_json::json!({
             "schemaVersion": 2,
+            "storageUpdatedAt": 0,
             "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
             "notes": [{
                 "id": "n1", "kind": "image", "boardId": "b1",
@@ -2151,7 +2343,7 @@ mod tests {
                 "z": 1, "createdAt": 0, "updatedAt": 0
             }],
             "currentBoardId": "b1",
-            "config": {}
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
         })
         .to_string();
         let manifest = minimal_restore_manifest(vec![]);
@@ -2172,6 +2364,7 @@ mod tests {
 
         let data_json = serde_json::json!({
             "schemaVersion": 2,
+            "storageUpdatedAt": 0,
             "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
             "notes": [{
                 "id": "n1", "kind": "image", "boardId": "b1",
@@ -2185,7 +2378,7 @@ mod tests {
                 ]
             }],
             "currentBoardId": "b1",
-            "config": {}
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
         })
         .to_string();
         let manifest = minimal_restore_manifest(vec![]);
@@ -2206,18 +2399,19 @@ mod tests {
 
         let data_json = serde_json::json!({
             "schemaVersion": 2,
+            "storageUpdatedAt": 0,
             "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
             "notes": [{
                 "id": "n1", "kind": "image", "boardId": "b1",
                 "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
                 "z": 1, "createdAt": 0, "updatedAt": 0,
                 "attachments": [{
-                    "id": "a1", "hash": "", "filename": "", "mimeType": "image/png",
+                    "id": "a1", "hash": "not-a-hash", "filename": "", "mimeType": "image/png",
                     "size": 0, "relativePath": "attachments/not-a-hash.png", "createdAt": 0
                 }]
             }],
             "currentBoardId": "b1",
-            "config": {}
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
         })
         .to_string();
         let manifest = minimal_restore_manifest(vec![]);
@@ -2244,7 +2438,10 @@ mod tests {
         let hash = compute_test_sha256(img_content);
         let rel_path = format!("attachments/{hash}.png");
 
-        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash)],
+        );
 
         let mut bad_entry = make_image_attachment_entry(&rel_path, img_content);
         bad_entry.sha256 = "0".repeat(64);
@@ -2269,7 +2466,10 @@ mod tests {
         let hash = compute_test_sha256(img_content);
         let rel_path = format!("attachments/{hash}.png");
 
-        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash)],
+        );
 
         let mut bad_entry = make_image_attachment_entry(&rel_path, img_content);
         bad_entry.size = 999999;
@@ -2295,7 +2495,10 @@ mod tests {
         let fake_hash = "aabbccdd".repeat(8);
         let rel_path = format!("attachments/{fake_hash}.png");
 
-        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[image_note_for_restore("n1", "b1", &rel_path, &fake_hash)],
+        );
 
         let entry = make_image_attachment_entry(&rel_path, img_content);
         let manifest = minimal_restore_manifest(vec![entry]);
@@ -2304,7 +2507,7 @@ mod tests {
 
         let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
         assert!(
-            err.contains("文件名哈希") || err.contains("不匹配"),
+            err.contains("文件名哈希") || err.contains("SHA-256") || err.contains("不匹配"),
             "{err}"
         );
 
@@ -2352,7 +2555,10 @@ mod tests {
         let hash = compute_test_sha256(img_content);
         let rel_path = format!("attachments/{hash}.png");
 
-        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash)],
+        );
         let entry = make_image_attachment_entry(&rel_path, img_content);
         let manifest = minimal_restore_manifest(vec![entry]);
         let manifest_json = serde_json::to_string(&manifest).unwrap();
@@ -2466,10 +2672,11 @@ mod tests {
 
         let data_json = serde_json::json!({
             "schemaVersion": 999,
+            "storageUpdatedAt": 0,
             "boards": [],
             "notes": [],
             "currentBoardId": "",
-            "config": {}
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
         })
         .to_string();
         let manifest = minimal_restore_manifest(vec![]);
@@ -2503,7 +2710,10 @@ mod tests {
         let hash = compute_test_sha256(img_content);
         let rel_path = format!("attachments/{hash}.png");
 
-        let data_json = restore_data_json_with_board("b1", &[image_note("n1", "b1", &rel_path)]);
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash)],
+        );
         let entry = make_image_attachment_entry(&rel_path, img_content);
         let manifest = minimal_restore_manifest(vec![entry]);
         let manifest_json = serde_json::to_string(&manifest).unwrap();
@@ -2544,6 +2754,456 @@ mod tests {
         let result = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap();
         assert!(result.success);
         assert!(!old_attach_dir.exists(), "旧附件目录应被整体移除");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // 恢复校验：config 缺失/无效
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_missing_config() {
+        let root = test_dir("restore-no-config");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [],
+            "notes": [],
+            "currentBoardId": ""
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("config") || err.contains("解析") || err.contains("missing"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_config_missing_theme_mode() {
+        let root = test_dir("restore-no-theme");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [],
+            "notes": [],
+            "currentBoardId": "",
+            "config": {"version": 1, "maxZ": 1}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("config") || err.contains("themeMode") || err.contains("解析"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // 恢复校验：看板缺少必填字段
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_board_missing_id() {
+        let root = test_dir("restore-board-no-id");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [],
+            "currentBoardId": "",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("看板") || err.contains("id") || err.contains("解析"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_board_missing_name() {
+        let root = test_dir("restore-board-no-name");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "icon": "📋", "createdAt": 0}],
+            "notes": [],
+            "currentBoardId": "",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("name") || err.contains("看板") || err.contains("解析"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_board_missing_icon() {
+        let root = test_dir("restore-board-no-icon");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "createdAt": 0}],
+            "notes": [],
+            "currentBoardId": "",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("icon") || err.contains("看板") || err.contains("解析"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_board_invalid_viewport_x() {
+        let root = test_dir("restore-board-bad-viewport-x");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{
+                "id": "b1",
+                "name": "A",
+                "icon": "📋",
+                "createdAt": 0,
+                "viewport": {"x": "not_a_number", "y": 0}
+            }],
+            "notes": [],
+            "currentBoardId": "",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("viewport") || err.contains("x") || err.contains("解析"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // 恢复校验：便签 boardId 引用
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_note_missing_board_id() {
+        let root = test_dir("restore-note-no-bid");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "text",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0
+            }],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("boardId") || err.contains("缺少"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_note_invalid_board_id() {
+        let root = test_dir("restore-note-bad-bid");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "text", "boardId": "nonexistent",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0
+            }],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("不存在的看板") || err.contains("boardId"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_accepts_trashed_note_without_board_id() {
+        let root = test_dir("restore-trash-no-bid");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "text",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0,
+                "deletedAt": 1700000000000_u64
+            }],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap();
+        assert!(result.success);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // 恢复校验：便签坐标/时间戳无效
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_note_invalid_x() {
+        let root = test_dir("restore-note-bad-x");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "text", "boardId": "b1",
+                "x": "not_a_number", "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0
+            }],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("解析") || err.contains("x") || err.contains("number"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // 恢复校验：附件 hash 与文件名/内容不匹配
+    // =======================================================================
+
+    #[test]
+    fn restore_fails_attachment_hash_empty() {
+        let root = test_dir("restore-hash-empty");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let img_content = b"some content";
+        let hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{hash}.png");
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "image", "boardId": "b1",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0,
+                "attachments": [{
+                    "id": "a1", "hash": "", "filename": "", "mimeType": "image/png",
+                    "size": 0, "relativePath": rel_path, "createdAt": 0
+                }]
+            }],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("hash") || err.contains("不能为空"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_attachment_hash_stem_mismatch() {
+        let root = test_dir("restore-hash-stem-mismatch");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let img_content = b"content for stem mismatch";
+        let real_hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{real_hash}.png");
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "image", "boardId": "b1",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0,
+                "attachments": [{
+                    "id": "a1", "hash": "00000000000000000000000000000000000000000000000000000000000000aa",
+                    "filename": "", "mimeType": "image/png",
+                    "size": 0, "relativePath": rel_path, "createdAt": 0
+                }]
+            }],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(
+            err.contains("hash") || err.contains("文件名") || err.contains("不匹配"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // 备份原子性：失败时不留下半成品 zip
+    // =======================================================================
+
+    #[test]
+    fn backup_failure_leaves_no_zip_or_temp() {
+        let root = test_dir("backup-no-leftover");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let missing_rel_path =
+            "attachments/0000000000000000000000000000000000000000000000000000000000000000.png";
+        let data = minimal_data_json(&[], &[image_note("n1", "b1", missing_rel_path)]);
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target);
+
+        assert!(result.is_err());
+        assert!(!target.exists(), "失败时不应留下最终 zip");
+        assert!(
+            !root.join("backup.zip.tmp").exists(),
+            "失败时不应留下临时 zip"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn backup_success_has_no_temp_leftover() {
+        let root = test_dir("backup-no-tmp");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[text_note("n1", "b1")],
+        );
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let result = create_local_backup_inner(&sonotes_base, &target).unwrap();
+
+        assert!(result.success);
+        assert!(target.exists(), "成功时应存在最终 zip");
+        assert!(
+            !root.join("backup.zip.tmp").exists(),
+            "成功后不应留下临时 zip"
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }

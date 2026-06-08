@@ -13,6 +13,7 @@ import { Spotlight } from "./components/Spotlight";
 import { QuickCaptureOverlay } from "./components/QuickCaptureOverlay";
 import { SmartPasteSplitBubble } from "./components/SmartPasteSplitBubble";
 import { SelectionActionBar } from "./components/SelectionActionBar";
+import { PersistenceController } from "./components/PersistenceController";
 import { WindowShell, WindowShellContentRect } from "./components/WindowShell";
 import { Z_INDEX } from "./constants/layout";
 import { useFPSMonitor } from "./utils/performance";
@@ -200,6 +201,7 @@ function App() {
         {viewMode === 'BOARD' ? <CanvasWithProfiler /> : <TrashGrid />}
       </WindowShell>
 
+      <PersistenceController />
       <ContextMenu />
       <ShortcutsManager />
       <SmartPasteSplitBubble />

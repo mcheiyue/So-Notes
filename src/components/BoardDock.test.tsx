@@ -682,6 +682,71 @@ describe('BoardDock v1.2.4 最小修复', () => {
     await clickElement(getSettingsButton());
     expect(container.querySelector('[data-testid="zip-feedback"]')).toBeNull();
   });
+
+  it('viewMode=TRASH 时 zip 备份仍可正常执行（persistence facade 可用）', async () => {
+    const { saveZipDialog } = await import('../utils/fileSystem');
+    const { createLocalBackup } = await import('../services/backup/BackupService');
+    const { flushNow } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(saveZipDialog).mockResolvedValue('/backups/trash-test.zip');
+    vi.mocked(createLocalBackup).mockResolvedValue({
+      success: true, backupPath: '/backups/trash-test.zip', noteCount: 3, boardCount: 1, attachmentCount: 1,
+    });
+    vi.mocked(flushNow).mockResolvedValue(true);
+
+    useStore.setState({ viewMode: 'TRASH', isDockVisible: true });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('创建本地 zip 备份'));
+
+    expect(flushNow).toHaveBeenCalledTimes(1);
+    expect(saveZipDialog).toHaveBeenCalledTimes(1);
+    expect(createLocalBackup).toHaveBeenCalledWith('/backups/trash-test.zip');
+    const feedback = container.querySelector('[data-testid="zip-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('备份成功');
+    expect(feedback?.textContent).toContain('3 条便签');
+    expect(feedback?.getAttribute('role')).toBe('status');
+  });
+
+  it('viewMode=TRASH 时 zip 恢复仍可正常执行（persistence facade 可用）', async () => {
+    const { openZipDialog } = await import('../utils/fileSystem');
+    const { restoreLocalBackup } = await import('../services/backup/BackupService');
+    const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
+    const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(openZipDialog).mockResolvedValue('/backups/trash-restore.zip');
+    vi.mocked(restoreLocalBackup).mockResolvedValue({
+      success: true, noteCount: 2, boardCount: 1, attachmentCount: 0,
+    });
+    vi.mocked(readDiskStorageData).mockResolvedValue({
+      schemaVersion: 1,
+      storageUpdatedAt: Date.now(),
+      notes: [
+        { id: 'restored-in-trash', kind: 'text', boardId: 'default', x: 0, y: 0, title: '', content: '恢复便签', color: '#FFF', z: 1, collapsed: false, createdAt: 1, updatedAt: 1 },
+      ],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config },
+    });
+    vi.mocked(flushNow).mockResolvedValue(true);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    useStore.setState({ viewMode: 'TRASH', isDockVisible: true });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('从 zip 覆盖恢复'));
+
+    expect(flushNow).toHaveBeenCalledTimes(1);
+    expect(pause).toHaveBeenCalled();
+    expect(restoreLocalBackup).toHaveBeenCalledWith('/backups/trash-restore.zip');
+    expect(resume).toHaveBeenCalled();
+
+    const feedback = container.querySelector('[data-testid="zip-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('恢复成功');
+    expect(feedback?.getAttribute('role')).toBe('status');
+  });
 });
 
 describe('BoardDock 图片文件一致性管理入口', () => {
