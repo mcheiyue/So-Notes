@@ -1047,6 +1047,7 @@ fn create_local_backup_inner(
         .map_err(|e| format!("写入 data.json 内容失败: {e}"))?;
 
     let mut attachment_entries = Vec::new();
+    let mut total_attachment_bytes: u64 = 0;
     for (ref_path, file_path) in &validated_images {
         // 验证路径格式（collect_unique_image_refs 已验证，这里做双重确认）
         validate_zip_entry_path(ref_path)?;
@@ -1067,6 +1068,14 @@ fn create_local_backup_inner(
             file_size,
             MAX_ATTACHMENT_UNCOMPRESSED_BYTES,
         )?;
+        total_attachment_bytes = total_attachment_bytes
+            .checked_add(file_size)
+            .ok_or_else(|| "附件总大小超过上限".to_string())?;
+        if total_attachment_bytes > MAX_TOTAL_ATTACHMENT_UNCOMPRESSED_BYTES {
+            return Err(format!(
+                "附件总解压大小超过上限: {total_attachment_bytes} 字节"
+            ));
+        }
 
         zip.start_file(ref_path, options)
             .map_err(|e| format!("写入 zip 条目 {ref_path} 失败: {e}"))?;
@@ -1955,6 +1964,36 @@ mod tests {
             err.contains("解压后大小超过上限"),
             "错误信息应提及附件大小上限: {err}"
         );
+        assert!(!target.exists(), "失败时不应留下半成品备份文件");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn backup_rejects_total_attachment_size_over_restore_limit() {
+        let root = test_dir("backup-total-attachment-size");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let first_content = vec![b'a'; 40];
+        let second_content = vec![b'b'; 40];
+        let first_rel_path = create_attachment_file(&attach_dir, &first_content, "png");
+        let second_rel_path = create_attachment_file(&attach_dir, &second_content, "png");
+
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[
+                image_note("n1", "b1", &first_rel_path, first_content.len() as u64),
+                image_note("n2", "b1", &second_rel_path, second_content.len() as u64),
+            ],
+        );
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let err = create_local_backup_inner(&sonotes_base, &target).unwrap_err();
+
+        assert!(err.contains("附件总解压大小超过上限"), "{err}");
         assert!(!target.exists(), "失败时不应留下半成品备份文件");
 
         let _ = std::fs::remove_dir_all(root);

@@ -90,7 +90,7 @@ describe('v1.4.0 StorageData 演进契约', () => {
     });
   });
 
-  it('磁盘是较新空快照时优先保留较旧非空 WAL', async () => {
+  it('磁盘是较新空快照时选择 DISK 避免旧 WAL 复活', async () => {
     const saveSpy = vi.fn(async () => true);
     useStore.setState({ saveToDisk: saveSpy });
 
@@ -126,9 +126,9 @@ describe('v1.4.0 StorageData 演进契约', () => {
     await useStore.getState().init();
 
     const state = useStore.getState();
-    expect(state.currentBoardId).toBe('wal-board');
-    expect(state.notesById['wal-note']?.title).toBe('WAL 数据');
-    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(state.currentBoardId).toBe('default');
+    expect(state.notesById['wal-note']).toBeUndefined();
+    expect(saveSpy).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledWith('load_content', { filename: 'data.json' });
   });
 });
@@ -1082,11 +1082,35 @@ describe('useStore 保存状态可见性契约', () => {
     expect(state.saveError).toBe('写入本地缓存失败，未保存到磁盘。');
   });
 
-  it('空便签状态会阻止写入 WAL 和磁盘', async () => {
+  it('合法空便签状态会写入 WAL 和磁盘', async () => {
     useStore.setState({
       ...createEmptyNormalizedNotesState(),
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
       currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+    vi.mocked(db.saveWAL).mockResolvedValueOnce(true);
+    vi.mocked(invoke).mockResolvedValueOnce({ success: true, io_duration_ms: 0, retries: 0 });
+
+    const saved = await useStore.getState().saveToDisk();
+    const state = useStore.getState();
+
+    expect(saved).toBe(true);
+    expect(db.saveWAL).toHaveBeenCalledWith(expect.objectContaining({ notes: [] }));
+    expect(invoke).toHaveBeenCalledWith('save_content', expect.objectContaining({
+      filename: 'data.json',
+      content: expect.stringContaining('"notes": []'),
+    }));
+    expect(state.isSaving).toBe(false);
+    expect(state.saveStatus).toBe('saved');
+    expect(state.saveError).toBeNull();
+  });
+
+  it('无效存储契约会阻止写入 WAL 和磁盘', async () => {
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [],
+      currentBoardId: '',
       config: { ...useStore.getState().config, maxZ: 1 },
     });
 
@@ -1098,7 +1122,7 @@ describe('useStore 保存状态可见性契约', () => {
     expect(invoke).not.toHaveBeenCalledWith('save_content', expect.anything());
     expect(state.isSaving).toBe(false);
     expect(state.saveStatus).toBe('error');
-    expect(state.saveError).toBe('检测到空便签数据，已阻止覆盖本地存储。');
+    expect(state.saveError).toBe('检测到无效存储数据，已阻止覆盖本地存储。');
   });
 
   it('磁盘写入异常时写入 error 状态并透传错误消息', async () => {

@@ -322,10 +322,13 @@ const getLegacyStorageUpdatedAt = (notes: Note[]): number => {
   return Math.max(...notes.map((note) => note.updatedAt || 0));
 };
 
-const isEmptyStorageData = (data: StorageData): boolean => data.notes.length === 0;
-
 const hasInvalidStorageContract = (data: StorageData): boolean =>
-  data.boards.length === 0 || !data.currentBoardId || !data.boards.some((board) => board.id === data.currentBoardId);
+  !Array.isArray(data.notes)
+  || !Array.isArray(data.boards)
+  || data.boards.length === 0
+  || typeof data.currentBoardId !== 'string'
+  || data.currentBoardId.length === 0
+  || !data.boards.some((board) => board.id === data.currentBoardId);
 
 const hasValidStorageContract = (data: StorageData | null | undefined): data is StorageData =>
   data != null && !hasInvalidStorageContract(data);
@@ -2292,12 +2295,12 @@ export const useStore = create<State>()(
       const currentGen = saveGenerationId + 1;
       set({ isSaving: true, saveStatus: 'saving', saveError: null, saveGenerationId: currentGen });
 
-      if (isEmptyStorageData(storageData)) {
+      if (hasInvalidStorageContract(storageData)) {
         if (get().saveGenerationId === currentGen) {
           set({
             isSaving: false,
             saveStatus: 'error',
-            saveError: '检测到空便签数据，已阻止覆盖本地存储。',
+            saveError: '检测到无效存储数据，已阻止覆盖本地存储。',
           });
         }
         return false;

@@ -36,7 +36,12 @@ const buildNewDefaultData = (): StorageData =>
   });
 
 const hasInvalidStorageContract = (data: StorageData): boolean =>
-  data.boards.length === 0 || !data.currentBoardId || !data.boards.some((board) => board.id === data.currentBoardId);
+  !Array.isArray(data.notes)
+  || !Array.isArray(data.boards)
+  || data.boards.length === 0
+  || typeof data.currentBoardId !== 'string'
+  || data.currentBoardId.length === 0
+  || !data.boards.some((board) => board.id === data.currentBoardId);
 
 const hasValidStorageContract = (data: StorageData | null | undefined): data is StorageData =>
   data != null && !hasInvalidStorageContract(data);

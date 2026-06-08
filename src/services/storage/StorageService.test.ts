@@ -226,6 +226,38 @@ describe('StorageService.bootstrap', () => {
     expect(result.recovered).toBe(false);
   });
 
+  it('WAL 缺少 boards 时不会在契约仲裁阶段抛错', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'd1',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: 200
+      }],
+      storageUpdatedAt: 200,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 500,
+      notes: [],
+      currentBoardId: DEFAULT_BOARD.id,
+      config: DEFAULT_CONFIG,
+    } as unknown as StorageData);
+
+    const result = await bootstrap();
+
+    expect(result.source).toBe('DISK');
+    expect(result.data.notes[0].id).toBe('d1');
+    expect(result.walTime).toBe(500);
+    expect(result.diskTime).toBe(200);
+  });
+
   it('双源均无数据时返回 NEW 默认领域', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(null);
     vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
