@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-let capturedBridgeCallback: ((state: Record<string, unknown>) => void) | null = null;
+let capturedBridgeCallback: ((state: DomainState) => void) | null = null;
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async () => null),
@@ -16,7 +16,7 @@ vi.mock('../../store/db', () => ({
 
 vi.mock('../../store/domainStore', () => ({
   setDomainPersistenceBridge: vi.fn((bridge: unknown) => {
-    capturedBridgeCallback = bridge as (state: Record<string, unknown>) => void;
+    capturedBridgeCallback = bridge as (state: DomainState) => void;
     return vi.fn();
   }),
 }));
@@ -34,6 +34,7 @@ import { db } from '../../store/db';
 import { setDomainPersistenceBridge } from '../../store/domainStore';
 import { bootstrap, attach } from './StorageService';
 import { STORAGE_SCHEMA_VERSION, DEFAULT_BOARD, DEFAULT_CONFIG } from '../../store/types';
+import type { DomainState } from '../../store/domainStore';
 import type { StorageData, AttachmentRef } from '../../store/types';
 
 type DiskJsonFixture = Partial<Omit<StorageData, 'notes'>> & {
@@ -413,7 +414,7 @@ describe('StorageService.bootstrap', () => {
   });
 });
 
-const makeDomainState = () => ({
+const makeDomainState = (): DomainState => ({
   notesById: {
     'note-1': {
       id: 'note-1',
@@ -437,7 +438,8 @@ const makeDomainState = () => ({
       boardId: DEFAULT_BOARD.id,
       x: 10,
       y: 20,
-      z: 1,
+      deletedAt: null,
+      color: '#FFFFFF',
     },
   },
   boards: [DEFAULT_BOARD],
@@ -445,7 +447,7 @@ const makeDomainState = () => ({
   config: { ...DEFAULT_CONFIG },
 });
 
-const makeEmptyDomainState = () => ({
+const makeEmptyDomainState = (): DomainState => ({
   notesById: {},
   allNoteIds: [],
   boardNoteIds: {},
@@ -622,13 +624,45 @@ describe('StorageService.attach', () => {
     handle.detach();
   });
 
-  it('flushPersistNow 检测到空领域状态时拒绝写入 WAL 和磁盘', async () => {
+  it('flushPersistNow 会写入 attach 时传入的初始领域状态', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+    const initialState = makeDomainState();
+
+    const handle = attach({ writeWAL, writeDisk, initialState });
+
+    const result = await handle.flushPersistNow();
+
+    expect(result).toBe(true);
+    expect(writeWAL).toHaveBeenCalledTimes(1);
+    expect(writeDisk).toHaveBeenCalledTimes(1);
+    expect(writeDisk).toHaveBeenCalledWith(expect.objectContaining({ notes: [initialState.notesById['note-1']] }));
+
+    handle.detach();
+  });
+
+  it('flushPersistNow 不会写入空初始领域状态', async () => {
+    const writeWAL = vi.fn(async () => true);
+    const writeDisk = vi.fn(async () => true);
+
+    const handle = attach({ writeWAL, writeDisk, initialState: makeEmptyDomainState() });
+
+    const result = await handle.flushPersistNow();
+
+    expect(result).toBe(true);
+    expect(writeWAL).not.toHaveBeenCalled();
+    expect(writeDisk).not.toHaveBeenCalled();
+
+    handle.detach();
+  });
+
+  it('flushPersistNow 检测到无效领域契约时拒绝写入 WAL 和磁盘', async () => {
     const writeWAL = vi.fn(async () => true);
     const writeDisk = vi.fn(async () => true);
 
     const handle = attach({ writeWAL, writeDisk });
 
-    capturedBridgeCallback!(makeEmptyDomainState());
+    capturedBridgeCallback!({ ...makeEmptyDomainState(), boards: [] });
 
     const result = await handle.flushPersistNow();
 
@@ -640,13 +674,13 @@ describe('StorageService.attach', () => {
     handle.detach();
   });
 
-  it('定时写入检测到空领域状态时拒绝写入 WAL 和磁盘', async () => {
+  it('定时写入检测到无效领域契约时拒绝写入 WAL 和磁盘', async () => {
     const writeWAL = vi.fn(async () => true);
     const writeDisk = vi.fn(async () => true);
 
     const handle = attach({ writeWAL, writeDisk, walThrottleMs: 100, diskDebounceMs: 200 });
 
-    capturedBridgeCallback!(makeEmptyDomainState());
+    capturedBridgeCallback!({ ...makeEmptyDomainState(), boards: [] });
     await vi.advanceTimersByTimeAsync(300);
 
     expect(writeWAL).not.toHaveBeenCalled();

@@ -4,6 +4,19 @@ import { attach } from '../services/storage/StorageService';
 import type { AttachResult } from '../services/storage/types';
 import * as persistenceFacade from '../services/storage/PersistenceFacade';
 
+const getCurrentDomainState = () => {
+  const state = useStore.getState();
+  return {
+    notesById: state.notesById,
+    allNoteIds: state.allNoteIds,
+    boardNoteIds: state.boardNoteIds,
+    layoutNotesById: state.layoutNotesById,
+    boards: state.boards,
+    currentBoardId: state.currentBoardId,
+    config: state.config,
+  };
+};
+
 export const PersistenceController = () => {
   const storageHandleRef = useRef<AttachResult | null>(null);
 
@@ -17,6 +30,7 @@ export const PersistenceController = () => {
       }
 
       const handle = attach({
+        initialState: getCurrentDomainState(),
         onStatusChange: (status) => {
           switch (status) {
             case 'writing-wal':

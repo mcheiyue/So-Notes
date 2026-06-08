@@ -1,4 +1,5 @@
 import type { StorageData } from '../../store/types';
+import type { DomainState } from '../../store/domainStore';
 
 /**
  * 数据来源标记。
@@ -45,6 +46,7 @@ export type PersistenceStatus = 'idle' | 'dirty' | 'writing-wal' | 'writing-disk
  * 所有时间参数单位为毫秒；writer 注入用于测试。
  */
 export interface AttachOptions {
+  readonly initialState?: DomainState;
   /** WAL 写入节流间隔（毫秒），默认 100 */
   readonly walThrottleMs?: number;
   /** 磁盘写入防抖间隔（毫秒），默认 2000 */

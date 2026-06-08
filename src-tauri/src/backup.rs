@@ -110,8 +110,7 @@ pub struct RestoreResult {
 #[serde(rename_all = "camelCase")]
 struct StorageDataForRestore {
     schema_version: u32,
-    #[serde(default)]
-    current_board_id: Option<String>,
+    current_board_id: String,
     storage_updated_at: f64,
     config: ConfigForRestore,
     boards: Vec<BoardForRestore>,
@@ -177,8 +176,13 @@ struct NoteForRestore {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AttachmentRefForRestore {
+    id: String,
     hash: String,
+    filename: String,
+    mime_type: String,
+    size: f64,
     relative_path: String,
+    created_at: f64,
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +299,61 @@ struct NoteForBackup {
 #[serde(rename_all = "camelCase")]
 struct AttachmentRefForBackup {
     relative_path: String,
+}
+
+struct TempZipGuard {
+    path: PathBuf,
+    keep: bool,
+}
+
+impl TempZipGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, keep: false }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn keep(mut self) {
+        self.keep = true;
+    }
+}
+
+impl Drop for TempZipGuard {
+    fn drop(&mut self) {
+        if !self.keep {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn create_temp_zip_guard(resolved_path: &Path) -> Result<(TempZipGuard, std::fs::File), String> {
+    let parent = resolved_path
+        .parent()
+        .ok_or_else(|| format!("备份目标路径缺少父目录: {}", resolved_path.display()))?;
+    let file_name = resolved_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("备份目标文件名无效: {}", resolved_path.display()))?;
+
+    for _ in 0..16 {
+        let temp_path = parent.join(format!(
+            ".{file_name}.{:032x}.tmp",
+            rand::random::<u128>()
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => return Ok((TempZipGuard::new(temp_path), file)),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("创建临时 zip 文件失败: {err}")),
+        }
+    }
+
+    Err("创建临时 zip 文件失败: 临时文件名冲突过多".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +495,10 @@ fn validate_restored_data(
         return Err("config.themeMode 不能为空".to_string());
     }
 
+    if data.boards.is_empty() {
+        return Err("boards 不能为空".to_string());
+    }
+
     let mut board_ids: HashSet<String> = HashSet::new();
     for board in &data.boards {
         if board.id.is_empty() {
@@ -463,17 +526,25 @@ fn validate_restored_data(
         }
     }
 
-    if let Some(ref board_id) = data.current_board_id {
-        if !board_id.is_empty() && !board_ids.contains(board_id) {
-            return Err(format!("currentBoardId 引用了不存在的看板: {board_id}"));
-        }
+    if data.current_board_id.is_empty() {
+        return Err("currentBoardId 不能为空".to_string());
+    }
+    if !board_ids.contains(&data.current_board_id) {
+        return Err(format!(
+            "currentBoardId 引用了不存在的看板: {}",
+            data.current_board_id
+        ));
     }
 
     let mut data_image_refs: HashSet<String> = HashSet::new();
+    let mut note_ids: HashSet<String> = HashSet::new();
 
     for note in &data.notes {
         if note.id.is_empty() {
             return Err("便签 id 不能为空".to_string());
+        }
+        if !note_ids.insert(note.id.clone()) {
+            return Err(format!("便签 id 重复: {}", note.id));
         }
         if !VALID_NOTE_KINDS.contains(&note.kind.as_str()) {
             return Err(format!("便签 {} 的 kind 值无效: {}", note.id, note.kind));
@@ -545,8 +616,37 @@ fn validate_restored_data(
 
                 let att = &attachments[0];
 
+                if att.id.is_empty() {
+                    return Err(format!("图片便签 {} 的附件 id 不能为空", note.id));
+                }
                 if att.hash.is_empty() {
                     return Err(format!("图片便签 {} 的附件 hash 不能为空", note.id));
+                }
+                if att.filename.is_empty() {
+                    return Err(format!("图片便签 {} 的附件 filename 不能为空", note.id));
+                }
+                if att.mime_type.is_empty() {
+                    return Err(format!("图片便签 {} 的附件 mimeType 不能为空", note.id));
+                }
+                if !att.size.is_finite() || att.size < 0.0 {
+                    return Err(format!("图片便签 {} 的附件 size 必须为有效非负数", note.id));
+                }
+                if !att.created_at.is_finite() || att.created_at < 0.0 {
+                    return Err(format!(
+                        "图片便签 {} 的附件 createdAt 必须为有效非负数",
+                        note.id
+                    ));
+                }
+
+                if let Some(content) = attachment_contents.get(&att.relative_path) {
+                    if content.len() as f64 != att.size {
+                        return Err(format!(
+                            "图片便签 {} 的附件 size 与文件大小不匹配: size={}, 实际={}",
+                            note.id,
+                            att.size,
+                            content.len()
+                        ));
+                    }
                 }
 
                 let rel_path = &att.relative_path;
@@ -890,9 +990,7 @@ fn create_local_backup_inner(
         }
     }
 
-    let temp_path = resolved_path.with_extension("zip.tmp");
-    let zip_file =
-        std::fs::File::create(&temp_path).map_err(|e| format!("创建临时 zip 文件失败: {e}"))?;
+    let (temp_guard, zip_file) = create_temp_zip_guard(&resolved_path)?;
     let mut zip = zip::ZipWriter::new(zip_file);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
@@ -967,15 +1065,10 @@ fn create_local_backup_inner(
     zip.write_all(manifest_json.as_bytes())
         .map_err(|e| format!("写入 manifest.json 内容失败: {e}"))?;
 
-    if let Err(e) = zip.finish() {
-        let _ = std::fs::remove_file(&temp_path);
-        return Err(format!("完成 zip 文件失败: {e}"));
-    }
+    zip.finish().map_err(|e| format!("完成 zip 文件失败: {e}"))?;
 
-    std::fs::rename(&temp_path, &resolved_path).map_err(|e| {
-        let _ = std::fs::remove_file(&temp_path);
-        format!("重命名备份文件失败: {e}")
-    })?;
+    std::fs::rename(temp_guard.path(), &resolved_path).map_err(|e| format!("重命名备份文件失败: {e}"))?;
+    temp_guard.keep();
 
     Ok(BackupResult {
         success: true,
@@ -1057,12 +1150,17 @@ mod tests {
 
     /// 生成最简 data.json 字符串。
     fn minimal_data_json(boards: &[serde_json::Value], notes: &[serde_json::Value]) -> String {
+        let current_board_id = boards
+            .first()
+            .and_then(|board| board.get("id"))
+            .and_then(|id| id.as_str())
+            .unwrap_or("");
         serde_json::json!({
             "schemaVersion": 2,
             "storageUpdatedAt": 0,
             "boards": boards,
             "notes": notes,
-            "currentBoardId": "",
+            "currentBoardId": current_board_id,
             "config": { "version": 1, "maxZ": 1, "themeMode": "light" }
         })
         .to_string()
@@ -1134,7 +1232,12 @@ mod tests {
         board_id: &str,
         relative_path: &str,
         hash: &str,
+        size: u64,
     ) -> serde_json::Value {
+        let filename = Path::new(relative_path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or(relative_path);
         serde_json::json!({
             "id": id,
             "kind": "image",
@@ -1147,9 +1250,9 @@ mod tests {
             "attachments": [{
                 "id": format!("{id}-att"),
                 "hash": hash,
-                "filename": "",
+                "filename": filename,
                 "mimeType": "image/png",
-                "size": 0,
+                "size": size,
                 "relativePath": relative_path,
                 "createdAt": 0
             }]
@@ -2084,7 +2187,7 @@ mod tests {
 
         let data_json = restore_data_json_with_board(
             "b1",
-            &[image_note_for_restore("n1", "b1", &rel_path, &hash)],
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash, img_content.len() as u64)],
         );
         let att_entry = make_image_attachment_entry(&rel_path, img_content);
         let manifest = minimal_restore_manifest(vec![att_entry]);
@@ -2269,6 +2372,80 @@ mod tests {
     }
 
     #[test]
+    fn restore_fails_empty_boards() {
+        let root = test_dir("restore-empty-boards");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [],
+            "notes": [],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("boards") || err.contains("看板"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_empty_current_board_id() {
+        let root = test_dir("restore-empty-current-board");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [],
+            "currentBoardId": "",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("currentBoardId") || err.contains("不能为空"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_missing_current_board_id() {
+        let root = test_dir("restore-no-current-board");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [],
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("currentBoardId") || err.contains("解析"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn restore_fails_invalid_note_kind() {
         let root = test_dir("restore-bad-kind");
         let sonotes_base = root.join("SoNotes");
@@ -2406,7 +2583,7 @@ mod tests {
                 "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
                 "z": 1, "createdAt": 0, "updatedAt": 0,
                 "attachments": [{
-                    "id": "a1", "hash": "not-a-hash", "filename": "", "mimeType": "image/png",
+                    "id": "a1", "hash": "not-a-hash", "filename": "not-a-hash.png", "mimeType": "image/png",
                     "size": 0, "relativePath": "attachments/not-a-hash.png", "createdAt": 0
                 }]
             }],
@@ -2440,7 +2617,7 @@ mod tests {
 
         let data_json = restore_data_json_with_board(
             "b1",
-            &[image_note_for_restore("n1", "b1", &rel_path, &hash)],
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash, img_content.len() as u64)],
         );
 
         let mut bad_entry = make_image_attachment_entry(&rel_path, img_content);
@@ -2468,7 +2645,7 @@ mod tests {
 
         let data_json = restore_data_json_with_board(
             "b1",
-            &[image_note_for_restore("n1", "b1", &rel_path, &hash)],
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash, img_content.len() as u64)],
         );
 
         let mut bad_entry = make_image_attachment_entry(&rel_path, img_content);
@@ -2497,7 +2674,7 @@ mod tests {
 
         let data_json = restore_data_json_with_board(
             "b1",
-            &[image_note_for_restore("n1", "b1", &rel_path, &fake_hash)],
+            &[image_note_for_restore("n1", "b1", &rel_path, &fake_hash, img_content.len() as u64)],
         );
 
         let entry = make_image_attachment_entry(&rel_path, img_content);
@@ -2557,7 +2734,7 @@ mod tests {
 
         let data_json = restore_data_json_with_board(
             "b1",
-            &[image_note_for_restore("n1", "b1", &rel_path, &hash)],
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash, img_content.len() as u64)],
         );
         let entry = make_image_attachment_entry(&rel_path, img_content);
         let manifest = minimal_restore_manifest(vec![entry]);
@@ -2712,7 +2889,7 @@ mod tests {
 
         let data_json = restore_data_json_with_board(
             "b1",
-            &[image_note_for_restore("n1", "b1", &rel_path, &hash)],
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash, img_content.len() as u64)],
         );
         let entry = make_image_attachment_entry(&rel_path, img_content);
         let manifest = minimal_restore_manifest(vec![entry]);
@@ -3034,6 +3211,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn restore_fails_duplicate_note_id() {
+        let root = test_dir("restore-duplicate-note-id");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [
+                {
+                    "id": "n1", "kind": "text", "boardId": "b1",
+                    "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                    "z": 1, "createdAt": 0, "updatedAt": 0
+                },
+                {
+                    "id": "n1", "kind": "text", "boardId": "b1",
+                    "x": 10, "y": 10, "title": "", "content": "", "color": "yellow",
+                    "z": 2, "createdAt": 0, "updatedAt": 0
+                }
+            ],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 2, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("便签 id 重复") || err.contains("重复"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     // =======================================================================
     // 恢复校验：便签坐标/时间戳无效
     // =======================================================================
@@ -3132,8 +3345,8 @@ mod tests {
                 "z": 1, "createdAt": 0, "updatedAt": 0,
                 "attachments": [{
                     "id": "a1", "hash": "00000000000000000000000000000000000000000000000000000000000000aa",
-                    "filename": "", "mimeType": "image/png",
-                    "size": 0, "relativePath": rel_path, "createdAt": 0
+                    "filename": format!("{real_hash}.png"), "mimeType": "image/png",
+                    "size": img_content.len() as u64, "relativePath": rel_path, "createdAt": 0
                 }]
             }],
             "currentBoardId": "b1",
@@ -3154,6 +3367,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn restore_fails_attachment_missing_contract_fields() {
+        let root = test_dir("restore-attachment-missing-fields");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let img_content = b"content with incomplete attachment ref";
+        let hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{hash}.png");
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "image", "boardId": "b1",
+                "x": 0, "y": 0, "title": "", "content": "", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0,
+                "attachments": [{
+                    "hash": hash,
+                    "relativePath": rel_path
+                }]
+            }],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("解析") || err.contains("id") || err.contains("filename"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     // =======================================================================
     // 备份原子性：失败时不留下半成品 zip
     // =======================================================================
@@ -3165,20 +3416,27 @@ mod tests {
         let attach_dir = sonotes_base.join("attachments");
         std::fs::create_dir_all(&attach_dir).unwrap();
 
-        let missing_rel_path =
+        let blocked_rel_path =
             "attachments/0000000000000000000000000000000000000000000000000000000000000000.png";
-        let data = minimal_data_json(&[], &[image_note("n1", "b1", missing_rel_path)]);
+        std::fs::create_dir_all(sonotes_base.join(blocked_rel_path)).unwrap();
+
+        let data = minimal_data_json(&[], &[image_note("n1", "b1", blocked_rel_path)]);
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
         let target = root.join("backup.zip");
+        let stale_fixed_temp = root.join("backup.zip.tmp");
+        std::fs::write(&stale_fixed_temp, b"stale temp").unwrap();
         let result = create_local_backup_inner(&sonotes_base, &target);
 
         assert!(result.is_err());
         assert!(!target.exists(), "失败时不应留下最终 zip");
-        assert!(
-            !root.join("backup.zip.tmp").exists(),
-            "失败时不应留下临时 zip"
-        );
+        assert_eq!(std::fs::read(&stale_fixed_temp).unwrap(), b"stale temp");
+        let leftovers = std::fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(".backup.zip."))
+            .count();
+        assert_eq!(leftovers, 0, "失败时不应留下随机临时 zip");
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -3200,10 +3458,12 @@ mod tests {
 
         assert!(result.success);
         assert!(target.exists(), "成功时应存在最终 zip");
-        assert!(
-            !root.join("backup.zip.tmp").exists(),
-            "成功后不应留下临时 zip"
-        );
+        let leftovers = std::fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(".backup.zip."))
+            .count();
+        assert_eq!(leftovers, 0, "成功后不应留下随机临时 zip");
 
         let _ = std::fs::remove_dir_all(root);
     }

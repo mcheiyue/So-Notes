@@ -38,7 +38,8 @@ const buildNewDefaultData = (): StorageData =>
 const hasPersistedNotes = (data: StorageData | null | undefined): data is StorageData =>
   Array.isArray(data?.notes) && data.notes.length > 0;
 
-const isEmptyStorageData = (data: StorageData): boolean => data.notes.length === 0;
+const hasInvalidStorageContract = (data: StorageData): boolean =>
+  data.boards.length === 0 || !data.currentBoardId || !data.boards.some((board) => board.id === data.currentBoardId);
 
 const migrateAndSanitize = (data: StorageData): StorageData => {
   data.schemaVersion = STORAGE_SCHEMA_VERSION;
@@ -107,7 +108,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
   const walTime = getLatestUpdateTimestamp(walData);
   const diskTime = getLatestUpdateTimestamp(diskData);
 
-  if (diskData && isEmptyStorageData(diskData) && hasPersistedNotes(walData)) {
+  if (diskData && !hasPersistedNotes(diskData) && hasPersistedNotes(walData)) {
     finalData = walData;
     source = 'WAL';
   } else if (diskData && diskTime > walTime) {
@@ -144,7 +145,7 @@ const serializeDomainState = (state: DomainState): StorageData => ({
 });
 
 const defaultWriteDisk = async (data: StorageData): Promise<boolean> => {
-  if (isEmptyStorageData(data)) {
+  if (hasInvalidStorageContract(data)) {
     return false;
   }
 
@@ -169,9 +170,9 @@ export function attach(options?: AttachOptions): AttachResult {
 
   const onStatusChange = options?.onStatusChange;
 
-  let latestState: DomainState | null = null;
+  let latestState: DomainState | null = options?.initialState ?? null;
   let status: PersistenceStatus = 'idle';
-  let dirty = false;
+  let dirty = options?.initialState ? denormalizeNotes(options.initialState).length > 0 : false;
   let detached = false;
   let paused = false;
 
@@ -193,7 +194,7 @@ export function attach(options?: AttachOptions): AttachResult {
 
     setStatus('writing-wal');
     const data = serializeDomainState(latestState);
-    if (isEmptyStorageData(data)) {
+    if (hasInvalidStorageContract(data)) {
       setStatus('error');
       return;
     }
@@ -225,7 +226,7 @@ export function attach(options?: AttachOptions): AttachResult {
 
         setStatus('writing-disk');
         const data = serializeDomainState(latestState);
-        if (isEmptyStorageData(data)) {
+        if (hasInvalidStorageContract(data)) {
           setStatus('error');
           diskInFlight = false;
           return false;
@@ -287,7 +288,7 @@ export function attach(options?: AttachOptions): AttachResult {
   const onBeforeUnload = () => {
     if (!dirty || !latestState) return;
     const data = serializeDomainState(latestState);
-    if (isEmptyStorageData(data)) {
+    if (hasInvalidStorageContract(data)) {
       setStatus('error');
       return;
     }
@@ -322,7 +323,7 @@ export function attach(options?: AttachOptions): AttachResult {
 
     setStatus('writing-wal');
     const data = serializeDomainState(latestState);
-    if (isEmptyStorageData(data)) {
+    if (hasInvalidStorageContract(data)) {
       setStatus('error');
       return false;
     }
