@@ -46,6 +46,16 @@ const hasInvalidStorageContract = (data: StorageData): boolean =>
 const hasValidStorageContract = (data: StorageData | null | undefined): data is StorageData =>
   data != null && !hasInvalidStorageContract(data);
 
+const hasMigratableStorageData = (data: StorageData | null | undefined): data is StorageData =>
+  data != null && Array.isArray(data.notes);
+
+const normalizeWalStorageData = (raw: unknown): StorageData | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (!Array.isArray((raw as { notes?: unknown }).notes)) return undefined;
+
+  return normalizeStorageDataMetadata(raw as StorageData);
+};
+
 const migrateAndSanitize = (data: StorageData): StorageData => {
   data.schemaVersion = STORAGE_SCHEMA_VERSION;
 
@@ -103,7 +113,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
   const defaultData = buildNewDefaultData();
 
   const [walData, diskData] = await Promise.all([
-    db.loadWAL().then((raw) => (raw ? normalizeStorageDataMetadata(raw) : undefined)),
+    db.loadWAL().then(normalizeWalStorageData),
     readDiskStorageData('data.json'),
   ]);
 
@@ -116,7 +126,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
   if (diskData && diskTime >= walTime) {
     finalData = diskData;
     source = 'DISK';
-  } else if (hasValidStorageContract(walData)) {
+  } else if (hasMigratableStorageData(walData)) {
     finalData = walData;
     source = 'WAL';
   } else if (diskData) {
@@ -125,6 +135,10 @@ export async function bootstrap(): Promise<BootstrapResult> {
   }
 
   finalData = migrateAndSanitize(finalData);
+  if (!hasValidStorageContract(finalData)) {
+    finalData = defaultData;
+    source = 'NEW';
+  }
   await prehydrateImageNoteAssetUrls(finalData.notes);
 
   return {

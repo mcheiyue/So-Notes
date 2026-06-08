@@ -226,7 +226,7 @@ describe('StorageService.bootstrap', () => {
     expect(result.recovered).toBe(false);
   });
 
-  it('WAL 缺少 boards 时不会在契约仲裁阶段抛错', async () => {
+  it('WAL 缺少 boards 但 notes 可迁移时会选择 WAL 并补齐看板', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [{
         id: 'd1',
@@ -245,7 +245,53 @@ describe('StorageService.bootstrap', () => {
     vi.mocked(db.loadWAL).mockResolvedValueOnce({
       schemaVersion: STORAGE_SCHEMA_VERSION,
       storageUpdatedAt: 500,
-      notes: [],
+      notes: [{
+        id: 'w1',
+        kind: 'text',
+        x: 0,
+        y: 0,
+        title: 'WAL',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: 500,
+      }],
+      currentBoardId: DEFAULT_BOARD.id,
+      config: DEFAULT_CONFIG,
+    } as unknown as StorageData);
+
+    const result = await bootstrap();
+
+    expect(result.source).toBe('WAL');
+    expect(result.data.notes[0].id).toBe('w1');
+    expect(result.data.notes[0].boardId).toBe(DEFAULT_BOARD.id);
+    expect(result.data.boards).toEqual([DEFAULT_BOARD]);
+    expect(result.data.currentBoardId).toBe(DEFAULT_BOARD.id);
+    expect(result.syncAction.type).toBe('SYNC_WAL_TO_DISK');
+    expect(result.walTime).toBe(500);
+    expect(result.diskTime).toBe(200);
+  });
+
+  it('WAL 缺少 notes 时不会在归一化阶段抛错', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'd1',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: 200
+      }],
+      storageUpdatedAt: 200,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 500,
+      boards: [DEFAULT_BOARD],
       currentBoardId: DEFAULT_BOARD.id,
       config: DEFAULT_CONFIG,
     } as unknown as StorageData);
@@ -254,7 +300,7 @@ describe('StorageService.bootstrap', () => {
 
     expect(result.source).toBe('DISK');
     expect(result.data.notes[0].id).toBe('d1');
-    expect(result.walTime).toBe(500);
+    expect(result.walTime).toBe(0);
     expect(result.diskTime).toBe(200);
   });
 

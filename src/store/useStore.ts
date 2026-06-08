@@ -333,11 +333,21 @@ const hasInvalidStorageContract = (data: StorageData): boolean =>
 const hasValidStorageContract = (data: StorageData | null | undefined): data is StorageData =>
   data != null && !hasInvalidStorageContract(data);
 
+const hasMigratableStorageData = (data: StorageData | null | undefined): data is StorageData =>
+  data != null && Array.isArray(data.notes);
+
 const normalizeStorageDataMetadata = (data: StorageDataInput): StorageData => ({
   ...data,
   schemaVersion: isFiniteTimestamp(data.schemaVersion) ? data.schemaVersion : STORAGE_SCHEMA_VERSION,
   storageUpdatedAt: isFiniteTimestamp(data.storageUpdatedAt) ? data.storageUpdatedAt : getLegacyStorageUpdatedAt(data.notes),
 });
+
+const normalizeWalStorageData = (raw: unknown): StorageData | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (!Array.isArray((raw as { notes?: unknown }).notes)) return undefined;
+
+  return normalizeStorageDataMetadata(raw as StorageDataInput);
+};
 
 const getBoardNoteIds = (state: Pick<State, 'boardNoteIds'>, boardId: string): string[] => state.boardNoteIds[boardId] ?? [];
 
@@ -626,7 +636,7 @@ export const useStore = create<State>()(
         return isFiniteTimestamp(data.storageUpdatedAt) ? data.storageUpdatedAt : getLegacyStorageUpdatedAt(data.notes);
       };
 
-      const normalizedWalData = walData ? normalizeStorageDataMetadata(walData) : undefined;
+      const normalizedWalData = normalizeWalStorageData(walData);
       const walTime = getLatestUpdate(normalizedWalData);
       const diskTime = getLatestUpdate(diskData);
 
@@ -638,7 +648,7 @@ export const useStore = create<State>()(
         // console.log('Using DISK (Newer content found)');
         finalData = diskData;
         source = 'DISK';
-      } else if (hasValidStorageContract(normalizedWalData)) {
+      } else if (hasMigratableStorageData(normalizedWalData)) {
         // WAL is newer or equal -> Use WAL
         // console.log('Using WAL (Cache is active)');
         finalData = normalizedWalData;
@@ -682,6 +692,16 @@ export const useStore = create<State>()(
       // Ensure currentBoardId is valid
       if (!finalData.currentBoardId || !finalData.boards.find(b => b.id === finalData.currentBoardId)) {
           finalData.currentBoardId = finalData.boards[0].id;
+      }
+
+      if (!hasValidStorageContract(finalData)) {
+          finalData = normalizeStorageDataMetadata({
+              notes: [],
+              boards: [DEFAULT_BOARD],
+              currentBoardId: DEFAULT_BOARD.id,
+              config: DEFAULT_CONFIG,
+          });
+          source = 'NEW';
       }
 
       set((state) => {
