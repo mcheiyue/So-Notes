@@ -645,6 +645,10 @@ pub fn run() {
             webdav::webdav_clear_config,
             webdav::webdav_test_connection,
             webdav::webdav_list_backups,
+            webdav::webdav_create_remote_backup,
+            webdav::webdav_download_backup,
+            webdav::resolve_downloaded_backup,
+            webdav::cleanup_downloaded_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

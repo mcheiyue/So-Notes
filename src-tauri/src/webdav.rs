@@ -5,8 +5,12 @@
 //!
 //! 当前阶段实现配置闭环、连接测试与远端备份列表读取；上传、下载与恢复编排后续补充。
 
+use crate::backup;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 use url::Url;
 
@@ -30,6 +34,21 @@ const REMOTE_BACKUP_FILENAME_LEN: usize = 15 + DATETIME_LEN + 4; // 33
 
 /// 配置文件名。
 const CONFIG_FILENAME: &str = "webdav-config.json";
+
+/// 下载临时文件最大字节数（1 GiB 压缩 zip 传输上限）。
+const MAX_WEBDAV_BACKUP_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// 应用缓存目录下的 WebDAV 临时目录名。
+const WEBDAV_TEMP_DIR_NAME: &str = "webdav-backups";
+
+/// 上传前临时 zip 存放子目录名。
+const WEBDAV_PENDING_DIR_NAME: &str = "pending";
+
+/// 下载临时文件存放子目录名。
+const WEBDAV_DOWNLOADS_DIR_NAME: &str = "downloads";
+
+/// 上传同名冲突重试次数上限。
+const UPLOAD_RETRY_LIMIT: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // 序列化类型（前端消费，camelCase）
@@ -121,6 +140,37 @@ pub struct WebDavConfigClearResult {
     /// 是否成功。
     pub success: bool,
     /// 错误信息（失败时）。
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebDavUploadResult {
+    pub success: bool,
+    pub remote_file_name: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebDavDownloadResult {
+    pub success: bool,
+    pub download_token: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalBackupPathResult {
+    pub success: bool,
+    pub local_path: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebDavCleanupResult {
+    pub success: bool,
     pub error: Option<String>,
 }
 
@@ -890,6 +940,368 @@ pub async fn webdav_list_backups(
     let xml = resp.text().await.map_err(|_| "远端备份列表读取失败".to_string())?;
     let entries = parse_propfind_response(&xml)?;
     Ok(filter_backup_entries(entries))
+}
+
+// ---------------------------------------------------------------------------
+// 下载 Token 存储
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+enum DownloadTokenState {
+    Ready { file_path: PathBuf },
+    Resolved { file_path: PathBuf },
+    Cleaned,
+}
+
+#[derive(Debug, Clone)]
+struct DownloadTokenEntry {
+    state: DownloadTokenState,
+}
+
+fn download_tokens() -> &'static Mutex<HashMap<String, DownloadTokenEntry>> {
+    static TOKENS: OnceLock<Mutex<HashMap<String, DownloadTokenEntry>>> = OnceLock::new();
+    TOKENS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn store_download_token(token: &str, file_path: PathBuf) {
+    let mut tokens = download_tokens().lock().unwrap();
+    tokens.insert(
+        token.to_string(),
+        DownloadTokenEntry {
+            state: DownloadTokenState::Ready { file_path },
+        },
+    );
+}
+
+fn resolve_download_token(token: &str) -> Result<PathBuf, String> {
+    let mut tokens = download_tokens().lock().unwrap();
+    let entry = tokens
+        .get_mut(token)
+        .ok_or_else(|| "下载 token 无效".to_string())?;
+
+    match &entry.state {
+        DownloadTokenState::Ready { file_path } => {
+            let path = file_path.clone();
+            entry.state = DownloadTokenState::Resolved { file_path: path.clone() };
+            Ok(path)
+        }
+        DownloadTokenState::Resolved { .. } => Err("下载 token 已被解析，不能重复使用".to_string()),
+        DownloadTokenState::Cleaned => Err("下载 token 已清理，无效".to_string()),
+    }
+}
+
+fn cleanup_download_token(token: &str) -> Result<PathBuf, String> {
+    let mut tokens = download_tokens().lock().unwrap();
+    let entry = tokens
+        .get_mut(token)
+        .ok_or_else(|| "下载 token 无效".to_string())?;
+
+    match &entry.state {
+        DownloadTokenState::Ready { file_path } => {
+            let path = file_path.clone();
+            entry.state = DownloadTokenState::Cleaned;
+            Ok(path)
+        }
+        DownloadTokenState::Resolved { file_path } => {
+            let path = file_path.clone();
+            entry.state = DownloadTokenState::Cleaned;
+            Ok(path)
+        }
+        DownloadTokenState::Cleaned => {
+            Ok(PathBuf::new())
+        }
+    }
+}
+
+fn remove_download_token(token: &str) {
+    let mut tokens = download_tokens().lock().unwrap();
+    tokens.remove(token);
+}
+
+// ---------------------------------------------------------------------------
+// 临时路径辅助
+// ---------------------------------------------------------------------------
+
+fn webdav_temp_base_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("获取应用缓存目录失败: {e}"))?;
+    Ok(cache_dir.join(WEBDAV_TEMP_DIR_NAME))
+}
+
+fn webdav_pending_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(webdav_temp_base_dir(app)?.join(WEBDAV_PENDING_DIR_NAME))
+}
+
+fn webdav_downloads_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(webdav_temp_base_dir(app)?.join(WEBDAV_DOWNLOADS_DIR_NAME))
+}
+
+fn validate_file_within_webdav_dir(path: &Path, base: &Path) -> bool {
+    let normalized_path = normalize_path(path);
+    let normalized_base = normalize_path(base);
+    normalized_path.starts_with(&normalized_base) && normalized_path != normalized_base
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                components.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => components.push(other),
+        }
+    }
+    components.iter().collect()
+}
+
+fn generate_download_token() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("webdav-dl-{:032x}", nanos)
+}
+
+// ---------------------------------------------------------------------------
+// Tauri 命令：上传/下载/Token 生命周期
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn webdav_create_remote_backup(
+    app: tauri::AppHandle,
+    config: WebDavConfig,
+) -> Result<WebDavUploadResult, String> {
+    let base_url = normalize_webdav_url(&config.server_url)?;
+    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
+
+    let pending_dir = webdav_pending_dir(&app)?;
+    std::fs::create_dir_all(&pending_dir)
+        .map_err(|_| "远端备份上传失败，本地数据未受影响".to_string())?;
+
+    let temp_id: u64 = rand::random();
+    let temp_zip_name = format!("webdav-pending-{temp_id:016x}.zip");
+    let temp_zip_path = pending_dir.join(&temp_zip_name);
+    let temp_zip_path_str = temp_zip_path.to_string_lossy().to_string();
+
+    let backup_result = backup::create_local_backup(app.clone(), temp_zip_path_str).await?;
+
+    if !backup_result.success {
+        let _ = std::fs::remove_file(&temp_zip_path);
+        return Err(
+            backup_result
+                .error
+                .unwrap_or_else(|| "远端备份上传失败，本地数据未受影响".to_string()),
+        );
+    }
+
+    let zip_bytes = std::fs::read(&temp_zip_path).map_err(|_| {
+        let _ = std::fs::remove_file(&temp_zip_path);
+        "远端备份上传失败，本地数据未受影响".to_string()
+    })?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("SoNotes/1.5")
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|_| "远端备份上传失败，本地数据未受影响".to_string())?;
+
+    let dir_url = build_remote_dir_url(&base_url, &remote_dir);
+    let mut last_error = String::new();
+
+    for attempt in 0..UPLOAD_RETRY_LIMIT {
+        let remote_filename = if attempt == 0 {
+            generate_current_remote_backup_filename()
+        } else {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            generate_current_remote_backup_filename()
+        };
+
+        let upload_url = format!("{}{}", dir_url, remote_filename);
+
+        let mut req = client
+            .put(&upload_url)
+            .header("Content-Type", "application/zip")
+            .header("If-None-Match", "*")
+            .body(zip_bytes.clone());
+
+        if let Some(pw) = &config.password {
+            req = req.basic_auth(&config.username, Some(pw));
+        } else if !config.username.is_empty() {
+            req = req.basic_auth(&config.username, None::<&str>);
+        }
+
+        match req.send().await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                match status {
+                    200..=299 => {
+                        let _ = std::fs::remove_file(&temp_zip_path);
+                        return Ok(WebDavUploadResult {
+                            success: true,
+                            remote_file_name: Some(remote_filename),
+                            error: None,
+                        });
+                    }
+                    401 | 403 => {
+                        let _ = std::fs::remove_file(&temp_zip_path);
+                        return Err("WebDAV 鉴权失败".to_string());
+                    }
+                    409 | 412 => {
+                        last_error = "远端已存在同名备份，请稍后重试".to_string();
+                        continue;
+                    }
+                    _ => {
+                        last_error = format!("远端备份上传失败 (HTTP {status})，本地数据未受影响");
+                        continue;
+                    }
+                }
+            }
+            Err(_) => {
+                last_error = "远端备份上传失败，本地数据未受影响".to_string();
+                continue;
+            }
+        }
+    }
+
+    let _ = std::fs::remove_file(&temp_zip_path);
+    Err(last_error)
+}
+
+#[tauri::command]
+pub async fn webdav_download_backup(
+    app: tauri::AppHandle,
+    config: WebDavConfig,
+    remote_file_name: String,
+) -> Result<WebDavDownloadResult, String> {
+    validate_remote_backup_filename(&remote_file_name)?;
+
+    let base_url = normalize_webdav_url(&config.server_url)?;
+    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
+
+    let downloads_dir = webdav_downloads_dir(&app)?;
+    std::fs::create_dir_all(&downloads_dir)
+        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+
+    let dir_url = build_remote_dir_url(&base_url, &remote_dir);
+    let download_url = format!("{}{}", dir_url, remote_file_name);
+
+    let client = reqwest::Client::builder()
+        .user_agent("SoNotes/1.5")
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+
+    let mut req = client.get(&download_url);
+    if let Some(pw) = &config.password {
+        req = req.basic_auth(&config.username, Some(pw));
+    } else if !config.username.is_empty() {
+        req = req.basic_auth(&config.username, None::<&str>);
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+
+    let status = resp.status().as_u16();
+    match status {
+        200..=299 => {}
+        401 | 403 => return Err("WebDAV 鉴权失败".to_string()),
+        404 => return Err("远端备份目录不可用".to_string()),
+        _ => return Err(format!("远端备份下载失败 (HTTP {status})，本地数据未受影响")),
+    }
+
+    if let Some(content_length) = resp.content_length() {
+        if content_length > MAX_WEBDAV_BACKUP_DOWNLOAD_BYTES {
+            return Err("远端备份超过允许大小，本地数据未受影响".to_string());
+        }
+    }
+
+    let dl_id: u64 = rand::random();
+    let dl_file_name = format!("webdav-dl-{dl_id:016x}.zip");
+    let dl_path = downloads_dir.join(&dl_file_name);
+
+    let mut file = std::fs::File::create(&dl_path)
+        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+
+    let mut total_bytes: u64 = 0;
+    let mut resp = resp;
+
+    use std::io::Write;
+
+    while let Some(chunk) = resp.chunk().await.map_err(|_| {
+        let _ = std::fs::remove_file(&dl_path);
+        "远端备份下载失败，本地数据未受影响".to_string()
+    })? {
+        total_bytes += chunk.len() as u64;
+        if total_bytes > MAX_WEBDAV_BACKUP_DOWNLOAD_BYTES {
+            let _ = std::fs::remove_file(&dl_path);
+            return Err("远端备份超过允许大小，本地数据未受影响".to_string());
+        }
+
+        file.write_all(&chunk).map_err(|_| {
+            let _ = std::fs::remove_file(&dl_path);
+            "远端备份下载失败，本地数据未受影响".to_string()
+        })?;
+    }
+
+    drop(file);
+
+    let token = generate_download_token();
+    store_download_token(&token, dl_path);
+
+    Ok(WebDavDownloadResult {
+        success: true,
+        download_token: Some(token),
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub async fn resolve_downloaded_backup(
+    app: tauri::AppHandle,
+    download_token: String,
+) -> Result<LocalBackupPathResult, String> {
+    let path = resolve_download_token(&download_token)?;
+
+    let downloads_dir = webdav_downloads_dir(&app)?;
+    if !validate_file_within_webdav_dir(&path, &downloads_dir) {
+        remove_download_token(&download_token);
+        return Err("下载 token 无效".to_string());
+    }
+
+    Ok(LocalBackupPathResult {
+        success: true,
+        local_path: Some(path.to_string_lossy().to_string()),
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub async fn cleanup_downloaded_backup(
+    app: tauri::AppHandle,
+    download_token: String,
+) -> Result<WebDavCleanupResult, String> {
+    if let Ok(path) = cleanup_download_token(&download_token) {
+        if !path.as_os_str().is_empty() {
+            let downloads_dir = webdav_downloads_dir(&app)?;
+            if !validate_file_within_webdav_dir(&path, &downloads_dir) {
+                remove_download_token(&download_token);
+                return Err("下载 token 无效".to_string());
+            }
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    remove_download_token(&download_token);
+
+    Ok(WebDavCleanupResult {
+        success: true,
+        error: None,
+    })
 }
 
 // ===========================================================================
@@ -1716,5 +2128,132 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].file_name, "SoNotes_Backup_20240101120000.zip");
         assert_eq!(filtered[0].size, Some(2048));
+    }
+
+    // -----------------------------------------------------------------------
+    // 临时路径辅助测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn validate_file_within_webdav_dir_rejects_exact_match() {
+        let base = PathBuf::from("/cache/webdav-backups/downloads");
+        assert!(!validate_file_within_webdav_dir(&base, &base));
+    }
+
+    #[test]
+    fn validate_file_within_webdav_dir_accepts_child_file() {
+        let base = PathBuf::from("/cache/webdav-backups/downloads");
+        let path = PathBuf::from("/cache/webdav-backups/downloads/file.zip");
+        assert!(validate_file_within_webdav_dir(&path, &base));
+    }
+
+    #[test]
+    fn validate_file_within_webdav_dir_rejects_outside_path() {
+        let base = PathBuf::from("/cache/webdav-backups/downloads");
+        let path = PathBuf::from("/other/dir/file.zip");
+        assert!(!validate_file_within_webdav_dir(&path, &base));
+    }
+
+    #[test]
+    fn validate_file_within_webdav_dir_rejects_sibling_prefix() {
+        let base = PathBuf::from("/cache/webdav-backups/downloads");
+        let path = PathBuf::from("/cache/webdav-backups/downloads-old/file.zip");
+        assert!(!validate_file_within_webdav_dir(&path, &base));
+    }
+
+    #[test]
+    fn validate_file_within_webdav_dir_rejects_traversal_attack() {
+        let base = PathBuf::from("/cache/webdav-backups/downloads");
+        let path = PathBuf::from("/cache/webdav-backups/downloads/../secrets/file.zip");
+        assert!(!validate_file_within_webdav_dir(&path, &base));
+    }
+
+    #[test]
+    fn generate_download_token_format() {
+        let token = generate_download_token();
+        assert!(token.starts_with("webdav-dl-"));
+        assert_eq!(token.len(), 42);
+    }
+
+    #[test]
+    fn generate_download_token_unique() {
+        let t1 = generate_download_token();
+        let t2 = generate_download_token();
+        assert_ne!(t1, t2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Token 存储生命周期测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn token_lifecycle_ready_resolve_cleanup() {
+        let tmp = std::env::temp_dir().join(format!("webdav-token-test-{:016x}", rand::random::<u64>()));
+        std::fs::write(&tmp, b"test").unwrap();
+
+        let token = generate_download_token();
+        store_download_token(&token, tmp.clone());
+
+        let resolved = resolve_download_token(&token).unwrap();
+        assert_eq!(resolved, tmp);
+
+        let err = resolve_download_token(&token).unwrap_err();
+        assert!(err.contains("已被解析"));
+
+        let cleaned = cleanup_download_token(&token).unwrap();
+        assert_eq!(cleaned, tmp);
+
+        // 幂等：重复 cleanup 不报错
+        let result = cleanup_download_token(&token);
+        assert!(result.is_ok());
+
+        // resolve 已清理的 token 应失败
+        let err = resolve_download_token(&token).unwrap_err();
+        assert!(err.contains("无效"));
+
+        remove_download_token(&token);
+    }
+
+    #[test]
+    fn token_resolve_rejects_invalid() {
+        let err = resolve_download_token("nonexistent-token").unwrap_err();
+        assert!(err.contains("无效"));
+    }
+
+    #[test]
+    fn token_cleanup_rejects_invalid() {
+        let err = cleanup_download_token("nonexistent-token").unwrap_err();
+        assert!(err.contains("无效"));
+    }
+
+    #[test]
+    fn token_cleanup_idempotent_after_cleaned() {
+        let tmp = std::env::temp_dir().join(format!("webdav-token-test-{:016x}", rand::random::<u64>()));
+        std::fs::write(&tmp, b"test").unwrap();
+
+        let token = generate_download_token();
+        store_download_token(&token, tmp.clone());
+
+        let _ = cleanup_download_token(&token).unwrap();
+        let result = cleanup_download_token(&token);
+        assert!(result.is_ok());
+
+        remove_download_token(&token);
+    }
+
+    #[test]
+    fn token_cleanup_returns_path_without_deleting_file() {
+        let tmp = std::env::temp_dir().join(format!("webdav-token-test-{:016x}", rand::random::<u64>()));
+        std::fs::write(&tmp, b"test").unwrap();
+        assert!(tmp.exists());
+
+        let token = generate_download_token();
+        store_download_token(&token, tmp.clone());
+
+        let _ = cleanup_download_token(&token).unwrap();
+        assert!(tmp.exists());
+
+        remove_download_token(&token);
+        let _ = std::fs::remove_file(&tmp);
     }
 }
