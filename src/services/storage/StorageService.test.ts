@@ -191,7 +191,7 @@ describe('StorageService.bootstrap', () => {
     expect(result.walTime).toBe(walTime);
   });
 
-  it('WAL 为空时回退到 disk', async () => {
+  it('WAL 是较新空快照时选择 WAL 以保留全部删除结果', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
       notes: [{
         id: 'd1',
@@ -218,8 +218,9 @@ describe('StorageService.bootstrap', () => {
 
     const result = await bootstrap();
 
-    expect(result.source).toBe('DISK');
-    expect(result.data.notes[0].id).toBe('d1');
+    expect(result.source).toBe('WAL');
+    expect(result.data.notes).toEqual([]);
+    expect(result.syncAction.type).toBe('SYNC_WAL_TO_DISK');
     expect(result.diskTime).toBe(200);
     expect(result.walTime).toBe(500);
     expect(result.recovered).toBe(false);

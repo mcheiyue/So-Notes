@@ -24,6 +24,14 @@ pub const BACKUP_FORMAT_VERSION: u32 = 1;
 const MAX_MANIFEST_JSON_UNCOMPRESSED_BYTES: u64 = 1024 * 1024;
 const MAX_DATA_JSON_UNCOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_ATTACHMENT_UNCOMPRESSED_BYTES: u64 = 256 * 1024 * 1024;
+#[cfg(not(test))]
+const MAX_ATTACHMENT_COUNT: usize = 10_000;
+#[cfg(test)]
+const MAX_ATTACHMENT_COUNT: usize = 8;
+#[cfg(not(test))]
+const MAX_TOTAL_ATTACHMENT_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
+#[cfg(test)]
+const MAX_TOTAL_ATTACHMENT_UNCOMPRESSED_BYTES: u64 = 64;
 
 // ---------------------------------------------------------------------------
 // 备份清单类型
@@ -769,6 +777,8 @@ fn restore_local_backup_inner(
     let mut data_content: Option<Vec<u8>> = None;
     let mut attachment_contents: std::collections::HashMap<String, Vec<u8>> =
         std::collections::HashMap::new();
+    let mut attachment_count: usize = 0;
+    let mut total_attachment_bytes: u64 = 0;
 
     for i in 0..archive.len() {
         let mut entry = archive
@@ -806,6 +816,22 @@ fn restore_local_backup_inner(
                 data_content = Some(buf);
             }
             path if path.starts_with("attachments/") => {
+                attachment_count = attachment_count
+                    .checked_add(1)
+                    .ok_or_else(|| "附件数量超过上限".to_string())?;
+                if attachment_count > MAX_ATTACHMENT_COUNT {
+                    return Err(format!("附件数量超过上限: {attachment_count}"));
+                }
+
+                total_attachment_bytes = total_attachment_bytes
+                    .checked_add(entry.size())
+                    .ok_or_else(|| "附件总大小超过上限".to_string())?;
+                if total_attachment_bytes > MAX_TOTAL_ATTACHMENT_UNCOMPRESSED_BYTES {
+                    return Err(format!(
+                        "附件总解压大小超过上限: {total_attachment_bytes} 字节"
+                    ));
+                }
+
                 ensure_uncompressed_size(
                     &format!("附件 {path}"),
                     entry.size(),
@@ -2443,6 +2469,66 @@ mod tests {
 
         let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
         assert!(err.contains("manifest.json") && err.contains("超过上限"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_attachment_count_too_large() {
+        let root = test_dir("restore-too-many-attachments");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let zip_path = root.join("too-many.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+
+        for index in 0..=MAX_ATTACHMENT_COUNT {
+            let path = format!("attachments/{index:064x}.png");
+            zip.start_file(path, options).unwrap();
+            zip.write_all(b"x").unwrap();
+        }
+        zip.finish().unwrap();
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("附件数量超过上限"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_total_attachment_size_too_large() {
+        let root = test_dir("restore-total-attachment-size");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let zip_path = root.join("too-large-total.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+
+        zip.start_file(
+            "attachments/0000000000000000000000000000000000000000000000000000000000000000.png",
+            options,
+        )
+        .unwrap();
+        let oversized_total = vec![b'x'; (MAX_TOTAL_ATTACHMENT_UNCOMPRESSED_BYTES + 1) as usize];
+        zip.write_all(&oversized_total).unwrap();
+        zip.finish().unwrap();
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("附件总解压大小超过上限"), "{err}");
 
         let _ = std::fs::remove_dir_all(root);
     }

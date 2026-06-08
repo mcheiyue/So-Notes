@@ -35,11 +35,11 @@ const buildNewDefaultData = (): StorageData =>
     config: DEFAULT_CONFIG,
   });
 
-const hasPersistedNotes = (data: StorageData | null | undefined): data is StorageData =>
-  Array.isArray(data?.notes) && data.notes.length > 0;
-
 const hasInvalidStorageContract = (data: StorageData): boolean =>
   data.boards.length === 0 || !data.currentBoardId || !data.boards.some((board) => board.id === data.currentBoardId);
+
+const hasValidStorageContract = (data: StorageData | null | undefined): data is StorageData =>
+  data != null && !hasInvalidStorageContract(data);
 
 const migrateAndSanitize = (data: StorageData): StorageData => {
   data.schemaVersion = STORAGE_SCHEMA_VERSION;
@@ -111,7 +111,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
   if (diskData && diskTime >= walTime) {
     finalData = diskData;
     source = 'DISK';
-  } else if (hasPersistedNotes(walData)) {
+  } else if (hasValidStorageContract(walData)) {
     finalData = walData;
     source = 'WAL';
   } else if (diskData) {

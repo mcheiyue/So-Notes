@@ -322,10 +322,13 @@ const getLegacyStorageUpdatedAt = (notes: Note[]): number => {
   return Math.max(...notes.map((note) => note.updatedAt || 0));
 };
 
-const hasPersistedNotes = (data: StorageData | null | undefined): data is StorageData =>
-  Array.isArray(data?.notes) && data.notes.length > 0;
-
 const isEmptyStorageData = (data: StorageData): boolean => data.notes.length === 0;
+
+const hasInvalidStorageContract = (data: StorageData): boolean =>
+  data.boards.length === 0 || !data.currentBoardId || !data.boards.some((board) => board.id === data.currentBoardId);
+
+const hasValidStorageContract = (data: StorageData | null | undefined): data is StorageData =>
+  data != null && !hasInvalidStorageContract(data);
 
 const normalizeStorageDataMetadata = (data: StorageDataInput): StorageData => ({
   ...data,
@@ -632,7 +635,7 @@ export const useStore = create<State>()(
         // console.log('Using DISK (Newer content found)');
         finalData = diskData;
         source = 'DISK';
-      } else if (hasPersistedNotes(normalizedWalData)) {
+      } else if (hasValidStorageContract(normalizedWalData)) {
         // WAL is newer or equal -> Use WAL
         // console.log('Using WAL (Cache is active)');
         finalData = normalizedWalData;
