@@ -643,6 +643,8 @@ pub fn run() {
             webdav::webdav_load_config,
             webdav::webdav_save_config,
             webdav::webdav_clear_config,
+            webdav::webdav_test_connection,
+            webdav::webdav_list_backups,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,7 +3,7 @@
 //! 本模块提供 WebDAV 远端备份的类型定义、URL 规范化、单级远端目录规范化、
 //! 远端备份文件名校验/生成、配置加载/保存/清除命令及对应单元测试。
 //!
-//! 当前阶段不包含网络传输（PROPFIND / PUT / GET），仅提供配置闭环与校验基础设施。
+//! 当前阶段实现配置闭环、连接测试与远端备份列表读取；上传、下载与恢复编排后续补充。
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -35,7 +35,7 @@ const CONFIG_FILENAME: &str = "webdav-config.json";
 // 序列化类型（前端消费，camelCase）
 // ---------------------------------------------------------------------------
 
-/// WebDAV 连接配置（前端传入的非敏感字段）。
+/// WebDAV 连接配置（前端传入；密码/令牌仅用于本次请求，不持久化）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebDavConfig {
@@ -45,6 +45,28 @@ pub struct WebDavConfig {
     pub username: String,
     /// 远端目录（单级，例如 `SoNotes_Backups/`）。
     pub remote_dir: Option<String>,
+    /// 密码或应用令牌（仅在本次请求中使用，不持久化）。
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+/// 连接测试结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebDavConnectionResult {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// 远端备份条目。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebDavRemoteBackup {
+    pub file_name: String,
+    pub size: Option<u64>,
+    pub last_modified: Option<String>,
+    pub status: Option<u16>,
+    pub readable: bool,
 }
 
 /// 保存配置请求（含密码/令牌字段与记住密码标记）。
@@ -565,6 +587,309 @@ pub async fn webdav_clear_config(app: tauri::AppHandle) -> Result<WebDavConfigCl
         success: true,
         error: None,
     })
+}
+
+// ---------------------------------------------------------------------------
+// URL 构建
+// ---------------------------------------------------------------------------
+
+fn build_remote_dir_url(base_url: &str, remote_dir: &str) -> String {
+    let mut url = base_url.trim_end_matches('/').to_string();
+    url.push('/');
+    url.push_str(remote_dir.trim_start_matches('/'));
+    if !url.ends_with('/') {
+        url.push('/');
+    }
+    url
+}
+
+// ---------------------------------------------------------------------------
+// PROPFIND 请求
+// ---------------------------------------------------------------------------
+
+fn propfind_request(
+    url: &str,
+    depth: &str,
+    username: &str,
+    password: Option<&str>,
+) -> reqwest::RequestBuilder {
+    let client = reqwest::Client::builder()
+        .user_agent("SoNotes/1.5")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .expect("reqwest client build");
+
+    let body = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:propfind xmlns:D="DAV:">
+  <D:allprop/>
+</D:propfind>"#;
+
+    let mut req = client
+        .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), url)
+        .header("Depth", depth)
+        .header("Content-Type", "application/xml")
+        .body(body.to_string());
+
+    if let Some(pw) = password {
+        req = req.basic_auth(username, Some(pw));
+    } else if !username.is_empty() {
+        req = req.basic_auth(username, None::<&str>);
+    }
+
+    req
+}
+
+// ---------------------------------------------------------------------------
+// PROPFIND XML 解析
+// ---------------------------------------------------------------------------
+
+struct PropfindEntry {
+    href: String,
+    status: Option<String>,
+    content_length: Option<u64>,
+    last_modified: Option<String>,
+    is_collection: bool,
+}
+
+fn parse_propfind_response(xml: &str) -> Result<Vec<PropfindEntry>, String> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut entries: Vec<PropfindEntry> = Vec::new();
+    let mut current_entry: Option<PropfindEntry> = None;
+    let mut in_href = false;
+    let mut in_status = false;
+    let mut in_get_content_length = false;
+    let mut in_get_last_modified = false;
+    let mut in_resourcetype = false;
+    let mut in_collection = false;
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let local = tag.split(':').last().unwrap_or(&tag).to_string();
+
+                match local.as_str() {
+                    "response" => {
+                        current_entry = Some(PropfindEntry {
+                            href: String::new(),
+                            status: None,
+                            content_length: None,
+                            last_modified: None,
+                            is_collection: false,
+                        });
+                    }
+                    "href" => in_href = true,
+                    "status" => in_status = true,
+                    "getcontentlength" => in_get_content_length = true,
+                    "getlastmodified" => in_get_last_modified = true,
+                    "resourcetype" => in_resourcetype = true,
+                    "collection" => {
+                        if in_resourcetype {
+                            in_collection = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let local = tag.split(':').last().unwrap_or(&tag).to_string();
+
+                if local == "collection" && in_resourcetype {
+                    if let Some(ref mut entry) = current_entry {
+                        entry.is_collection = true;
+                    }
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let local = tag.split(':').last().unwrap_or(&tag).to_string();
+
+                match local.as_str() {
+                    "href" => in_href = false,
+                    "status" => in_status = false,
+                    "getcontentlength" => in_get_content_length = false,
+                    "getlastmodified" => in_get_last_modified = false,
+                    "resourcetype" => {
+                        in_resourcetype = false;
+                        if in_collection {
+                            if let Some(ref mut entry) = current_entry {
+                                entry.is_collection = true;
+                            }
+                            in_collection = false;
+                        }
+                    }
+                    "collection" => {
+                        if in_resourcetype {
+                            in_collection = false;
+                        }
+                    }
+                    "response" => {
+                        if let Some(entry) = current_entry.take() {
+                            entries.push(entry);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Text(ref e)) => {
+                let text = e.unescape().map(|u| u.to_string()).unwrap_or_default();
+                if let Some(ref mut entry) = current_entry {
+                    if in_href {
+                        entry.href = text;
+                    } else if in_status {
+                        entry.status = Some(text);
+                    } else if in_get_content_length {
+                        entry.content_length = text.parse().ok();
+                    } else if in_get_last_modified {
+                        entry.last_modified = Some(text);
+                    } else if in_collection {
+                        entry.is_collection = true;
+                    }
+                }
+            }
+            Ok(Event::Eof) => {
+                if current_entry.is_some()
+                    || in_href
+                    || in_status
+                    || in_get_content_length
+                    || in_get_last_modified
+                    || in_resourcetype
+                    || in_collection
+                {
+                    return Err("WebDAV 列表 XML 解析失败".to_string());
+                }
+                break;
+            }
+            Err(_) => return Err("WebDAV 列表 XML 解析失败".to_string()),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(entries)
+}
+
+fn extract_status_code(status: &str) -> Option<u16> {
+    status
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.split(']').next())
+        .and_then(|s| s.parse().ok())
+}
+
+fn filter_backup_entries(entries: Vec<PropfindEntry>) -> Vec<WebDavRemoteBackup> {
+    entries
+        .into_iter()
+        .filter(|e| !e.is_collection)
+        .filter_map(|e| {
+            let href = e.href.trim_end_matches('/');
+            let file_name = href.rsplit('/').next()?.to_string();
+
+            if validate_remote_backup_filename(&file_name).is_err() {
+                return None;
+            }
+
+            let status_code = e.status.as_deref().and_then(extract_status_code);
+            let status_ok = status_code
+                .map(|c| (200..400).contains(&c))
+                .unwrap_or(true);
+
+            Some(WebDavRemoteBackup {
+                file_name,
+                size: e.content_length,
+                last_modified: e.last_modified,
+                status: status_code,
+                readable: status_ok,
+            })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Tauri 命令：transport
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn webdav_test_connection(config: WebDavConfig) -> Result<WebDavConnectionResult, String> {
+    let base_url = normalize_webdav_url(&config.server_url)?;
+    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
+    let dir_url = build_remote_dir_url(&base_url, &remote_dir);
+
+    let resp = propfind_request(
+        &dir_url,
+        "0",
+        &config.username,
+        config.password.as_deref(),
+    )
+    .send()
+    .await
+    .map_err(|e| {
+        if e.is_timeout() {
+            "WebDAV 地址不可访问".to_string()
+        } else if e.is_connect() {
+            "WebDAV 地址不可访问".to_string()
+        } else {
+            "WebDAV 地址不可访问".to_string()
+        }
+    })?;
+
+    let status = resp.status().as_u16();
+    match status {
+        200..=299 => Ok(WebDavConnectionResult {
+            success: true,
+            error: None,
+        }),
+        401 | 403 => Ok(WebDavConnectionResult {
+            success: false,
+            error: Some("WebDAV 鉴权失败".to_string()),
+        }),
+        404 => Ok(WebDavConnectionResult {
+            success: false,
+            error: Some("远端备份目录不可用".to_string()),
+        }),
+        _ => Ok(WebDavConnectionResult {
+            success: false,
+            error: Some(format!("WebDAV 服务器返回异常状态码: {status}")),
+        }),
+    }
+}
+
+#[tauri::command]
+pub async fn webdav_list_backups(
+    config: WebDavConfig,
+) -> Result<Vec<WebDavRemoteBackup>, String> {
+    let base_url = normalize_webdav_url(&config.server_url)?;
+    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
+    let dir_url = build_remote_dir_url(&base_url, &remote_dir);
+
+    let resp = propfind_request(
+        &dir_url,
+        "1",
+        &config.username,
+        config.password.as_deref(),
+    )
+    .send()
+    .await
+    .map_err(|_| "远端备份列表读取失败".to_string())?;
+
+    let status = resp.status().as_u16();
+    match status {
+        200..=299 => {}
+        401 | 403 => return Err("WebDAV 鉴权失败".to_string()),
+        404 => return Err("远端备份目录不可用".to_string()),
+        _ => return Err(format!("远端备份列表读取失败 (HTTP {status})")),
+    }
+
+    let xml = resp.text().await.map_err(|_| "远端备份列表读取失败".to_string())?;
+    let entries = parse_propfind_response(&xml)?;
+    Ok(filter_backup_entries(entries))
 }
 
 // ===========================================================================
@@ -1181,5 +1506,215 @@ mod tests {
         // 不应 panic
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // URL 构建测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn build_remote_dir_url_basic() {
+        let url = build_remote_dir_url("https://example.com/dav", "SoNotes_Backups/");
+        assert_eq!(url, "https://example.com/dav/SoNotes_Backups/");
+    }
+
+    #[test]
+    fn build_remote_dir_url_strips_double_slash() {
+        let url = build_remote_dir_url("https://example.com/dav/", "/SoNotes_Backups/");
+        assert_eq!(url, "https://example.com/dav/SoNotes_Backups/");
+    }
+
+    #[test]
+    fn build_remote_dir_url_no_trailing_slash_on_dir() {
+        let url = build_remote_dir_url("https://example.com/dav", "backups");
+        assert_eq!(url, "https://example.com/dav/backups/");
+    }
+
+    #[test]
+    fn build_remote_dir_url_preserves_base_path() {
+        let url = build_remote_dir_url("https://example.com/remote.php/dav", "SoNotes_Backups/");
+        assert_eq!(url, "https://example.com/remote.php/dav/SoNotes_Backups/");
+    }
+
+    // -----------------------------------------------------------------------
+    // PROPFIND XML 解析测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_propfind_simple_collection() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/dav/SoNotes_Backups/</D:href>
+    <D:propstat>
+      <D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+
+        let entries = parse_propfind_response(xml).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].is_collection);
+        assert_eq!(entries[0].href, "/dav/SoNotes_Backups/");
+    }
+
+    #[test]
+    fn parse_propfind_mixed_entries() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/dav/SoNotes_Backups/</D:href>
+    <D:propstat>
+      <D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/dav/SoNotes_Backups/SoNotes_Backup_20240101120000.zip</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getcontentlength>1024000</D:getcontentlength>
+        <D:getlastmodified>Sun, 01 Jan 2024 12:00:00 GMT</D:getlastmodified>
+        <D:resourcetype/>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/dav/SoNotes_Backups/random_file.txt</D:href>
+    <D:propstat>
+      <D:prop><D:getcontentlength>512</D:getcontentlength><D:resourcetype/></D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+
+        let entries = parse_propfind_response(xml).unwrap();
+        assert_eq!(entries.len(), 3);
+
+        let filtered = filter_backup_entries(entries);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].file_name, "SoNotes_Backup_20240101120000.zip");
+        assert_eq!(filtered[0].size, Some(1024000));
+        assert!(filtered[0].readable);
+    }
+
+    #[test]
+    fn parse_propfind_empty_response() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+</D:multistatus>"#;
+
+        let entries = parse_propfind_response(xml).unwrap();
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn parse_propfind_malformed_xml_returns_error() {
+        let result = parse_propfind_response(r#"<D:multistatus><D:response>"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_propfind_missing_size_and_mtime() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/dav/SoNotes_Backups/SoNotes_Backup_20240101120000.zip</D:href>
+    <D:propstat>
+      <D:prop><D:resourcetype/></D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+
+        let entries = parse_propfind_response(xml).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content_length, None);
+        assert_eq!(entries[0].last_modified, None);
+    }
+
+    #[test]
+    fn parse_propfind_auth_error_entry() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/dav/SoNotes_Backups/SoNotes_Backup_20240101120000.zip</D:href>
+    <D:propstat>
+      <D:prop><D:resourcetype/></D:prop>
+      <D:status>HTTP/1.1 403 Forbidden</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+
+        let entries = parse_propfind_response(xml).unwrap();
+        let filtered = filter_backup_entries(entries);
+        assert_eq!(filtered.len(), 1);
+        assert!(!filtered[0].readable);
+    }
+
+    // -----------------------------------------------------------------------
+    // extract_status_code 测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_status_200() {
+        assert_eq!(extract_status_code("HTTP/1.1 200 OK"), Some(200));
+    }
+
+    #[test]
+    fn extract_status_403() {
+        assert_eq!(extract_status_code("HTTP/1.1 403 Forbidden"), Some(403));
+    }
+
+    #[test]
+    fn extract_status_none() {
+        assert_eq!(extract_status_code("nonsense"), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // filter_backup_entries 测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn filter_excludes_collections() {
+        let entries = vec![PropfindEntry {
+            href: "/dav/SoNotes_Backups/".to_string(),
+            status: None,
+            content_length: None,
+            last_modified: None,
+            is_collection: true,
+        }];
+        let filtered = filter_backup_entries(entries);
+        assert_eq!(filtered.len(), 0);
+    }
+
+    #[test]
+    fn filter_excludes_non_matching_filenames() {
+        let entries = vec![PropfindEntry {
+            href: "/dav/SoNotes_Backups/readme.txt".to_string(),
+            status: None,
+            content_length: Some(100),
+            last_modified: None,
+            is_collection: false,
+        }];
+        let filtered = filter_backup_entries(entries);
+        assert_eq!(filtered.len(), 0);
+    }
+
+    #[test]
+    fn filter_includes_valid_backup() {
+        let entries = vec![PropfindEntry {
+            href: "/dav/SoNotes_Backups/SoNotes_Backup_20240101120000.zip".to_string(),
+            status: Some("HTTP/1.1 200 OK".to_string()),
+            content_length: Some(2048),
+            last_modified: Some("Sun, 01 Jan 2024 12:00:00 GMT".to_string()),
+            is_collection: false,
+        }];
+        let filtered = filter_backup_entries(entries);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].file_name, "SoNotes_Backup_20240101120000.zip");
+        assert_eq!(filtered[0].size, Some(2048));
     }
 }
