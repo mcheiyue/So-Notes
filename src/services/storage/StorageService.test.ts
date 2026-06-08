@@ -304,6 +304,85 @@ describe('StorageService.bootstrap', () => {
     expect(result.diskTime).toBe(200);
   });
 
+  it('较新 WAL 迁移失败时会回退到有效 DISK', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'd1',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: 'DISK',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: 200
+      }],
+      storageUpdatedAt: 200,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 500,
+      notes: [{
+        id: 'w1',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: 'WAL',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: 500,
+      }],
+      boards: [{ name: '坏看板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: DEFAULT_CONFIG,
+    } as unknown as StorageData);
+
+    const result = await bootstrap();
+
+    expect(result.source).toBe('DISK');
+    expect(result.data.notes[0].id).toBe('d1');
+    expect(result.syncAction.type).toBe('SYNC_DISK_TO_WAL');
+    expect(result.walTime).toBe(500);
+    expect(result.diskTime).toBe(200);
+  });
+
+  it('WAL 缺少 config 且 boards 非数组时会安全迁移', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [],
+      storageUpdatedAt: 200,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 500,
+      notes: [{
+        id: 'w1',
+        kind: 'text',
+        x: 0,
+        y: 0,
+        title: 'WAL',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100, updatedAt: 500,
+      }],
+      boards: 'bad-boards',
+      currentBoardId: 'missing-board',
+    } as unknown as StorageData);
+
+    const result = await bootstrap();
+
+    expect(result.source).toBe('WAL');
+    expect(result.data.notes[0].id).toBe('w1');
+    expect(result.data.notes[0].boardId).toBe(DEFAULT_BOARD.id);
+    expect(result.data.boards).toEqual([DEFAULT_BOARD]);
+    expect(result.data.currentBoardId).toBe(DEFAULT_BOARD.id);
+    expect(result.data.config).toEqual(expect.objectContaining(DEFAULT_CONFIG));
+    expect(result.syncAction.type).toBe('SYNC_WAL_TO_DISK');
+  });
+
   it('双源均无数据时返回 NEW 默认领域', async () => {
     vi.mocked(invoke).mockResolvedValueOnce(null);
     vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);

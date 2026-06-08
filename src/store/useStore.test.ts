@@ -212,6 +212,105 @@ describe('v1.4.0 StorageData 演进契约', () => {
     expect(state.notesById['disk-note']?.title).toBe('磁盘数据');
     expect(saveSpy).not.toHaveBeenCalled();
   });
+
+  it('较新 WAL 迁移后契约无效时会回退到有效 DISK', async () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 5000,
+      notes: [{
+        id: 'wal-note',
+        kind: 'text',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: 'WAL 数据',
+        content: '坏 WAL 不应覆盖 disk',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 5000,
+      }],
+      boards: [{ name: '坏看板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    } as unknown as StorageData);
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 1000,
+      notes: [{
+        id: 'disk-note',
+        kind: 'text',
+        boardId: 'default',
+        x: 0,
+        y: 0,
+        title: '磁盘数据',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 1000,
+      }],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    }));
+
+    await useStore.getState().init();
+
+    const state = useStore.getState();
+    expect(state.currentBoardId).toBe('default');
+    expect(state.notesById['disk-note']?.title).toBe('磁盘数据');
+    expect(state.notesById['wal-note']).toBeUndefined();
+    expect(saveSpy).not.toHaveBeenCalled();
+    expect(db.saveWAL).toHaveBeenCalledWith(expect.objectContaining({
+      notes: expect.arrayContaining([expect.objectContaining({ id: 'disk-note' })]),
+    }));
+  });
+
+  it('较新 WAL 缺少 config 且 boards 非数组时会安全迁移', async () => {
+    const saveSpy = vi.fn(async () => true);
+    useStore.setState({ saveToDisk: saveSpy });
+
+    vi.mocked(db.loadWAL).mockResolvedValueOnce({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 5000,
+      notes: [{
+        id: 'wal-note',
+        kind: 'text',
+        x: 10,
+        y: 20,
+        title: 'WAL 数据',
+        content: '应安全迁移',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 5000,
+      }],
+      boards: 'bad-boards',
+      currentBoardId: 'missing-board',
+    } as unknown as StorageData);
+    vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      storageUpdatedAt: 1000,
+      notes: [],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      config: { version: 2, maxZ: 1, themeMode: 'system' },
+    }));
+
+    await useStore.getState().init();
+
+    const state = useStore.getState();
+    expect(state.currentBoardId).toBe('default');
+    expect(state.notesById['wal-note']?.title).toBe('WAL 数据');
+    expect(state.notesById['wal-note']?.boardId).toBe('default');
+    expect(state.boards[0].id).toBe('default');
+    expect(state.config).toEqual(expect.objectContaining({ version: 2, maxZ: 1, themeMode: 'system' }));
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('useStore 布局持久化契约', () => {

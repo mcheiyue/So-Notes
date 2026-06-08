@@ -349,6 +349,57 @@ const normalizeWalStorageData = (raw: unknown): StorageData | undefined => {
   return normalizeStorageDataMetadata(raw as StorageDataInput);
 };
 
+const migrateAndSanitizeStorageData = (data: StorageData): StorageData => {
+  const migrated: StorageData = {
+    ...data,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    notes: Array.isArray(data.notes) ? data.notes : [],
+    boards: Array.isArray(data.boards) ? data.boards : [DEFAULT_BOARD],
+    currentBoardId: typeof data.currentBoardId === 'string' ? data.currentBoardId : DEFAULT_BOARD.id,
+    config: { ...DEFAULT_CONFIG, ...(data.config && typeof data.config === 'object' ? data.config : {}) },
+  };
+
+  if (migrated.notes.length > 0) {
+    const currentMaxZ = Math.max(...migrated.notes.map(n => n.z || 0), 0);
+    migrated.config.maxZ = Math.max(currentMaxZ, migrated.notes.length);
+
+    migrated.notes.forEach((n, i) => {
+      if (n.x < 0 || n.y < 0) { n.x = 20 + (i * 10); n.y = 20 + (i * 10); }
+      if (n.collapsed === undefined) n.collapsed = false;
+      if (n.title === undefined) n.title = '';
+      if (!n.boardId) n.boardId = 'default';
+      if (!n.updatedAt) n.updatedAt = n.createdAt || Date.now();
+      if (n.width !== undefined && n.editingWidth === undefined) { n.editingWidth = n.width; }
+      if (n.height !== undefined && n.editingHeight === undefined) { n.editingHeight = n.height; }
+      delete n.width;
+      delete n.height;
+      n.attachments = sanitizeNoteAttachments(n);
+    });
+  }
+
+  if (migrated.boards.length === 0) {
+    migrated.boards = [DEFAULT_BOARD];
+    migrated.currentBoardId = DEFAULT_BOARD.id;
+  }
+
+  if (!migrated.currentBoardId || !migrated.boards.find(b => b.id === migrated.currentBoardId)) {
+    migrated.currentBoardId = migrated.boards[0].id;
+  }
+
+  return migrated;
+};
+
+const tryPrepareStorageSource = (data: StorageData | null | undefined): StorageData | null => {
+  if (!hasMigratableStorageData(data)) return null;
+
+  try {
+    const migrated = migrateAndSanitizeStorageData(data);
+    return hasValidStorageContract(migrated) ? migrated : null;
+  } catch {
+    return null;
+  }
+};
+
 const getBoardNoteIds = (state: Pick<State, 'boardNoteIds'>, boardId: string): string[] => state.boardNoteIds[boardId] ?? [];
 
 const getNoteById = (state: Pick<State, 'notesById'>, id: string): Note | undefined => state.notesById[id];
@@ -640,69 +691,21 @@ export const useStore = create<State>()(
       const walTime = getLatestUpdate(normalizedWalData);
       const diskTime = getLatestUpdate(diskData);
 
-      // console.log(`Init Arbitration -> WAL: ${walTime}, DISK: ${diskTime}`);
+      const candidates = [
+        { source: 'DISK' as const, data: diskData, time: diskTime },
+        { source: 'WAL' as const, data: normalizedWalData, time: walTime },
+      ].sort((left, right) => right.time - left.time);
 
-      // Decision Logic
-      if (diskData && diskTime >= walTime) {
-        // Disk is newer (or WAL is empty/stale) -> Use Disk
-        // console.log('Using DISK (Newer content found)');
-        finalData = diskData;
-        source = 'DISK';
-      } else if (hasMigratableStorageData(normalizedWalData)) {
-        // WAL is newer or equal -> Use WAL
-        // console.log('Using WAL (Cache is active)');
-        finalData = normalizedWalData;
-        source = 'WAL';
-      } else if (diskData) {
-        // Fallback to Disk if WAL is empty
-        // console.log('Using DISK (WAL empty)');
-        finalData = diskData;
-        source = 'DISK';
+      for (const candidate of candidates) {
+        const prepared = tryPrepareStorageSource(candidate.data);
+        if (prepared) {
+          finalData = prepared;
+          source = candidate.source;
+          break;
+        }
       }
-
-      // 3. Hydrate State
-      if (finalData.notes.length > 0) {
-        const currentMaxZ = Math.max(...finalData.notes.map(n => n.z || 0), 0);
-        finalData.config.maxZ = Math.max(currentMaxZ, finalData.notes.length);
-        
-        // Data Migration / Sanity Check
-        finalData.notes.forEach((n, i) => {
-           if (n.x < 0 || n.y < 0) { n.x = 20 + (i * 10); n.y = 20 + (i * 10); }
-           if (n.collapsed === undefined) n.collapsed = false;
-           if (n.title === undefined) n.title = "";
-           if (!n.boardId) n.boardId = 'default';
-           if (!n.updatedAt) n.updatedAt = n.createdAt || Date.now();
-           if (n.width !== undefined && n.editingWidth === undefined) { n.editingWidth = n.width; }
-           if (n.height !== undefined && n.editingHeight === undefined) { n.editingHeight = n.height; }
-           delete n.width;
-           delete n.height;
-           n.attachments = sanitizeNoteAttachments(n);
-         });
-      }
-
-      finalData.schemaVersion = STORAGE_SCHEMA_VERSION;
 
       await prehydrateImageNoteAssetUrls(finalData.notes);
-      
-      // Ensure boards exist (Migration from v1.0.9)
-      if (!finalData.boards || finalData.boards.length === 0) {
-          finalData.boards = [DEFAULT_BOARD];
-          finalData.currentBoardId = DEFAULT_BOARD.id;
-      }
-      // Ensure currentBoardId is valid
-      if (!finalData.currentBoardId || !finalData.boards.find(b => b.id === finalData.currentBoardId)) {
-          finalData.currentBoardId = finalData.boards[0].id;
-      }
-
-      if (!hasValidStorageContract(finalData)) {
-          finalData = normalizeStorageDataMetadata({
-              notes: [],
-              boards: [DEFAULT_BOARD],
-              currentBoardId: DEFAULT_BOARD.id,
-              config: DEFAULT_CONFIG,
-          });
-          source = 'NEW';
-      }
 
       set((state) => {
         const normalizedNotes = normalizeNotes(finalData.notes);

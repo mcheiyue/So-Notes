@@ -57,13 +57,20 @@ const normalizeWalStorageData = (raw: unknown): StorageData | undefined => {
 };
 
 const migrateAndSanitize = (data: StorageData): StorageData => {
-  data.schemaVersion = STORAGE_SCHEMA_VERSION;
+  const migrated: StorageData = {
+    ...data,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    notes: Array.isArray(data.notes) ? data.notes : [],
+    boards: Array.isArray(data.boards) ? data.boards : [DEFAULT_BOARD],
+    currentBoardId: typeof data.currentBoardId === 'string' ? data.currentBoardId : DEFAULT_BOARD.id,
+    config: { ...DEFAULT_CONFIG, ...(data.config && typeof data.config === 'object' ? data.config : {}) },
+  };
 
-  if (data.notes.length > 0) {
-    const currentMaxZ = Math.max(...data.notes.map((n) => n.z || 0), 0);
-    data.config.maxZ = Math.max(currentMaxZ, data.notes.length);
+  if (migrated.notes.length > 0) {
+    const currentMaxZ = Math.max(...migrated.notes.map((n) => n.z || 0), 0);
+    migrated.config.maxZ = Math.max(currentMaxZ, migrated.notes.length);
 
-    data.notes.forEach((n: Note, i: number) => {
+    migrated.notes.forEach((n: Note, i: number) => {
       if (n.x < 0 || n.y < 0) {
         n.x = 20 + i * 10;
         n.y = 20 + i * 10;
@@ -76,16 +83,27 @@ const migrateAndSanitize = (data: StorageData): StorageData => {
       });
   }
 
-  if (!data.boards || data.boards.length === 0) {
-    data.boards = [DEFAULT_BOARD];
-    data.currentBoardId = DEFAULT_BOARD.id;
+  if (migrated.boards.length === 0) {
+    migrated.boards = [DEFAULT_BOARD];
+    migrated.currentBoardId = DEFAULT_BOARD.id;
   }
 
-  if (!data.currentBoardId || !data.boards.find((b: Board) => b.id === data.currentBoardId)) {
-    data.currentBoardId = data.boards[0].id;
+  if (!migrated.currentBoardId || !migrated.boards.find((b: Board) => b.id === migrated.currentBoardId)) {
+    migrated.currentBoardId = migrated.boards[0].id;
   }
 
-  return data;
+  return migrated;
+};
+
+const tryPrepareSource = (data: StorageData | null | undefined): StorageData | null => {
+  if (!hasMigratableStorageData(data)) return null;
+
+  try {
+    const migrated = migrateAndSanitize(data);
+    return hasValidStorageContract(migrated) ? migrated : null;
+  } catch {
+    return null;
+  }
 };
 
 const prehydrateImageNoteAssetUrls = async (notes: Note[]): Promise<void> => {
@@ -117,27 +135,23 @@ export async function bootstrap(): Promise<BootstrapResult> {
     readDiskStorageData('data.json'),
   ]);
 
+  const walTime = getLatestUpdateTimestamp(walData);
+  const diskTime = getLatestUpdateTimestamp(diskData);
+  const candidates = [
+    { source: 'DISK' as const, data: diskData, time: diskTime },
+    { source: 'WAL' as const, data: walData, time: walTime },
+  ].sort((left, right) => right.time - left.time);
+
   let finalData: StorageData = defaultData;
   let source: StorageDataSource = 'NEW';
 
-  const walTime = getLatestUpdateTimestamp(walData);
-  const diskTime = getLatestUpdateTimestamp(diskData);
-
-  if (diskData && diskTime >= walTime) {
-    finalData = diskData;
-    source = 'DISK';
-  } else if (hasMigratableStorageData(walData)) {
-    finalData = walData;
-    source = 'WAL';
-  } else if (diskData) {
-    finalData = diskData;
-    source = 'DISK';
-  }
-
-  finalData = migrateAndSanitize(finalData);
-  if (!hasValidStorageContract(finalData)) {
-    finalData = defaultData;
-    source = 'NEW';
+  for (const candidate of candidates) {
+    const prepared = tryPrepareSource(candidate.data);
+    if (prepared) {
+      finalData = prepared;
+      source = candidate.source;
+      break;
+    }
   }
   await prehydrateImageNoteAssetUrls(finalData.notes);
 
