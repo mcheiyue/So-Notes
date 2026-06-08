@@ -154,7 +154,7 @@ describe('StorageService.bootstrap', () => {
     expect(result.recovered).toBe(false);
   });
 
-  it('磁盘是较新空快照时不覆盖较旧非空 WAL', async () => {
+  it('磁盘是较新空快照时选择 DISK 以避免旧 WAL 复活便签', async () => {
     const walTime = 5000;
     const diskTime = 9000;
 
@@ -184,9 +184,9 @@ describe('StorageService.bootstrap', () => {
 
     const result = await bootstrap();
 
-    expect(result.source).toBe('WAL');
-    expect(result.data.notes[0].id).toBe('w1');
-    expect(result.syncAction.type).toBe('SYNC_WAL_TO_DISK');
+    expect(result.source).toBe('DISK');
+    expect(result.data.notes).toEqual([]);
+    expect(result.syncAction.type).toBe('SYNC_DISK_TO_WAL');
     expect(result.diskTime).toBe(diskTime);
     expect(result.walTime).toBe(walTime);
   });

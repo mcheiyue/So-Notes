@@ -21,6 +21,9 @@ use tauri::Manager;
 ///
 /// 后续若修改 zip 内部结构（如新增顶层文件或改变清单 schema），应递增此值。
 pub const BACKUP_FORMAT_VERSION: u32 = 1;
+const MAX_MANIFEST_JSON_UNCOMPRESSED_BYTES: u64 = 1024 * 1024;
+const MAX_DATA_JSON_UNCOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_ATTACHMENT_UNCOMPRESSED_BYTES: u64 = 256 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // 备份清单类型
@@ -170,9 +173,6 @@ struct NoteForRestore {
 }
 
 /// 恢复时校验图片引用的结构，包含 `hash` 字段。
-///
-/// 与 `AttachmentRefForBackup` 不同，此类型要求 `hash` 字段存在，
-/// 以便校验它等于文件名主干和实际 SHA-256 内容哈希。
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AttachmentRefForRestore {
@@ -272,35 +272,6 @@ pub fn validate_zip_entry_path(entry_name: &str) -> Result<(), String> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 内部：data.json 最小解析结构
-// ---------------------------------------------------------------------------
-
-/// 用于解析 `data.json` 的最小 StorageData 结构。
-///
-/// 只提取看板数量、便签列表及图片引用，其余字段忽略。
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StorageDataForBackup {
-    boards: Vec<serde_json::Value>,
-    notes: Vec<NoteForBackup>,
-}
-
-/// 用于解析 `data.json` 的最小 Note 结构。
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NoteForBackup {
-    #[serde(default)]
-    attachments: Option<Vec<AttachmentRefForBackup>>,
-}
-
-/// 用于解析 `data.json` 的最小 AttachmentRef 结构。
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AttachmentRefForBackup {
-    relative_path: String,
-}
-
 struct TempZipGuard {
     path: PathBuf,
     keep: bool,
@@ -359,29 +330,6 @@ fn create_temp_zip_guard(resolved_path: &Path) -> Result<(TempZipGuard, std::fs:
 // ---------------------------------------------------------------------------
 // 内部辅助函数
 // ---------------------------------------------------------------------------
-
-/// 从所有便签中收集去重后的图片文件引用。
-///
-/// 遍历所有便签（包括废纸篓中的便签），提取其图片引用中的 `relative_path`，
-/// 经过 `validate_zip_entry_path` 验证后去重返回。
-fn collect_unique_image_refs(data: &StorageDataForBackup) -> Result<Vec<String>, String> {
-    let mut seen = HashSet::new();
-    let mut refs = Vec::new();
-
-    for note in &data.notes {
-        if let Some(attachments) = &note.attachments {
-            for att in attachments {
-                if seen.insert(att.relative_path.clone()) {
-                    // 验证路径格式：必须为 attachments/<safe_filename>
-                    validate_zip_entry_path(&att.relative_path)?;
-                    refs.push(att.relative_path.clone());
-                }
-            }
-        }
-    }
-
-    Ok(refs)
-}
 
 /// 如果目标路径已存在，生成带后缀 `_1`、`_2` 的确定性安全兄弟路径。
 ///
@@ -450,30 +398,10 @@ fn restore_attachment_dir(attach_bak: &Path, attach_dir: &Path, had_old_attach: 
     }
 }
 
-fn validate_restored_data(
+fn validate_storage_data_contract(
     data: &StorageDataForRestore,
-    manifest: &BackupManifest,
     attachment_contents: &std::collections::HashMap<String, Vec<u8>>,
-) -> Result<(), String> {
-    if manifest.attachment_count != manifest.attachments.len() as u32 {
-        return Err(format!(
-            "备份清单图片数量不匹配: attachmentCount={}, attachments={}",
-            manifest.attachment_count,
-            manifest.attachments.len()
-        ));
-    }
-
-    let mut manifest_paths: HashSet<String> = HashSet::new();
-    for att in &manifest.attachments {
-        validate_zip_entry_path(&att.zip_entry_path)?;
-        if !manifest_paths.insert(att.zip_entry_path.clone()) {
-            return Err(format!(
-                "备份清单中存在重复图片条目: {}",
-                att.zip_entry_path
-            ));
-        }
-    }
-
+) -> Result<HashSet<String>, String> {
     if !SUPPORTED_SCHEMA_VERSIONS.contains(&data.schema_version) {
         return Err(format!("不支持的 schemaVersion: {}", data.schema_version));
     }
@@ -692,6 +620,46 @@ fn validate_restored_data(
         }
     }
 
+    Ok(data_image_refs)
+}
+
+fn attachment_ref_for_path<'a>(
+    data: &'a StorageDataForRestore,
+    relative_path: &str,
+) -> Option<&'a AttachmentRefForRestore> {
+    data.notes
+        .iter()
+        .filter_map(|note| note.attachments.as_ref())
+        .flat_map(|attachments| attachments.iter())
+        .find(|attachment| attachment.relative_path == relative_path)
+}
+
+fn validate_restored_data(
+    data: &StorageDataForRestore,
+    manifest: &BackupManifest,
+    attachment_contents: &std::collections::HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    if manifest.attachment_count != manifest.attachments.len() as u32 {
+        return Err(format!(
+            "备份清单图片数量不匹配: attachmentCount={}, attachments={}",
+            manifest.attachment_count,
+            manifest.attachments.len()
+        ));
+    }
+
+    let mut manifest_paths: HashSet<String> = HashSet::new();
+    for att in &manifest.attachments {
+        validate_zip_entry_path(&att.zip_entry_path)?;
+        if !manifest_paths.insert(att.zip_entry_path.clone()) {
+            return Err(format!(
+                "备份清单中存在重复图片条目: {}",
+                att.zip_entry_path
+            ));
+        }
+    }
+
+    let data_image_refs = validate_storage_data_contract(data, attachment_contents)?;
+
     for ref_path in &data_image_refs {
         if !manifest_paths.contains(ref_path) {
             return Err(format!("数据中引用的图片 {ref_path} 不在备份清单中"));
@@ -783,6 +751,12 @@ fn restore_local_backup_inner(
         match name.as_str() {
             "manifest.json" => {
                 has_manifest = true;
+                if entry.size() > MAX_MANIFEST_JSON_UNCOMPRESSED_BYTES {
+                    return Err(format!(
+                        "manifest.json 解压后大小超过上限: {} 字节",
+                        entry.size()
+                    ));
+                }
                 let mut buf = String::new();
                 entry
                     .read_to_string(&mut buf)
@@ -791,6 +765,12 @@ fn restore_local_backup_inner(
             }
             "data.json" => {
                 has_data = true;
+                if entry.size() > MAX_DATA_JSON_UNCOMPRESSED_BYTES {
+                    return Err(format!(
+                        "data.json 解压后大小超过上限: {} 字节",
+                        entry.size()
+                    ));
+                }
                 let mut buf = Vec::new();
                 entry
                     .read_to_end(&mut buf)
@@ -798,6 +778,12 @@ fn restore_local_backup_inner(
                 data_content = Some(buf);
             }
             path if path.starts_with("attachments/") => {
+                if entry.size() > MAX_ATTACHMENT_UNCOMPRESSED_BYTES {
+                    return Err(format!(
+                        "附件 {path} 解压后大小超过上限: {} 字节",
+                        entry.size()
+                    ));
+                }
                 let mut buf = Vec::new();
                 entry
                     .read_to_end(&mut buf)
@@ -946,15 +932,16 @@ fn create_local_backup_inner(
         std::fs::read_to_string(&data_path).map_err(|e| format!("读取 data.json 失败: {e}"))?;
 
     // 2. 解析 data.json
-    let storage_data: StorageDataForBackup =
+    let storage_data: StorageDataForRestore =
         serde_json::from_str(&data_json).map_err(|e| format!("解析 data.json 失败: {e}"))?;
+    let empty_attachment_contents = std::collections::HashMap::new();
+    let image_refs = validate_storage_data_contract(&storage_data, &empty_attachment_contents)?;
 
     // 3. 统计
     let board_count = storage_data.boards.len() as u32;
     let note_count = storage_data.notes.len() as u32;
 
     // 4. 收集去重后的图片文件引用
-    let image_refs = collect_unique_image_refs(&storage_data)?;
     let attachment_count = image_refs.len() as u32;
 
     let mut validated_images = Vec::new();
@@ -1034,6 +1021,21 @@ fn create_local_backup_inner(
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect::<String>();
+
+        let attachment_ref = attachment_ref_for_path(&storage_data, ref_path)
+            .ok_or_else(|| format!("数据中缺少图片引用: {ref_path}"))?;
+        if attachment_ref.hash != sha256 {
+            return Err(format!(
+                "图片文件 {ref_path} 的 hash 与 data.json 不匹配: data={}, 实际={}",
+                attachment_ref.hash, sha256
+            ));
+        }
+        if attachment_ref.size != total_size as f64 {
+            return Err(format!(
+                "图片文件 {ref_path} 的 size 与 data.json 不匹配: data={}, 实际={}",
+                attachment_ref.size, total_size
+            ));
+        }
 
         attachment_entries.push(BackupAttachmentEntry {
             zip_entry_path: ref_path.clone(),
@@ -1180,8 +1182,28 @@ mod tests {
         })
     }
 
+    fn image_attachment_json(id: &str, relative_path: &str, size: u64) -> serde_json::Value {
+        let filename = Path::new(relative_path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or(relative_path);
+        let hash = Path::new(relative_path)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        serde_json::json!({
+            "id": format!("{id}-att"),
+            "hash": hash,
+            "filename": filename,
+            "mimeType": "image/png",
+            "size": size,
+            "relativePath": relative_path,
+            "createdAt": 0
+        })
+    }
+
     /// 生成一张图片便签 JSON，引用指定的 relative_path。
-    fn image_note(id: &str, board_id: &str, relative_path: &str) -> serde_json::Value {
+    fn image_note(id: &str, board_id: &str, relative_path: &str, size: u64) -> serde_json::Value {
         serde_json::json!({
             "id": id,
             "kind": "image",
@@ -1191,20 +1213,12 @@ mod tests {
             "color": "yellow",
             "z": 1,
             "createdAt": 0, "updatedAt": 0,
-            "attachments": [{
-                "id": format!("{id}-att"),
-                "hash": "",
-                "filename": "",
-                "mimeType": "image/png",
-                "size": 0,
-                "relativePath": relative_path,
-                "createdAt": 0
-            }]
+            "attachments": [image_attachment_json(id, relative_path, size)]
         })
     }
 
     /// 生成一张处于废纸篓的图片便签 JSON（有 deletedAt）。
-    fn trashed_image_note(id: &str, board_id: &str, relative_path: &str) -> serde_json::Value {
+    fn trashed_image_note(id: &str, board_id: &str, relative_path: &str, size: u64) -> serde_json::Value {
         serde_json::json!({
             "id": id,
             "kind": "image",
@@ -1215,15 +1229,7 @@ mod tests {
             "z": 1,
             "createdAt": 0, "updatedAt": 0,
             "deletedAt": 1700000000000_u64,
-            "attachments": [{
-                "id": format!("{id}-att"),
-                "hash": "",
-                "filename": "",
-                "mimeType": "image/png",
-                "size": 0,
-                "relativePath": relative_path,
-                "createdAt": 0
-            }]
+            "attachments": [image_attachment_json(id, relative_path, size)]
         })
     }
 
@@ -1727,7 +1733,10 @@ mod tests {
 
         let data = minimal_data_json(
             &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
-            &[text_note("n1", "b1"), image_note("n2", "b1", &rel_path)],
+            &[
+                text_note("n1", "b1"),
+                image_note("n2", "b1", &rel_path, img_content.len() as u64),
+            ],
         );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
@@ -1769,7 +1778,7 @@ mod tests {
             &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
             &[
                 text_note("n1", "b1"),
-                trashed_image_note("n2", "b1", &rel_path),
+                trashed_image_note("n2", "b1", &rel_path, img_content.len() as u64),
             ],
         );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
@@ -1801,8 +1810,8 @@ mod tests {
         let data = minimal_data_json(
             &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
             &[
-                image_note("n1", "b1", &rel_path),
-                image_note("n2", "b1", &rel_path),
+                image_note("n1", "b1", &rel_path, img_content.len() as u64),
+                image_note("n2", "b1", &rel_path, img_content.len() as u64),
             ],
         );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
@@ -1838,7 +1847,10 @@ mod tests {
 
         let missing_rel_path =
             "attachments/0000000000000000000000000000000000000000000000000000000000000000.png";
-        let data = minimal_data_json(&[], &[image_note("n1", "b1", missing_rel_path)]);
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[image_note("n1", "b1", missing_rel_path, 0)],
+        );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
         let target = root.join("backup.zip");
@@ -1879,7 +1891,10 @@ mod tests {
             .map(|b| format!("{b:02x}"))
             .collect();
 
-        let data = minimal_data_json(&[], &[image_note("n1", "b1", &rel_path)]);
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[image_note("n1", "b1", &rel_path, img_content.len() as u64)],
+        );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
         let target = root.join("backup.zip");
@@ -1917,7 +1932,10 @@ mod tests {
         let sonotes_base = root.join("SoNotes");
         std::fs::create_dir_all(&sonotes_base).unwrap();
 
-        let data = minimal_data_json(&[], &[]);
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[],
+        );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
         let target = root.join("backup.zip");
@@ -1941,6 +1959,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn backup_rejects_data_that_restore_would_reject() {
+        let root = test_dir("backup-contract-invalid");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data = minimal_data_json(&[], &[]);
+        std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
+
+        let target = root.join("backup.zip");
+        let err = create_local_backup_inner(&sonotes_base, &target).unwrap_err();
+
+        assert!(err.contains("boards"), "错误应来自 StorageData 契约: {err}");
+        assert!(!target.exists(), "契约非法时不应生成 zip");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     // -----------------------------------------------------------------------
     // create_local_backup_inner：不安全的图片引用路径被拒绝
     // -----------------------------------------------------------------------
@@ -1952,8 +1988,8 @@ mod tests {
         std::fs::create_dir_all(&sonotes_base).unwrap();
 
         let data = minimal_data_json(
-            &[],
-            &[image_note("n1", "b1", "attachments/../../etc/passwd")],
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[image_note("n1", "b1", "attachments/../../etc/passwd", 0)],
         );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
@@ -1976,7 +2012,10 @@ mod tests {
         let sonotes_base = root.join("SoNotes");
         std::fs::create_dir_all(&sonotes_base).unwrap();
 
-        let data = minimal_data_json(&[], &[image_note("n1", "b1", "/etc/passwd")]);
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[image_note("n1", "b1", "/etc/passwd", 0)],
+        );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
         let target = root.join("backup.zip");
@@ -1993,7 +2032,10 @@ mod tests {
         let sonotes_base = root.join("SoNotes");
         std::fs::create_dir_all(&sonotes_base).unwrap();
 
-        let data = minimal_data_json(&[], &[image_note("n1", "b1", "C:/Windows/System32/config")]);
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[image_note("n1", "b1", "C:/Windows/System32/config", 0)],
+        );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
         let target = root.join("backup.zip");
@@ -2010,7 +2052,10 @@ mod tests {
         let sonotes_base = root.join("SoNotes");
         std::fs::create_dir_all(&sonotes_base).unwrap();
 
-        let data = minimal_data_json(&[], &[image_note("n1", "b1", "attachments/sub/file.png")]);
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[image_note("n1", "b1", "attachments/sub/file.png", 0)],
+        );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
         let target = root.join("backup.zip");
@@ -2056,7 +2101,10 @@ mod tests {
         let img_content = b"test forward slash";
         let rel_path = create_attachment_file(&attach_dir, img_content, "png");
 
-        let data = minimal_data_json(&[], &[image_note("n1", "b1", &rel_path)]);
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[image_note("n1", "b1", &rel_path, img_content.len() as u64)],
+        );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
         let target = root.join("backup.zip");
@@ -2270,6 +2318,30 @@ mod tests {
 
         let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
         assert!(err.contains("data.json"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_fails_manifest_json_too_large() {
+        let root = test_dir("restore-large-manifest");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let zip_path = root.join("large-manifest.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("manifest.json", options).unwrap();
+        let oversized_manifest = vec![b' '; (MAX_MANIFEST_JSON_UNCOMPRESSED_BYTES + 1) as usize];
+        zip.write_all(&oversized_manifest).unwrap();
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+        zip.finish().unwrap();
+
+        let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
+        assert!(err.contains("manifest.json") && err.contains("超过上限"), "{err}");
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -3420,7 +3492,10 @@ mod tests {
             "attachments/0000000000000000000000000000000000000000000000000000000000000000.png";
         std::fs::create_dir_all(sonotes_base.join(blocked_rel_path)).unwrap();
 
-        let data = minimal_data_json(&[], &[image_note("n1", "b1", blocked_rel_path)]);
+        let data = minimal_data_json(
+            &[serde_json::json!({"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0})],
+            &[image_note("n1", "b1", blocked_rel_path, 0)],
+        );
         std::fs::write(sonotes_base.join("data.json"), &data).unwrap();
 
         let target = root.join("backup.zip");

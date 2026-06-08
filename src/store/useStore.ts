@@ -627,10 +627,7 @@ export const useStore = create<State>()(
       // console.log(`Init Arbitration -> WAL: ${walTime}, DISK: ${diskTime}`);
 
       // Decision Logic
-      if (diskData && isEmptyStorageData(diskData) && hasPersistedNotes(normalizedWalData)) {
-        finalData = normalizedWalData;
-        source = 'WAL';
-      } else if (diskData && diskTime > walTime) {
+      if (diskData && diskTime >= walTime) {
         // Disk is newer (or WAL is empty/stale) -> Use Disk
         // console.log('Using DISK (Newer content found)');
         finalData = diskData;

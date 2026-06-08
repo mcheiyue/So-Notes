@@ -108,10 +108,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
   const walTime = getLatestUpdateTimestamp(walData);
   const diskTime = getLatestUpdateTimestamp(diskData);
 
-  if (diskData && !hasPersistedNotes(diskData) && hasPersistedNotes(walData)) {
-    finalData = walData;
-    source = 'WAL';
-  } else if (diskData && diskTime > walTime) {
+  if (diskData && diskTime >= walTime) {
     finalData = diskData;
     source = 'DISK';
   } else if (hasPersistedNotes(walData)) {
