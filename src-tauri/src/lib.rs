@@ -15,6 +15,7 @@ use tokio::sync;
 mod attachments;
 pub mod backup;
 mod persistence;
+pub mod webdav;
 
 struct AppState {
     is_pinned: Mutex<bool>,
@@ -639,6 +640,9 @@ pub fn run() {
             attachments::delete_attachment_file,
             backup::create_local_backup,
             backup::restore_local_backup,
+            webdav::webdav_load_config,
+            webdav::webdav_save_config,
+            webdav::webdav_clear_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3656,6 +3656,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-shell",
  "tokio",
+ "url",
  "windows",
  "zip",
 ]
