@@ -161,6 +161,7 @@ struct BoardViewportForRestore {
 #[serde(rename_all = "camelCase")]
 struct NoteForRestore {
     id: String,
+    #[serde(default = "default_note_kind")]
     kind: String,
     #[serde(default)]
     board_id: Option<String>,
@@ -178,6 +179,10 @@ struct NoteForRestore {
     collapsed: Option<bool>,
     #[serde(default)]
     attachments: Option<Vec<AttachmentRefForRestore>>,
+}
+
+fn default_note_kind() -> String {
+    "text".to_string()
 }
 
 /// 恢复时校验图片引用的结构，包含 `hash` 字段。
@@ -2766,6 +2771,37 @@ mod tests {
 
         let err = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap_err();
         assert!(err.contains("kind"), "{err}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_accepts_legacy_text_note_missing_kind() {
+        let root = test_dir("restore-legacy-note-no-kind");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{"id": "n1", "boardId": "b1",
+                "x": 0, "y": 0, "title": "旧文本便签", "content": "legacy", "color": "yellow",
+                "z": 1, "createdAt": 0, "updatedAt": 0}],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap();
+        assert!(result.success);
+        assert_eq!(result.note_count, 1);
+
+        let restored = std::fs::read_to_string(sonotes_base.join("data.json")).unwrap();
+        assert!(restored.contains("旧文本便签"));
 
         let _ = std::fs::remove_dir_all(root);
     }
