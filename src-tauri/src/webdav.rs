@@ -444,72 +444,8 @@ pub fn generate_current_remote_backup_filename() -> String {
     format!("SoNotes_Backup_{now}.zip")
 }
 
-/// 获取当前日期时间的 YYYYMMDDHHMMSS 字符串（内部辅助函数，便于测试替换）。
 fn chrono_now_datetime_string() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days = secs / 86400;
-    let time_of_day = secs % 86400;
-    let hours = time_of_day / 3600;
-    let minutes = (time_of_day % 3600) / 60;
-    let seconds = time_of_day % 60;
-
-    // 简易公历日期计算（Gregorian）
-    let (year, month, day) = days_to_ymd(days);
-
-    format!(
-        "{year:04}{month:02}{day:02}{hours:02}{minutes:02}{seconds:02}"
-    )
-}
-
-/// 将从 1970-01-01 起的天数转换为年月日。
-fn days_to_ymd(days: u64) -> (u64, u64, u64) {
-    // 简化的日期算法
-    let mut y = 1970u64;
-    let mut remaining = days;
-
-    loop {
-        let days_in_year = if is_leap_year(y) { 366 } else { 365 };
-        if remaining < days_in_year {
-            break;
-        }
-        remaining -= days_in_year;
-        y += 1;
-    }
-
-    let leap = is_leap_year(y);
-    let days_in_month: [u64; 12] = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-
-    let mut m = 1u64;
-    for &dim in &days_in_month {
-        if remaining < dim {
-            break;
-        }
-        remaining -= dim;
-        m += 1;
-    }
-
-    (y, m, remaining + 1)
-}
-
-fn is_leap_year(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+    chrono::Local::now().format("%Y%m%d%H%M%S").to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -1846,32 +1782,6 @@ mod tests {
     fn generate_filename_has_zip_suffix() {
         let name = generate_current_remote_backup_filename();
         assert!(name.ends_with(".zip"));
-    }
-
-    // -----------------------------------------------------------------------
-    // 辅助函数：日期时间生成测试
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn days_to_ymd_known_date() {
-        // 2024-01-01 是 1970-01-01 起的第 19723 天
-        let (y, m, d) = days_to_ymd(19723);
-        assert_eq!((y, m, d), (2024, 1, 1));
-    }
-
-    #[test]
-    fn days_to_ymd_leap_year_feb29() {
-        // 2024-02-29: 2024-01-01 = day 19723, +31 (Jan) + 28 (Feb) = 19782
-        let (y, m, d) = days_to_ymd(19782);
-        assert_eq!((y, m, d), (2024, 2, 29));
-    }
-
-    #[test]
-    fn is_leap_year_standard() {
-        assert!(is_leap_year(2024));
-        assert!(!is_leap_year(2023));
-        assert!(!is_leap_year(1900));
-        assert!(is_leap_year(2000));
     }
 
     // -----------------------------------------------------------------------

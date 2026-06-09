@@ -3824,6 +3824,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 name = "so-notes"
 version = "1.4.9"
 dependencies = [
+ "chrono",
  "fs4",
  "image",
  "quick-xml 0.37.5",
