@@ -36,6 +36,8 @@ const CANVAS_NON_BLANK_SELECTOR = [
   '.minimap-interaction-area',
 ].join(', ');
 
+const NOTE_PAN_GUARD_SELECTOR = '[data-note-pan-guard="true"]';
+
 const ALLOWED_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
   'image/png',
   'image/jpeg',
@@ -84,6 +86,10 @@ const getEventTargetElement = (target: EventTarget | null): Element | null => {
 const isBlankCanvasTarget = (target: EventTarget | null): boolean => {
   const targetElement = getEventTargetElement(target);
   return !targetElement || !targetElement.closest(CANVAS_NON_BLANK_SELECTOR);
+};
+
+const isNotePanGuardTarget = (target: EventTarget | null): boolean => {
+  return Boolean(getEventTargetElement(target)?.closest(NOTE_PAN_GUARD_SELECTOR));
 };
 
 const isNoteCanvasTarget = (target: EventTarget | null): boolean => {
@@ -582,7 +588,9 @@ export const Canvas: React.FC = () => {
   };
 
   const handleGlobalDown = (e: React.MouseEvent) => {
+    const isPanModeActive = useViewportStore.getState().interaction.isPanMode;
     const isBlankTarget = isBlankCanvasTarget(e.target);
+    const isPanStartTarget = isBlankTarget || (isPanModeActive && isNotePanGuardTarget(e.target));
 
     if (e.button !== 2 && stickyDragId) {
       engine.commitStickyDragPlacement();
@@ -593,7 +601,7 @@ export const Canvas: React.FC = () => {
       return;
     }
 
-    if (useViewportStore.getState().interaction.isPanMode && e.button === 0 && isBlankTarget) {
+    if (isPanModeActive && e.button === 0 && isPanStartTarget) {
       engine.isPanning.current = true;
       engine.panStart.x = e.clientX;
       engine.panStart.y = e.clientY;

@@ -738,6 +738,56 @@ describe('Canvas 空白命中判定', () => {
     expect(useStore.getState().viewport.y).toBe(35);
   });
 
+  it('抓手模式下从 NoteCard 的 data-note-pan-guard 拖动会启动画布平移', async () => {
+    const clearSelection = vi.fn();
+    useStore.setState({
+      clearSelection,
+      interaction: {
+        ...useStore.getState().interaction,
+        isPanMode: true,
+      },
+    });
+
+    await renderCanvas();
+
+    const canvasRoot = container.firstElementChild as HTMLDivElement | null;
+    const panGuard = container.querySelector('[data-note-pan-guard="true"]') as HTMLDivElement | null;
+    const noteEl = panGuard?.closest('.note-card') as HTMLElement | null;
+    const worldLayer = noteEl?.parentElement as HTMLElement | null;
+
+    expect(canvasRoot).not.toBeNull();
+    expect(panGuard).not.toBeNull();
+    expect(noteEl).not.toBeNull();
+    expect(worldLayer).not.toBeNull();
+
+    await act(async () => {
+      panGuard?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 220,
+        clientY: 240,
+      }));
+
+      panGuard?.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        buttons: 1,
+        clientX: 250,
+        clientY: 265,
+      }));
+    });
+
+    expect(clearSelection).not.toHaveBeenCalled();
+    expect(rafMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rafCallbacks[0]?.(0);
+    });
+
+    expect(worldLayer?.style.transform).toBe('translate3d(-10px, -35px, 0)');
+    expect(useStore.getState().viewport.x).toBe(10);
+    expect(useStore.getState().viewport.y).toBe(35);
+  });
+
   it('active DragSession 便签即使旧布局位置被虚拟化裁剪也会保持渲染', async () => {
     useStore.setState({
       viewport: { x: 2000, y: 60, w: 1280, h: 720 },
