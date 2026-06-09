@@ -1312,7 +1312,17 @@ pub async fn webdav_create_remote_backup(
         };
 
         let upload_url = format!("{}{}", dir_url, remote_filename);
-        let zip_bytes = std::fs::read(&actual_zip_path).map_err(|_| {
+        let zip_len = tokio::fs::metadata(&actual_zip_path)
+            .await
+            .map_err(|_| {
+                let _ = std::fs::remove_file(&actual_zip_path);
+                if actual_zip_path != temp_zip_path {
+                    let _ = std::fs::remove_file(&temp_zip_path);
+                }
+                "远端备份上传失败，本地数据未受影响".to_string()
+            })?
+            .len();
+        let zip_file = tokio::fs::File::open(&actual_zip_path).await.map_err(|_| {
             let _ = std::fs::remove_file(&actual_zip_path);
             if actual_zip_path != temp_zip_path {
                 let _ = std::fs::remove_file(&temp_zip_path);
@@ -1323,8 +1333,9 @@ pub async fn webdav_create_remote_backup(
         let mut req = client
             .put(&upload_url)
             .header("Content-Type", "application/zip")
+            .header(reqwest::header::CONTENT_LENGTH, zip_len)
             .header("If-None-Match", "*")
-            .body(zip_bytes);
+            .body(reqwest::Body::from(zip_file));
 
         if let Some(pw) = &config.password {
             req = req.basic_auth(&config.username, Some(pw));
