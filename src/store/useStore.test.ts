@@ -17,12 +17,15 @@ vi.mock('../utils/fileSystem', () => ({
   openFile: vi.fn(async () => null),
 }));
 
-const { resolveAttachmentAssetUrlCachedMock } = vi.hoisted(() => ({
+const { resolveAttachmentAssetUrlCachedMock, deleteAttachmentFileMock } = vi.hoisted(() => ({
   resolveAttachmentAssetUrlCachedMock: vi.fn(async (relativePath: string) => `asset://localhost/${relativePath}`),
+  deleteAttachmentFileMock: vi.fn(async (relativePath: string) => ({ deleted: true, relativePath })),
 }));
 
 vi.mock('../services/storage/attachmentPersistence', () => ({
   resolveAttachmentAssetUrlCached: resolveAttachmentAssetUrlCachedMock,
+  deleteAttachmentFile: deleteAttachmentFileMock,
+  invalidateAttachmentPathCache: vi.fn(),
 }));
 
 import { useStore } from './useStore';
@@ -3049,6 +3052,224 @@ describe('v1.4.4 软删除与废纸篓恢复领域撤销/重做契约', () => {
     expect(useStore.getState().notesById['sd-1']).toBeUndefined();
     expect(useStore.getState().notesById['sd-2']).toBeUndefined();
     expect(useStore.getState().domainHistory.undoStack.length).toBe(undoCountAfterSoftDelete);
+  });
+
+  it('deleteNotePermanently 删除最后引用的图片文件', async () => {
+    const attachment: AttachmentRef = {
+      id: 'att-1',
+      hash: 'hash-1',
+      filename: 'a.png',
+      mimeType: 'image/png',
+      size: 10,
+      relativePath: 'attachments/hash-1.png',
+      createdAt: 1,
+    };
+    useStore.setState({
+      ...normalizeNotes([{
+        id: 'img-1',
+        kind: 'image',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '',
+        content: '',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 100,
+        deletedAt: 200,
+        attachments: [attachment],
+      }]),
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    useStore.getState().deleteNotePermanently('img-1');
+    await flushMicrotasks();
+
+    expect(deleteAttachmentFileMock).toHaveBeenCalledWith('attachments/hash-1.png');
+    expect(useStore.getState().notesById['img-1']).toBeUndefined();
+  });
+
+  it('deleteNotePermanently 保留仍被其他便签引用的图片文件', async () => {
+    const attachment: AttachmentRef = {
+      id: 'att-1',
+      hash: 'hash-1',
+      filename: 'a.png',
+      mimeType: 'image/png',
+      size: 10,
+      relativePath: 'attachments/hash-1.png',
+      createdAt: 1,
+    };
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'trash-img',
+          kind: 'image',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '',
+          content: '',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+          deletedAt: 200,
+          attachments: [attachment],
+        },
+        {
+          id: 'live-img',
+          kind: 'image',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: '',
+          content: '',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 101,
+          updatedAt: 101,
+          attachments: [{ ...attachment, id: 'att-2' }],
+        },
+      ]),
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().deleteNotePermanently('trash-img');
+    await flushMicrotasks();
+
+    expect(deleteAttachmentFileMock).not.toHaveBeenCalled();
+    expect(useStore.getState().notesById['live-img']).toBeDefined();
+  });
+
+  it('deleteSelectedPermanently 批量删除共享图片时只清理一次', async () => {
+    const attachment: AttachmentRef = {
+      id: 'att-1',
+      hash: 'hash-1',
+      filename: 'a.png',
+      mimeType: 'image/png',
+      size: 10,
+      relativePath: 'attachments/hash-1.png',
+      createdAt: 1,
+    };
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'trash-img-a',
+          kind: 'image',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '',
+          content: '',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+          deletedAt: 200,
+          attachments: [attachment],
+        },
+        {
+          id: 'trash-img-b',
+          kind: 'image',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: '',
+          content: '',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 101,
+          updatedAt: 101,
+          deletedAt: 201,
+          attachments: [{ ...attachment, id: 'att-2' }],
+        },
+      ]),
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().deleteSelectedPermanently(['trash-img-a', 'trash-img-b']);
+    await flushMicrotasks();
+
+    expect(deleteAttachmentFileMock).toHaveBeenCalledTimes(1);
+    expect(deleteAttachmentFileMock).toHaveBeenCalledWith('attachments/hash-1.png');
+  });
+
+  it('emptyTrash 保留仍被看板便签引用的图片文件', async () => {
+    const sharedAttachment: AttachmentRef = {
+      id: 'att-shared',
+      hash: 'hash-shared',
+      filename: 'shared.png',
+      mimeType: 'image/png',
+      size: 10,
+      relativePath: 'attachments/hash-shared.png',
+      createdAt: 1,
+    };
+    const orphanAttachment: AttachmentRef = {
+      id: 'att-orphan',
+      hash: 'hash-orphan',
+      filename: 'orphan.png',
+      mimeType: 'image/png',
+      size: 20,
+      relativePath: 'attachments/hash-orphan.png',
+      createdAt: 2,
+    };
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'trash-shared',
+          kind: 'image',
+          boardId: 'default',
+          x: 10,
+          y: 20,
+          title: '',
+          content: '',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 100,
+          updatedAt: 100,
+          deletedAt: 200,
+          attachments: [sharedAttachment],
+        },
+        {
+          id: 'live-shared',
+          kind: 'image',
+          boardId: 'default',
+          x: 30,
+          y: 40,
+          title: '',
+          content: '',
+          color: '#FFFFFF',
+          z: 2,
+          createdAt: 101,
+          updatedAt: 101,
+          attachments: [{ ...sharedAttachment, id: 'att-live' }],
+        },
+        {
+          id: 'trash-orphan',
+          kind: 'image',
+          boardId: 'default',
+          x: 50,
+          y: 60,
+          title: '',
+          content: '',
+          color: '#FFFFFF',
+          z: 3,
+          createdAt: 102,
+          updatedAt: 102,
+          deletedAt: 202,
+          attachments: [orphanAttachment],
+        },
+      ]),
+      config: { ...useStore.getState().config, maxZ: 3 },
+    });
+
+    useStore.getState().emptyTrash();
+    await flushMicrotasks();
+
+    expect(deleteAttachmentFileMock).toHaveBeenCalledTimes(1);
+    expect(deleteAttachmentFileMock).toHaveBeenCalledWith('attachments/hash-orphan.png');
+    expect(useStore.getState().notesById['live-shared']).toBeDefined();
   });
 
   it('restoreNote 看板已被删除时回退到当前看板，撤销后保持可用看板', () => {

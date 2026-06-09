@@ -18,7 +18,8 @@ import { buildSmartPasteNoteInputs, splitParagraphs } from '../utils/smartPaste'
 import type { SmartPasteNoteInput, SmartPasteOptionId, SmartPasteResult } from '../utils/smartPaste';
 import { LAYOUT } from '../constants/layout';
 import { computeImageNoteSize } from '../utils/imageNoteSize';
-import { resolveAttachmentAssetUrlCached } from '../services/storage/attachmentPersistence';
+import { deleteAttachmentFile, invalidateAttachmentPathCache, resolveAttachmentAssetUrlCached } from '../services/storage/attachmentPersistence';
+import { collectLiveAttachmentRefs } from '../services/storage/attachmentConsistency';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -479,6 +480,27 @@ const removeNoteFromNormalizedState = (state: Pick<State, 'notesById' | 'allNote
   delete state.notesById[noteId];
   state.allNoteIds = state.allNoteIds.filter((id) => id !== noteId);
   delete state.layoutNotesById[noteId];
+};
+
+const collectAttachmentRelativePaths = (notes: Note[]): Set<string> => {
+  const paths = new Set<string>();
+  collectLiveAttachmentRefs(notes).forEach((ref) => paths.add(ref.relativePath));
+  return paths;
+};
+
+const cleanupUnreferencedAttachmentFiles = (candidatePaths: ReadonlySet<string>) => {
+  if (candidatePaths.size === 0) return;
+
+  const livePaths = collectAttachmentRelativePaths(Object.values(useStore.getState().notesById));
+  const pathsToDelete = Array.from(candidatePaths).filter((relativePath) => !livePaths.has(relativePath));
+  if (pathsToDelete.length === 0) return;
+
+  void Promise.allSettled(
+    pathsToDelete.map(async (relativePath) => {
+      await deleteAttachmentFile(relativePath);
+      invalidateAttachmentPathCache(relativePath);
+    }),
+  );
 };
 
 const extractDomainSlice = (state: State): DomainState => ({
@@ -1617,18 +1639,32 @@ export const useStore = create<State>()(
 
 
     deleteNotePermanently: (id) => {
+        const candidatePaths = new Set<string>();
         set((state) => {
+            const note = state.notesById[id];
+            if (note) {
+                collectAttachmentRelativePaths([note]).forEach((relativePath) => candidatePaths.add(relativePath));
+            }
             removeNoteFromNormalizedState(state, id);
             state.selectedIds = state.selectedIds.filter((selectedId) => selectedId !== id);
         });
+        cleanupUnreferencedAttachmentFiles(candidatePaths);
     },
 
     emptyTrash: () => {
+        const candidatePaths = new Set<string>();
         set((state) => {
             const noteIdsToDelete = state.allNoteIds.filter((id) => state.notesById[id]?.deletedAt);
+            noteIdsToDelete.forEach((noteId) => {
+                const note = state.notesById[noteId];
+                if (note) {
+                    collectAttachmentRelativePaths([note]).forEach((relativePath) => candidatePaths.add(relativePath));
+                }
+            });
             noteIdsToDelete.forEach((noteId) => removeNoteFromNormalizedState(state, noteId));
             state.selectedIds = state.selectedIds.filter((id) => state.notesById[id]);
         });
+        cleanupUnreferencedAttachmentFiles(candidatePaths);
     },
 
     restoreAllTrash: () => {
@@ -1742,12 +1778,18 @@ export const useStore = create<State>()(
     },
 
     deleteSelectedPermanently: (ids) => {
+        const candidatePaths = new Set<string>();
         set((state) => {
             ids.forEach((id) => {
+                const note = state.notesById[id];
+                if (note) {
+                    collectAttachmentRelativePaths([note]).forEach((relativePath) => candidatePaths.add(relativePath));
+                }
                 removeNoteFromNormalizedState(state, id);
             });
             state.selectedIds = state.selectedIds.filter((selectedId) => !ids.includes(selectedId));
         });
+        cleanupUnreferencedAttachmentFiles(candidatePaths);
     },
 
     
