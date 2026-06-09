@@ -419,6 +419,34 @@ fn ensure_uncompressed_size(label: &str, size: u64, limit: u64) -> Result<(), St
     Ok(())
 }
 
+fn read_zip_entry_limited<R: Read>(
+    reader: &mut R,
+    label: &str,
+    declared_size: u64,
+    limit: u64,
+) -> Result<Vec<u8>, String> {
+    ensure_uncompressed_size(label, declared_size, limit)?;
+
+    let mut limited_reader = reader.take(limit.saturating_add(1));
+    let mut buf = Vec::new();
+    limited_reader
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("读取 {label} 失败: {e}"))?;
+
+    if buf.len() as u64 > limit {
+        return Err(format!("{label} 实际解压大小超过上限: {} 字节", buf.len()));
+    }
+
+    if declared_size != buf.len() as u64 {
+        return Err(format!(
+            "{label} 声明大小与实际读取大小不匹配: 声明 {declared_size} 字节, 实际 {} 字节",
+            buf.len()
+        ));
+    }
+
+    Ok(buf)
+}
+
 fn validate_storage_data_contract(
     data: &StorageDataForRestore,
     attachment_contents: &std::collections::HashMap<String, Vec<u8>>,
@@ -800,24 +828,26 @@ fn restore_local_backup_inner(
         match name.as_str() {
             "manifest.json" => {
                 has_manifest = true;
-                ensure_uncompressed_size(
+                let declared_size = entry.size();
+                let buf = read_zip_entry_limited(
+                    &mut entry,
                     "manifest.json",
-                    entry.size(),
+                    declared_size,
                     MAX_MANIFEST_JSON_UNCOMPRESSED_BYTES,
                 )?;
-                let mut buf = String::new();
-                entry
-                    .read_to_string(&mut buf)
-                    .map_err(|e| format!("读取 manifest.json 失败: {e}"))?;
-                manifest_content = Some(buf);
+                let content =
+                    String::from_utf8(buf).map_err(|e| format!("读取 manifest.json 失败: {e}"))?;
+                manifest_content = Some(content);
             }
             "data.json" => {
                 has_data = true;
-                ensure_uncompressed_size("data.json", entry.size(), MAX_DATA_JSON_UNCOMPRESSED_BYTES)?;
-                let mut buf = Vec::new();
-                entry
-                    .read_to_end(&mut buf)
-                    .map_err(|e| format!("读取 data.json 失败: {e}"))?;
+                let declared_size = entry.size();
+                let buf = read_zip_entry_limited(
+                    &mut entry,
+                    "data.json",
+                    declared_size,
+                    MAX_DATA_JSON_UNCOMPRESSED_BYTES,
+                )?;
                 data_content = Some(buf);
             }
             path if path.starts_with("attachments/") => {
@@ -828,8 +858,16 @@ fn restore_local_backup_inner(
                     return Err(format!("附件数量超过上限: {attachment_count}"));
                 }
 
+                let declared_size = entry.size();
+                let buf = read_zip_entry_limited(
+                    &mut entry,
+                    &format!("附件 {path}"),
+                    declared_size,
+                    MAX_ATTACHMENT_UNCOMPRESSED_BYTES,
+                )?;
+
                 total_attachment_bytes = total_attachment_bytes
-                    .checked_add(entry.size())
+                    .checked_add(buf.len() as u64)
                     .ok_or_else(|| "附件总大小超过上限".to_string())?;
                 if total_attachment_bytes > MAX_TOTAL_ATTACHMENT_UNCOMPRESSED_BYTES {
                     return Err(format!(
@@ -837,15 +875,6 @@ fn restore_local_backup_inner(
                     ));
                 }
 
-                ensure_uncompressed_size(
-                    &format!("附件 {path}"),
-                    entry.size(),
-                    MAX_ATTACHMENT_UNCOMPRESSED_BYTES,
-                )?;
-                let mut buf = Vec::new();
-                entry
-                    .read_to_end(&mut buf)
-                    .map_err(|e| format!("读取附件失败: {path} ({e})"))?;
                 attachment_contents.insert(name, buf);
             }
             other => {
@@ -2345,6 +2374,30 @@ mod tests {
 
         zip.finish().unwrap();
         zip_path
+    }
+
+    #[test]
+    fn read_zip_entry_limited_rejects_actual_bytes_over_limit_even_when_declared_small() {
+        let mut reader = std::io::Cursor::new(vec![b'x'; 65]);
+
+        let err = read_zip_entry_limited(&mut reader, "data.json", 1, 64).unwrap_err();
+
+        assert!(
+            err.contains("实际解压大小超过上限"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn read_zip_entry_limited_rejects_declared_and_actual_size_mismatch() {
+        let mut reader = std::io::Cursor::new(vec![b'x'; 8]);
+
+        let err = read_zip_entry_limited(&mut reader, "data.json", 4, 64).unwrap_err();
+
+        assert!(
+            err.contains("声明大小与实际读取大小不匹配"),
+            "unexpected error: {err}"
+        );
     }
 
     fn make_image_attachment_entry(path: &str, content: &[u8]) -> BackupAttachmentEntry {

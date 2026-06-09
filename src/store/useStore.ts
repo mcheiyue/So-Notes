@@ -580,20 +580,19 @@ const extractAffectedNoteFromPatch = (
   }
 };
 
-const navigateToAffectedNote = (
+const buildAffectedNoteNavigationPatch = (
   patch: DomainPatch,
   preApplyDomain: DomainState,
   postApplyNotesById: Record<string, Note>,
   currentBoardId: string,
-  setFn: (partial: Partial<State>) => void,
-): void => {
+  viewport: State['viewport'],
+): Partial<State> => {
   const affected = extractAffectedNoteFromPatch(patch, preApplyDomain);
-  if (!affected) return;
+  if (!affected) return {};
 
   const note = postApplyNotesById[affected.noteId];
-  if (!note || note.deletedAt) return;
+  if (!note || note.deletedAt) return {};
 
-  const viewport = useStore.getState().viewport;
   const nWidth = LAYOUT.NOTE_WIDTH;
   const nHeight = LAYOUT.NOTE_MIN_HEIGHT;
   const noteRight = note.x + nWidth;
@@ -605,22 +604,22 @@ const navigateToAffectedNote = (
     note.y <= viewport.y + viewport.h;
   const shouldCenter = affected.boardId !== currentBoardId || !isInCurrentViewport;
 
-  if (affected.boardId !== currentBoardId) {
-    setFn({ currentBoardId: affected.boardId, viewMode: 'BOARD', selectedIds: [] });
-  }
+  const boardPatch: Partial<State> = affected.boardId !== currentBoardId
+    ? { currentBoardId: affected.boardId, viewMode: 'BOARD' }
+    : {};
 
   if (!shouldCenter) {
-    setFn({ selectedIds: [note.id] });
-    return;
+    return { ...boardPatch, selectedIds: [note.id] };
   }
 
   const targetX = note.x + nWidth / 2 - viewport.w / 2;
   const targetY = note.y + nHeight / 2 - viewport.h / 2;
 
-  setFn({
+  return {
+    ...boardPatch,
     viewport: { ...viewport, x: targetX, y: targetY },
     selectedIds: [note.id],
-  });
+  };
 };
 
 const toMutableHistoryStack = <T>(stack: HistoryStack<T>): {
@@ -1613,6 +1612,7 @@ export const useStore = create<State>()(
 
             const prevDeletedAt = note.deletedAt;
             const prevZ = note.z;
+            const prevBoardId = note.boardId;
 
             const targetBoardId = resolveRestoreBoardId(state, note.boardId);
             if (!targetBoardId) return;
@@ -1630,7 +1630,7 @@ export const useStore = create<State>()(
                 id: crypto.randomUUID(),
                 label: 'restore-note',
                 createdAt: Date.now(),
-                undo: { type: 'update-fields', noteId: id, fields: { deletedAt: prevDeletedAt, boardId: targetBoardId, z: prevZ } },
+                undo: { type: 'update-fields', noteId: id, fields: { deletedAt: prevDeletedAt, boardId: prevBoardId, z: prevZ } },
                 redo: { type: 'update-fields', noteId: id, fields: { deletedAt: null, boardId: note.boardId, z: note.z } },
             };
             state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
@@ -2003,19 +2003,22 @@ export const useStore = create<State>()(
       const removedIds = new Set(
         Object.keys(currentDomain.notesById).filter((id) => !patched.notesById[id]),
       );
+      const navigationPatch = buildAffectedNoteNavigationPatch(
+        result.entry.undo,
+        currentDomain,
+        patched.notesById,
+        currentDomain.currentBoardId,
+        get().viewport,
+      );
 
-      set({
-        ...patched,
-        domainHistory: result.stack,
-      });
-
-      if (removedIds.size > 0) {
-        set((state) => {
+      set((state) => {
+        Object.assign(state, patched);
+        state.domainHistory = toMutableHistoryStack(result.stack);
+        if (removedIds.size > 0) {
           clearDanglingNoteUiRefs(state, removedIds);
-        });
-      }
-
-      navigateToAffectedNote(result.entry.undo, currentDomain, patched.notesById, currentDomain.currentBoardId, (partial) => set(partial));
+        }
+        Object.assign(state, navigationPatch);
+      });
 
       return true;
     },
@@ -2033,19 +2036,22 @@ export const useStore = create<State>()(
       const removedIds = new Set(
         Object.keys(currentDomain.notesById).filter((id) => !patched.notesById[id]),
       );
+      const navigationPatch = buildAffectedNoteNavigationPatch(
+        result.entry.redo,
+        currentDomain,
+        patched.notesById,
+        currentDomain.currentBoardId,
+        get().viewport,
+      );
 
-      set({
-        ...patched,
-        domainHistory: result.stack,
-      });
-
-      if (removedIds.size > 0) {
-        set((state) => {
+      set((state) => {
+        Object.assign(state, patched);
+        state.domainHistory = toMutableHistoryStack(result.stack);
+        if (removedIds.size > 0) {
           clearDanglingNoteUiRefs(state, removedIds);
-        });
-      }
-
-      navigateToAffectedNote(result.entry.redo, currentDomain, patched.notesById, currentDomain.currentBoardId, (partial) => set(partial));
+        }
+        Object.assign(state, navigationPatch);
+      });
 
       return true;
     },

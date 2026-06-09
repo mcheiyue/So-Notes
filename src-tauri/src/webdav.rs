@@ -59,7 +59,7 @@ const WEBDAV_TEMP_FILE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 // ---------------------------------------------------------------------------
 
 /// WebDAV 连接配置（前端传入；密码/令牌仅用于本次请求，不持久化）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebDavConfig {
     /// WebDAV 服务地址（仅 host + 可选端口），例如 `example.com` 或 `example.com:5005`。
@@ -71,6 +71,17 @@ pub struct WebDavConfig {
     /// 密码或应用令牌（仅在本次请求中使用，不持久化）。
     #[serde(default)]
     pub password: Option<String>,
+}
+
+impl std::fmt::Debug for WebDavConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebDavConfig")
+            .field("server_url", &self.server_url)
+            .field("username", &self.username)
+            .field("remote_dir", &self.remote_dir)
+            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 /// 连接测试结果。
@@ -93,7 +104,7 @@ pub struct WebDavRemoteBackup {
 }
 
 /// 保存配置请求（含密码/令牌字段与记住密码标记）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebDavConfigSaveRequest {
     /// WebDAV 服务地址。
@@ -107,6 +118,18 @@ pub struct WebDavConfigSaveRequest {
     /// 密码或应用令牌（仅在本次请求中使用，不应持久化到普通配置文件）。
     #[serde(default)]
     pub password: Option<String>,
+}
+
+impl std::fmt::Debug for WebDavConfigSaveRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebDavConfigSaveRequest")
+            .field("server_url", &self.server_url)
+            .field("username", &self.username)
+            .field("remote_dir", &self.remote_dir)
+            .field("remember_password", &self.remember_password)
+            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 /// 配置加载结果。
@@ -1515,6 +1538,51 @@ pub async fn cleanup_downloaded_backup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn webdav_config_debug_redacts_password() {
+        let config = WebDavConfig {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: Some("SoNotes_Backups/".to_string()),
+            password: Some("super-secret-token".to_string()),
+        };
+
+        let output = format!("{config:?}");
+
+        assert!(
+            !output.contains("super-secret-token"),
+            "Debug 泄漏了密码: {output}"
+        );
+        assert!(
+            output.contains("[REDACTED]"),
+            "Debug 未显示脱敏占位: {output}"
+        );
+        assert!(output.contains("alice"), "Debug 应保留非敏感字段: {output}");
+    }
+
+    #[test]
+    fn webdav_config_save_request_debug_redacts_password() {
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: Some("SoNotes_Backups/".to_string()),
+            remember_password: false,
+            password: Some("super-secret-token".to_string()),
+        };
+
+        let output = format!("{request:?}");
+
+        assert!(
+            !output.contains("super-secret-token"),
+            "Debug 泄漏了密码: {output}"
+        );
+        assert!(
+            output.contains("[REDACTED]"),
+            "Debug 未显示脱敏占位: {output}"
+        );
+        assert!(output.contains("alice"), "Debug 应保留非敏感字段: {output}");
+    }
 
     // -----------------------------------------------------------------------
     // URL 规范化测试

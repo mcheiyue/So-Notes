@@ -2009,6 +2009,40 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     expect(useStore.getState().noteHighlights[noteId]).toBeUndefined();
   });
 
+  it('undoDomainChange 删除便签时只发出一次原子 store 更新', () => {
+    useStore.getState().addNote(100, 200);
+    let notifications = 0;
+    const unsubscribe = useStore.subscribe(() => {
+      notifications += 1;
+    });
+
+    try {
+      expect(useStore.getState().undoDomainChange()).toBe(true);
+    } finally {
+      unsubscribe();
+    }
+
+    expect(notifications).toBe(1);
+  });
+
+  it('redoDomainChange 恢复便签时只发出一次原子 store 更新', () => {
+    useStore.getState().addNote(100, 200);
+    useStore.getState().undoDomainChange();
+
+    let notifications = 0;
+    const unsubscribe = useStore.subscribe(() => {
+      notifications += 1;
+    });
+
+    try {
+      expect(useStore.getState().redoDomainChange()).toBe(true);
+    } finally {
+      unsubscribe();
+    }
+
+    expect(notifications).toBe(1);
+  });
+
   it('历史为空时 undoDomainChange 返回 false', () => {
     expect(useStore.getState().undoDomainChange()).toBe(false);
   });
@@ -3272,7 +3306,7 @@ describe('v1.4.4 软删除与废纸篓恢复领域撤销/重做契约', () => {
     expect(useStore.getState().notesById['live-shared']).toBeDefined();
   });
 
-  it('restoreNote 看板已被删除时回退到当前看板，撤销后保持可用看板', () => {
+  it('restoreNote 看板已被删除时回退到当前看板，撤销后回到原始看板归属', () => {
     vi.setSystemTime(new Date('2026-06-01T10:00:00.000Z'));
     useStore.setState({
       ...normalizeNotes([
@@ -3310,7 +3344,13 @@ describe('v1.4.4 软删除与废纸篓恢复领域撤销/重做契约', () => {
 
     useStore.getState().undoDomainChange();
     expect(useStore.getState().notesById['sd-1'].deletedAt).toBe(new Date('2026-06-01T10:00:00.000Z').getTime());
+    expect(useStore.getState().notesById['sd-1'].boardId).toBe('board-b');
+    expect(useStore.getState().boardNoteIds['board-b']).toContain('sd-1');
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['sd-1'].deletedAt).toBeNull();
     expect(useStore.getState().notesById['sd-1'].boardId).toBe('default');
+    expect(useStore.getState().boardNoteIds['default']).toContain('sd-1');
   });
 
   it('选中便签软删除后通过撤销可恢复到原看板并保留选区清理', () => {
