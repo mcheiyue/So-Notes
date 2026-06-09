@@ -292,7 +292,7 @@ export const appController = {
       uiState.addDetachedNote(noteId, { x, y });
     }
 
-    const keepAlwaysOnTop = uiState.detachedNotes.find((d) => d.noteId === noteId)?.isPinned ?? false;
+    const keepAlwaysOnTop = useUIStore.getState().detachedNotes.find((d) => d.noteId === noteId)?.isPinned ?? false;
     invoke('open_detached_note_window', { noteId, spawnX: x, spawnY: y, keepAlwaysOnTop }).catch(() => undefined);
   },
 

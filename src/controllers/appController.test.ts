@@ -444,6 +444,34 @@ describe('appController 撕下便签方法', () => {
     });
   });
 
+  it('detachNote 打开窗口前重新读取 addDetachedNote 后的最新置顶状态', () => {
+    const originalAddDetachedNote = useUIStore.getState().addDetachedNote;
+    useUIStore.setState({
+      addDetachedNote: (noteId, position) => {
+        originalAddDetachedNote(noteId, position);
+        const { detachedNotes } = useUIStore.getState();
+        useUIStore.setState({
+          detachedNotes: detachedNotes.map((entry) =>
+            entry.noteId === noteId ? { ...entry, isPinned: true } : entry,
+          ),
+        });
+      },
+    });
+
+    try {
+      appController.detachNote('n1');
+
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith('open_detached_note_window', {
+        noteId: 'n1',
+        spawnX: 50,
+        spawnY: 120,
+        keepAlwaysOnTop: true,
+      });
+    } finally {
+      useUIStore.setState({ addDetachedNote: originalAddDetachedNote });
+    }
+  });
+
   it('showAllDetachedNotes 显示已置顶撕下窗口时保留置顶状态', () => {
     appController.detachNote('n1');
     appController.detachNote('n2');
