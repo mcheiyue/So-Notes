@@ -6,11 +6,14 @@
 use crate::backup;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tauri::Manager;
-use url::Url;
+use url::{Host, Url};
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -230,6 +233,7 @@ struct WebDavConfigFile {
 ///
 /// 规则：
 /// - 必须使用 `https://`，除非是 `http://localhost`、`http://127.0.0.1` 或 `http://[::1]`。
+/// - `https://` 不允许指向本机、私网、链路本地、未指定地址等内部目标。
 /// - 拒绝 userinfo（用户名:密码嵌入 URL）。
 /// - 拒绝 query 与 fragment。
 /// - 拒绝空 host。
@@ -242,16 +246,16 @@ pub fn normalize_webdav_url(input: &str) -> Result<String, String> {
 
     let parsed = Url::parse(input).map_err(|_| "WebDAV 地址格式无效".to_string())?;
 
+    // 拒绝空 host
+    let host = parsed
+        .host()
+        .ok_or_else(|| "WebDAV 地址缺少主机名".to_string())?;
+
     // 检查 scheme
     match parsed.scheme() {
-        "https" => {}
+        "https" => reject_internal_https_host(&parsed, &host)?,
         "http" => {
-            let host_str = parsed.host_str().unwrap_or("");
-            let is_local = host_str == "localhost"
-                || host_str == "127.0.0.1"
-                || host_str == "[::1]"
-                || host_str == "::1";
-            if !is_local {
+            if !is_http_localhost_exception(&host) {
                 return Err(
                     "WebDAV 地址必须使用 HTTPS，只有本机开发地址允许 HTTP".to_string(),
                 );
@@ -277,14 +281,6 @@ pub fn normalize_webdav_url(input: &str) -> Result<String, String> {
         return Err("WebDAV 地址不能包含用户名、密码、查询参数或片段".to_string());
     }
 
-    // 拒绝空 host
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "WebDAV 地址缺少主机名".to_string())?;
-    if host.is_empty() {
-        return Err("WebDAV 地址缺少主机名".to_string());
-    }
-
     // 构造规范化 URL：scheme + host + port（如有）+ path
     let mut normalized = format!("{}://{}", parsed.scheme(), host);
     if let Some(port) = parsed.port() {
@@ -301,6 +297,65 @@ pub fn normalize_webdav_url(input: &str) -> Result<String, String> {
     }
 
     Ok(normalized)
+}
+
+fn is_http_localhost_exception(host: &Host<&str>) -> bool {
+    match host {
+        Host::Domain(domain) => domain.eq_ignore_ascii_case("localhost"),
+        Host::Ipv4(ip) => ip.is_loopback(),
+        Host::Ipv6(ip) => ip.is_loopback(),
+    }
+}
+
+fn reject_internal_https_host(parsed: &Url, host: &Host<&str>) -> Result<(), String> {
+    match host {
+        Host::Domain(domain) => {
+            if domain.trim_end_matches('.').eq_ignore_ascii_case("localhost") {
+                return Err("WebDAV HTTPS 地址不能指向本机或内网地址".to_string());
+            }
+
+            let port = parsed.port_or_known_default().unwrap_or(443);
+            if host_resolves_to_disallowed_webdav_ip(domain, port) {
+                return Err("WebDAV HTTPS 地址不能指向本机或内网地址".to_string());
+            }
+            Ok(())
+        }
+        Host::Ipv4(ip) => reject_disallowed_https_ip(IpAddr::V4(*ip)),
+        Host::Ipv6(ip) => reject_disallowed_https_ip(IpAddr::V6(*ip)),
+    }
+}
+
+fn reject_disallowed_https_ip(ip: IpAddr) -> Result<(), String> {
+    if is_disallowed_webdav_ip(ip) {
+        Err("WebDAV HTTPS 地址不能指向本机或内网地址".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn host_resolves_to_disallowed_webdav_ip(domain: &str, port: u16) -> bool {
+    (domain, port)
+        .to_socket_addrs()
+        .map(|addrs| addrs.map(|addr| addr.ip()).any(is_disallowed_webdav_ip))
+        .unwrap_or(false)
+}
+
+fn is_disallowed_webdav_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
+        }
+        IpAddr::V6(ip) => {
+            if let Some(mapped) = ip.to_ipv4_mapped() {
+                return is_disallowed_webdav_ip(IpAddr::V4(mapped));
+            }
+
+            ip.is_loopback()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || ip.is_unspecified()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +546,63 @@ fn config_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(config_dir.join(CONFIG_FILENAME))
 }
 
+struct WebDavTempFileGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl WebDavTempFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for WebDavTempFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn webdav_config_temp_path(path: &Path) -> Result<PathBuf, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "WebDAV 配置文件路径缺少父目录".to_string())?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "WebDAV 配置文件名无效".to_string())?;
+    Ok(parent.join(format!(
+        ".{file_name}.tmp-{:016x}",
+        rand::random::<u64>()
+    )))
+}
+
+fn write_webdav_config_atomic(path: &Path, content: &str) -> Result<(), String> {
+    let tmp_path = webdav_config_temp_path(path)?;
+    let mut guard = WebDavTempFileGuard::new(tmp_path.clone());
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(|e| format!("创建 WebDAV 配置临时文件失败: {e}"))?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| format!("写入 WebDAV 配置临时文件失败: {e}"))?;
+    file.sync_all()
+        .map_err(|e| format!("同步 WebDAV 配置临时文件失败: {e}"))?;
+    drop(file);
+
+    std::fs::rename(&tmp_path, path).map_err(|e| format!("替换 WebDAV 配置文件失败: {e}"))?;
+    guard.disarm();
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Tauri 命令
 // ---------------------------------------------------------------------------
@@ -578,7 +690,7 @@ pub async fn webdav_save_config(
             .map_err(|e| format!("创建 WebDAV 配置目录失败: {e}"))?;
     }
 
-    std::fs::write(&path, json).map_err(|e| format!("写入 WebDAV 配置文件失败: {e}"))?;
+    write_webdav_config_atomic(&path, &json)?;
 
     Ok(WebDavConfigSaveResult {
         success: true,
@@ -1184,11 +1296,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 fn generate_download_token() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("webdav-dl-{:032x}", nanos)
+    format!("webdav-dl-{:032x}", rand::random::<u128>())
 }
 
 fn is_stale_file(path: &Path, max_age: Duration) -> bool {
@@ -1601,6 +1709,18 @@ mod tests {
     }
 
     #[test]
+    fn url_norm_accepts_https_public_ipv4_literal() {
+        let result = normalize_webdav_url("https://1.1.1.1/dav").unwrap();
+        assert_eq!(result, "https://1.1.1.1/dav");
+    }
+
+    #[test]
+    fn url_norm_accepts_https_public_ipv6_literal() {
+        let result = normalize_webdav_url("https://[2001:4860:4860::8888]/dav").unwrap();
+        assert_eq!(result, "https://[2001:4860:4860::8888]/dav");
+    }
+
+    #[test]
     fn url_norm_accepts_http_localhost() {
         let result = normalize_webdav_url("http://localhost:8080/dav").unwrap();
         assert_eq!(result, "http://localhost:8080/dav");
@@ -1622,6 +1742,62 @@ mod tests {
     fn url_norm_rejects_http_non_localhost() {
         let err = normalize_webdav_url("http://example.com/dav").unwrap_err();
         assert!(err.contains("HTTPS"));
+    }
+
+    #[test]
+    fn url_norm_rejects_https_localhost() {
+        let err = normalize_webdav_url("https://localhost/dav").unwrap_err();
+        assert!(err.contains("本机") || err.contains("内网"));
+    }
+
+    #[test]
+    fn url_norm_rejects_https_loopback_ipv4_literal() {
+        let err = normalize_webdav_url("https://127.0.0.1/dav").unwrap_err();
+        assert!(err.contains("本机") || err.contains("内网"));
+    }
+
+    #[test]
+    fn url_norm_rejects_https_private_ipv4_literal() {
+        let err = normalize_webdav_url("https://192.168.1.10/dav").unwrap_err();
+        assert!(err.contains("本机") || err.contains("内网"));
+    }
+
+    #[test]
+    fn url_norm_rejects_https_link_local_ipv4_literal() {
+        let err = normalize_webdav_url("https://169.254.1.1/dav").unwrap_err();
+        assert!(err.contains("本机") || err.contains("内网"));
+    }
+
+    #[test]
+    fn url_norm_rejects_https_ipv6_loopback_literal() {
+        let err = normalize_webdav_url("https://[::1]/dav").unwrap_err();
+        assert!(err.contains("本机") || err.contains("内网"));
+    }
+
+    #[test]
+    fn url_norm_rejects_https_ipv6_unique_local_literal() {
+        let err = normalize_webdav_url("https://[fc00::1]/dav").unwrap_err();
+        assert!(err.contains("本机") || err.contains("内网"));
+    }
+
+    #[test]
+    fn disallowed_ip_check_rejects_internal_ranges() {
+        assert!(is_disallowed_webdav_ip("10.0.0.1".parse().unwrap()));
+        assert!(is_disallowed_webdav_ip("172.16.0.1".parse().unwrap()));
+        assert!(is_disallowed_webdav_ip("192.168.0.1".parse().unwrap()));
+        assert!(is_disallowed_webdav_ip("169.254.1.1".parse().unwrap()));
+        assert!(is_disallowed_webdav_ip("0.0.0.0".parse().unwrap()));
+        assert!(is_disallowed_webdav_ip("::".parse().unwrap()));
+        assert!(is_disallowed_webdav_ip("::1".parse().unwrap()));
+        assert!(is_disallowed_webdav_ip("fe80::1".parse().unwrap()));
+        assert!(is_disallowed_webdav_ip("fc00::1".parse().unwrap()));
+        assert!(is_disallowed_webdav_ip("::ffff:127.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn disallowed_ip_check_accepts_public_addresses() {
+        assert!(!is_disallowed_webdav_ip("1.1.1.1".parse().unwrap()));
+        assert!(!is_disallowed_webdav_ip("2001:4860:4860::8888".parse().unwrap()));
     }
 
     #[test]
@@ -2005,6 +2181,73 @@ mod tests {
             !json.contains("\"password\":"),
             "配置文件序列化结果不应包含 \"password\" 字段"
         );
+    }
+
+    #[test]
+    fn webdav_config_temp_path_stays_in_same_directory() {
+        let dir = test_config_dir("atomic-temp-dir");
+        let path = dir.join(CONFIG_FILENAME);
+        let tmp_path = webdav_config_temp_path(&path).unwrap();
+
+        assert_eq!(tmp_path.parent(), Some(dir.as_path()));
+        assert!(tmp_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap()
+            .starts_with(".webdav-config.json.tmp-"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn webdav_config_atomic_write_creates_file() {
+        let dir = test_config_dir("atomic-create");
+        let path = dir.join(CONFIG_FILENAME);
+
+        write_webdav_config_atomic(&path, r#"{"serverUrl":"https://example.com"}"#).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            r#"{"serverUrl":"https://example.com"}"#
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn webdav_config_atomic_write_overwrites_existing_file() {
+        let dir = test_config_dir("atomic-overwrite");
+        let path = dir.join(CONFIG_FILENAME);
+        std::fs::write(&path, "old").unwrap();
+
+        write_webdav_config_atomic(&path, "new").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn webdav_config_atomic_write_leaves_no_temp_file() {
+        let dir = test_config_dir("atomic-no-temp");
+        let path = dir.join(CONFIG_FILENAME);
+
+        write_webdav_config_atomic(&path, "content").unwrap();
+
+        let temp_count = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .map(|name| name.starts_with(".webdav-config.json.tmp-"))
+                    .unwrap_or(false)
+            })
+            .count();
+        assert_eq!(temp_count, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // -----------------------------------------------------------------------
@@ -2439,6 +2682,7 @@ mod tests {
         let token = generate_download_token();
         assert!(token.starts_with("webdav-dl-"));
         assert_eq!(token.len(), 42);
+        assert!(token[10..].chars().all(|ch| ch.is_ascii_hexdigit()));
     }
 
     #[test]
