@@ -26,6 +26,7 @@ vi.mock('../services/storage/attachmentPersistence', () => ({
   deleteAttachmentFile: vi.fn(async () => ({ deleted: true, relativePath: '' })),
   attachmentExists: vi.fn(async () => true),
   invalidateAttachmentPathCache: vi.fn(),
+  resolveAttachmentAssetUrlCached: vi.fn(async (relativePath: string) => `asset://localhost/${relativePath}`),
 }));
 
 vi.mock('../services/storage/attachmentConsistency', () => ({
@@ -584,6 +585,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
     const { openZipDialog } = await import('../utils/fileSystem');
     const { restoreLocalBackup } = await import('../services/backup/BackupService');
     const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
+    const { invalidateAttachmentPathCache, resolveAttachmentAssetUrlCached } = await import('../services/storage/attachmentPersistence');
     const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(openZipDialog).mockResolvedValue('/backups/test.zip');
@@ -595,6 +597,21 @@ describe('BoardDock v1.2.4 最小修复', () => {
       storageUpdatedAt: Date.now(),
       notes: [
         { id: 'restored-1', kind: 'text', boardId: 'default', x: 0, y: 0, title: '', content: '恢复便签', color: '#FFF', z: 1, collapsed: false, createdAt: 1, updatedAt: 1 },
+        {
+          id: 'restored-image',
+          kind: 'image',
+          boardId: 'default',
+          x: 20,
+          y: 30,
+          title: '',
+          content: '',
+          color: '#FFF',
+          z: 2,
+          collapsed: false,
+          createdAt: 1,
+          updatedAt: 1,
+          attachments: [{ id: 'att-restored', hash: 'a'.repeat(64), filename: 'photo.png', relativePath: 'attachments/photo.png', mimeType: 'image/png', size: 123, createdAt: 1 }],
+        },
       ],
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
       currentBoardId: 'default',
@@ -624,7 +641,10 @@ describe('BoardDock v1.2.4 最小修复', () => {
     const state = useStore.getState();
     expect(state.notesById['restored-1']).toBeDefined();
     expect(state.notesById['restored-1'].content).toBe('恢复便签');
+    expect(state.notesById['restored-image']).toBeDefined();
     expect(state.domainHistory.undoStack).toHaveLength(0);
+    expect(invalidateAttachmentPathCache).toHaveBeenCalled();
+    expect(resolveAttachmentAssetUrlCached).toHaveBeenCalledWith('attachments/photo.png');
   });
 
   it('zip 恢复取消确认时不执行恢复', async () => {
@@ -1321,6 +1341,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup, cleanupDownloadedBackup } = await import('../services/backup/WebDavBackupService');
     const { restoreLocalBackup } = await import('../services/backup/BackupService');
     const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
+    const { resolveAttachmentAssetUrlCached } = await import('../services/storage/attachmentPersistence');
     const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(loadConfig).mockResolvedValue({
@@ -1339,6 +1360,21 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
       storageUpdatedAt: Date.now(),
       notes: [
         { id: 'r1', kind: 'text', boardId: 'default', x: 0, y: 0, title: '', content: '恢复便签', color: '#FFF', z: 1, collapsed: false, createdAt: 1, updatedAt: 1 },
+        {
+          id: 'r-image',
+          kind: 'image',
+          boardId: 'default',
+          x: 12,
+          y: 24,
+          title: '',
+          content: '',
+          color: '#FFF',
+          z: 2,
+          collapsed: false,
+          createdAt: 1,
+          updatedAt: 1,
+          attachments: [{ id: 'att-remote', hash: 'b'.repeat(64), filename: 'remote.png', relativePath: 'attachments/remote.png', mimeType: 'image/png', size: 456, createdAt: 1 }],
+        },
       ],
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
       currentBoardId: 'default',
@@ -1372,5 +1408,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const state = useStore.getState();
     expect(state.notesById['r1']).toBeDefined();
     expect(state.notesById['r1'].content).toBe('恢复便签');
+    expect(state.notesById['r-image']).toBeDefined();
+    expect(resolveAttachmentAssetUrlCached).toHaveBeenCalledWith('attachments/remote.png');
   });
 });

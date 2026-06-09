@@ -5,7 +5,7 @@ import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronL
 import { Z_INDEX } from "../constants/layout";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { appController } from "../controllers/appController";
-import { listAttachmentFiles, deleteAttachmentFile, attachmentExists, invalidateAttachmentPathCache } from "../services/storage/attachmentPersistence";
+import { listAttachmentFiles, deleteAttachmentFile, attachmentExists, invalidateAttachmentPathCache, resolveAttachmentAssetUrlCached } from "../services/storage/attachmentPersistence";
 import { detectMissingReferences, detectOrphanAttachments } from "../services/storage/attachmentConsistency";
 import { saveZipDialog, openZipDialog } from "../utils/fileSystem";
 import { createLocalBackup, restoreLocalBackup } from "../services/backup/BackupService";
@@ -14,6 +14,7 @@ import * as persistenceFacade from "../services/storage/PersistenceFacade";
 import { readDiskStorageData } from "../services/storage/tauriPersistence";
 import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
 import { db } from "../store/db";
+import type { Note } from "../store/types";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 type StoreState = ReturnType<typeof useStore.getState>;
@@ -66,6 +67,21 @@ const formatWebDavLastModified = (value?: string | null): string => {
   if (Number.isNaN(date.getTime())) return value;
   const pad = (part: number) => part.toString().padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+};
+
+const prehydrateRestoredImageNoteAssetUrls = async (notes: Note[]): Promise<void> => {
+  const imageRelativePaths = notes
+    .filter((note) => note.kind === 'image')
+    .flatMap((note) => note.attachments ?? [])
+    .map((attachment) => attachment.relativePath);
+
+  if (imageRelativePaths.length === 0) return;
+
+  await Promise.allSettled(
+    Array.from(new Set(imageRelativePaths)).map((relativePath) =>
+      resolveAttachmentAssetUrlCached(relativePath),
+    ),
+  );
 };
 
 export const BoardDock = () => {
@@ -329,6 +345,9 @@ export const BoardDock = () => {
     const normalizedNotes = normalizeNotes(restoredData.notes);
     const activeBoard = restoredData.boards.find((b) => b.id === restoredData.currentBoardId);
 
+    invalidateAttachmentPathCache();
+    await prehydrateRestoredImageNoteAssetUrls(restoredData.notes);
+
     useStore.setState((state) => ({
       ...state,
       notesById: normalizedNotes.notesById,
@@ -363,7 +382,6 @@ export const BoardDock = () => {
     localStorage.setItem('theme', theme);
 
     await db.clearWAL();
-    invalidateAttachmentPathCache();
     return true;
   };
 
