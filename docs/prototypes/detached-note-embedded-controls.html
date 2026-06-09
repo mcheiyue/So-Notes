@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SoNotes — 撕下便签视觉方向原型</title>
+<style>
+  /* ============================================================
+     SoNotes Design Tokens (从 tailwind.config.js / index.css 提取)
+     ============================================================ */
+  :root {
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+
+    /* 语义色 — 浅色模式 */
+    --color-bg-primary: #f8fafc;
+    --color-bg-secondary: #ffffff;
+    --color-text-primary: #1e293b;
+    --color-text-secondary: #475569;
+    --color-text-tertiary: #94a3b8;
+    --color-border-subtle: #e2e8f0;
+
+    /* 便签色 — 浅色 (NOTE_COLORS) */
+    --note-white: #FFFFFF;
+    --note-yellow: #fef9c3;
+    --note-green: #dcfce7;
+    --note-blue: #dbeafe;
+    --note-red: #fee2e2;
+    --note-purple: #f3e8ff;
+
+    /* 便签色 — 深色 (NOTE_COLOR_MAP_DARK_MODE bg) */
+    --note-white-dark: #131e31;
+    --note-yellow-dark: #251c0c;
+    --note-green-dark: #0e2417;
+    --note-blue-dark: #131e31;
+    --note-red-dark: #281215;
+    --note-purple-dark: #1d152f;
+
+    /* 深色模式边框 */
+    --note-white-dark-border: #223452;
+    --note-yellow-dark-border: #413014;
+    --note-green-dark-border: #173f27;
+    --note-blue-dark-border: #223452;
+    --note-red-dark-border: #471b21;
+    --note-purple-dark-border: #332353;
+
+    /* 深色模式强调色 */
+    --note-white-dark-accent: #3b82f6;
+    --note-yellow-dark-accent: #f59e0b;
+    --note-green-dark-accent: #10b981;
+    --note-blue-dark-accent: #3b82f6;
+    --note-red-dark-accent: #ef4444;
+    --note-purple-dark-accent: #a855f7;
+
+    /* 页面深色背景 */
+    --dark-page-bg: #181a1d;
+    --dark-page-surface: #1f2226;
+
+    /* 控制按钮尺寸 */
+    --control-size: 24px;
+    --control-radius: 5px;
+    --control-gap: 2px;
+  }
+
+  /* ============================================================
+     基础重置 & 页面布局
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .page-wrap {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 48px 32px 80px;
+  }
+
+  /* ============================================================
+     排版
+     ============================================================ */
+  .page-title {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--color-text-primary);
+    margin-bottom: 8px;
+  }
+
+  .page-subtitle {
+    font-size: 15px;
+    color: var(--color-text-secondary);
+    margin-bottom: 40px;
+    line-height: 1.6;
+  }
+
+  .section-label {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-text-tertiary);
+    margin-bottom: 16px;
+  }
+
+  .caption {
+    font-size: 13px;
+    color: var(--color-text-tertiary);
+    margin-top: 12px;
+    line-height: 1.6;
+  }
+
+  .caption strong {
+    color: var(--color-text-secondary);
+    font-weight: 600;
+  }
+
+  .rationale {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    line-height: 1.75;
+    max-width: 640px;
+    margin-top: 20px;
+    padding: 16px 20px;
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 10px;
+  }
+
+  .rationale li {
+    margin-bottom: 6px;
+  }
+
+  .rationale li:last-child { margin-bottom: 0; }
+
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    margin-left: 6px;
+  }
+
+  .badge-current {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+
+  .badge-proposed {
+    background: #dcfce7;
+    color: #166534;
+  }
+
+  /* ============================================================
+     对比区域布局
+     ============================================================ */
+  .comparison-row {
+    display: flex;
+    gap: 48px;
+    flex-wrap: wrap;
+    margin-bottom: 56px;
+  }
+
+  .comparison-col {
+    flex: 1;
+    min-width: 320px;
+  }
+
+  .demo-grid {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    margin-bottom: 56px;
+  }
+
+  .demo-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  /* ============================================================
+     当前方案：浮动工具栏 (复现 DetachedNoteOverlay.tsx 行 155-199)
+     ============================================================ */
+  .current-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 32px;
+    width: fit-content;
+    padding: 0 6px;
+    margin-bottom: 6px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border-subtle);
+    background: rgba(255,255,255,0.95);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    backdrop-filter: blur(12px);
+  }
+
+  .current-toolbar.dark {
+    background: rgba(31,34,38,0.95);
+    border-color: #2d3238;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+
+  .toolbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    border-radius: var(--control-radius);
+    color: var(--color-text-tertiary);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .toolbar-btn:hover {
+    background: rgba(0,0,0,0.05);
+    color: var(--color-text-secondary);
+  }
+
+  .current-toolbar.dark .toolbar-btn:hover {
+    background: rgba(255,255,255,0.1);
+  }
+
+  .toolbar-btn svg { width: 14px; height: 14px; }
+
+  /* ============================================================
+     便签表面 (从 NoteVisuals.tsx + noteVisualStyles.ts 提取)
+     ============================================================ */
+  .note-surface {
+    position: relative;
+    width: 260px;
+    border-radius: 12px;
+    border: 1px solid var(--color-border-subtle);
+    overflow: hidden;
+    /* 浅色模式表面渐变 — NoteVisuals 行 42-43 */
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 50%);
+    /* 浅色模式阴影 — noteVisualStyles 行 87-94 */
+    box-shadow:
+      inset 0 1px 1px rgba(255,255,255,0.3),
+      0 2px 8px rgba(0,0,0,0.05);
+  }
+
+  .note-surface.dark {
+    border-color: var(--note-white-dark-border);
+    /* 深色模式表面 — noteVisualStyles 行 48-52 */
+    background-image:
+      radial-gradient(138% 112% at 15% 0%, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.075) 36%, rgba(59,130,246,0.018) 62%, transparent 82%),
+      linear-gradient(155deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.034) 20%, transparent 54%),
+      linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(0,0,0,0.045) 76%, rgba(0,0,0,0.15) 100%);
+    /* 深色模式阴影 — noteVisualStyles 行 107-141 */
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.14),
+      inset 1px 0 0 rgba(255,255,255,0.045),
+      inset 0 -1px 0 rgba(0,0,0,0.3),
+      0 8px 20px -12px rgba(0,0,0,0.72),
+      0 0 0 1px rgba(59,130,246,0.035);
+  }
+
+  .note-surface.active {
+    box-shadow:
+      inset 0 1px 1px rgba(255,255,255,0.4),
+      0 4px 14px rgba(0,0,0,0.08);
+  }
+
+  .note-surface.dark.active {
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      inset 1px 0 0 rgba(255,255,255,0.045),
+      inset 0 -1px 0 rgba(0,0,0,0.3),
+      0 10px 24px -12px rgba(0,0,0,0.78),
+      0 0 0 1px rgba(59,130,246,0.1),
+      0 0 24px -10px rgba(59,130,246,0.22);
+  }
+
+  /* 便签内容 — 从 NoteVisuals.tsx 行 112-135 */
+  .note-title-area {
+    padding: 12px 16px 4px;
+  }
+
+  .note-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .note-content-area {
+    padding: 0 16px 16px;
+  }
+
+  .note-content {
+    font-size: 15px;
+    line-height: 1.625;
+    color: var(--color-text-secondary);
+  }
+
+  .dark .note-title { color: #e2e8f0; }
+  .dark .note-content { color: #94a3b8; }
+
+  /* 便签颜色变体 */
+  .note-yellow { background-color: var(--note-yellow); }
+  .note-green  { background-color: var(--note-green); }
+  .note-blue   { background-color: var(--note-blue); }
+  .note-red    { background-color: var(--note-red); }
+  .note-purple { background-color: var(--note-purple); }
+
+  .dark.note-yellow {
+    background-color: var(--note-yellow-dark);
+    border-color: var(--note-yellow-dark-border);
+  }
+  .dark.note-green {
+    background-color: var(--note-green-dark);
+    border-color: var(--note-green-dark-border);
+  }
+  .dark.note-blue {
+    background-color: var(--note-blue-dark);
+    border-color: var(--note-blue-dark-border);
+  }
+  .dark.note-red {
+    background-color: var(--note-red-dark);
+    border-color: var(--note-red-dark-border);
+  }
+  .dark.note-purple {
+    background-color: var(--note-purple-dark);
+    border-color: var(--note-purple-dark-border);
+  }
+
+  /* 各色深色模式的 radial gradient — 根据 accent 色 */
+  .dark.note-yellow .note-surface-inner,
+  .note-surface.dark.note-yellow {
+    background-image:
+      radial-gradient(138% 112% at 15% 0%, rgba(245,158,11,0.22) 0%, rgba(245,158,11,0.075) 36%, rgba(245,158,11,0.018) 62%, transparent 82%),
+      linear-gradient(155deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.034) 20%, transparent 54%),
+      linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(0,0,0,0.045) 76%, rgba(0,0,0,0.15) 100%);
+  }
+
+  .note-surface.dark.note-green {
+    background-image:
+      radial-gradient(138% 112% at 15% 0%, rgba(16,185,129,0.22) 0%, rgba(16,185,129,0.075) 36%, rgba(16,185,129,0.018) 62%, transparent 82%),
+      linear-gradient(155deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.034) 20%, transparent 54%),
+      linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(0,0,0,0.045) 76%, rgba(0,0,0,0.15) 100%);
+  }
+
+  .note-surface.dark.note-blue {
+    background-image:
+      radial-gradient(138% 112% at 15% 0%, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.075) 36%, rgba(59,130,246,0.018) 62%, transparent 82%),
+      linear-gradient(155deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.034) 20%, transparent 54%),
+      linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(0,0,0,0.045) 76%, rgba(0,0,0,0.15) 100%);
+  }
+
+  .note-surface.dark.note-red {
+    background-image:
+      radial-gradient(138% 112% at 15% 0%, rgba(239,68,68,0.22) 0%, rgba(239,68,68,0.075) 36%, rgba(239,68,68,0.018) 62%, transparent 82%),
+      linear-gradient(155deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.034) 20%, transparent 54%),
+      linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(0,0,0,0.045) 76%, rgba(0,0,0,0.15) 100%);
+  }
+
+  .note-surface.dark.note-purple {
+    background-image:
+      radial-gradient(138% 112% at 15% 0%, rgba(168,85,247,0.22) 0%, rgba(168,85,247,0.075) 36%, rgba(168,85,247,0.018) 62%, transparent 82%),
+      linear-gradient(155deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.034) 20%, transparent 54%),
+      linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(0,0,0,0.045) 76%, rgba(0,0,0,0.15) 100%);
+  }
+
+  /* ============================================================
+     方案 B：嵌入式右上角控制 — 作为 note-surface 内部元素
+     控制按钮直接嵌入便签表面，无独立面板/材质层
+     ============================================================ */
+  .embedded-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    gap: var(--control-gap);
+    /* 默认完全透明，不干扰便签视觉 */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 2;
+  }
+
+  /* 悬停时：按钮组浮现，无额外材质层 */
+  .note-surface:hover .embedded-controls {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .embedded-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-size);
+    height: var(--control-size);
+    border: none;
+    background: transparent;
+    border-radius: var(--control-radius);
+    color: var(--color-text-tertiary);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .embedded-btn:hover {
+    background: rgba(0,0,0,0.08);
+    color: var(--color-text-secondary);
+  }
+
+  .note-surface.dark .embedded-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: #e2e8f0;
+  }
+
+  .embedded-btn svg { width: 14px; height: 14px; }
+
+  /* 置顶态指示 */
+  .embedded-btn.pinned {
+    color: #3b82f6;
+  }
+
+  .pin-indicator {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    color: #3b82f6;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+    z-index: 1;
+  }
+
+  .note-surface:hover .pin-indicator {
+    opacity: 0;
+  }
+
+  .pin-indicator svg { width: 12px; height: 12px; }
+
+  /* 深色背景容器 — 用于展示深色便签 */
+  .dark-bg {
+    background: var(--dark-page-bg);
+    border-radius: 12px;
+    padding: 32px;
+  }
+
+  /* ============================================================
+     "撕下" 视觉暗示 — 轻微阴影增强 + 活跃边框
+     ============================================================ */
+  .detached-indicator {
+    /* 比原便签略强的阴影，暗示脱离画布 */
+    box-shadow:
+      inset 0 1px 1px rgba(255,255,255,0.3),
+      0 2px 8px rgba(0,0,0,0.05),
+      0 0 0 1px rgba(59,130,246,0.08);
+  }
+
+  .detached-indicator.dark {
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      inset 1px 0 0 rgba(255,255,255,0.045),
+      inset 0 -1px 0 rgba(0,0,0,0.3),
+      0 10px 24px -12px rgba(0,0,0,0.78),
+      0 0 0 1px rgba(59,130,246,0.1),
+      0 0 24px -10px rgba(59,130,246,0.15);
+  }
+
+  /* ============================================================
+     箭头 / 连接线 — 当前方案的"漂浮感"
+     ============================================================ */
+  .connector-arrow {
+    width: 24px;
+    height: 24px;
+    margin: -2px auto 4px;
+    color: var(--color-text-tertiary);
+    opacity: 0.4;
+  }
+
+  /* ============================================================
+     分割线
+     ============================================================ */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--color-border-subtle);
+    margin: 40px 0;
+  }
+
+  .dark-bg .divider {
+    border-color: #2d3238;
+  }
+
+  /* ============================================================
+     Hover 演示提示
+     ============================================================ */
+  .hover-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--color-text-tertiary);
+    margin-top: 8px;
+    padding: 4px 10px;
+    background: rgba(0,0,0,0.03);
+    border-radius: 6px;
+  }
+
+  .hover-hint::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #3b82f6;
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 0.4; transform: scale(0.9); }
+    50% { opacity: 1; transform: scale(1.1); }
+  }
+
+  /* ============================================================
+     响应式
+     ============================================================ */
+  @media (max-width: 768px) {
+    .page-wrap { padding: 24px 16px 48px; }
+    .comparison-row { gap: 32px; }
+    .demo-grid { gap: 24px; }
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <!-- ============================================================
+       标题
+       ============================================================ -->
+  <h1 class="page-title">撕下便签 — 嵌入式控制方案原型</h1>
+  <p class="page-subtitle">
+    对比当前浮动工具栏方案与推荐的嵌入式右上角控制方案。核心原则：撕下便签的视觉主体应与画布便签保持一致，
+    控制操作作为便签表面的一部分自然浮现，而非外挂一个独立的工具栏。
+  </p>
+
+  <!-- ============================================================
+       对比 1：当前方案 vs 推荐方案 (浅色)
+       ============================================================ -->
+  <div class="section-label">方案对比 · 浅色模式</div>
+  <div class="comparison-row">
+
+    <!-- 当前方案 -->
+    <div class="comparison-col">
+      <div class="demo-card">
+        <div class="section-label" style="margin-bottom:12px">
+          当前方案 <span class="badge badge-current">浮动工具栏</span>
+        </div>
+
+        <!-- 浮动工具栏 -->
+        <div class="current-toolbar">
+          <button class="toolbar-btn" title="定位到画布所在">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
+          </button>
+          <button class="toolbar-btn" title="置顶">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+          </button>
+          <button class="toolbar-btn" title="贴回画布">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <!-- 连接箭头 -->
+        <svg class="connector-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+
+        <!-- 便签 -->
+        <div class="note-surface">
+          <div class="note-title-area">
+            <div class="note-title">产品规划 Q3</div>
+          </div>
+          <div class="note-content-area">
+            <div class="note-content">撕下便签的工具栏独立于便签表面之外，形成视觉断裂。用户需要将注意力从内容转移到外部控件上。</div>
+          </div>
+        </div>
+
+        <p class="caption">
+          <strong>问题：</strong>工具栏与便签之间存在视觉空隙，看起来像一个外挂的小部件浮在便签上方，
+          破坏了便签作为独立信息单元的整体感。
+        </p>
+      </div>
+    </div>
+
+    <!-- 推荐方案 -->
+    <div class="comparison-col">
+      <div class="demo-card">
+        <div class="section-label" style="margin-bottom:12px">
+          推荐方案 <span class="badge badge-proposed">嵌入式控制</span>
+        </div>
+
+        <div class="hover-hint">悬停此便签查看控制浮现效果</div>
+        <div style="height:8px"></div>
+
+        <!-- 嵌入式控制便签 — 控制按钮直接内嵌于便签表面 -->
+        <div class="note-surface detached-indicator">
+          <div class="embedded-controls">
+            <button class="embedded-btn" title="定位到画布所在">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
+            </button>
+            <button class="embedded-btn" title="置顶">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+            </button>
+            <button class="embedded-btn" title="贴回画布">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="note-title-area">
+            <div class="note-title">产品规划 Q3</div>
+          </div>
+          <div class="note-content-area">
+            <div class="note-content">控制按钮嵌入便签右上角，悬停时从便签表面柔和浮现。便签保持完整的信息单元形态，不依赖外部工具栏。</div>
+          </div>
+        </div>
+
+        <p class="caption">
+          <strong>优势：</strong>便签表面完整统一，控制操作像是便签的一部分。
+          用户视线无需跳离便签即可操作，认知负担更低。
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ============================================================
+       对比 2：深色模式
+       ============================================================ -->
+  <div class="section-label">方案对比 · 深色模式</div>
+  <div class="comparison-row">
+
+    <!-- 当前方案 — 深色 -->
+    <div class="comparison-col">
+      <div class="dark-bg">
+        <div class="demo-card">
+          <div class="section-label" style="margin-bottom:12px; color: #64748b">
+            当前方案 <span class="badge badge-current">浮动工具栏</span>
+          </div>
+
+          <div class="current-toolbar dark">
+            <button class="toolbar-btn" title="定位到画布所在">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
+            </button>
+            <button class="toolbar-btn" title="置顶">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+            </button>
+            <button class="toolbar-btn" title="贴回画布">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+
+          <svg class="connector-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #475569"><polyline points="6 9 12 15 18 9"/></svg>
+
+          <div class="note-surface dark">
+            <div class="note-title-area">
+              <div class="note-title">产品规划 Q3</div>
+            </div>
+            <div class="note-content-area">
+              <div class="note-content">深色模式下，浮动工具栏的磨砂玻璃背景与便签的有色亚克力表面形成两层独立材质，视觉层级冲突更明显。</div>
+            </div>
+          </div>
+
+          <p class="caption" style="color: #64748b">
+            <strong style="color: #94a3b8">问题：</strong>深色模式下两层材质叠加更突兀，工具栏的磨砂背景与便签的 tinted acrylic 表面互相干扰。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 推荐方案 — 深色 -->
+    <div class="comparison-col">
+      <div class="dark-bg">
+        <div class="demo-card">
+          <div class="section-label" style="margin-bottom:12px; color: #64748b">
+            推荐方案 <span class="badge badge-proposed">嵌入式控制</span>
+          </div>
+
+          <div class="hover-hint" style="color: #64748b; background: rgba(255,255,255,0.04)">
+            悬停此便签查看控制浮现效果
+          </div>
+          <div style="height:8px"></div>
+
+          <div class="note-surface dark detached-indicator">
+            <div class="embedded-controls">
+              <button class="embedded-btn" title="定位到画布所在">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
+              </button>
+              <button class="embedded-btn" title="置顶">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+              </button>
+              <button class="embedded-btn" title="贴回画布">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div class="note-title-area">
+              <div class="note-title">产品规划 Q3</div>
+            </div>
+            <div class="note-content-area">
+              <div class="note-content">控制按钮作为便签表面的一部分浮现，使用相同的深色材质语言。没有额外的材质层，视觉统一。</div>
+            </div>
+          </div>
+
+          <p class="caption" style="color: #64748b">
+            <strong style="color: #94a38b">优势：</strong>控制区与便签表面融为一体，不引入新的视觉层级，整体更安静。
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ============================================================
+       多色便签展示 — 嵌入式控制在不同颜色下的表现
+       ============================================================ -->
+  <div class="section-label">多色便签 · 浅色模式 (悬停查看控制浮现)</div>
+  <div class="demo-grid">
+
+    <!-- 黄色 -->
+    <div class="demo-card">
+      <div class="note-surface note-yellow detached-indicator">
+        <div class="embedded-controls">
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></button>
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg></button>
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div class="note-title-area"><div class="note-title">灵感速记</div></div>
+        <div class="note-content-area"><div class="note-content">嵌入式控制不挑颜色，透明按钮直接浮于各色便签表面之上。</div></div>
+      </div>
+    </div>
+
+    <!-- 绿色 -->
+    <div class="demo-card">
+      <div class="note-surface note-green detached-indicator">
+        <div class="embedded-controls">
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></button>
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg></button>
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div class="note-title-area"><div class="note-title">待办清单</div></div>
+        <div class="note-content-area"><div class="note-content">• 完成原型设计<br>• 内部评审<br>• 迭代控制交互</div></div>
+      </div>
+    </div>
+
+    <!-- 蓝色 -->
+    <div class="demo-card">
+      <div class="note-surface note-blue detached-indicator">
+        <div class="embedded-controls">
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></button>
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg></button>
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div class="note-title-area"><div class="note-title">会议纪要</div></div>
+        <div class="note-content-area"><div class="note-content">讨论了撕下便签的视觉方向，结论：保持便签完整性，控制内嵌。</div></div>
+      </div>
+    </div>
+
+    <!-- 紫色 -->
+    <div class="demo-card">
+      <div class="note-surface note-purple detached-indicator">
+        <div class="embedded-controls">
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></button>
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg></button>
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div class="note-title-area"><div class="note-title">阅读笔记</div></div>
+        <div class="note-content-area"><div class="note-content">安静的设计语言：控件不争抢注意力，只在需要时出现。</div></div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ============================================================
+       多色便签 — 深色模式
+       ============================================================ -->
+  <div class="section-label">多色便签 · 深色模式 (悬停查看控制浮现)</div>
+  <div class="demo-grid">
+
+    <!-- 黄色深色 -->
+    <div class="demo-card">
+      <div class="dark-bg" style="padding:24px">
+        <div class="note-surface dark note-yellow detached-indicator">
+          <div class="embedded-controls">
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></button>
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg></button>
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </div>
+          <div class="note-title-area"><div class="note-title">灵感速记</div></div>
+          <div class="note-content-area"><div class="note-content">深色下各色便签的 tinted acrylic 表面与嵌入控制和谐共存。</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 绿色深色 -->
+    <div class="demo-card">
+      <div class="dark-bg" style="padding:24px">
+        <div class="note-surface dark note-green detached-indicator">
+          <div class="embedded-controls">
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></button>
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg></button>
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </div>
+          <div class="note-title-area"><div class="note-title">待办清单</div></div>
+          <div class="note-content-area"><div class="note-content">• 完成原型设计<br>• 内部评审<br>• 迭代控制交互</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 红色深色 -->
+    <div class="demo-card">
+      <div class="dark-bg" style="padding:24px">
+        <div class="note-surface dark note-red detached-indicator">
+          <div class="embedded-controls">
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></button>
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg></button>
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </div>
+          <div class="note-title-area"><div class="note-title">紧急事项</div></div>
+          <div class="note-content-area"><div class="note-content">深色红色便签，accent 色 #ef4444 的 radial gradient 与控制按钮不冲突。</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ============================================================
+       置顶态 & 活跃态展示
+       ============================================================ -->
+  <div class="section-label">状态变体 · 置顶态 & 活跃态</div>
+  <div class="demo-grid">
+
+    <!-- 置顶态 — 浅色 -->
+    <div class="demo-card">
+      <div class="section-label" style="margin-bottom:12px">置顶态 · 浅色</div>
+      <div class="note-surface active detached-indicator">
+        <!-- 置顶时 Pin 指示器常驻 -->
+        <div class="pin-indicator">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+        </div>
+        <div class="embedded-controls">
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></button>
+          <button class="embedded-btn pinned"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg></button>
+          <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div class="note-title-area"><div class="note-title">已置顶的便签</div></div>
+        <div class="note-content-area"><div class="note-content">置顶时右上角 Pin 图标以蓝色常驻显示，hover 后 Pin 按钮继承蓝色高亮。</div></div>
+      </div>
+      <p class="caption">置顶态：Pin 指示器不依赖 hover，始终可见；hover 后控制组浮现，Pin 按钮保持蓝色。</p>
+    </div>
+
+    <!-- 活跃态 — 深色 -->
+    <div class="demo-card">
+      <div class="section-label" style="margin-bottom:12px">活跃态 · 深色</div>
+      <div class="dark-bg" style="padding:24px">
+        <div class="note-surface dark active detached-indicator">
+          <div class="embedded-controls">
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></button>
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg></button>
+            <button class="embedded-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </div>
+          <div class="note-title-area"><div class="note-title">正在编辑的便签</div></div>
+          <div class="note-content-area"><div class="note-content">活跃态使用增强的 accent 边框光晕和更深层阴影，嵌入控制依然和谐。</div></div>
+        </div>
+      </div>
+      <p class="caption">活跃态：accent 边框光晕增强（alpha 0.1→0.14），阴影加深。控制按钮透明嵌入，不引入额外材质。</p>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ============================================================
+       设计理据
+       ============================================================ -->
+  <div class="section-label">设计理据</div>
+  <ul class="rationale">
+    <li><strong>视觉一致性：</strong>撕下便签的本质是"同一张便签的另一个视口"，而非一个独立的 UI 控件。
+      当前方案的浮动工具栏破坏了这个隐喻——用户看到的是"便签 + 工具栏"两个对象，而非一张完整的便签。</li>
+    <li><strong>认知负担：</strong>嵌入式控制让用户的视线始终停留在便签表面。操作路径：看便签 → 视线自然移到右上角 → 操作。
+      当前方案：看便签 → 视线上移跳出便签 → 找工具栏按钮 → 操作 → 视线下移回便签。</li>
+    <li><strong>材质统一：</strong>深色模式下，当前工具栏的磨砂玻璃背景与便签的 tinted acrylic 表面是两层独立材质。
+      嵌入式方案的控制按钮直接浮于便签表面之上，不引入额外的视觉层级。</li>
+    <li><strong>安静的桌面工具：</strong>SoNotes 的设计语言是"安静"——便签是主角，UI 控件是配角。
+      嵌入式控制在默认状态下完全隐藏，只在用户主动悬停时柔和浮现，符合这个原则。</li>
+    <li><strong>不依赖外部工具栏：</strong>当前方案的工具栏位于便签上方，与便签之间有视觉空隙，
+      看起来像一个 macOS 风格的浮动小部件。嵌入式方案消除了这个空隙，让控制操作成为便签表面的一部分。</li>
+    <li><strong>实现路径：</strong>从 <code>DetachedNoteOverlay.tsx</code> 移除独立的 drag-handle 工具栏 div，
+      将三个按钮作为 <code>NoteVisuals</code> 的 children 嵌入，通过 <code>position: absolute; top-right</code> 定位，
+      hover 时通过 <code>opacity</code> 实现浮现效果，按钮级 hover 提供轻量反馈。拖拽区域改为整个便签表面的顶部区域。</li>
+  </ul>
+
+</div>
+
+<!-- ============================================================
+     交互脚本 — 增强 hover 演示的触感
+     ============================================================ -->
+<script>
+  // 为嵌入式控制按钮添加更细腻的 hover 反馈（缩放微动效）
+  document.querySelectorAll('.embedded-btn').forEach(btn => {
+    btn.addEventListener('mouseenter', () => {
+      btn.style.transform = 'scale(1.08)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.transform = 'scale(1)';
+    });
+    btn.style.transition = 'background 0.15s, color 0.15s, transform 0.12s';
+  });
+</script>
+</body>
+</html>
