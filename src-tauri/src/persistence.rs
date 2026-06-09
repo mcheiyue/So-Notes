@@ -378,12 +378,14 @@ impl IntentQueue {
 
     async fn atomic_import(path: PathBuf, content: String) -> Result<(), String> {
         let bak_path = path.with_extension("bak");
-
-        if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+        let _bak_guard = if tokio::fs::try_exists(&path).await.unwrap_or(false) {
             tokio::fs::copy(&path, &bak_path)
                 .await
                 .map_err(|e| e.to_string())?;
-        }
+            Some(CleanupGuard::new(bak_path))
+        } else {
+            None
+        };
 
         let (res, _, _) = Self::write_content(path, content).await;
         res
@@ -500,6 +502,44 @@ mod tests {
             let lock_path = path.with_extension("tmp.lock");
             assert!(!tmp_path.exists(), "临时文件应被清理");
             assert!(!lock_path.exists(), "锁文件应被清理");
+
+            let _ = std::fs::remove_dir_all(&dir);
+        });
+    }
+
+    #[test]
+    fn atomic_import_removes_bak_after_success() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let dir = test_dir("import_bak_success");
+            let path = dir.join("data.json");
+            std::fs::write(&path, "old").unwrap();
+
+            IntentQueue::atomic_import(path.clone(), "new".to_string())
+                .await
+                .unwrap();
+
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+            assert!(!path.with_extension("bak").exists(), ".bak 应在导入成功后清理");
+
+            let _ = std::fs::remove_dir_all(&dir);
+        });
+    }
+
+    #[test]
+    fn atomic_import_removes_bak_after_write_failure() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let dir = test_dir("import_bak_failure");
+            let path = dir.join("data.json");
+            std::fs::write(&path, "old").unwrap();
+            std::fs::create_dir(path.with_extension("tmp")).unwrap();
+
+            let result = IntentQueue::atomic_import(path.clone(), "new".to_string()).await;
+
+            assert!(result.is_err(), "预置 tmp 目录应导致写入失败");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "old");
+            assert!(!path.with_extension("bak").exists(), ".bak 应在导入失败后清理");
 
             let _ = std::fs::remove_dir_all(&dir);
         });

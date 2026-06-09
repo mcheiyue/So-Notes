@@ -340,6 +340,22 @@ fn create_temp_zip_guard(resolved_path: &Path) -> Result<(TempZipGuard, std::fs:
     Err("创建临时 zip 文件失败: 临时文件名冲突过多".to_string())
 }
 
+struct RestoreStagingGuard {
+    path: PathBuf,
+}
+
+impl RestoreStagingGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl Drop for RestoreStagingGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 内部辅助函数
 // ---------------------------------------------------------------------------
@@ -920,6 +936,7 @@ fn restore_local_backup_inner(
     let staging_id = format!("{:016x}", rand::random::<u64>());
     let staging_dir = sonotes_base.join(format!(".restore_staging_{staging_id}"));
     std::fs::create_dir_all(&staging_dir).map_err(|e| format!("创建暂存目录失败: {e}"))?;
+    let _staging_guard = RestoreStagingGuard::new(staging_dir.clone());
 
     std::fs::write(staging_dir.join("data.json"), &raw_data)
         .map_err(|e| format!("写入暂存 data.json 失败: {e}"))?;
@@ -2376,6 +2393,21 @@ mod tests {
         zip_path
     }
 
+    fn assert_no_restore_staging_leftover(sonotes_base: &Path) {
+        let leftovers = std::fs::read_dir(sonotes_base)
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .map(|name| name.starts_with(".restore_staging_"))
+                    .unwrap_or(false)
+            })
+            .count();
+        assert_eq!(leftovers, 0, "不应残留恢复暂存目录");
+    }
+
     #[test]
     fn read_zip_entry_limited_rejects_actual_bytes_over_limit_even_when_declared_small() {
         let mut reader = std::io::Cursor::new(vec![b'x'; 65]);
@@ -2443,6 +2475,24 @@ mod tests {
 
         let restored = std::fs::read_to_string(sonotes_base.join("data.json")).unwrap();
         assert!(restored.contains("\"n1\""));
+        assert_no_restore_staging_leftover(&sonotes_base);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_staging_guard_removes_directory_on_drop() {
+        let root = test_dir("restore-staging-guard");
+        let staging_dir = root.join(".restore_staging_guard_test");
+        std::fs::create_dir_all(&staging_dir).unwrap();
+        std::fs::write(staging_dir.join("data.json"), b"{}").unwrap();
+
+        {
+            let _guard = RestoreStagingGuard::new(staging_dir.clone());
+            assert!(staging_dir.exists());
+        }
+
+        assert!(!staging_dir.exists(), "暂存目录应由 RAII guard 自动清理");
 
         let _ = std::fs::remove_dir_all(root);
     }
