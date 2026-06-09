@@ -297,6 +297,35 @@ fn lock_for_hash(hash: &str) -> Arc<Mutex<()>> {
     )
 }
 
+fn cleanup_lock_for_hash(hash: &str) {
+    let Some(locks) = ATTACHMENT_HASH_LOCKS.get() else {
+        return;
+    };
+    let mut guard = match locks.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if guard
+        .get(hash)
+        .map(|hash_lock| Arc::strong_count(hash_lock) == 1)
+        .unwrap_or(false)
+    {
+        guard.remove(hash);
+    }
+}
+
+#[cfg(test)]
+fn hash_lock_exists(hash: &str) -> bool {
+    let Some(locks) = ATTACHMENT_HASH_LOCKS.get() else {
+        return false;
+    };
+    let guard = match locks.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.contains_key(hash)
+}
+
 fn write_attachment_from_path_blocking(
     attach_dir: PathBuf,
     source_path: String,
@@ -340,18 +369,23 @@ fn write_attachment_from_path_blocking(
     let relative_path = content_addressed_relative_path(&hash_hex, Some(&ext));
     let final_path = attach_dir.join(format!("{hash_hex}.{ext}"));
 
-    let hash_lock = lock_for_hash(&hash_hex);
-    let _hash_guard = match hash_lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let bytes_written = if final_path.exists() {
-        0
-    } else {
-        std::fs::rename(&tmp_path, &final_path).map_err(|e| format!("重命名临时文件失败: {e}"))?;
-        tmp_guard.disarm();
-        total_size
-    };
+    let write_result = (|| -> Result<u64, String> {
+        let hash_lock = lock_for_hash(&hash_hex);
+        let _hash_guard = match hash_lock.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if final_path.exists() {
+            Ok(0)
+        } else {
+            std::fs::rename(&tmp_path, &final_path)
+                .map_err(|e| format!("重命名临时文件失败: {e}"))?;
+            tmp_guard.disarm();
+            Ok(total_size)
+        }
+    })();
+    cleanup_lock_for_hash(&hash_hex);
+    let bytes_written = write_result?;
 
     let meta = std::fs::metadata(&final_path).map_err(|e| format!("读取附件元数据失败: {e}"))?;
     let created_at = meta.created().map(system_time_to_millis).unwrap_or(0);
@@ -549,27 +583,33 @@ fn write_attachment_from_bytes_blocking(
     let relative_path = content_addressed_relative_path(&hash_hex, Some(&ext));
     let final_path = attach_dir.join(format!("{hash_hex}.{ext}"));
 
-    let hash_lock = lock_for_hash(&hash_hex);
-    let _hash_guard = match hash_lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let write_result = (|| -> Result<u64, String> {
+        let hash_lock = lock_for_hash(&hash_hex);
+        let _hash_guard = match hash_lock.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
 
-    let bytes_written = if final_path.exists() {
-        0
-    } else {
-        let (tmp_path, mut tmp_file) = create_random_tmp_file(&attach_dir)?;
-        let mut tmp_guard = TempFileGuard::new(tmp_path.clone());
-        tmp_file
-            .write_all(data)
-            .map_err(|e| format!("写入临时文件失败: {e}"))?;
-        tmp_file.flush().map_err(|e| format!("刷新临时文件失败: {e}"))?;
-        drop(tmp_file);
-        std::fs::rename(&tmp_path, &final_path)
-            .map_err(|e| format!("重命名临时文件失败: {e}"))?;
-        tmp_guard.disarm();
-        data.len() as u64
-    };
+        if final_path.exists() {
+            Ok(0)
+        } else {
+            let (tmp_path, mut tmp_file) = create_random_tmp_file(&attach_dir)?;
+            let mut tmp_guard = TempFileGuard::new(tmp_path.clone());
+            tmp_file
+                .write_all(data)
+                .map_err(|e| format!("写入临时文件失败: {e}"))?;
+            tmp_file
+                .flush()
+                .map_err(|e| format!("刷新临时文件失败: {e}"))?;
+            drop(tmp_file);
+            std::fs::rename(&tmp_path, &final_path)
+                .map_err(|e| format!("重命名临时文件失败: {e}"))?;
+            tmp_guard.disarm();
+            Ok(data.len() as u64)
+        }
+    })();
+    cleanup_lock_for_hash(&hash_hex);
+    let bytes_written = write_result?;
 
     let meta =
         std::fs::metadata(&final_path).map_err(|e| format!("读取附件元数据失败: {e}"))?;
@@ -1064,6 +1104,12 @@ mod tests {
         dir
     }
 
+    fn test_sha256_hex(data: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        bytes_to_hex(&hasher.finalize())
+    }
+
     #[test]
     fn random_tmp_file_uses_exclusive_creation() {
         let dir = test_dir("tmp");
@@ -1106,6 +1152,7 @@ mod tests {
         assert_eq!(first.relative_path, second.relative_path);
         assert_eq!(first.bytes_written, b"same attachment bytes".len() as u64);
         assert_eq!(second.bytes_written, 0);
+        assert!(!hash_lock_exists(&first.hash), "路径写入完成后不应残留 hash 锁");
         assert!(std::fs::read_dir(root.join("attachments"))
             .expect("read attach dir")
             .filter_map(Result::ok)
@@ -1177,6 +1224,31 @@ mod tests {
         assert_eq!(first.relative_path, second.relative_path);
         assert_eq!(first.bytes_written, data.len() as u64);
         assert_eq!(second.bytes_written, 0);
+        assert!(!hash_lock_exists(&first.hash), "字节写入完成后不应残留 hash 锁");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bytes_write_cleans_hash_lock_after_failure() {
+        let root = test_dir("bytes-lock-failure");
+        let attach_dir = root.join("attachments-as-file");
+        std::fs::write(&attach_dir, b"not a directory").expect("write blocking file");
+
+        let data = b"bytes that cannot be written into file path dir";
+        let expected_hash = test_sha256_hex(data);
+        let result = write_attachment_from_bytes_blocking(
+            attach_dir,
+            data,
+            "clipboard-image.png".to_string(),
+            "image/png".to_string(),
+        );
+
+        assert!(result.is_err(), "文件形式的附件目录应导致写入失败");
+        assert!(
+            !hash_lock_exists(&expected_hash),
+            "失败路径也不应残留 hash 锁"
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
