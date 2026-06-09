@@ -299,7 +299,11 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       shouldFinalizeOnMouseUpRef.current = false;
       const clientPoint = getClientPoint(e) ?? { x: 0, y: 0 };
       const state = useStore.getState();
-      const dragIds = state.selectedIds.includes(note.id) ? state.selectedIds : [note.id];
+      const isNoteSelected = state.selectedIds.includes(note.id);
+      const dragIds = isNoteSelected ? state.selectedIds : [note.id];
+      if (!isNoteSelected) {
+        setSelectedIds(dragIds);
+      }
       const dragNotes = dragIds.flatMap((dragId) => {
           const dragNote = state.notesById[dragId];
           return dragNote ? [dragNote] : [];
@@ -389,6 +393,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
   const handleMouseDown = (e: DraggableEvent) => {
     const mouseEvent = e as unknown as React.MouseEvent;
+    if (isPanMode) return;
     if (useStore.getState().stickyDrag.id) return;
 
     const targetElement = mouseEvent.target instanceof Element ? mouseEvent.target : null;
@@ -423,6 +428,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   };
   
   const handleContextMenu = (e: React.MouseEvent) => {
+      if (isPanMode) return;
       e.preventDefault();
       e.stopPropagation();
       if (isStatic) return; // TRASH 列表下禁用右键菜单
@@ -658,7 +664,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       onStart={handleStart}
       onDrag={handleDrag}
       onStop={handleStop}
-      disabled={isStickyDragging || isStatic}
+      disabled={isStickyDragging || isStatic || isPanMode}
     >
       <NoteVisuals
         ref={nodeRef}
@@ -692,8 +698,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
               ? "border-blue-500/60"
               : "border-blue-500/40"
           ),
-          isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto",
-          isPanMode && "pointer-events-none"
+          isStatic && "relative !transform-none !left-auto !top-auto opacity-90 grayscale-[0.1] hover:grayscale-0 pointer-events-auto"
         )}
         style={{
           zIndex: isStickyDragging ? Z_INDEX.NOTE_DRAGGING : (isStatic ? undefined : note.z),
@@ -707,6 +712,13 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         onContextMenu={handleContextMenu}
         onDoubleClick={handleHeaderDoubleClick}
       >
+        {isPanMode && !isStatic && (
+          <div
+            aria-hidden="true"
+            data-note-pan-guard="true"
+            className="absolute inset-0 z-40 cursor-grab"
+          />
+        )}
         <header 
             className={cn(
                 "drag-handle relative h-9 flex items-center justify-between px-2 pt-1 select-none",

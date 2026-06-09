@@ -1,6 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, Root } from 'react-dom/client';
+
+type MockDraggableCallback = (event: MouseEvent, ...args: unknown[]) => void;
+
+type MockDraggableCoreProps = {
+  onStart?: MockDraggableCallback;
+  onDrag?: MockDraggableCallback;
+  onStop?: MockDraggableCallback;
+  disabled?: boolean;
+};
+
+type MockDraggableCoreComponentProps = MockDraggableCoreProps & {
+  children: ReactNode;
+  [key: string]: unknown;
+};
 
 const {
   convertFileSrcMock,
@@ -10,6 +24,7 @@ const {
   writeImageMock,
   imageFromPathMock,
   getImageDimensionsFromRelativePathMock,
+  draggableCorePropsRef,
 } = vi.hoisted(() => ({
   convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
   resolveAttachmentPathMock: vi.fn(async (path: string) => `/abs/${path}`),
@@ -26,6 +41,7 @@ const {
   writeImageMock: vi.fn(async () => undefined),
   imageFromPathMock: vi.fn(async (path: string) => ({ path, __tauriImage: true })),
   getImageDimensionsFromRelativePathMock: vi.fn(async () => ({ width: 1080, height: 1920 })),
+  draggableCorePropsRef: { current: null as MockDraggableCoreProps | null },
 }));
 
 vi.mock('@tauri-apps/api/image', () => ({
@@ -67,8 +83,11 @@ vi.mock('../utils/fileSystem', () => ({
 }));
 
 vi.mock('react-draggable', () => ({
-  default: ({ children }: { children: React.ReactNode }) => children,
-  DraggableCore: ({ children }: { children: React.ReactNode }) => children,
+  default: ({ children }: { children: ReactNode }) => children,
+  DraggableCore: ({ children, ...props }: MockDraggableCoreComponentProps) => {
+    draggableCorePropsRef.current = props;
+    return children;
+  },
 }));
 
 import { NoteCard } from './NoteCard';
@@ -122,6 +141,15 @@ const createAttachment = (overrides: Partial<AttachmentRef> = {}): AttachmentRef
   ...overrides,
 });
 
+const getLatestDraggableCoreProps = (): MockDraggableCoreProps => {
+  const props = draggableCorePropsRef.current;
+  if (!props) {
+    throw new Error('未捕获到 DraggableCore props');
+  }
+
+  return props;
+};
+
 describe('NoteCard 头部交互边界', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -144,6 +172,7 @@ describe('NoteCard 头部交互边界', () => {
     imageFromPathMock.mockClear();
     getImageDimensionsFromRelativePathMock.mockClear();
     getImageDimensionsFromRelativePathMock.mockResolvedValue({ width: 1080, height: 1920 });
+    draggableCorePropsRef.current = null;
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn(async () => undefined),
@@ -551,6 +580,135 @@ describe('NoteCard 头部交互边界', () => {
       Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
     });
     expect(rootRegion?.style.boxShadow).toContain('0 2px 8px');
+  });
+
+  it('拖拽未选中的便签时在拖拽开始阶段收敛选中，清掉陈旧多选高亮', async () => {
+    useStore.setState({
+      ...normalizeNotes([
+        createNote(),
+        createNote({ id: 'note-2', x: 420, y: 160 }),
+        createNote({ id: 'note-3', x: 720, y: 220 }),
+      ]),
+      selectedIds: ['note-2', 'note-3'],
+    });
+
+    await renderNoteCard();
+
+    const header = container.querySelector('.drag-handle') as HTMLDivElement | null;
+    expect(header).not.toBeNull();
+
+    await act(async () => {
+      header?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 220,
+        clientY: 180,
+      }));
+    });
+
+    expect(useStore.getState().selectedIds).toEqual(['note-2', 'note-3']);
+
+    const { onStart, onStop } = getLatestDraggableCoreProps();
+
+    await act(async () => {
+      onStart?.(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 220,
+        clientY: 180,
+      }));
+    });
+
+    expect(useStore.getState().selectedIds).toEqual(['note-1']);
+
+    await act(async () => {
+      onStop?.(new MouseEvent('mouseup', {
+        bubbles: true,
+        clientX: 220,
+        clientY: 180,
+      }));
+    });
+  });
+
+  it('拖拽已在多选里的便签时保留当前多选，继续按组选中拖拽', async () => {
+    useStore.setState({
+      ...normalizeNotes([
+        createNote(),
+        createNote({ id: 'note-2', x: 420, y: 160 }),
+      ]),
+      selectedIds: ['note-1', 'note-2'],
+    });
+
+    await renderNoteCard();
+
+    const { onStart, onStop } = getLatestDraggableCoreProps();
+
+    await act(async () => {
+      onStart?.(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 220,
+        clientY: 180,
+      }));
+    });
+
+    expect(useStore.getState().selectedIds).toEqual(['note-1', 'note-2']);
+
+    await act(async () => {
+      onStop?.(new MouseEvent('mouseup', {
+        bubbles: true,
+        clientX: 220,
+        clientY: 180,
+      }));
+    });
+  });
+
+  it('平移模式不再整卡禁用指针事件，chrome 可恢复显示且不会退化成普通便签交互', async () => {
+    useStore.setState({
+      ...normalizeNotes([
+        createNote(),
+        createNote({ id: 'note-2', x: 420, y: 160 }),
+      ]),
+      selectedIds: ['note-2'],
+      interaction: {
+        ...useStore.getState().interaction,
+        isPanMode: true,
+      },
+    });
+
+    await renderNoteCard();
+
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    expect(rootRegion).not.toBeNull();
+    expect(rootRegion?.className).not.toContain('pointer-events-none');
+    expect(container.querySelector('[data-note-pan-guard="true"]')).not.toBeNull();
+    expect(getLatestDraggableCoreProps().disabled).toBe(true);
+
+    await act(async () => {
+      rootRegion?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+
+    expect((container.querySelector('.drag-handle') as HTMLDivElement | null)?.className).toContain('opacity-100');
+    expect(container.querySelector('[aria-label="复制内容"]')).not.toBeNull();
+
+    await act(async () => {
+      rootRegion?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 220,
+        clientY: 180,
+      }));
+    });
+
+    expect(useStore.getState().selectedIds).toEqual(['note-2']);
+
+    await act(async () => {
+      useStore.setState({
+        interaction: {
+          ...useStore.getState().interaction,
+          isPanMode: false,
+        },
+      });
+    });
+
+    expect(container.querySelector('[data-note-pan-guard="true"]')).toBeNull();
+    expect((container.querySelector('.drag-handle') as HTMLDivElement | null)?.className).toContain('opacity-100');
   });
 
   it('编辑正文后在失焦时触发临时编辑高亮', async () => {
