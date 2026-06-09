@@ -54,6 +54,12 @@ const formatImportHighlights = (summary: NonNullable<ImportFeedback['summary']>)
   return highlights;
 };
 
+const formatUnknownError = (err: unknown): string => {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return '未知错误';
+};
+
 export const BoardDock = () => {
   const store = useStore();
   const { 
@@ -187,7 +193,7 @@ export const BoardDock = () => {
         }
       } catch (err) {
         if (!cancelled) {
-          setWebdavFeedback({ status: 'error', message: `加载配置失败：${err instanceof Error ? err.message : '未知错误'}` });
+          setWebdavFeedback({ status: 'error', message: `加载配置失败：${formatUnknownError(err)}` });
         }
       }
     })();
@@ -286,7 +292,7 @@ export const BoardDock = () => {
         setZipFeedback({ status: 'error', message: `备份失败：${result.error ?? '未知错误'}` });
       }
     } catch (err) {
-      setZipFeedback({ status: 'error', message: `备份失败：${err instanceof Error ? err.message : '未知错误'}` });
+      setZipFeedback({ status: 'error', message: `备份失败：${formatUnknownError(err)}` });
     } finally {
       setZipOperation('idle');
     }
@@ -391,7 +397,7 @@ export const BoardDock = () => {
         message: `恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
       });
     } catch (err) {
-      setZipFeedback({ status: 'error', message: `恢复失败：${err instanceof Error ? err.message : '未知错误'}` });
+      setZipFeedback({ status: 'error', message: `恢复失败：${formatUnknownError(err)}` });
     } finally {
       if (pauseOccurred) {
         try {
@@ -433,7 +439,7 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'error', message: `保存失败：${result.error ?? '未知错误'}` });
       }
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `保存失败：${err instanceof Error ? err.message : '未知错误'}` });
+      setWebdavFeedback({ status: 'error', message: `保存失败：${formatUnknownError(err)}` });
     } finally {
       setWebdavOperation('idle');
     }
@@ -452,7 +458,7 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'error', message: `清除失败：${result.error ?? '未知错误'}` });
       }
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `清除失败：${err instanceof Error ? err.message : '未知错误'}` });
+      setWebdavFeedback({ status: 'error', message: `清除失败：${formatUnknownError(err)}` });
     } finally {
       setWebdavOperation('idle');
     }
@@ -471,7 +477,7 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'error', message: `连接失败：${result.error ?? '未知错误'}` });
       }
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `连接失败：${err instanceof Error ? err.message : '未知错误'}` });
+      setWebdavFeedback({ status: 'error', message: `连接失败：${formatUnknownError(err)}` });
     } finally {
       setWebdavOperation('idle');
     }
@@ -489,7 +495,7 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'info', message: '远端无备份文件。' });
       }
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `获取备份列表失败：${err instanceof Error ? err.message : '未知错误'}` });
+      setWebdavFeedback({ status: 'error', message: `获取备份列表失败：${formatUnknownError(err)}` });
     } finally {
       setWebdavOperation('idle');
     }
@@ -519,7 +525,7 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${result.error ?? '未知错误'}` });
       }
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${err instanceof Error ? err.message : '未知错误'}` });
+      setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatUnknownError(err)}` });
     } finally {
       setWebdavOperation('idle');
     }
@@ -577,7 +583,7 @@ export const BoardDock = () => {
         message: `远端恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
       });
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `恢复失败：${err instanceof Error ? err.message : '未知错误'}` });
+      setWebdavFeedback({ status: 'error', message: `恢复失败：${formatUnknownError(err)}` });
     } finally {
       if (downloadToken) {
         try {

@@ -1021,7 +1021,7 @@ pub async fn webdav_list_backups(
 enum DownloadTokenState {
     Ready { file_path: PathBuf },
     Resolved { file_path: PathBuf },
-    Cleaned,
+    Cleaned { file_path: Option<PathBuf> },
 }
 
 #[derive(Debug, Clone)]
@@ -1065,6 +1065,14 @@ fn token_is_expired(entry: &DownloadTokenEntry) -> bool {
         .unwrap_or(false)
 }
 
+fn token_file_path(state: &DownloadTokenState) -> Option<PathBuf> {
+    match state {
+        DownloadTokenState::Ready { file_path }
+        | DownloadTokenState::Resolved { file_path } => Some(file_path.clone()),
+        DownloadTokenState::Cleaned { file_path } => file_path.clone(),
+    }
+}
+
 fn resolve_download_token(token: &str) -> Result<PathBuf, String> {
     let mut tokens = download_tokens().lock().unwrap();
     let entry = tokens
@@ -1072,7 +1080,8 @@ fn resolve_download_token(token: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| "下载 token 无效".to_string())?;
 
     if token_is_expired(entry) {
-        entry.state = DownloadTokenState::Cleaned;
+        let file_path = token_file_path(&entry.state);
+        entry.state = DownloadTokenState::Cleaned { file_path };
         return Err("下载 token 已过期".to_string());
     }
 
@@ -1083,7 +1092,7 @@ fn resolve_download_token(token: &str) -> Result<PathBuf, String> {
             Ok(path)
         }
         DownloadTokenState::Resolved { .. } => Err("下载 token 已被解析，不能重复使用".to_string()),
-        DownloadTokenState::Cleaned => Err("下载 token 已清理，无效".to_string()),
+        DownloadTokenState::Cleaned { .. } => Err("下载 token 已清理，无效".to_string()),
     }
 }
 
@@ -1093,24 +1102,29 @@ fn cleanup_download_token(token: &str) -> Result<PathBuf, String> {
         .get_mut(token)
         .ok_or_else(|| "下载 token 无效".to_string())?;
 
-    if token_is_expired(entry) {
-        entry.state = DownloadTokenState::Cleaned;
-        return Ok(PathBuf::new());
+    if let DownloadTokenState::Cleaned { file_path } = &mut entry.state {
+        return Ok(file_path.take().unwrap_or_default());
     }
 
-    match &entry.state {
+    if token_is_expired(entry) {
+        let file_path = token_file_path(&entry.state);
+        entry.state = DownloadTokenState::Cleaned { file_path: None };
+        return Ok(file_path.unwrap_or_default());
+    }
+
+    match &mut entry.state {
         DownloadTokenState::Ready { file_path } => {
             let path = file_path.clone();
-            entry.state = DownloadTokenState::Cleaned;
+            entry.state = DownloadTokenState::Cleaned { file_path: None };
             Ok(path)
         }
         DownloadTokenState::Resolved { file_path } => {
             let path = file_path.clone();
-            entry.state = DownloadTokenState::Cleaned;
+            entry.state = DownloadTokenState::Cleaned { file_path: None };
             Ok(path)
         }
-        DownloadTokenState::Cleaned => {
-            Ok(PathBuf::new())
+        DownloadTokenState::Cleaned { file_path } => {
+            Ok(file_path.take().unwrap_or_default())
         }
     }
 }
@@ -1247,8 +1261,25 @@ pub async fn webdav_create_remote_backup(
         );
     }
 
-    let zip_bytes = std::fs::read(&temp_zip_path).map_err(|_| {
-        let _ = std::fs::remove_file(&temp_zip_path);
+    let actual_zip_path = backup_result
+        .backup_path
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| temp_zip_path.clone());
+
+    if !validate_file_within_webdav_dir(&actual_zip_path, &pending_dir) {
+        let _ = std::fs::remove_file(&actual_zip_path);
+        if actual_zip_path != temp_zip_path {
+            let _ = std::fs::remove_file(&temp_zip_path);
+        }
+        return Err("远端备份上传失败，本地数据未受影响".to_string());
+    }
+
+    let zip_bytes = std::fs::read(&actual_zip_path).map_err(|_| {
+        let _ = std::fs::remove_file(&actual_zip_path);
+        if actual_zip_path != temp_zip_path {
+            let _ = std::fs::remove_file(&temp_zip_path);
+        }
         "远端备份上传失败，本地数据未受影响".to_string()
     })?;
 
@@ -1267,6 +1298,10 @@ pub async fn webdav_create_remote_backup(
     )
     .await
     .map_err(|error| {
+        let _ = std::fs::remove_file(&actual_zip_path);
+        if actual_zip_path != temp_zip_path {
+            let _ = std::fs::remove_file(&temp_zip_path);
+        }
         if error == "WebDAV 鉴权失败" {
             error
         } else {
@@ -1303,7 +1338,10 @@ pub async fn webdav_create_remote_backup(
                 let status = resp.status().as_u16();
                 match status {
                     200..=299 => {
-                        let _ = std::fs::remove_file(&temp_zip_path);
+                        let _ = std::fs::remove_file(&actual_zip_path);
+                        if actual_zip_path != temp_zip_path {
+                            let _ = std::fs::remove_file(&temp_zip_path);
+                        }
                         return Ok(WebDavUploadResult {
                             success: true,
                             remote_file_name: Some(remote_filename),
@@ -1311,7 +1349,10 @@ pub async fn webdav_create_remote_backup(
                         });
                     }
                     401 | 403 => {
-                        let _ = std::fs::remove_file(&temp_zip_path);
+                        let _ = std::fs::remove_file(&actual_zip_path);
+                        if actual_zip_path != temp_zip_path {
+                            let _ = std::fs::remove_file(&temp_zip_path);
+                        }
                         return Err("WebDAV 鉴权失败".to_string());
                     }
                     409 | 412 => {
@@ -1331,7 +1372,10 @@ pub async fn webdav_create_remote_backup(
         }
     }
 
-    let _ = std::fs::remove_file(&temp_zip_path);
+    let _ = std::fs::remove_file(&actual_zip_path);
+    if actual_zip_path != temp_zip_path {
+        let _ = std::fs::remove_file(&temp_zip_path);
+    }
     Err(last_error)
 }
 
@@ -2371,7 +2415,9 @@ mod tests {
         let result = cleanup_download_token(&token);
         assert!(result.is_ok());
 
-        // resolve 已清理的 token 应失败
+        let cleaned_again = cleanup_download_token(&token).unwrap();
+        assert!(cleaned_again.as_os_str().is_empty());
+
         let err = resolve_download_token(&token).unwrap_err();
         assert!(err.contains("无效"));
 
@@ -2453,7 +2499,10 @@ mod tests {
         );
 
         let cleaned = cleanup_download_token(&token).unwrap();
-        assert!(cleaned.as_os_str().is_empty());
+        assert_eq!(cleaned, tmp);
+
+        let cleaned_again = cleanup_download_token(&token).unwrap();
+        assert!(cleaned_again.as_os_str().is_empty());
 
         remove_download_token(&token);
         let _ = std::fs::remove_file(&tmp);

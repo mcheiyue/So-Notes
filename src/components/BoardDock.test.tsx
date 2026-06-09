@@ -1214,6 +1214,23 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(feedback?.textContent).toContain('当前数据尚未成功写入磁盘');
   });
 
+  it('创建远端备份收到字符串异常时显示具体错误', async () => {
+    const { createRemoteBackup, loadConfig } = await import('../services/backup/WebDavBackupService');
+    const { flushNow } = await import('../services/storage/PersistenceFacade');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(flushNow).mockResolvedValue(true);
+    vi.mocked(createRemoteBackup).mockRejectedValue('远端备份上传失败，本地数据未受影响');
+
+    await openWebdavView();
+    await clickElement(findButtonByText('创建远端备份'));
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('远端备份上传失败，本地数据未受影响');
+    expect(feedback?.textContent).not.toContain('未知错误');
+  });
+
   it('刷新远端列表后渲染备份文件信息', async () => {
     const { loadConfig, listBackups } = await import('../services/backup/WebDavBackupService');
     vi.mocked(loadConfig).mockResolvedValue({
