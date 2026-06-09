@@ -16,6 +16,7 @@ import {
   createRemoteBackup,
   listBackups,
   downloadBackup,
+  deleteBackup,
   resolveDownloadedBackup,
   cleanupDownloadedBackup,
 } from './WebDavBackupService';
@@ -344,6 +345,42 @@ describe('WebDavBackupService', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('超过允许大小');
+    });
+  });
+
+  describe('deleteBackup', () => {
+    it('调用 webdav_delete_backup 命令并传递远端文件名', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+        remoteDir: 'SoNotes_Backups/',
+        password: 'secret',
+      };
+      const remoteFileName = 'SoNotes_Backup_20240101120000.zip';
+      const expected = { success: true };
+      invokeMock.mockResolvedValueOnce(expected);
+
+      const result = await deleteBackup(config, remoteFileName);
+
+      expect(invokeMock).toHaveBeenCalledWith('webdav_delete_backup', {
+        config,
+        remoteFileName,
+      });
+      expect(result).toEqual(expected);
+    });
+
+    it('传播远端备份已不存在结果', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      const expected = { success: true, error: '远端备份已不存在' };
+      invokeMock.mockResolvedValueOnce(expected);
+
+      const result = await deleteBackup(config, 'SoNotes_Backup_20240101120000.zip');
+
+      expect(result.success).toBe(true);
+      expect(result.error).toBe('远端备份已不存在');
     });
   });
 

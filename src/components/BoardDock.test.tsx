@@ -45,6 +45,7 @@ vi.mock('../services/backup/WebDavBackupService', () => ({
   testConnection: vi.fn(async () => ({ success: true })),
   createRemoteBackup: vi.fn(async () => ({ success: true, remoteFileName: 'backup.zip' })),
   listBackups: vi.fn(async () => []),
+  deleteBackup: vi.fn(async () => ({ success: true })),
   downloadBackup: vi.fn(async () => ({ success: true, downloadToken: 'tok-1' })),
   resolveDownloadedBackup: vi.fn(async () => ({ success: true, localPath: '/tmp/downloaded.zip' })),
   cleanupDownloadedBackup: vi.fn(async () => ({ success: true })),
@@ -1250,6 +1251,49 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(list?.textContent).toContain('2026-06-08');
     expect(list?.textContent).not.toContain('GMT');
     expect(list?.textContent).not.toContain('2026-06-08T10:00:00Z');
+  });
+
+  it('删除远端备份取消确认时不调用删除服务', async () => {
+    const { loadConfig, listBackups, deleteBackup } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'SoNotes_Backup_20260609151929.zip', size: 102400, lastModified: 'Tue, 09 Jun 2026 07:19:29 GMT', readable: true },
+    ]);
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+    await clickElement(container.querySelector('[data-testid="webdav-delete-button"]'));
+
+    expect(deleteBackup).not.toHaveBeenCalled();
+  });
+
+  it('删除远端备份成功后刷新列表', async () => {
+    const { loadConfig, listBackups, deleteBackup } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups)
+      .mockResolvedValueOnce([
+        { fileName: 'SoNotes_Backup_20260609151929.zip', size: 102400, lastModified: 'Tue, 09 Jun 2026 07:19:29 GMT', readable: true },
+      ])
+      .mockResolvedValueOnce([]);
+    vi.mocked(deleteBackup).mockResolvedValue({ success: true });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+    await clickElement(container.querySelector('[data-testid="webdav-delete-button"]'));
+
+    expect(deleteBackup).toHaveBeenCalledWith(
+      expect.objectContaining({ serverUrl: 'https://dav.example.com', username: 'user1' }),
+      'SoNotes_Backup_20260609151929.zip',
+    );
+    expect(listBackups).toHaveBeenCalledTimes(2);
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('远端备份已删除');
   });
 
   it('远端恢复取消确认时不调用任何服务', async () => {

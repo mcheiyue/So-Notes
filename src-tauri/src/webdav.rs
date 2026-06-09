@@ -178,6 +178,13 @@ pub struct WebDavCleanupResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebDavDeleteResult {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // 内部持久化结构（不暴露给前端）
 // ---------------------------------------------------------------------------
@@ -947,6 +954,49 @@ pub async fn webdav_list_backups(
     let xml = resp.text().await.map_err(|_| "远端备份列表读取失败".to_string())?;
     let entries = parse_propfind_response(&xml)?;
     Ok(filter_backup_entries(entries))
+}
+
+#[tauri::command]
+pub async fn webdav_delete_backup(
+    config: WebDavConfig,
+    remote_file_name: String,
+) -> Result<WebDavDeleteResult, String> {
+    validate_remote_backup_filename(&remote_file_name)?;
+
+    let base_url = normalize_webdav_url(&config.server_url)?;
+    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
+    let dir_url = build_remote_dir_url(&base_url, &remote_dir);
+    let file_url = format!("{}{}", dir_url, remote_file_name);
+
+    let client = reqwest::Client::builder()
+        .user_agent("SoNotes/1.5")
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|_| "远端备份删除失败".to_string())?;
+
+    let resp = webdav_request_with_auth(
+        &client,
+        reqwest::Method::DELETE,
+        &file_url,
+        &config.username,
+        config.password.as_deref(),
+    )
+    .send()
+    .await
+    .map_err(|_| "远端备份删除失败".to_string())?;
+
+    match resp.status().as_u16() {
+        200..=299 => Ok(WebDavDeleteResult {
+            success: true,
+            error: None,
+        }),
+        401 | 403 => Err("WebDAV 鉴权失败".to_string()),
+        404 => Ok(WebDavDeleteResult {
+            success: true,
+            error: Some("远端备份已不存在".to_string()),
+        }),
+        status => Err(format!("远端备份删除失败 (HTTP {status})")),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1751,6 +1801,26 @@ mod tests {
             err.contains("长度不正确") || err.contains("后缀"),
             "错误应提及长度或后缀: {err}"
         );
+    }
+
+    #[test]
+    fn delete_backup_rejects_path_filename_before_network() {
+        let config = WebDavConfig {
+            server_url: "https://example.com".to_string(),
+            username: "user".to_string(),
+            password: None,
+            remote_dir: Some("SoNotes_Backups/".to_string()),
+        };
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let err = rt
+            .block_on(webdav_delete_backup(
+                config,
+                "../SoNotes_Backup_20240101120000.zip".to_string(),
+            ))
+            .unwrap_err();
+
+        assert!(err.contains("..") || err.contains("路径分隔符"));
     }
 
     // -----------------------------------------------------------------------

@@ -110,7 +110,7 @@ export const BoardDock = () => {
     remoteDir: 'SoNotes_Backups/',
     rememberPassword: false,
   });
-  const [webdavOperation, setWebdavOperation] = useState<'idle' | 'testing' | 'saving' | 'listing' | 'creating' | 'restoring'>('idle');
+  const [webdavOperation, setWebdavOperation] = useState<'idle' | 'testing' | 'saving' | 'listing' | 'creating' | 'restoring' | 'deleting'>('idle');
   const [webdavFeedback, setWebdavFeedback] = useState<{ status: 'success' | 'error' | 'info'; message: string } | null>(null);
   const [webdavBackups, setWebdavBackups] = useState<WebDavBackupService.WebDavRemoteBackup[]>([]);
 
@@ -534,6 +534,37 @@ export const BoardDock = () => {
       }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatUnknownError(err)}` });
+    } finally {
+      setWebdavOperation('idle');
+    }
+  };
+
+  const onWebdavDeleteBackup = async (fileName: string) => {
+    const confirmed = window.confirm(
+      `确定要删除远端备份 "${fileName}" 吗？这不会影响当前本地看板和便签，但远端备份文件删除后不可恢复。`,
+    );
+    if (!confirmed) return;
+
+    const config = buildWebdavConfig();
+    if (!config) return;
+
+    setWebdavFeedback(null);
+    setWebdavOperation('deleting');
+    try {
+      const result = await WebDavBackupService.deleteBackup(config, fileName);
+      if (result.success) {
+        setWebdavFeedback({ status: 'success', message: result.error ?? '远端备份已删除。' });
+        try {
+          const backups = await WebDavBackupService.listBackups(config);
+          setWebdavBackups(backups);
+        } catch {
+          setWebdavBackups((items) => items.filter((item) => item.fileName !== fileName));
+        }
+      } else {
+        setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${result.error ?? '未知错误'}` });
+      }
+    } catch (err) {
+      setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${formatUnknownError(err)}` });
     } finally {
       setWebdavOperation('idle');
     }
@@ -1215,16 +1246,28 @@ export const BoardDock = () => {
                                                 {backup.readable ? '' : ' · 不可读'}
                                             </p>
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => onWebdavRestore(backup.fileName)}
-                                            disabled={webdavOperation !== 'idle' || zipOperation !== 'idle'}
-                                            className="flex items-center gap-1 px-2 py-1 text-xs text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded transition-colors disabled:opacity-50 flex-shrink-0"
-                                            data-testid="webdav-restore-button"
-                                        >
-                                            <RotateCcw className="w-3.5 h-3.5" />
-                                            <span>恢复</span>
-                                        </button>
+                                        <div className="flex items-center gap-1 flex-shrink-0">
+                                            <button
+                                                type="button"
+                                                onClick={() => onWebdavRestore(backup.fileName)}
+                                                disabled={webdavOperation !== 'idle' || zipOperation !== 'idle'}
+                                                className="flex items-center gap-1 px-2 py-1 text-xs text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded transition-colors disabled:opacity-50"
+                                                data-testid="webdav-restore-button"
+                                            >
+                                                <RotateCcw className="w-3.5 h-3.5" />
+                                                <span>恢复</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => onWebdavDeleteBackup(backup.fileName)}
+                                                disabled={webdavOperation !== 'idle' || zipOperation !== 'idle'}
+                                                className="flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 rounded transition-colors disabled:opacity-50"
+                                                data-testid="webdav-delete-button"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                                <span>删除</span>
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>

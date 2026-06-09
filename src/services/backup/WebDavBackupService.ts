@@ -74,6 +74,11 @@ export interface WebDavCleanupResult {
   readonly error?: string;
 }
 
+export interface WebDavDeleteResult {
+  readonly success: boolean;
+  readonly error?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // 配置管理
 // ---------------------------------------------------------------------------
@@ -123,6 +128,16 @@ export async function downloadBackup(
   remoteFileName: string,
 ): Promise<WebDavDownloadResult> {
   return invoke<WebDavDownloadResult>('webdav_download_backup', {
+    config,
+    remoteFileName,
+  });
+}
+
+export async function deleteBackup(
+  config: WebDavConfig,
+  remoteFileName: string,
+): Promise<WebDavDeleteResult> {
+  return invoke<WebDavDeleteResult>('webdav_delete_backup', {
     config,
     remoteFileName,
   });
