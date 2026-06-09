@@ -106,6 +106,33 @@ describe('StorageService.bootstrap', () => {
     expect(result.recovered).toBe(false);
   });
 
+  it('读取缺少 kind 的旧磁盘便签时按文本便签迁移', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(makeDiskJson({
+      notes: [{
+        id: 'legacy-text-note',
+        boardId: 'default',
+        x: 10,
+        y: 20,
+        title: '旧文本便签',
+        content: '旧版本没有 kind',
+        color: '#FFFFFF',
+        z: 1,
+        createdAt: 100,
+        updatedAt: 9000,
+      }],
+      storageUpdatedAt: 9000,
+    }));
+    vi.mocked(db.loadWAL).mockResolvedValueOnce(undefined);
+
+    const result = await bootstrap();
+
+    expect(result.source).toBe('DISK');
+    expect(result.data.notes[0]).toMatchObject({
+      id: 'legacy-text-note',
+      kind: 'text',
+    });
+  });
+
   it('DISK 与 WAL 同时间戳时选择 WAL 来源', async () => {
     const time = 5000;
 

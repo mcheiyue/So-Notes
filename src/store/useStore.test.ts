@@ -55,7 +55,6 @@ describe('v1.4.0 StorageData 演进契约', () => {
     vi.mocked(invoke).mockResolvedValueOnce(JSON.stringify({
       notes: [{
         id: 'legacy-note',
-        kind: 'text',
         boardId: 'legacy-board',
         x: 10,
         y: 20,
@@ -79,6 +78,7 @@ describe('v1.4.0 StorageData 演进契约', () => {
     const state = useStore.getState();
     expect(state.currentBoardId).toBe('legacy-board');
     expect(state.notesById['legacy-note']?.title).toBe('旧数据');
+    expect(state.notesById['legacy-note']?.kind).toBe('text');
     expect(state.viewMode).toBe('BOARD');
     expect(state.selectedIds).toEqual([]);
     expect(state.viewport.x).not.toBe(999);
@@ -87,6 +87,7 @@ describe('v1.4.0 StorageData 演进契约', () => {
     expect(savedWal).toMatchObject({
       schemaVersion: STORAGE_SCHEMA_VERSION,
       storageUpdatedAt: 123,
+      notes: [expect.objectContaining({ id: 'legacy-note', kind: 'text' })],
     });
   });
 

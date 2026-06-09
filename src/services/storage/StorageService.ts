@@ -81,6 +81,7 @@ const migrateAndSanitize = (data: StorageData): StorageData => {
       }
       if (n.collapsed === undefined) n.collapsed = false;
       if (n.title === undefined) n.title = '';
+      if (n.kind !== 'image') n.kind = 'text';
       if (!n.boardId) n.boardId = 'default';
       if (!n.updatedAt) n.updatedAt = n.createdAt || Date.now();
         n.attachments = sanitizeNoteAttachments(n);

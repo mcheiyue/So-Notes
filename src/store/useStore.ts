@@ -371,6 +371,7 @@ const migrateAndSanitizeStorageData = (data: StorageData): StorageData => {
       if (n.x < 0 || n.y < 0) { n.x = 20 + (i * 10); n.y = 20 + (i * 10); }
       if (n.collapsed === undefined) n.collapsed = false;
       if (n.title === undefined) n.title = '';
+      if (n.kind !== 'image') n.kind = 'text';
       if (!n.boardId) n.boardId = 'default';
       if (!n.updatedAt) n.updatedAt = n.createdAt || Date.now();
       if (n.width !== undefined && n.editingWidth === undefined) { n.editingWidth = n.width; }
