@@ -582,6 +582,92 @@ describe('NoteCard 头部交互边界', () => {
     expect(rootRegion?.style.boxShadow).toContain('0 2px 8px');
   });
 
+  it('拖拽在便签内停止时无需重新 mouseover 也会恢复 chrome', async () => {
+    await renderNoteCard();
+
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    expect(rootRegion).not.toBeNull();
+    vi.spyOn(rootRegion!, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 120, 260, 160));
+
+    await act(async () => {
+      rootRegion?.dispatchEvent(new MouseEvent('mouseover', {
+        bubbles: true,
+        clientX: 140,
+        clientY: 150,
+      }));
+    });
+
+    expect((container.querySelector('.drag-handle') as HTMLDivElement | null)?.className).toContain('opacity-100');
+    expect(container.querySelector('[aria-label="复制内容"]')).not.toBeNull();
+
+    const { onStart, onStop } = getLatestDraggableCoreProps();
+
+    await act(async () => {
+      onStart?.(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 140,
+        clientY: 150,
+      }));
+    });
+
+    expect((container.querySelector('.drag-handle') as HTMLDivElement | null)?.className).toContain('opacity-0');
+    expect(container.querySelector('[aria-label="复制内容"]')).toBeNull();
+
+    await act(async () => {
+      onStop?.(new MouseEvent('mouseup', {
+        bubbles: true,
+        clientX: 180,
+        clientY: 200,
+      }));
+    });
+
+    expect((container.querySelector('.drag-handle') as HTMLDivElement | null)?.className).toContain('opacity-100');
+    expect(container.querySelector('[aria-label="复制内容"]')).not.toBeNull();
+  });
+
+  it('拖拽在便签外停止时保持 chrome 隐藏', async () => {
+    await renderNoteCard();
+
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    expect(rootRegion).not.toBeNull();
+    vi.spyOn(rootRegion!, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 120, 260, 160));
+
+    await act(async () => {
+      rootRegion?.dispatchEvent(new MouseEvent('mouseover', {
+        bubbles: true,
+        clientX: 140,
+        clientY: 150,
+      }));
+    });
+
+    expect((container.querySelector('.drag-handle') as HTMLDivElement | null)?.className).toContain('opacity-100');
+    expect(container.querySelector('[aria-label="复制内容"]')).not.toBeNull();
+
+    const { onStart, onStop } = getLatestDraggableCoreProps();
+
+    await act(async () => {
+      onStart?.(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 140,
+        clientY: 150,
+      }));
+    });
+
+    expect((container.querySelector('.drag-handle') as HTMLDivElement | null)?.className).toContain('opacity-0');
+    expect(container.querySelector('[aria-label="复制内容"]')).toBeNull();
+
+    await act(async () => {
+      onStop?.(new MouseEvent('mouseup', {
+        bubbles: true,
+        clientX: 420,
+        clientY: 320,
+      }));
+    });
+
+    expect((container.querySelector('.drag-handle') as HTMLDivElement | null)?.className).toContain('opacity-0');
+    expect(container.querySelector('[aria-label="复制内容"]')).toBeNull();
+  });
+
   it('拖拽未选中的便签时在拖拽开始阶段收敛选中，清掉陈旧多选高亮', async () => {
     useStore.setState({
       ...normalizeNotes([

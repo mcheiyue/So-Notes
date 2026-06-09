@@ -45,6 +45,10 @@ const getClientPoint = (event: DraggableEvent): { x: number; y: number } | null 
   return touch ? { x: touch.clientX, y: touch.clientY } : null;
 };
 
+const isClientPointInsideRect = (point: { x: number; y: number }, rect: DOMRect | DOMRectReadOnly): boolean => {
+  return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+};
+
 export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = false, scale = 1 }) => {
   // Selectors
   const note = useDomainStore(state => state.notesById[id]);
@@ -114,6 +118,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const isDragging = useRef(false);
   const groupBoundsRef = useRef<{ minX: number, minY: number, width: number, height: number } | null>(null);
   const shouldFinalizeOnMouseUpRef = useRef(false);
+  const latestDragClientPointRef = useRef<{ x: number; y: number } | null>(null);
 
   // dragPos ref: tracks drag status without triggering React re-renders
   // react-draggable handles DOM transforms directly during drag
@@ -221,6 +226,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     if (!isDragging.current) return;
 
     const shouldUpdateLocalState = reason !== 'unmount';
+    const shouldRestoreHover = reason === 'stop'
+      && latestDragClientPointRef.current !== null
+      && nodeRef.current !== null
+      && isClientPointInsideRect(latestDragClientPointRef.current, nodeRef.current.getBoundingClientRect());
     const sessionIds = getEdgePushDragSessionNoteIds();
     const sessionPositions = Object.fromEntries(
       sessionIds.flatMap((sessionId) => {
@@ -250,9 +259,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     isDragging.current = false;
     dragPosRef.current = false;
     shouldFinalizeOnMouseUpRef.current = false;
+    latestDragClientPointRef.current = null;
     if (shouldUpdateLocalState) {
       setIsDragActive(false);
-      setIsHovered(false);
+      setIsHovered(shouldRestoreHover);
     }
     setIsDragging(false);
     document.body.classList.remove('is-dragging');
@@ -297,7 +307,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       setIsHovered(false);
       document.body.classList.add('is-dragging');
       shouldFinalizeOnMouseUpRef.current = false;
-      const clientPoint = getClientPoint(e) ?? { x: 0, y: 0 };
+      const clientPoint = getClientPoint(e);
+      if (clientPoint) {
+        latestDragClientPointRef.current = clientPoint;
+      }
       const state = useStore.getState();
       const isNoteSelected = state.selectedIds.includes(note.id);
       const dragIds = isNoteSelected ? state.selectedIds : [note.id];
@@ -322,7 +335,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       });
       useStore.getState().captureMoveSnapshot(moveSnapshotPositions);
 
-      beginEdgePushDragSession(note.id, dragIds, basePositions, clientPoint);
+      beginEdgePushDragSession(note.id, dragIds, basePositions, clientPoint ?? { x: 0, y: 0 });
       registerActiveNoteDragFinalizer(handleFinalizeDragSession);
 
       if (dragNotes.length > 1) {
@@ -363,6 +376,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
       const clientPoint = getClientPoint(e);
       if (clientPoint) {
+        latestDragClientPointRef.current = clientPoint;
         updateEdgePushPointerFromClient(clientPoint.x, clientPoint.y);
       }
       applyActiveDragSessionTransforms();
@@ -386,6 +400,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const handleStop = (e: DraggableEvent) => {
     const clientPoint = getClientPoint(e);
     if (clientPoint) {
+      latestDragClientPointRef.current = clientPoint;
       updateEdgePushPointerFromClient(clientPoint.x, clientPoint.y);
     }
     handleFinalizeDragSession('stop');
