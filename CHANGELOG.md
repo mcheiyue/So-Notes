@@ -2,6 +2,86 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.5.1] - 2026-06-10
+
+本版本在 v1.5.0 基础上集中修复备份恢复可靠性、WebDAV 安全边界、Undo/Redo 历史覆盖、图片缓存与撕下便签状态问题，让已有功能从"能用"推进到"可验证、可回滚、可防御"。
+
+### 🐛 问题修复 (Bug Fixes)
+
+* **修复 zip 恢复伪造大小绕过风险**
+  > zip 恢复现在按实际读取字节校验大小，不再信任 `entry.size()` 声明值。
+
+  - manifest.json、data.json 和附件条目都改用实际读取字节与声明大小双重校验。
+  - 附件总大小按实际读取字节累计，不再只看 header 元数据。
+
+* **修复恢复后图片显示不可用**
+  > 从备份恢复后，Image Note 的图片资源会在首次渲染前预热缓存。
+
+  - 恢复流程现在会先失效旧缓存，再异步预热所有 Image Note 的 asset URL。
+  - 不再需要重启程序才能看到恢复后的图片。
+
+* **修复 `restoreNote` 撤销看板归属错误**
+  > 废纸篓便签恢复到 fallback 看板后，撤销会正确回到原始看板。
+
+  - 撤销 patch 现在记录移动前的真实 `boardId`，而非 fallback 目标。
+  - 重做仍恢复到 fallback 看板并提升 z-order。
+
+* **修复 undo/redo 多次 `set()` 导致中间态渲染**
+  > `undoDomainChange` / `redoDomainChange` 合并为单次原子 store 更新。
+
+  - 领域 patch、历史栈、悬挂 UI 清理和导航/选区/viewport 都在一次 Zustand 更新中完成。
+  - 消除了 `selectedIds` 中间悬挂渲染窗口。
+
+* **修复撕下便签置顶状态读取旧 store 引用**
+  > `detachNote` 打开窗口前会重新读取最新置顶状态。
+
+  - 不再使用 `addDetachedNote` 之前的旧快照判断 `keepAlwaysOnTop`。
+
+* **修复 WebDAV 配置 `Debug` 泄漏密码**
+  > `WebDavConfig` 和 `WebDavConfigSaveRequest` 的 `Debug` 输出不再包含明文密码。
+
+* **修复普通交互污染撤销历史**
+  > 点击或拖拽便签时的 `bringToFront` 不再写入领域撤销栈。
+
+  - 只有右键菜单显式"置顶"才记录历史。
+  - 程序性定位（locate）也跳过历史记录。
+
+* **修复导入 `.bak` 与恢复 staging 临时资源残留**
+  > `atomic_import` 成功后会清理 `.bak` 文件，`restore_local_backup` 异常路径会清理 `.restore_staging_*` 目录。
+
+* **修复图片文件 hash 锁表只增不清理**
+  > 附件写入完成后，若无其他并发引用，会自动移除对应 hash 锁表条目。
+
+### 🔧 安全加固 (Security)
+
+* **拒绝指向内网地址的 HTTPS WebDAV URL**
+  > `https://` WebDAV 目标若指向本机、私网、链路本地或未指定地址，会被拒绝。
+
+  - HTTP 例外仅保留 `localhost`、`127.0.0.1`、`::1` 开发场景。
+  - DNS 解析失败按 fail-open 处理，避免离线域名回归。
+
+* **WebDAV redirect 防护**
+  > WebDAV 请求的 30x 重定向目标也会经过内网地址校验。
+
+  - redirect 不允许 HTTP 或内网目标。
+  - 最多跟随 10 次重定向。
+
+* **使用安全随机下载 token**
+  > WebDAV 下载 token 从时间戳改为 128-bit 密码学强随机 hex。
+
+* **原子化写入 WebDAV 配置**
+  > WebDAV 配置保存改为同目录临时文件 + `sync_all` + `rename`，失败路径自动清理。
+
+### 🔧 内部改进 (Internal)
+
+* **补齐批量操作领域撤销/重做历史**
+  > `duplicateNote`、`duplicateSelectedNotes`、`moveNoteToBoard`、`copyNoteToBoard`、`moveSelectedNotesToBoard`、`copySelectedNotesToBoard`、`batchToggleCollapse`、`bringToFront`、`batchBringToFront`、`batchSendToBack` 现在都支持撤销/重做。
+
+  - 每个用户意图生成一条历史条目。
+  - 复制/跨看板移动/批量折叠/置顶/置底均可用 Ctrl+Z 撤销。
+
+* **补充备份计划与撕下便签视觉原型文档**
+
 ## [v1.5.0] - 2026-06-09
 
 本版本正式接入 WebDAV 远端备份能力，在本地 zip 全量备份/恢复基础上增加远端创建、列出、恢复和删除备份入口；同时补齐旧数据兼容、图片文件清理、抓手模式交互和远端备份性能边界，让备份能力从“本地兜底”推进到“本地优先 + 用户自有远端仓库”的可靠闭环。
