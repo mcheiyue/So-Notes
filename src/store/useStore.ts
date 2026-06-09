@@ -136,7 +136,7 @@ interface State {
   arrangeNotes: (startX?: number, startY?: number, strategy?: ArrangeNotesStrategy, scope?: ArrangeNotesScope) => void;
   mergeSelectedNotes: () => string | null;
   splitNoteByParagraph: (noteId: string) => string[];
-  bringToFront: (id: string) => void;
+  bringToFront: (id: string, options?: { recordHistory?: boolean }) => void;
   deleteNote: (id: string) => void; // Soft delete
   restoreNote: (id: string) => void; // Restore from Trash
   deleteNotePermanently: (id: string) => void; // Hard delete
@@ -1572,12 +1572,24 @@ export const useStore = create<State>()(
         return createdIds;
     },
 
-    bringToFront: (id) => {
+    bringToFront: (id, options = {}) => {
       set((state) => {
         const note = getNoteById(state, id);
         if (note) {
+          const oldZ = note.z;
           state.config.maxZ += 1;
           note.z = state.config.maxZ;
+
+          if (options.recordHistory === false) return;
+
+          const entry: HistoryEntry<DomainPatch> = {
+            id: crypto.randomUUID(),
+            label: 'bring-to-front',
+            createdAt: Date.now(),
+            undo: { type: 'update-fields', noteId: id, fields: { z: oldZ } },
+            redo: { type: 'update-fields', noteId: id, fields: { z: note.z } },
+          };
+          state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         }
       });
     },
@@ -2157,17 +2169,27 @@ export const useStore = create<State>()(
         set((state) => {
             const note = getNoteById(state, id);
             if (note) {
+                const timestamp = Date.now();
                 const newNote: Note = {
                     ...note,
                     id: crypto.randomUUID(),
                     x: note.x + 20,
                     y: note.y + 20,
                     z: state.config.maxZ + 1,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
                 };
                 appendNoteToNormalizedState(state, newNote);
                 state.config.maxZ += 1;
+
+                const entry: HistoryEntry<DomainPatch> = {
+                    id: crypto.randomUUID(),
+                    label: 'duplicate-note',
+                    createdAt: Date.now(),
+                    undo: { type: 'remove-note', noteId: newNote.id },
+                    redo: { type: 'add-note', note: { ...newNote } },
+                };
+                state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
             }
         });
     },
@@ -2178,6 +2200,8 @@ export const useStore = create<State>()(
             if (selectedIds.length === 0) return;
             
             const newSelectedIds: string[] = [];
+            const createdNotes: Note[] = [];
+            const timestamp = Date.now();
 
             selectedIds.forEach(id => {
                 const note = getNoteById(state, id);
@@ -2188,17 +2212,33 @@ export const useStore = create<State>()(
                         x: note.x + 20,
                         y: note.y + 20,
                         z: state.config.maxZ + 1,
-                        createdAt: Date.now(),
-                        updatedAt: Date.now(),
+                        createdAt: timestamp,
+                        updatedAt: timestamp,
                     };
                     appendNoteToNormalizedState(state, newNote);
                     state.config.maxZ += 1;
                     newSelectedIds.push(newNote.id);
+                    createdNotes.push({ ...newNote });
                 }
             });
 
             if (newSelectedIds.length > 0) {
                 state.selectedIds = newSelectedIds;
+
+                const entry: HistoryEntry<DomainPatch> = {
+                    id: crypto.randomUUID(),
+                    label: 'duplicate-selected-notes',
+                    createdAt: Date.now(),
+                    undo: {
+                        type: 'compound-patch',
+                        patches: createdNotes.map((note) => ({ type: 'remove-note' as const, noteId: note.id })),
+                    },
+                    redo: {
+                        type: 'compound-patch',
+                        patches: createdNotes.map((note) => ({ type: 'add-note' as const, note })),
+                    },
+                };
+                state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
             }
         });
     },
@@ -2207,11 +2247,36 @@ export const useStore = create<State>()(
         set((state) => {
             const note = getNoteById(state, id);
             if (note) {
+                const oldBoardId = note.boardId;
+                const oldX = note.x;
+                const oldY = note.y;
+                const oldUpdatedAt = note.updatedAt;
                 moveNoteBetweenBoards(state, id, targetBoardId);
                 note.x += Math.floor(Math.random() * 20);
                 note.y += Math.floor(Math.random() * 20);
                 state.layoutNotesById[note.id] = extractLayoutNote(note);
                 state.selectedIds = state.selectedIds.filter(selId => selId !== id);
+
+                const entry: HistoryEntry<DomainPatch> = {
+                    id: crypto.randomUUID(),
+                    label: 'move-note-to-board',
+                    createdAt: Date.now(),
+                    undo: {
+                        type: 'compound-patch',
+                        patches: [
+                            { type: 'update-fields', noteId: id, fields: { boardId: oldBoardId } },
+                            { type: 'update-position', noteId: id, x: oldX, y: oldY, updatedAt: oldUpdatedAt },
+                        ],
+                    },
+                    redo: {
+                        type: 'compound-patch',
+                        patches: [
+                            { type: 'update-fields', noteId: id, fields: { boardId: note.boardId } },
+                            { type: 'update-position', noteId: id, x: note.x, y: note.y, updatedAt: note.updatedAt },
+                        ],
+                    },
+                };
+                state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
             }
         });
     },
@@ -2220,19 +2285,29 @@ export const useStore = create<State>()(
         set((state) => {
             const note = getNoteById(state, id);
             if (note) {
+                const timestamp = Date.now();
                 const newNote: Note = {
                     ...note,
                     id: crypto.randomUUID(),
                     boardId: targetBoardId,
                     z: state.config.maxZ + 1,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
                 };
                 newNote.x += Math.floor(Math.random() * 20);
                 newNote.y += Math.floor(Math.random() * 20);
                 appendNoteToNormalizedState(state, newNote);
                 state.layoutNotesById[newNote.id] = extractLayoutNote(newNote);
                 state.config.maxZ += 1;
+
+                const entry: HistoryEntry<DomainPatch> = {
+                    id: crypto.randomUUID(),
+                    label: 'copy-note-to-board',
+                    createdAt: Date.now(),
+                    undo: { type: 'remove-note', noteId: newNote.id },
+                    redo: { type: 'add-note', note: { ...newNote } },
+                };
+                state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
             }
         });
     },
@@ -2242,20 +2317,65 @@ export const useStore = create<State>()(
             const { selectedIds } = state;
             if (selectedIds.length === 0) return;
 
-            let movedCount = 0;
+            const changes: Array<{
+                id: string;
+                oldBoardId: string;
+                oldX: number;
+                oldY: number;
+                oldUpdatedAt: number;
+                newBoardId: string;
+                newX: number;
+                newY: number;
+                newUpdatedAt: number;
+            }> = [];
             selectedIds.forEach((id) => {
                 const note = state.notesById[id];
                 if (note) {
+                    const oldBoardId = note.boardId;
+                    const oldX = note.x;
+                    const oldY = note.y;
+                    const oldUpdatedAt = note.updatedAt;
                     moveNoteBetweenBoards(state, id, targetBoardId);
                     note.x += Math.floor(Math.random() * 30);
                     note.y += Math.floor(Math.random() * 30);
                     state.layoutNotesById[note.id] = extractLayoutNote(note);
-                    movedCount++;
+                    changes.push({
+                        id,
+                        oldBoardId,
+                        oldX,
+                        oldY,
+                        oldUpdatedAt,
+                        newBoardId: note.boardId,
+                        newX: note.x,
+                        newY: note.y,
+                        newUpdatedAt: note.updatedAt,
+                    });
                 }
             });
 
-            if (movedCount > 0) {
+            if (changes.length > 0) {
                 state.selectedIds = [];
+
+                const entry: HistoryEntry<DomainPatch> = {
+                    id: crypto.randomUUID(),
+                    label: 'move-selected-notes-to-board',
+                    createdAt: Date.now(),
+                    undo: {
+                        type: 'compound-patch',
+                        patches: changes.flatMap(({ id, oldBoardId, oldX, oldY, oldUpdatedAt }) => [
+                            { type: 'update-fields' as const, noteId: id, fields: { boardId: oldBoardId } },
+                            { type: 'update-position' as const, noteId: id, x: oldX, y: oldY, updatedAt: oldUpdatedAt },
+                        ]),
+                    },
+                    redo: {
+                        type: 'compound-patch',
+                        patches: changes.flatMap(({ id, newBoardId, newX, newY, newUpdatedAt }) => [
+                            { type: 'update-fields' as const, noteId: id, fields: { boardId: newBoardId } },
+                            { type: 'update-position' as const, noteId: id, x: newX, y: newY, updatedAt: newUpdatedAt },
+                        ]),
+                    },
+                };
+                state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
             }
         });
     },
@@ -2265,6 +2385,8 @@ export const useStore = create<State>()(
             const { selectedIds } = state;
             if (selectedIds.length === 0) return;
 
+            const createdNotes: Note[] = [];
+            const timestamp = Date.now();
             selectedIds.forEach(id => {
                 const note = getNoteById(state, id);
                 if (note) {
@@ -2273,16 +2395,34 @@ export const useStore = create<State>()(
                         id: crypto.randomUUID(),
                         boardId: targetBoardId,
                         z: state.config.maxZ + 1,
-                        createdAt: Date.now(),
-                        updatedAt: Date.now(),
+                        createdAt: timestamp,
+                        updatedAt: timestamp,
                     };
                     newNote.x += Math.floor(Math.random() * 30);
                     newNote.y += Math.floor(Math.random() * 30);
                     appendNoteToNormalizedState(state, newNote);
                     state.layoutNotesById[newNote.id] = extractLayoutNote(newNote);
                     state.config.maxZ += 1;
+                    createdNotes.push({ ...newNote });
                 }
             });
+
+            if (createdNotes.length === 0) return;
+
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'copy-selected-notes-to-board',
+                createdAt: Date.now(),
+                undo: {
+                    type: 'compound-patch',
+                    patches: createdNotes.map((note) => ({ type: 'remove-note' as const, noteId: note.id })),
+                },
+                redo: {
+                    type: 'compound-patch',
+                    patches: createdNotes.map((note) => ({ type: 'add-note' as const, note })),
+                },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
     },
 
@@ -2297,12 +2437,42 @@ export const useStore = create<State>()(
             
             const shouldExpand = collapsedCount >= ids.length / 2;
             
+            const changes: Array<{ noteId: string; oldCollapsed: boolean; newCollapsed: boolean }> = [];
             ids.forEach(id => {
                 const note = state.notesById[id];
                 if (note) {
-                    note.collapsed = shouldExpand ? false : true;
+                    const oldCollapsed = note.collapsed ?? false;
+                    const newCollapsed = shouldExpand ? false : true;
+                    if (oldCollapsed === newCollapsed) return;
+                    note.collapsed = newCollapsed;
+                    changes.push({ noteId: id, oldCollapsed, newCollapsed });
                 }
             });
+
+            if (changes.length === 0) return;
+
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'batch-toggle-collapse',
+                createdAt: Date.now(),
+                undo: {
+                    type: 'compound-patch',
+                    patches: changes.map(({ noteId, oldCollapsed }) => ({
+                        type: 'update-fields' as const,
+                        noteId,
+                        fields: { collapsed: oldCollapsed },
+                    })),
+                },
+                redo: {
+                    type: 'compound-patch',
+                    patches: changes.map(({ noteId, newCollapsed }) => ({
+                        type: 'update-fields' as const,
+                        noteId,
+                        fields: { collapsed: newCollapsed },
+                    })),
+                },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
     },
 
@@ -2315,16 +2485,36 @@ export const useStore = create<State>()(
                 .sort((a, b) => a.z - b.z);
             
             let currentMaxZ = state.config.maxZ;
-            
+            const changes: Array<{ noteId: string; oldZ: number; newZ: number }> = [];
+
             notesWithZ.forEach(({ id }) => {
                 const note = state.notesById[id];
                 if (note) {
+                    const oldZ = note.z;
                     currentMaxZ += 1;
                     note.z = currentMaxZ;
+                    changes.push({ noteId: id, oldZ, newZ: note.z });
                 }
             });
-            
+
             state.config.maxZ = currentMaxZ;
+
+            if (changes.length === 0) return;
+
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'batch-bring-to-front',
+                createdAt: Date.now(),
+                undo: {
+                    type: 'compound-patch',
+                    patches: changes.map(({ noteId, oldZ }) => ({ type: 'update-fields' as const, noteId, fields: { z: oldZ } })),
+                },
+                redo: {
+                    type: 'compound-patch',
+                    patches: changes.map(({ noteId, newZ }) => ({ type: 'update-fields' as const, noteId, fields: { z: newZ } })),
+                },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
     },
 
@@ -2342,14 +2532,34 @@ export const useStore = create<State>()(
                 .sort((a, b) => a.z - b.z);
             
             let currentMinZ = minZ - ids.length;
-            
+            const changes: Array<{ noteId: string; oldZ: number; newZ: number }> = [];
+
             notesWithZ.forEach(({ id }) => {
                 const note = state.notesById[id];
                 if (note) {
+                    const oldZ = note.z;
                     currentMinZ += 1;
                     note.z = currentMinZ;
+                    changes.push({ noteId: id, oldZ, newZ: note.z });
                 }
             });
+
+            if (changes.length === 0) return;
+
+            const entry: HistoryEntry<DomainPatch> = {
+                id: crypto.randomUUID(),
+                label: 'batch-send-to-back',
+                createdAt: Date.now(),
+                undo: {
+                    type: 'compound-patch',
+                    patches: changes.map(({ noteId, oldZ }) => ({ type: 'update-fields' as const, noteId, fields: { z: oldZ } })),
+                },
+                redo: {
+                    type: 'compound-patch',
+                    patches: changes.map(({ noteId, newZ }) => ({ type: 'update-fields' as const, noteId, fields: { z: newZ } })),
+                },
+            };
+            state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
         });
     },
 

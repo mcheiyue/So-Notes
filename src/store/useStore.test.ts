@@ -46,6 +46,20 @@ const flushMicrotasks = async () => {
 
 const getNote = (id: string) => useStore.getState().notesById[id];
 
+const makeTextNote = (overrides: Partial<Note> & Pick<Note, 'id'>): Note => ({
+  kind: 'text',
+  boardId: 'default',
+  x: 10,
+  y: 20,
+  title: overrides.id,
+  content: overrides.id,
+  color: '#FFFFFF',
+  z: 1,
+  createdAt: 100,
+  updatedAt: 100,
+  ...overrides,
+});
+
 describe('v1.4.0 StorageData 演进契约', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1978,6 +1992,315 @@ describe('v1.4.3 领域撤销/重做契约', () => {
 
     useStore.getState().redoDomainChange();
     expect(useStore.getState().notesById['collapse-note'].collapsed).toBe(true);
+  });
+
+  it('duplicateNote 创建单条历史并支持撤销/重做同一个复制便签', () => {
+    useStore.setState({
+      ...normalizeNotes([makeTextNote({ id: 'dup-source', x: 10, y: 20, z: 1 })]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    useStore.getState().duplicateNote('dup-source');
+
+    const duplicatedId = useStore.getState().allNoteIds.find((id) => id !== 'dup-source');
+    expect(duplicatedId).toBeDefined();
+    expect(useStore.getState().notesById[duplicatedId!]).toMatchObject({ x: 30, y: 40, z: 2 });
+    expect(useStore.getState().domainHistory.undoStack).toHaveLength(1);
+    expect(useStore.getState().domainHistory.undoStack[0]).toMatchObject({
+      label: 'duplicate-note',
+      undo: { type: 'remove-note', noteId: duplicatedId },
+      redo: { type: 'add-note' },
+    });
+
+    expect(useStore.getState().undoDomainChange()).toBe(true);
+    expect(useStore.getState().notesById[duplicatedId!]).toBeUndefined();
+
+    expect(useStore.getState().redoDomainChange()).toBe(true);
+    expect(useStore.getState().notesById[duplicatedId!]).toMatchObject({ id: duplicatedId, x: 30, y: 40 });
+  });
+
+  it('duplicateSelectedNotes 将批量复制合并为一条 compound 历史', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        makeTextNote({ id: 'dup-a', x: 10, y: 20, z: 1 }),
+        makeTextNote({ id: 'dup-b', x: 30, y: 40, z: 2 }),
+      ]),
+      selectedIds: ['dup-a', 'dup-b'],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().duplicateSelectedNotes();
+
+    const createdIds = useStore.getState().selectedIds;
+    expect(createdIds).toHaveLength(2);
+    expect(useStore.getState().domainHistory.undoStack).toHaveLength(1);
+    expect(useStore.getState().domainHistory.undoStack[0].label).toBe('duplicate-selected-notes');
+    expect(useStore.getState().domainHistory.undoStack[0].undo.type).toBe('compound-patch');
+
+    useStore.getState().undoDomainChange();
+    createdIds.forEach((id) => expect(useStore.getState().notesById[id]).toBeUndefined());
+
+    useStore.getState().redoDomainChange();
+    createdIds.forEach((id) => expect(useStore.getState().notesById[id]).toBeDefined());
+  });
+
+  it('moveNoteToBoard 记录原看板和位置并支持撤销/重做', () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      useStore.setState({
+        ...normalizeNotes([makeTextNote({ id: 'move-board-note', x: 10, y: 20, z: 1, updatedAt: 100 })]),
+        boards: [
+          { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+          { id: 'board-b', name: 'B板', icon: '📋', createdAt: 1 },
+        ],
+        currentBoardId: 'default',
+        selectedIds: ['move-board-note'],
+        config: { ...useStore.getState().config, maxZ: 1 },
+      });
+
+      useStore.getState().moveNoteToBoard('move-board-note', 'board-b');
+
+      expect(useStore.getState().notesById['move-board-note']).toMatchObject({ boardId: 'board-b', x: 20, y: 30 });
+      expect(useStore.getState().layoutNotesById['move-board-note']).toMatchObject({ boardId: 'board-b', x: 20, y: 30 });
+      expect(useStore.getState().boardNoteIds['default'] ?? []).not.toContain('move-board-note');
+      expect(useStore.getState().boardNoteIds['board-b']).toContain('move-board-note');
+      expect(useStore.getState().domainHistory.undoStack[0].label).toBe('move-note-to-board');
+      expect(useStore.getState().domainHistory.undoStack[0].undo.type).toBe('compound-patch');
+
+      useStore.getState().undoDomainChange();
+      expect(useStore.getState().notesById['move-board-note']).toMatchObject({ boardId: 'default', x: 10, y: 20 });
+      expect(useStore.getState().layoutNotesById['move-board-note']).toMatchObject({ boardId: 'default', x: 10, y: 20 });
+
+      useStore.getState().redoDomainChange();
+      expect(useStore.getState().notesById['move-board-note']).toMatchObject({ boardId: 'board-b', x: 20, y: 30 });
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it('copyNoteToBoard 创建可撤销的跨看板复制历史', () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      useStore.setState({
+        ...normalizeNotes([makeTextNote({ id: 'copy-board-source', x: 10, y: 20, z: 1 })]),
+        boards: [
+          { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+          { id: 'board-b', name: 'B板', icon: '📋', createdAt: 1 },
+        ],
+        currentBoardId: 'default',
+        config: { ...useStore.getState().config, maxZ: 1 },
+      });
+
+      useStore.getState().copyNoteToBoard('copy-board-source', 'board-b');
+
+      const copiedId = useStore.getState().allNoteIds.find((id) => id !== 'copy-board-source');
+      expect(copiedId).toBeDefined();
+      expect(useStore.getState().notesById[copiedId!]).toMatchObject({ boardId: 'board-b', x: 20, y: 30, z: 2 });
+      expect(useStore.getState().domainHistory.undoStack[0]).toMatchObject({
+        label: 'copy-note-to-board',
+        undo: { type: 'remove-note', noteId: copiedId },
+        redo: { type: 'add-note' },
+      });
+
+      useStore.getState().undoDomainChange();
+      expect(useStore.getState().notesById[copiedId!]).toBeUndefined();
+
+      useStore.getState().redoDomainChange();
+      expect(useStore.getState().notesById[copiedId!]).toMatchObject({ id: copiedId, boardId: 'board-b' });
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it('moveSelectedNotesToBoard 将批量跨看板移动合并为一条历史', () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      useStore.setState({
+        ...normalizeNotes([
+          makeTextNote({ id: 'move-sel-a', x: 10, y: 20, z: 1 }),
+          makeTextNote({ id: 'move-sel-b', x: 30, y: 40, z: 2 }),
+        ]),
+        boards: [
+          { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+          { id: 'board-b', name: 'B板', icon: '📋', createdAt: 1 },
+        ],
+        currentBoardId: 'default',
+        selectedIds: ['move-sel-a', 'move-sel-b'],
+        config: { ...useStore.getState().config, maxZ: 2 },
+      });
+
+      useStore.getState().moveSelectedNotesToBoard('board-b');
+
+      expect(useStore.getState().selectedIds).toEqual([]);
+      expect(useStore.getState().notesById['move-sel-a']).toMatchObject({ boardId: 'board-b', x: 25, y: 35 });
+      expect(useStore.getState().notesById['move-sel-b']).toMatchObject({ boardId: 'board-b', x: 45, y: 55 });
+      expect(useStore.getState().domainHistory.undoStack[0].label).toBe('move-selected-notes-to-board');
+      expect(useStore.getState().domainHistory.undoStack[0].undo.type).toBe('compound-patch');
+
+      useStore.getState().undoDomainChange();
+      expect(useStore.getState().notesById['move-sel-a']).toMatchObject({ boardId: 'default', x: 10, y: 20 });
+      expect(useStore.getState().notesById['move-sel-b']).toMatchObject({ boardId: 'default', x: 30, y: 40 });
+
+      useStore.getState().redoDomainChange();
+      expect(useStore.getState().notesById['move-sel-a']).toMatchObject({ boardId: 'board-b', x: 25, y: 35 });
+      expect(useStore.getState().notesById['move-sel-b']).toMatchObject({ boardId: 'board-b', x: 45, y: 55 });
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it('copySelectedNotesToBoard 将批量跨看板复制合并为一条历史', () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      useStore.setState({
+        ...normalizeNotes([
+          makeTextNote({ id: 'copy-sel-a', x: 10, y: 20, z: 1 }),
+          makeTextNote({ id: 'copy-sel-b', x: 30, y: 40, z: 2 }),
+        ]),
+        boards: [
+          { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+          { id: 'board-b', name: 'B板', icon: '📋', createdAt: 1 },
+        ],
+        currentBoardId: 'default',
+        selectedIds: ['copy-sel-a', 'copy-sel-b'],
+        config: { ...useStore.getState().config, maxZ: 2 },
+      });
+
+      useStore.getState().copySelectedNotesToBoard('board-b');
+
+      const copiedIds = useStore.getState().allNoteIds.filter((id) => !['copy-sel-a', 'copy-sel-b'].includes(id));
+      expect(copiedIds).toHaveLength(2);
+      expect(useStore.getState().domainHistory.undoStack[0].label).toBe('copy-selected-notes-to-board');
+      expect(useStore.getState().domainHistory.undoStack[0].undo.type).toBe('compound-patch');
+
+      useStore.getState().undoDomainChange();
+      copiedIds.forEach((id) => expect(useStore.getState().notesById[id]).toBeUndefined());
+
+      useStore.getState().redoDomainChange();
+      copiedIds.forEach((id) => expect(useStore.getState().notesById[id]).toMatchObject({ id, boardId: 'board-b' }));
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it('batchToggleCollapse 只记录实际变化的便签并支持撤销/重做', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        makeTextNote({ id: 'batch-collapse-a', collapsed: false, z: 1 }),
+        makeTextNote({ id: 'batch-collapse-b', collapsed: true, z: 2 }),
+      ]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().batchToggleCollapse(['batch-collapse-a', 'batch-collapse-b']);
+
+    expect(useStore.getState().notesById['batch-collapse-a'].collapsed).toBe(false);
+    expect(useStore.getState().notesById['batch-collapse-b'].collapsed).toBe(false);
+    const entry = useStore.getState().domainHistory.undoStack[0];
+    expect(entry.label).toBe('batch-toggle-collapse');
+    expect(entry.undo.type).toBe('compound-patch');
+    if (entry.undo.type === 'compound-patch') {
+      expect(entry.undo.patches).toHaveLength(1);
+      expect(entry.undo.patches[0]).toMatchObject({ type: 'update-fields', noteId: 'batch-collapse-b' });
+    }
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['batch-collapse-b'].collapsed).toBe(true);
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['batch-collapse-b'].collapsed).toBe(false);
+  });
+
+  it('bringToFront 创建 z 字段历史并支持撤销/重做', () => {
+    useStore.setState({
+      ...normalizeNotes([makeTextNote({ id: 'front-note', z: 1 })]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    useStore.getState().bringToFront('front-note');
+
+    expect(useStore.getState().notesById['front-note'].z).toBe(2);
+    expect(useStore.getState().domainHistory.undoStack[0]).toMatchObject({
+      label: 'bring-to-front',
+      undo: { type: 'update-fields', noteId: 'front-note', fields: { z: 1 } },
+      redo: { type: 'update-fields', noteId: 'front-note', fields: { z: 2 } },
+    });
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['front-note'].z).toBe(1);
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['front-note'].z).toBe(2);
+  });
+
+  it('bringToFront 可跳过程序性定位历史记录', () => {
+    useStore.setState({
+      ...normalizeNotes([makeTextNote({ id: 'locate-front-note', z: 1 })]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    useStore.getState().bringToFront('locate-front-note', { recordHistory: false });
+
+    expect(useStore.getState().notesById['locate-front-note'].z).toBe(2);
+    expect(useStore.getState().domainHistory.undoStack).toHaveLength(0);
+  });
+
+  it('batchBringToFront 创建一条 z-order compound 历史', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        makeTextNote({ id: 'front-a', z: 1 }),
+        makeTextNote({ id: 'front-b', z: 2 }),
+      ]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 2 },
+    });
+
+    useStore.getState().batchBringToFront(['front-a', 'front-b']);
+
+    expect(useStore.getState().notesById['front-a'].z).toBe(3);
+    expect(useStore.getState().notesById['front-b'].z).toBe(4);
+    expect(useStore.getState().domainHistory.undoStack[0].label).toBe('batch-bring-to-front');
+    expect(useStore.getState().domainHistory.undoStack[0].undo.type).toBe('compound-patch');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['front-a'].z).toBe(1);
+    expect(useStore.getState().notesById['front-b'].z).toBe(2);
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['front-a'].z).toBe(3);
+    expect(useStore.getState().notesById['front-b'].z).toBe(4);
+  });
+
+  it('batchSendToBack 创建一条 z-order compound 历史', () => {
+    useStore.setState({
+      ...normalizeNotes([
+        makeTextNote({ id: 'back-a', z: 3 }),
+        makeTextNote({ id: 'back-b', z: 4 }),
+        makeTextNote({ id: 'back-c', z: 5 }),
+      ]),
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config, maxZ: 5 },
+    });
+
+    useStore.getState().batchSendToBack(['back-b', 'back-c']);
+
+    expect(useStore.getState().notesById['back-b'].z).toBe(-1);
+    expect(useStore.getState().notesById['back-c'].z).toBe(0);
+    expect(useStore.getState().domainHistory.undoStack[0].label).toBe('batch-send-to-back');
+    expect(useStore.getState().domainHistory.undoStack[0].undo.type).toBe('compound-patch');
+
+    useStore.getState().undoDomainChange();
+    expect(useStore.getState().notesById['back-b'].z).toBe(4);
+    expect(useStore.getState().notesById['back-c'].z).toBe(5);
+
+    useStore.getState().redoDomainChange();
+    expect(useStore.getState().notesById['back-b'].z).toBe(-1);
+    expect(useStore.getState().notesById['back-c'].z).toBe(0);
   });
 
   it('撤销后执行新操作会清空 redo 栈', () => {

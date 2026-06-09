@@ -247,7 +247,7 @@ export const appController = {
       current.clearSelection();
       current.setViewportPosition(targetX, targetY);
       current.setSelectedIds([target.id]);
-      current.bringToFront(target.id);
+      current.bringToFront(target.id, { recordHistory: false });
       current.markNoteHighlights([target.id], 'located');
     });
   },
@@ -367,7 +367,7 @@ export const appController = {
       current.clearSelection();
       current.setViewportPosition(targetX, targetY);
       current.setSelectedIds([noteId]);
-      current.bringToFront(noteId);
+      current.bringToFront(noteId, { recordHistory: false });
       current.markNoteHighlights([noteId], 'located');
     };
 
