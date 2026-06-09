@@ -393,7 +393,10 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
 
   const handleMouseDown = (e: DraggableEvent) => {
     const mouseEvent = e as unknown as React.MouseEvent;
-    if (isPanMode) return;
+    if (isPanMode) {
+      setIsHovered(true);
+      return;
+    }
     if (useStore.getState().stickyDrag.id) return;
 
     const targetElement = mouseEvent.target instanceof Element ? mouseEvent.target : null;

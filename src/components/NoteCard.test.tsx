@@ -711,6 +711,45 @@ describe('NoteCard 头部交互边界', () => {
     expect((container.querySelector('.drag-handle') as HTMLDivElement | null)?.className).toContain('opacity-100');
   });
 
+  it('平移模式在指针已位于卡片内且未重新 mouseover 时，mousedown 也会恢复 chrome 且不改选中态', async () => {
+    useStore.setState({
+      ...normalizeNotes([
+        createNote({ title: '' }),
+        createNote({ id: 'note-2', x: 420, y: 160 }),
+      ]),
+      selectedIds: ['note-2'],
+      interaction: {
+        ...useStore.getState().interaction,
+        isPanMode: true,
+      },
+    });
+
+    await renderNoteCard();
+
+    const header = container.querySelector('.drag-handle') as HTMLDivElement | null;
+    const titleInput = container.querySelector('input[placeholder="标题"]') as HTMLInputElement | null;
+    const panGuard = container.querySelector('[data-note-pan-guard="true"]') as HTMLDivElement | null;
+
+    expect(header?.className).toContain('opacity-0');
+    expect(titleInput?.className).toContain('hidden');
+    expect(container.querySelector('[aria-label="复制内容"]')).toBeNull();
+    expect(panGuard).not.toBeNull();
+
+    await act(async () => {
+      panGuard?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 220,
+        clientY: 180,
+      }));
+    });
+
+    expect((container.querySelector('.drag-handle') as HTMLDivElement | null)?.className).toContain('opacity-100');
+    expect((container.querySelector('input[placeholder="标题"]') as HTMLInputElement | null)?.className).toContain('block');
+    expect(container.querySelector('[aria-label="复制内容"]')).not.toBeNull();
+    expect(useStore.getState().selectedIds).toEqual(['note-2']);
+  });
+
   it('编辑正文后在失焦时触发临时编辑高亮', async () => {
     const markNoteHighlights = vi.fn();
     useUIStore.setState({ markNoteHighlights });
