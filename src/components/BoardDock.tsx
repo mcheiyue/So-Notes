@@ -60,6 +60,14 @@ const formatUnknownError = (err: unknown): string => {
   return '未知错误';
 };
 
+const formatWebDavLastModified = (value?: string | null): string => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (part: number) => part.toString().padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+};
+
 export const BoardDock = () => {
   const store = useStore();
   const { 
@@ -1203,7 +1211,7 @@ export const BoardDock = () => {
                                             <p className="text-text-tertiary">
                                                 {backup.size != null ? `${(backup.size / 1024).toFixed(1)} KB` : ''}
                                                 {backup.size != null && backup.lastModified ? ' · ' : ''}
-                                                {backup.lastModified ?? ''}
+                                                {formatWebDavLastModified(backup.lastModified)}
                                                 {backup.readable ? '' : ' · 不可读'}
                                             </p>
                                         </div>

@@ -1247,7 +1247,9 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(list).not.toBeNull();
     expect(list?.textContent).toContain('backup-2026.zip');
     expect(list?.textContent).toContain('100.0 KB');
-    expect(list?.textContent).toContain('2026-06-08T10:00:00Z');
+    expect(list?.textContent).toContain('2026-06-08');
+    expect(list?.textContent).not.toContain('GMT');
+    expect(list?.textContent).not.toContain('2026-06-08T10:00:00Z');
   });
 
   it('远端恢复取消确认时不调用任何服务', async () => {
