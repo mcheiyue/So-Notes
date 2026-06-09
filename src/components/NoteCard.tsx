@@ -425,7 +425,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     }
 
     if (clickedHeaderAction || clickedDragSurface) {
-        bringToFront(note.id);
+        bringToFront(note.id, { recordHistory: false });
         shouldFinalizeOnMouseUpRef.current = false;
         return;
     }
@@ -434,7 +434,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
         setSelectedIds([note.id]);
     }
     
-    bringToFront(note.id);
+    bringToFront(note.id, { recordHistory: false });
     shouldFinalizeOnMouseUpRef.current = true;
   };
 

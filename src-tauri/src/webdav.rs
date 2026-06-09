@@ -51,6 +51,8 @@ const WEBDAV_DOWNLOADS_DIR_NAME: &str = "downloads";
 /// 上传同名冲突重试次数上限。
 const UPLOAD_RETRY_LIMIT: u32 = 3;
 
+const MAX_WEBDAV_REDIRECTS: usize = 10;
+
 /// 下载 token 有效期。过期 token 不再允许解析为本地恢复路径。
 const DOWNLOAD_TOKEN_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -356,6 +358,37 @@ fn is_disallowed_webdav_ip(ip: IpAddr) -> bool {
                 || ip.is_unspecified()
         }
     }
+}
+
+fn validate_webdav_redirect_url(url: &Url) -> Result<(), String> {
+    if url.scheme() != "https" {
+        return Err("WebDAV 重定向目标必须使用 HTTPS".to_string());
+    }
+
+    let host = url
+        .host()
+        .ok_or_else(|| "WebDAV 重定向目标缺少主机名".to_string())?;
+    reject_internal_https_host(url, &host)
+}
+
+fn webdav_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= MAX_WEBDAV_REDIRECTS {
+            attempt.error("WebDAV redirect limit exceeded")
+        } else if validate_webdav_redirect_url(attempt.url()).is_err() {
+            attempt.error("WebDAV redirect target rejected")
+        } else {
+            attempt.follow()
+        }
+    })
+}
+
+fn build_webdav_http_client(timeout: Duration) -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .user_agent("SoNotes/1.5")
+        .timeout(timeout)
+        .redirect(webdav_redirect_policy())
+        .build()
 }
 
 // ---------------------------------------------------------------------------
@@ -745,11 +778,7 @@ fn propfind_request(
     username: &str,
     password: Option<&str>,
 ) -> reqwest::RequestBuilder {
-    let client = reqwest::Client::builder()
-        .user_agent("SoNotes/1.5")
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .expect("reqwest client build");
+    let client = build_webdav_http_client(Duration::from_secs(15)).expect("reqwest client build");
 
     let body = r#"<?xml version="1.0" encoding="utf-8"?>
 <D:propfind xmlns:D="DAV:">
@@ -1002,10 +1031,7 @@ pub async fn webdav_test_connection(config: WebDavConfig) -> Result<WebDavConnec
     let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
     let dir_url = build_remote_dir_url(&base_url, &remote_dir);
 
-    let client = reqwest::Client::builder()
-        .user_agent("SoNotes/1.5")
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
+    let client = build_webdav_http_client(Duration::from_secs(15))
         .map_err(|_| "WebDAV 地址不可访问".to_string())?;
 
     let resp = propfind_request(
@@ -1103,10 +1129,7 @@ pub async fn webdav_delete_backup(
     let dir_url = build_remote_dir_url(&base_url, &remote_dir);
     let file_url = format!("{}{}", dir_url, remote_file_name);
 
-    let client = reqwest::Client::builder()
-        .user_agent("SoNotes/1.5")
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
+    let client = build_webdav_http_client(Duration::from_secs(30))
         .map_err(|_| "远端备份删除失败".to_string())?;
 
     let resp = webdav_request_with_auth(
@@ -1392,10 +1415,7 @@ pub async fn webdav_create_remote_backup(
         return Err("远端备份上传失败，本地数据未受影响".to_string());
     }
 
-    let client = reqwest::Client::builder()
-        .user_agent("SoNotes/1.5")
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
+    let client = build_webdav_http_client(Duration::from_secs(60))
         .map_err(|_| "远端备份上传失败，本地数据未受影响".to_string())?;
 
     let dir_url = build_remote_dir_url(&base_url, &remote_dir);
@@ -1524,10 +1544,7 @@ pub async fn webdav_download_backup(
     let dir_url = build_remote_dir_url(&base_url, &remote_dir);
     let download_url = format!("{}{}", dir_url, remote_file_name);
 
-    let client = reqwest::Client::builder()
-        .user_agent("SoNotes/1.5")
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
+    let client = build_webdav_http_client(Duration::from_secs(120))
         .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
 
     let mut req = client.get(&download_url);
@@ -1798,6 +1815,33 @@ mod tests {
     fn disallowed_ip_check_accepts_public_addresses() {
         assert!(!is_disallowed_webdav_ip("1.1.1.1".parse().unwrap()));
         assert!(!is_disallowed_webdav_ip("2001:4860:4860::8888".parse().unwrap()));
+    }
+
+    #[test]
+    fn redirect_guard_accepts_public_https_target() {
+        let url = Url::parse("https://1.1.1.1/dav/file.zip?token=abc").unwrap();
+        validate_webdav_redirect_url(&url).unwrap();
+    }
+
+    #[test]
+    fn redirect_guard_rejects_http_target() {
+        let url = Url::parse("http://example.com/dav/file.zip").unwrap();
+        let err = validate_webdav_redirect_url(&url).unwrap_err();
+        assert!(err.contains("HTTPS"));
+    }
+
+    #[test]
+    fn redirect_guard_rejects_https_private_target() {
+        let url = Url::parse("https://192.168.1.10/dav/file.zip").unwrap();
+        let err = validate_webdav_redirect_url(&url).unwrap_err();
+        assert!(err.contains("本机") || err.contains("内网"));
+    }
+
+    #[test]
+    fn redirect_guard_rejects_https_localhost_target() {
+        let url = Url::parse("https://localhost/dav/file.zip").unwrap();
+        let err = validate_webdav_redirect_url(&url).unwrap_err();
+        assert!(err.contains("本机") || err.contains("内网"));
     }
 
     #[test]

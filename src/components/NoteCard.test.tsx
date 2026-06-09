@@ -714,6 +714,71 @@ describe('NoteCard 头部交互边界', () => {
     });
   });
 
+  it('点击拖拽表面置顶不写入领域撤销历史', async () => {
+    useStore.setState({
+      ...normalizeNotes([
+        createNote({ z: 1 }),
+        createNote({ id: 'note-2', x: 420, y: 160, z: 2 }),
+      ]),
+      config: {
+        ...useStore.getState().config,
+        maxZ: 2,
+      },
+    });
+
+    await renderNoteCard();
+
+    const header = container.querySelector('.drag-handle') as HTMLDivElement | null;
+    expect(header).not.toBeNull();
+
+    const beforeUndoLength = useStore.getState().domainHistory.undoStack.length;
+
+    await act(async () => {
+      header?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 220,
+        clientY: 180,
+      }));
+    });
+
+    const state = useStore.getState();
+    expect(state.notesById['note-1']?.z).toBe(3);
+    expect(state.domainHistory.undoStack).toHaveLength(beforeUndoLength);
+  });
+
+  it('普通点击便签主体置顶不写入领域撤销历史', async () => {
+    useStore.setState({
+      ...normalizeNotes([
+        createNote({ z: 1 }),
+        createNote({ id: 'note-2', x: 420, y: 160, z: 2 }),
+      ]),
+      config: {
+        ...useStore.getState().config,
+        maxZ: 2,
+      },
+    });
+
+    await renderNoteCard();
+
+    const rootRegion = container.querySelector('.note-card') as HTMLDivElement | null;
+    expect(rootRegion).not.toBeNull();
+
+    const beforeUndoLength = useStore.getState().domainHistory.undoStack.length;
+
+    await act(async () => {
+      rootRegion?.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        clientX: 220,
+        clientY: 180,
+      }));
+    });
+
+    const state = useStore.getState();
+    expect(state.notesById['note-1']?.z).toBe(3);
+    expect(state.selectedIds).toEqual(['note-1']);
+    expect(state.domainHistory.undoStack).toHaveLength(beforeUndoLength);
+  });
+
   it('拖拽已在多选里的便签时保留当前多选，继续按组选中拖拽', async () => {
     useStore.setState({
       ...normalizeNotes([
