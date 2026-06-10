@@ -110,6 +110,131 @@ pub struct RestoreResult {
 }
 
 // ---------------------------------------------------------------------------
+// 备份验证结果类型
+// ---------------------------------------------------------------------------
+
+/// 备份验证结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupValidationResult {
+    /// 验证是否通过（`errors` 为空时为 `true`）。
+    pub ok: bool,
+    /// 备份摘要（验证通过时存在）。
+    pub summary: Option<BackupSummary>,
+    /// 验证错误列表。
+    pub errors: Vec<BackupValidationIssue>,
+    /// 验证警告列表。
+    pub warnings: Vec<BackupValidationIssue>,
+}
+
+/// 备份摘要。
+///
+/// 描述备份包中的看板、便签和图片文件统计信息。
+/// 不包含便签正文内容。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupSummary {
+    /// 应用标识。
+    pub app: String,
+    /// 备份格式版本号。
+    pub format_version: u32,
+    /// 创建备份时的应用版本。
+    pub app_version: String,
+    /// 备份创建时间（毫秒级 Unix 时间戳）。
+    pub created_at: u64,
+    /// 便签总数。
+    pub note_count: u32,
+    /// 看板总数。
+    pub board_count: u32,
+    /// 文本便签数量。
+    pub text_note_count: u32,
+    /// 图片便签数量。
+    pub image_note_count: u32,
+    /// 废纸篓中的便签数量。
+    pub trash_note_count: u32,
+    /// 图片文件数量。
+    pub image_file_count: u32,
+    /// 图片文件总字节数。
+    pub image_file_total_bytes: u64,
+}
+
+/// 备份验证问题。
+///
+/// 描述验证过程中发现的单个错误或警告。
+/// `code` 为稳定的错误码，`severity` 为 `"error"` 或 `"warning"`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupValidationIssue {
+    /// 稳定错误码，如 `missing_manifest`、`invalid_zip`。
+    pub code: String,
+    /// 严重程度：`"error"` 或 `"warning"`。
+    pub severity: String,
+    /// 人类可读的描述信息。
+    pub message: String,
+    /// 问题所在的验证目标，如 `backup_file`、`zip`、`manifest`、`data`、`image_file`、`zip_entry`。
+    pub target: Option<String>,
+    /// 问题相关的文件路径（如 zip 内条目路径）。
+    pub path: Option<String>,
+    /// 问题相关的便签 ID。
+    pub note_id: Option<String>,
+    /// 问题相关的图片文件 ID。
+    pub image_file_id: Option<String>,
+}
+
+impl BackupValidationIssue {
+    /// 创建新的验证问题。
+    pub fn new(
+        code: impl Into<String>,
+        severity: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            severity: severity.into(),
+            message: message.into(),
+            target: None,
+            path: None,
+            note_id: None,
+            image_file_id: None,
+        }
+    }
+
+    /// 创建 `severity` 为 `"error"` 的验证问题。
+    pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::new(code, "error", message)
+    }
+
+    /// 创建 `severity` 为 `"warning"` 的验证问题。
+    pub fn warning(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::new(code, "warning", message)
+    }
+
+    /// 设置 `target` 字段。
+    pub fn with_target(mut self, target: impl Into<String>) -> Self {
+        self.target = Some(target.into());
+        self
+    }
+
+    /// 设置 `path` 字段。
+    pub fn with_path(mut self, path: impl Into<String>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    /// 设置 `note_id` 字段。
+    pub fn with_note_id(mut self, note_id: impl Into<String>) -> Self {
+        self.note_id = Some(note_id.into());
+        self
+    }
+
+    /// 设置 `image_file_id` 字段。
+    pub fn with_image_file_id(mut self, image_file_id: impl Into<String>) -> Self {
+        self.image_file_id = Some(image_file_id.into());
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 恢复专用解析类型
 // ---------------------------------------------------------------------------
 
@@ -3906,5 +4031,294 @@ mod tests {
         assert_eq!(leftovers, 0, "成功后不应留下随机临时 zip");
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    // =======================================================================
+    // BackupValidationIssue 构造 helper
+    // =======================================================================
+
+    #[test]
+    fn issue_new_sets_code_severity_message() {
+        let issue = BackupValidationIssue::new("missing_manifest", "error", "缺少清单");
+        assert_eq!(issue.code, "missing_manifest");
+        assert_eq!(issue.severity, "error");
+        assert_eq!(issue.message, "缺少清单");
+        assert!(issue.target.is_none());
+        assert!(issue.path.is_none());
+        assert!(issue.note_id.is_none());
+        assert!(issue.image_file_id.is_none());
+    }
+
+    #[test]
+    fn issue_error_convenience_sets_severity_error() {
+        let issue = BackupValidationIssue::error("invalid_zip", "zip 损坏");
+        assert_eq!(issue.severity, "error");
+        assert_eq!(issue.code, "invalid_zip");
+    }
+
+    #[test]
+    fn issue_warning_convenience_sets_severity_warning() {
+        let issue = BackupValidationIssue::warning("unsupported_format_version", "旧版本");
+        assert_eq!(issue.severity, "warning");
+        assert_eq!(issue.code, "unsupported_format_version");
+    }
+
+    #[test]
+    fn issue_builder_chains_all_metadata_fields() {
+        let issue = BackupValidationIssue::error("image_file_hash_mismatch", "哈希不匹配")
+            .with_target("image_file")
+            .with_path("attachments/abc123.png")
+            .with_note_id("n1")
+            .with_image_file_id("img-1");
+
+        assert_eq!(issue.target.as_deref(), Some("image_file"));
+        assert_eq!(issue.path.as_deref(), Some("attachments/abc123.png"));
+        assert_eq!(issue.note_id.as_deref(), Some("n1"));
+        assert_eq!(issue.image_file_id.as_deref(), Some("img-1"));
+    }
+
+    // =======================================================================
+    // BackupValidationIssue 序列化 roundtrip 与 camelCase
+    // =======================================================================
+
+    #[test]
+    fn validation_issue_roundtrip() {
+        let issue = BackupValidationIssue::error("missing_image_file", "图片文件缺失")
+            .with_target("image_file")
+            .with_path("attachments/deadbeef.png")
+            .with_note_id("n42")
+            .with_image_file_id("att-42");
+
+        let json = serde_json::to_string(&issue).expect("序列化失败");
+        let deserialized: BackupValidationIssue = serde_json::from_str(&json).expect("反序列化失败");
+
+        assert_eq!(deserialized.code, "missing_image_file");
+        assert_eq!(deserialized.severity, "error");
+        assert_eq!(deserialized.message, "图片文件缺失");
+        assert_eq!(deserialized.target.as_deref(), Some("image_file"));
+        assert_eq!(deserialized.path.as_deref(), Some("attachments/deadbeef.png"));
+        assert_eq!(deserialized.note_id.as_deref(), Some("n42"));
+        assert_eq!(deserialized.image_file_id.as_deref(), Some("att-42"));
+    }
+
+    #[test]
+    fn validation_issue_json_keys_are_camel_case() {
+        let issue = BackupValidationIssue {
+            code: "test".to_string(),
+            severity: "error".to_string(),
+            message: "msg".to_string(),
+            target: Some("zip".to_string()),
+            path: Some("a/b".to_string()),
+            note_id: Some("n1".to_string()),
+            image_file_id: Some("img1".to_string()),
+        };
+
+        let json = serde_json::to_string(&issue).expect("序列化失败");
+        assert!(json.contains("\"noteId\""), "应使用 camelCase noteId: {json}");
+        assert!(
+            json.contains("\"imageFileId\""),
+            "应使用 camelCase imageFileId: {json}"
+        );
+        assert!(!json.contains("\"note_id\""), "不应包含 snake_case: {json}");
+        assert!(
+            !json.contains("\"image_file_id\""),
+            "不应包含 snake_case: {json}"
+        );
+    }
+
+    #[test]
+    fn validation_issue_none_fields_omitted_or_null() {
+        let issue = BackupValidationIssue::error("invalid_zip", "不是合法 zip");
+
+        let json = serde_json::to_string(&issue).expect("序列化失败");
+        let deserialized: BackupValidationIssue = serde_json::from_str(&json).expect("反序列化失败");
+
+        assert!(deserialized.target.is_none());
+        assert!(deserialized.path.is_none());
+        assert!(deserialized.note_id.is_none());
+        assert!(deserialized.image_file_id.is_none());
+    }
+
+    // =======================================================================
+    // BackupValidationResult 序列化 roundtrip 与 camelCase
+    // =======================================================================
+
+    #[test]
+    fn validation_result_ok_roundtrip() {
+        let result = BackupValidationResult {
+            ok: true,
+            summary: Some(BackupSummary {
+                app: "SoNotes".to_string(),
+                format_version: 1,
+                app_version: "1.5.2".to_string(),
+                created_at: 1700000000000,
+                note_count: 10,
+                board_count: 2,
+                text_note_count: 8,
+                image_note_count: 2,
+                trash_note_count: 1,
+                image_file_count: 3,
+                image_file_total_bytes: 4096,
+            }),
+            errors: vec![],
+            warnings: vec![],
+        };
+
+        let json = serde_json::to_string(&result).expect("序列化失败");
+        let deserialized: BackupValidationResult =
+            serde_json::from_str(&json).expect("反序列化失败");
+
+        assert!(deserialized.ok);
+        assert!(deserialized.summary.is_some());
+        assert!(deserialized.errors.is_empty());
+        assert!(deserialized.warnings.is_empty());
+        let summary = deserialized.summary.unwrap();
+        assert_eq!(summary.app, "SoNotes");
+        assert_eq!(summary.text_note_count, 8);
+        assert_eq!(summary.image_note_count, 2);
+        assert_eq!(summary.trash_note_count, 1);
+        assert_eq!(summary.image_file_count, 3);
+        assert_eq!(summary.image_file_total_bytes, 4096);
+    }
+
+    #[test]
+    fn validation_result_error_roundtrip() {
+        let result = BackupValidationResult {
+            ok: false,
+            summary: None,
+            errors: vec![
+                BackupValidationIssue::error("missing_manifest", "缺少 manifest.json")
+                    .with_target("zip"),
+            ],
+            warnings: vec![],
+        };
+
+        let json = serde_json::to_string(&result).expect("序列化失败");
+        let deserialized: BackupValidationResult =
+            serde_json::from_str(&json).expect("反序列化失败");
+
+        assert!(!deserialized.ok);
+        assert!(deserialized.summary.is_none());
+        assert_eq!(deserialized.errors.len(), 1);
+        assert_eq!(deserialized.errors[0].code, "missing_manifest");
+        assert_eq!(deserialized.errors[0].target.as_deref(), Some("zip"));
+    }
+
+    #[test]
+    fn validation_result_json_keys_are_camel_case() {
+        let result = BackupValidationResult {
+            ok: true,
+            summary: Some(BackupSummary {
+                app: "SoNotes".to_string(),
+                format_version: 1,
+                app_version: "1.5.2".to_string(),
+                created_at: 0,
+                note_count: 0,
+                board_count: 0,
+                text_note_count: 0,
+                image_note_count: 0,
+                trash_note_count: 0,
+                image_file_count: 0,
+                image_file_total_bytes: 0,
+            }),
+            errors: vec![],
+            warnings: vec![],
+        };
+
+        let json = serde_json::to_string(&result).expect("序列化失败");
+        assert!(json.contains("\"summary\""), "应包含 summary: {json}");
+        assert!(json.contains("\"errors\""), "应包含 errors: {json}");
+        assert!(json.contains("\"warnings\""), "应包含 warnings: {json}");
+        assert!(
+            !json.contains("\"image_file_count\""),
+            "不应包含 snake_case: {json}"
+        );
+    }
+
+    // =======================================================================
+    // BackupSummary 序列化 roundtrip 与 camelCase
+    // =======================================================================
+
+    #[test]
+    fn summary_roundtrip() {
+        let summary = BackupSummary {
+            app: "SoNotes".to_string(),
+            format_version: 1,
+            app_version: "1.5.2".to_string(),
+            created_at: 1700000000000,
+            note_count: 42,
+            board_count: 3,
+            text_note_count: 30,
+            image_note_count: 10,
+            trash_note_count: 2,
+            image_file_count: 8,
+            image_file_total_bytes: 102400,
+        };
+
+        let json = serde_json::to_string(&summary).expect("序列化失败");
+        let deserialized: BackupSummary = serde_json::from_str(&json).expect("反序列化失败");
+
+        assert_eq!(deserialized.app, "SoNotes");
+        assert_eq!(deserialized.format_version, 1);
+        assert_eq!(deserialized.app_version, "1.5.2");
+        assert_eq!(deserialized.created_at, 1700000000000);
+        assert_eq!(deserialized.note_count, 42);
+        assert_eq!(deserialized.board_count, 3);
+        assert_eq!(deserialized.text_note_count, 30);
+        assert_eq!(deserialized.image_note_count, 10);
+        assert_eq!(deserialized.trash_note_count, 2);
+        assert_eq!(deserialized.image_file_count, 8);
+        assert_eq!(deserialized.image_file_total_bytes, 102400);
+    }
+
+    #[test]
+    fn summary_json_keys_are_camel_case() {
+        let summary = BackupSummary {
+            app: "SoNotes".to_string(),
+            format_version: 1,
+            app_version: "1.0.0".to_string(),
+            created_at: 0,
+            note_count: 0,
+            board_count: 0,
+            text_note_count: 0,
+            image_note_count: 0,
+            trash_note_count: 0,
+            image_file_count: 0,
+            image_file_total_bytes: 0,
+        };
+
+        let json = serde_json::to_string(&summary).expect("序列化失败");
+        assert!(
+            json.contains("\"formatVersion\""),
+            "应使用 camelCase: {json}"
+        );
+        assert!(json.contains("\"appVersion\""), "应使用 camelCase: {json}");
+        assert!(json.contains("\"createdAt\""), "应使用 camelCase: {json}");
+        assert!(json.contains("\"noteCount\""), "应使用 camelCase: {json}");
+        assert!(json.contains("\"boardCount\""), "应使用 camelCase: {json}");
+        assert!(
+            json.contains("\"textNoteCount\""),
+            "应使用 camelCase: {json}"
+        );
+        assert!(
+            json.contains("\"imageNoteCount\""),
+            "应使用 camelCase: {json}"
+        );
+        assert!(
+            json.contains("\"trashNoteCount\""),
+            "应使用 camelCase: {json}"
+        );
+        assert!(
+            json.contains("\"imageFileCount\""),
+            "应使用 camelCase: {json}"
+        );
+        assert!(
+            json.contains("\"imageFileTotalBytes\""),
+            "应使用 camelCase: {json}"
+        );
+        assert!(
+            !json.contains("\"text_note_count\""),
+            "不应包含 snake_case: {json}"
+        );
     }
 }
