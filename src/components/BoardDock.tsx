@@ -8,7 +8,7 @@ import { appController } from "../controllers/appController";
 import { listAttachmentFiles, deleteAttachmentFile, attachmentExists, invalidateAttachmentPathCache, resolveAttachmentAssetUrlCached } from "../services/storage/attachmentPersistence";
 import { detectMissingReferences, detectOrphanAttachments } from "../services/storage/attachmentConsistency";
 import { saveZipDialog, openZipDialog } from "../utils/fileSystem";
-import { createLocalBackup, restoreLocalBackup } from "../services/backup/BackupService";
+import { createLocalBackup, restoreLocalBackup, validateLocalBackup } from "../services/backup/BackupService";
 import * as WebDavBackupService from "../services/backup/WebDavBackupService";
 import * as persistenceFacade from "../services/storage/PersistenceFacade";
 import { readDiskStorageData } from "../services/storage/tauriPersistence";
@@ -389,15 +389,47 @@ export const BoardDock = () => {
     const sourceZipPath = await openZipDialog();
     if (!sourceZipPath) return;
 
-    const confirmed = window.confirm(
-      '即将从 zip 备份覆盖恢复所有数据（便签、看板、图片文件），当前本地数据将被替换。此操作不可撤销，是否继续？',
-    );
-    if (!confirmed) return;
-
     setZipFeedback(null);
     setZipOperation('restoring');
     let pauseOccurred = false;
     try {
+      const validation = await validateLocalBackup(sourceZipPath);
+
+      if (!validation.ok) {
+        const firstError = validation.errors[0];
+        const errorMessage = firstError?.message;
+        setZipFeedback({
+          status: 'error',
+          message: `备份验证失败：${errorMessage || '备份包校验未通过，本地数据未受影响。'}`,
+        });
+        return;
+      }
+
+      const summary = validation.summary;
+      if (!summary) {
+        setZipFeedback({ status: 'error', message: '备份验证通过但摘要信息不可用，本地数据未受影响。' });
+        return;
+      }
+      const formatBytes = (bytes: number) => {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      };
+      const confirmMessage = [
+        '备份验证通过。',
+        '',
+        '将恢复：',
+        `${summary.boardCount} 个看板`,
+        `${summary.noteCount} 条便签（文本 ${summary.textNoteCount}，图片 ${summary.imageNoteCount}）`,
+        `${summary.trashNoteCount} 条废纸篓便签`,
+        `${summary.imageFileCount} 个图片文件（${formatBytes(summary.imageFileTotalBytes)}）`,
+        '',
+        '当前本地数据将被替换。是否继续？',
+      ].join('\n');
+
+      const confirmed = window.confirm(confirmMessage);
+      if (!confirmed) return;
+
       const flushed = await persistenceFacade.flushNow();
       if (!flushed) {
         setZipFeedback({ status: 'error', message: '恢复失败：当前数据尚未成功写入磁盘，请稍后重试。' });

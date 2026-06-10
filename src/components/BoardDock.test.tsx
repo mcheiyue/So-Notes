@@ -37,6 +37,24 @@ vi.mock('../services/storage/attachmentConsistency', () => ({
 vi.mock('../services/backup/BackupService', () => ({
   createLocalBackup: vi.fn(async () => ({ success: true, noteCount: 0, boardCount: 0, attachmentCount: 0 })),
   restoreLocalBackup: vi.fn(async () => ({ success: true, noteCount: 0, boardCount: 0, attachmentCount: 0 })),
+  validateLocalBackup: vi.fn(async () => ({
+    ok: true,
+    summary: {
+      app: 'SoNotes',
+      formatVersion: 1,
+      appVersion: '1.5.2',
+      createdAt: Date.now(),
+      noteCount: 0,
+      boardCount: 0,
+      textNoteCount: 0,
+      imageNoteCount: 0,
+      trashNoteCount: 0,
+      imageFileCount: 0,
+      imageFileTotalBytes: 0,
+    },
+    errors: [],
+    warnings: [],
+  })),
 }));
 
 vi.mock('../services/backup/WebDavBackupService', () => ({
@@ -583,12 +601,30 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
   it('zip 恢复成功后替换前端状态并清空历史', async () => {
     const { openZipDialog } = await import('../utils/fileSystem');
-    const { restoreLocalBackup } = await import('../services/backup/BackupService');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
     const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
     const { invalidateAttachmentPathCache, resolveAttachmentAssetUrlCached } = await import('../services/storage/attachmentPersistence');
     const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(openZipDialog).mockResolvedValue('/backups/test.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes',
+        formatVersion: 1,
+        appVersion: '1.5.2',
+        createdAt: Date.now(),
+        noteCount: 3,
+        boardCount: 1,
+        textNoteCount: 2,
+        imageNoteCount: 1,
+        trashNoteCount: 0,
+        imageFileCount: 2,
+        imageFileTotalBytes: 2048,
+      },
+      errors: [],
+      warnings: [],
+    });
     vi.mocked(restoreLocalBackup).mockResolvedValue({
       success: true, noteCount: 3, boardCount: 1, attachmentCount: 2,
     });
@@ -649,16 +685,35 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
   it('zip 恢复取消确认时不执行恢复', async () => {
     const { openZipDialog } = await import('../utils/fileSystem');
-    const { restoreLocalBackup } = await import('../services/backup/BackupService');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
     const { pause } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(openZipDialog).mockResolvedValue('/backups/test.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes',
+        formatVersion: 1,
+        appVersion: '1.5.2',
+        createdAt: Date.now(),
+        noteCount: 5,
+        boardCount: 2,
+        textNoteCount: 4,
+        imageNoteCount: 1,
+        trashNoteCount: 0,
+        imageFileCount: 1,
+        imageFileTotalBytes: 1024,
+      },
+      errors: [],
+      warnings: [],
+    });
     vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     await openDataSettings();
     await clickElement(findButtonByText('从 zip 覆盖恢复'));
 
     expect(openZipDialog).toHaveBeenCalledTimes(1);
+    expect(validateLocalBackup).toHaveBeenCalledWith('/backups/test.zip');
     expect(restoreLocalBackup).not.toHaveBeenCalled();
     expect(pause).not.toHaveBeenCalled();
   });
@@ -678,10 +733,28 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
   it('zip 恢复失败时显示错误反馈并恢复持久化', async () => {
     const { openZipDialog } = await import('../utils/fileSystem');
-    const { restoreLocalBackup } = await import('../services/backup/BackupService');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
     const { pause, resume } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(openZipDialog).mockResolvedValue('/backups/bad.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes',
+        formatVersion: 1,
+        appVersion: '1.5.2',
+        createdAt: Date.now(),
+        noteCount: 1,
+        boardCount: 1,
+        textNoteCount: 1,
+        imageNoteCount: 0,
+        trashNoteCount: 0,
+        imageFileCount: 0,
+        imageFileTotalBytes: 0,
+      },
+      errors: [],
+      warnings: [],
+    });
     vi.mocked(restoreLocalBackup).mockResolvedValue({
       success: false, noteCount: 0, boardCount: 0, attachmentCount: 0, error: 'zip 文件损坏',
     });
@@ -744,11 +817,29 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
   it('viewMode=TRASH 时 zip 恢复仍可正常执行（persistence facade 可用）', async () => {
     const { openZipDialog } = await import('../utils/fileSystem');
-    const { restoreLocalBackup } = await import('../services/backup/BackupService');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
     const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
     const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(openZipDialog).mockResolvedValue('/backups/trash-restore.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes',
+        formatVersion: 1,
+        appVersion: '1.5.2',
+        createdAt: Date.now(),
+        noteCount: 2,
+        boardCount: 1,
+        textNoteCount: 2,
+        imageNoteCount: 0,
+        trashNoteCount: 0,
+        imageFileCount: 0,
+        imageFileTotalBytes: 0,
+      },
+      errors: [],
+      warnings: [],
+    });
     vi.mocked(restoreLocalBackup).mockResolvedValue({
       success: true, noteCount: 2, boardCount: 1, attachmentCount: 0,
     });
@@ -773,6 +864,153 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(flushNow).toHaveBeenCalledTimes(1);
     expect(pause).toHaveBeenCalled();
     expect(restoreLocalBackup).toHaveBeenCalledWith('/backups/trash-restore.zip');
+    expect(resume).toHaveBeenCalled();
+
+    const feedback = container.querySelector('[data-testid="zip-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('恢复成功');
+    expect(feedback?.getAttribute('role')).toBe('status');
+  });
+
+  it('zip 恢复验证失败时不调用 flush/pause/restore', async () => {
+    const { openZipDialog } = await import('../utils/fileSystem');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(openZipDialog).mockResolvedValue('/backups/bad.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: false,
+      summary: null,
+      errors: [{ code: 'not_sonotes_backup', severity: 'error', message: '这不是 SoNotes 备份包，本地数据未受影响。' }],
+      warnings: [],
+    });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('从 zip 覆盖恢复'));
+
+    expect(validateLocalBackup).toHaveBeenCalledWith('/backups/bad.zip');
+    expect(restoreLocalBackup).not.toHaveBeenCalled();
+    expect(flushNow).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+
+    const feedback = container.querySelector('[data-testid="zip-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('备份验证失败');
+    expect(feedback?.textContent).toContain('这不是 SoNotes 备份包');
+    expect(feedback?.getAttribute('role')).toBe('alert');
+  });
+
+  it('zip 恢复验证失败时使用 fallback 文案（errors 无 message）', async () => {
+    const { openZipDialog } = await import('../utils/fileSystem');
+    const { validateLocalBackup } = await import('../services/backup/BackupService');
+
+    vi.mocked(openZipDialog).mockResolvedValue('/backups/unknown.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: false,
+      summary: null,
+      errors: [{ code: 'unreadable_backup_file', severity: 'error', message: '' }],
+      warnings: [],
+    });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('从 zip 覆盖恢复'));
+
+    const feedback = container.querySelector('[data-testid="zip-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('备份验证失败');
+    expect(feedback?.textContent).toContain('本地数据未受影响');
+    expect(feedback?.getAttribute('role')).toBe('alert');
+  });
+
+  it('zip 恢复验证成功但用户取消摘要确认时不调用 flush/pause/restore', async () => {
+    const { openZipDialog } = await import('../utils/fileSystem');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(openZipDialog).mockResolvedValue('/backups/test.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes',
+        formatVersion: 1,
+        appVersion: '1.5.2',
+        createdAt: Date.now(),
+        noteCount: 42,
+        boardCount: 3,
+        textNoteCount: 36,
+        imageNoteCount: 6,
+        trashNoteCount: 2,
+        imageFileCount: 6,
+        imageFileTotalBytes: 5 * 1024 * 1024,
+      },
+      errors: [],
+      warnings: [],
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    await openDataSettings();
+    await clickElement(findButtonByText('从 zip 覆盖恢复'));
+
+    expect(validateLocalBackup).toHaveBeenCalledWith('/backups/test.zip');
+    expect(restoreLocalBackup).not.toHaveBeenCalled();
+    expect(flushNow).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+  });
+
+  it('zip 恢复验证成功且用户确认后执行完整恢复流程', async () => {
+    const { openZipDialog } = await import('../utils/fileSystem');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
+    const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(openZipDialog).mockResolvedValue('/backups/full.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes',
+        formatVersion: 1,
+        appVersion: '1.5.2',
+        createdAt: Date.now(),
+        noteCount: 10,
+        boardCount: 2,
+        textNoteCount: 8,
+        imageNoteCount: 2,
+        trashNoteCount: 1,
+        imageFileCount: 2,
+        imageFileTotalBytes: 4096,
+      },
+      errors: [],
+      warnings: [],
+    });
+    vi.mocked(restoreLocalBackup).mockResolvedValue({
+      success: true, noteCount: 10, boardCount: 2, attachmentCount: 2,
+    });
+    vi.mocked(readDiskStorageData).mockResolvedValue({
+      schemaVersion: 1,
+      storageUpdatedAt: Date.now(),
+      notes: [
+        { id: 'r1', kind: 'text', boardId: 'default', x: 0, y: 0, title: '', content: '恢复便签', color: '#FFF', z: 1, collapsed: false, createdAt: 1, updatedAt: 1 },
+      ],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config },
+    });
+    vi.mocked(flushNow).mockResolvedValue(true);
+    vi.mocked(pause).mockImplementation(() => {});
+    vi.mocked(resume).mockImplementation(() => {});
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await openDataSettings();
+    await clickElement(findButtonByText('从 zip 覆盖恢复'));
+
+    expect(validateLocalBackup).toHaveBeenCalledWith('/backups/full.zip');
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy.mock.calls[0][0]).toContain('2 个看板');
+    expect(confirmSpy.mock.calls[0][0]).toContain('10 条便签');
+    expect(confirmSpy.mock.calls[0][0]).toContain('2 个图片文件');
+    expect(flushNow).toHaveBeenCalled();
+    expect(pause).toHaveBeenCalled();
+    expect(restoreLocalBackup).toHaveBeenCalledWith('/backups/full.zip');
     expect(resume).toHaveBeenCalled();
 
     const feedback = container.querySelector('[data-testid="zip-feedback"]');
