@@ -1577,7 +1577,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
 
   it('远端恢复成功后调用完整流程并更新反馈', async () => {
     const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup, cleanupDownloadedBackup } = await import('../services/backup/WebDavBackupService');
-    const { restoreLocalBackup } = await import('../services/backup/BackupService');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
     const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
     const { resolveAttachmentAssetUrlCached } = await import('../services/storage/attachmentPersistence');
     const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
@@ -1590,6 +1590,15 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     ]);
     vi.mocked(downloadBackup).mockResolvedValue({ success: true, downloadToken: 'tok-abc' });
     vi.mocked(resolveDownloadedBackup).mockResolvedValue({ success: true, localPath: '/tmp/dl.zip' });
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: Date.now(),
+        noteCount: 5, boardCount: 2, textNoteCount: 4, imageNoteCount: 1, trashNoteCount: 0,
+        imageFileCount: 1, imageFileTotalBytes: 456,
+      },
+      errors: [], warnings: [],
+    });
     vi.mocked(restoreLocalBackup).mockResolvedValue({
       success: true, noteCount: 5, boardCount: 2, attachmentCount: 1,
     });
@@ -1627,13 +1636,14 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
     await clickElement(restoreBtn);
 
-    expect(flushNow).toHaveBeenCalled();
-    expect(pause).toHaveBeenCalled();
     expect(downloadBackup).toHaveBeenCalledWith(
       expect.objectContaining({ serverUrl: 'https://dav.example.com' }),
       'backup-2026.zip',
     );
     expect(resolveDownloadedBackup).toHaveBeenCalledWith('tok-abc');
+    expect(validateLocalBackup).toHaveBeenCalledWith('/tmp/dl.zip');
+    expect(flushNow).toHaveBeenCalled();
+    expect(pause).toHaveBeenCalled();
     expect(restoreLocalBackup).toHaveBeenCalledWith('/tmp/dl.zip');
     expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-abc');
     expect(resume).toHaveBeenCalled();
@@ -1648,5 +1658,205 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(state.notesById['r1'].content).toBe('恢复便签');
     expect(state.notesById['r-image']).toBeDefined();
     expect(resolveAttachmentAssetUrlCached).toHaveBeenCalledWith('attachments/remote.png');
+  });
+
+  it('远端恢复验证失败时 cleanup token 并显示错误', async () => {
+    const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup, cleanupDownloadedBackup } = await import('../services/backup/WebDavBackupService');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'bad-backup.zip', size: 1024, lastModified: '2026-06-08T10:00:00Z', readable: true },
+    ]);
+    vi.mocked(downloadBackup).mockResolvedValue({ success: true, downloadToken: 'tok-bad' });
+    vi.mocked(resolveDownloadedBackup).mockResolvedValue({ success: true, localPath: '/tmp/bad.zip' });
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: false,
+      summary: null,
+      errors: [{ code: 'not_sonotes_backup', severity: 'error', message: '这不是 SoNotes 备份包，本地数据未受影响。' }],
+      warnings: [],
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+
+    const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
+    await clickElement(restoreBtn);
+
+    expect(validateLocalBackup).toHaveBeenCalledWith('/tmp/bad.zip');
+    expect(restoreLocalBackup).not.toHaveBeenCalled();
+    expect(flushNow).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+    expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-bad');
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('备份验证失败');
+    expect(feedback?.textContent).toContain('这不是 SoNotes 备份包');
+    expect(feedback?.getAttribute('role')).toBe('alert');
+  });
+
+  it('远端恢复摘要确认取消时 cleanup token 且不调用恢复', async () => {
+    const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup, cleanupDownloadedBackup } = await import('../services/backup/WebDavBackupService');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'good-backup.zip', size: 2048, lastModified: '2026-06-08T10:00:00Z', readable: true },
+    ]);
+    vi.mocked(downloadBackup).mockResolvedValue({ success: true, downloadToken: 'tok-cancel' });
+    vi.mocked(resolveDownloadedBackup).mockResolvedValue({ success: true, localPath: '/tmp/good.zip' });
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: Date.now(),
+        noteCount: 10, boardCount: 2, textNoteCount: 8, imageNoteCount: 2, trashNoteCount: 0,
+        imageFileCount: 2, imageFileTotalBytes: 4096,
+      },
+      errors: [], warnings: [],
+    });
+    // 初始确认通过，摘要确认取消
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    confirmSpy.mockReturnValueOnce(true);  // 初始确认
+    confirmSpy.mockReturnValueOnce(false); // 摘要确认取消
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+
+    const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
+    await clickElement(restoreBtn);
+
+    expect(validateLocalBackup).toHaveBeenCalledWith('/tmp/good.zip');
+    expect(restoreLocalBackup).not.toHaveBeenCalled();
+    expect(flushNow).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+    expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-cancel');
+  });
+
+  it('远端恢复 restoreLocalBackup 失败时 cleanup token 并恢复持久化', async () => {
+    const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup, cleanupDownloadedBackup } = await import('../services/backup/WebDavBackupService');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'corrupt.zip', size: 2048, lastModified: '2026-06-08T10:00:00Z', readable: true },
+    ]);
+    vi.mocked(downloadBackup).mockResolvedValue({ success: true, downloadToken: 'tok-fail' });
+    vi.mocked(resolveDownloadedBackup).mockResolvedValue({ success: true, localPath: '/tmp/corrupt.zip' });
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: Date.now(),
+        noteCount: 3, boardCount: 1, textNoteCount: 3, imageNoteCount: 0, trashNoteCount: 0,
+        imageFileCount: 0, imageFileTotalBytes: 0,
+      },
+      errors: [], warnings: [],
+    });
+    vi.mocked(restoreLocalBackup).mockResolvedValue({
+      success: false, noteCount: 0, boardCount: 0, attachmentCount: 0, error: 'zip 文件损坏',
+    });
+    vi.mocked(flushNow).mockResolvedValue(true);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+
+    const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
+    await clickElement(restoreBtn);
+
+    expect(validateLocalBackup).toHaveBeenCalledWith('/tmp/corrupt.zip');
+    expect(restoreLocalBackup).toHaveBeenCalledWith('/tmp/corrupt.zip');
+    expect(pause).toHaveBeenCalled();
+    expect(resume).toHaveBeenCalled();
+    expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-fail');
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('zip 文件损坏');
+    expect(feedback?.getAttribute('role')).toBe('alert');
+  });
+
+  it('远端恢复 validateLocalBackup 抛异常时 cleanup token', async () => {
+    const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup, cleanupDownloadedBackup } = await import('../services/backup/WebDavBackupService');
+    const { validateLocalBackup } = await import('../services/backup/BackupService');
+    const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'io-error.zip', size: 2048, lastModified: '2026-06-08T10:00:00Z', readable: true },
+    ]);
+    vi.mocked(downloadBackup).mockResolvedValue({ success: true, downloadToken: 'tok-throw' });
+    vi.mocked(resolveDownloadedBackup).mockResolvedValue({ success: true, localPath: '/tmp/io-error.zip' });
+    vi.mocked(validateLocalBackup).mockRejectedValue(new Error('I/O 错误'));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+
+    const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
+    await clickElement(restoreBtn);
+
+    expect(validateLocalBackup).toHaveBeenCalledWith('/tmp/io-error.zip');
+    expect(flushNow).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+    expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-throw');
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('I/O 错误');
+    expect(feedback?.getAttribute('role')).toBe('alert');
+  });
+
+  it('远端恢复 flushNow 失败时 cleanup token 且不调用恢复', async () => {
+    const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup, cleanupDownloadedBackup } = await import('../services/backup/WebDavBackupService');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'flush-fail.zip', size: 2048, lastModified: '2026-06-08T10:00:00Z', readable: true },
+    ]);
+    vi.mocked(downloadBackup).mockResolvedValue({ success: true, downloadToken: 'tok-flush' });
+    vi.mocked(resolveDownloadedBackup).mockResolvedValue({ success: true, localPath: '/tmp/flush-fail.zip' });
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: Date.now(),
+        noteCount: 1, boardCount: 1, textNoteCount: 1, imageNoteCount: 0, trashNoteCount: 0,
+        imageFileCount: 0, imageFileTotalBytes: 0,
+      },
+      errors: [], warnings: [],
+    });
+    vi.mocked(flushNow).mockResolvedValue(false);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+
+    const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
+    await clickElement(restoreBtn);
+
+    expect(validateLocalBackup).toHaveBeenCalled();
+    expect(flushNow).toHaveBeenCalled();
+    expect(restoreLocalBackup).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+    expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-flush');
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('当前数据尚未成功写入磁盘');
   });
 });

@@ -385,6 +385,32 @@ export const BoardDock = () => {
     return true;
   };
 
+  const formatBytesForRestore = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const buildRestoreSummaryMessage = (summary: {
+    boardCount: number;
+    noteCount: number;
+    textNoteCount: number;
+    imageNoteCount: number;
+    trashNoteCount: number;
+    imageFileCount: number;
+    imageFileTotalBytes: number;
+  }): string => [
+    '备份验证通过。',
+    '',
+    '将恢复：',
+    `${summary.boardCount} 个看板`,
+    `${summary.noteCount} 条便签（文本 ${summary.textNoteCount}，图片 ${summary.imageNoteCount}）`,
+    `${summary.trashNoteCount} 条废纸篓便签`,
+    `${summary.imageFileCount} 个图片文件（${formatBytesForRestore(summary.imageFileTotalBytes)}）`,
+    '',
+    '当前本地数据将被替换。是否继续？',
+  ].join('\n');
+
   const onZipRestoreClick = async () => {
     const sourceZipPath = await openZipDialog();
     if (!sourceZipPath) return;
@@ -410,24 +436,8 @@ export const BoardDock = () => {
         setZipFeedback({ status: 'error', message: '备份验证通过但摘要信息不可用，本地数据未受影响。' });
         return;
       }
-      const formatBytes = (bytes: number) => {
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-      };
-      const confirmMessage = [
-        '备份验证通过。',
-        '',
-        '将恢复：',
-        `${summary.boardCount} 个看板`,
-        `${summary.noteCount} 条便签（文本 ${summary.textNoteCount}，图片 ${summary.imageNoteCount}）`,
-        `${summary.trashNoteCount} 条废纸篓便签`,
-        `${summary.imageFileCount} 个图片文件（${formatBytes(summary.imageFileTotalBytes)}）`,
-        '',
-        '当前本地数据将被替换。是否继续？',
-      ].join('\n');
 
-      const confirmed = window.confirm(confirmMessage);
+      const confirmed = window.confirm(buildRestoreSummaryMessage(summary));
       if (!confirmed) return;
 
       const flushed = await persistenceFacade.flushNow();
@@ -621,10 +631,10 @@ export const BoardDock = () => {
   };
 
   const onWebdavRestore = async (fileName: string) => {
-    const confirmed = window.confirm(
-      `即将从远端备份 "${fileName}" 覆盖恢复所有数据（便签、看板、图片文件），当前本地数据将被替换。此操作不可撤销，是否继续？`,
+    const initialConfirmed = window.confirm(
+      `即将从远端备份 "${fileName}" 下载并验证，通过后覆盖恢复所有数据。此操作不可撤销，是否继续？`,
     );
-    if (!confirmed) return;
+    if (!initialConfirmed) return;
 
     const config = buildWebdavConfig();
     if (!config) return;
@@ -634,14 +644,6 @@ export const BoardDock = () => {
     let pauseOccurred = false;
     let downloadToken: string | null = null;
     try {
-      const flushed = await persistenceFacade.flushNow();
-      if (!flushed) {
-        setWebdavFeedback({ status: 'error', message: '恢复失败：当前数据尚未成功写入磁盘，请稍后重试。' });
-        return;
-      }
-      persistenceFacade.pause();
-      pauseOccurred = true;
-
       const dlResult = await WebDavBackupService.downloadBackup(config, fileName);
       if (!dlResult.success || !dlResult.downloadToken) {
         setWebdavFeedback({ status: 'error', message: `下载失败：${dlResult.error ?? '未知错误'}` });
@@ -654,6 +656,34 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'error', message: `解析下载文件失败：${resolveResult.error ?? '未知错误'}` });
         return;
       }
+
+      const validation = await validateLocalBackup(resolveResult.localPath);
+      if (!validation.ok) {
+        const firstError = validation.errors[0];
+        const errorMessage = firstError?.message;
+        setWebdavFeedback({
+          status: 'error',
+          message: `备份验证失败：${errorMessage || '备份包校验未通过，本地数据未受影响。'}`,
+        });
+        return;
+      }
+
+      const summary = validation.summary;
+      if (!summary) {
+        setWebdavFeedback({ status: 'error', message: '备份验证通过但摘要信息不可用，本地数据未受影响。' });
+        return;
+      }
+
+      const restoreConfirmed = window.confirm(buildRestoreSummaryMessage(summary));
+      if (!restoreConfirmed) return;
+
+      const flushed = await persistenceFacade.flushNow();
+      if (!flushed) {
+        setWebdavFeedback({ status: 'error', message: '恢复失败：当前数据尚未成功写入磁盘，请稍后重试。' });
+        return;
+      }
+      persistenceFacade.pause();
+      pauseOccurred = true;
 
       const result = await restoreLocalBackup(resolveResult.localPath);
       if (!result.success) {
