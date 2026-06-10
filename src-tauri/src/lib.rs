@@ -644,6 +644,7 @@ pub fn run() {
             attachments::delete_attachment_file,
             backup::create_local_backup,
             backup::restore_local_backup,
+            backup::validate_local_backup,
             webdav::webdav_load_config,
             webdav::webdav_save_config,
             webdav::webdav_clear_config,

@@ -1409,6 +1409,112 @@ fn create_local_backup_inner(
 }
 
 // ---------------------------------------------------------------------------
+// 验证命令辅助：错误码映射
+// ---------------------------------------------------------------------------
+
+/// 将 `inspect_backup_zip` 返回的 `String` 错误映射为结构化 `BackupValidationIssue`。
+///
+/// 匹配顺序至关重要：更具体的模式必须排在通用模式之前。
+/// 未匹配的错误统一归为 `invalid_data`（数据契约校验失败的兜底）。
+fn map_inspect_error_to_issue(err: &str) -> BackupValidationIssue {
+    // -- 系统级 / zip 层 --
+
+    if err.contains("打开备份文件失败") {
+        return BackupValidationIssue::error("unreadable_backup_file", err)
+            .with_target("backup_file");
+    }
+
+    if err.contains("读取 zip 文件失败") {
+        return BackupValidationIssue::error("invalid_zip", err).with_target("zip");
+    }
+
+    // -- zip 条目（必须在通用 "附件" 之前） --
+
+    if err.contains("zip 中存在重复条目") {
+        return BackupValidationIssue::error("duplicate_zip_entry", err)
+            .with_target("zip_entry");
+    }
+
+    if err.contains("附件数量超过上限") {
+        return BackupValidationIssue::error("image_file_count_limit_exceeded", err)
+            .with_target("zip");
+    }
+
+    if err.contains("附件总解压大小超过上限") {
+        return BackupValidationIssue::error("image_file_total_size_limit_exceeded", err)
+            .with_target("zip");
+    }
+
+    if err.contains("zip 条目") || err.contains("zip 中包含未知条目") {
+        return BackupValidationIssue::error("invalid_zip_entry", err)
+            .with_target("zip_entry");
+    }
+
+    // -- manifest 缺失 / 解析 --
+
+    if err.contains("备份文件缺少 manifest.json") {
+        return BackupValidationIssue::error("missing_manifest", err)
+            .with_target("manifest");
+    }
+
+    if err.contains("解析 manifest.json 失败") {
+        return BackupValidationIssue::error("invalid_manifest", err)
+            .with_target("manifest");
+    }
+
+    // -- manifest 内容校验 --
+
+    if err.contains("备份清单中的应用标识不匹配") {
+        return BackupValidationIssue::error("not_sonotes_backup", err)
+            .with_target("manifest");
+    }
+
+    if err.contains("不支持的备份格式版本") {
+        return BackupValidationIssue::error("unsupported_format_version", err)
+            .with_target("manifest");
+    }
+
+    if err.contains("备份清单") {
+        return BackupValidationIssue::error("invalid_manifest", err)
+            .with_target("manifest");
+    }
+
+    // -- data.json 缺失 / 解析 --
+
+    if err.contains("备份文件缺少 data.json") {
+        return BackupValidationIssue::error("missing_data", err).with_target("data");
+    }
+
+    if err.contains("解析 data.json 失败") {
+        return BackupValidationIssue::error("invalid_data", err).with_target("data");
+    }
+
+    // -- 图片文件校验（必须在通用 "附件" 之前） --
+
+    if err.contains("zip 中缺少图片文件") || err.contains("数据中缺少图片引用") {
+        return BackupValidationIssue::error("missing_image_file", err)
+            .with_target("image_file");
+    }
+
+    if err.contains("SHA-256 不匹配") {
+        return BackupValidationIssue::error("image_file_hash_mismatch", err)
+            .with_target("image_file");
+    }
+
+    // -- 附件大小限制 --
+
+    if err.contains("解压后大小超过上限") {
+        return BackupValidationIssue::error("image_file_total_size_limit_exceeded", err)
+            .with_target("zip");
+    }
+
+    // -- 数据契约校验兜底 --
+    // 包含：validate_storage_data_contract、validate_restored_data 中的
+    // schemaVersion、board、note、attachment ref 等所有校验失败。
+    BackupValidationIssue::error("invalid_data", err).with_target("data")
+}
+
+// ---------------------------------------------------------------------------
 // Tauri 命令
 // ---------------------------------------------------------------------------
 
@@ -1455,6 +1561,37 @@ pub async fn restore_local_backup(
     tokio::task::spawn_blocking(move || restore_local_backup_inner(&sonotes_base, &source))
         .await
         .map_err(|e| format!("恢复线程失败: {e}"))?
+}
+
+/// 只读验证本地 zip 备份文件。
+///
+/// 打开 zip、解析清单与数据、校验完整性后返回结构化验证结果。
+/// 不创建 staging 目录、不修改当前本地数据。
+#[tauri::command]
+pub async fn validate_local_backup(
+    source_zip_path: String,
+) -> Result<BackupValidationResult, String> {
+    let source = PathBuf::from(source_zip_path);
+
+    tokio::task::spawn_blocking(move || match inspect_backup_zip(&source) {
+        Ok(inspected) => Ok(BackupValidationResult {
+            ok: true,
+            summary: Some(inspected.summary),
+            errors: vec![],
+            warnings: vec![],
+        }),
+        Err(err) => {
+            let issue = map_inspect_error_to_issue(&err);
+            Ok(BackupValidationResult {
+                ok: false,
+                summary: None,
+                errors: vec![issue],
+                warnings: vec![],
+            })
+        }
+    })
+    .await
+    .map_err(|e| format!("验证线程失败: {e}"))?
 }
 
 // ===========================================================================
@@ -4661,5 +4798,157 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // map_inspect_error_to_issue：错误码映射
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn map_error_unreadable_backup_file_on_open_failure() {
+        let issue = map_inspect_error_to_issue("打开备份文件失败: 系统找不到指定的文件。");
+        assert_eq!(issue.code, "unreadable_backup_file");
+        assert_eq!(issue.target.as_deref(), Some("backup_file"));
+    }
+
+    #[test]
+    fn map_error_invalid_zip_on_read_failure() {
+        let issue = map_inspect_error_to_issue("读取 zip 文件失败: invalid Zip archive");
+        assert_eq!(issue.code, "invalid_zip");
+        assert_eq!(issue.target.as_deref(), Some("zip"));
+    }
+
+    #[test]
+    fn map_error_missing_manifest() {
+        let issue = map_inspect_error_to_issue("备份文件缺少 manifest.json");
+        assert_eq!(issue.code, "missing_manifest");
+        assert_eq!(issue.target.as_deref(), Some("manifest"));
+    }
+
+    #[test]
+    fn map_error_invalid_manifest_on_parse() {
+        let issue = map_inspect_error_to_issue("解析 manifest.json 失败: expected ident");
+        assert_eq!(issue.code, "invalid_manifest");
+        assert_eq!(issue.target.as_deref(), Some("manifest"));
+    }
+
+    #[test]
+    fn map_error_not_sonotes_backup() {
+        let issue = map_inspect_error_to_issue(
+            "备份清单中的应用标识不匹配: 期望 SoNotes, 实际 Other",
+        );
+        assert_eq!(issue.code, "not_sonotes_backup");
+        assert_eq!(issue.target.as_deref(), Some("manifest"));
+    }
+
+    #[test]
+    fn map_error_unsupported_format_version() {
+        let issue = map_inspect_error_to_issue("不支持的备份格式版本: 99");
+        assert_eq!(issue.code, "unsupported_format_version");
+        assert_eq!(issue.target.as_deref(), Some("manifest"));
+    }
+
+    #[test]
+    fn map_error_missing_data() {
+        let issue = map_inspect_error_to_issue("备份文件缺少 data.json");
+        assert_eq!(issue.code, "missing_data");
+        assert_eq!(issue.target.as_deref(), Some("data"));
+    }
+
+    #[test]
+    fn map_error_invalid_data_on_parse() {
+        let issue = map_inspect_error_to_issue("解析 data.json 失败: missing field `boards`");
+        assert_eq!(issue.code, "invalid_data");
+        assert_eq!(issue.target.as_deref(), Some("data"));
+    }
+
+    #[test]
+    fn map_error_duplicate_zip_entry() {
+        let issue = map_inspect_error_to_issue("zip 中存在重复条目: manifest.json");
+        assert_eq!(issue.code, "duplicate_zip_entry");
+        assert_eq!(issue.target.as_deref(), Some("zip_entry"));
+    }
+
+    #[test]
+    fn map_error_invalid_zip_entry() {
+        let issue = map_inspect_error_to_issue("zip 条目路径为空");
+        assert_eq!(issue.code, "invalid_zip_entry");
+        assert_eq!(issue.target.as_deref(), Some("zip_entry"));
+    }
+
+    #[test]
+    fn map_error_unknown_zip_entry() {
+        let issue = map_inspect_error_to_issue("zip 中包含未知条目: malware.exe");
+        assert_eq!(issue.code, "invalid_zip_entry");
+        assert_eq!(issue.target.as_deref(), Some("zip_entry"));
+    }
+
+    #[test]
+    fn map_error_image_file_count_limit() {
+        let issue = map_inspect_error_to_issue("附件数量超过上限: 9");
+        assert_eq!(issue.code, "image_file_count_limit_exceeded");
+        assert_eq!(issue.target.as_deref(), Some("zip"));
+    }
+
+    #[test]
+    fn map_error_image_file_total_size_limit() {
+        let issue = map_inspect_error_to_issue("附件总解压大小超过上限: 999 字节");
+        assert_eq!(issue.code, "image_file_total_size_limit_exceeded");
+        assert_eq!(issue.target.as_deref(), Some("zip"));
+    }
+
+    #[test]
+    fn map_error_missing_image_file() {
+        let issue = map_inspect_error_to_issue("zip 中缺少图片文件: attachments/abc.png");
+        assert_eq!(issue.code, "missing_image_file");
+        assert_eq!(issue.target.as_deref(), Some("image_file"));
+    }
+
+    #[test]
+    fn map_error_missing_image_ref() {
+        let issue = map_inspect_error_to_issue("数据中缺少图片引用: attachments/abc.png");
+        assert_eq!(issue.code, "missing_image_file");
+        assert_eq!(issue.target.as_deref(), Some("image_file"));
+    }
+
+    #[test]
+    fn map_error_image_hash_mismatch() {
+        let issue = map_inspect_error_to_issue(
+            "图片文件 attachments/a.png 的 SHA-256 不匹配: 期望 abc, 实际 def",
+        );
+        assert_eq!(issue.code, "image_file_hash_mismatch");
+        assert_eq!(issue.target.as_deref(), Some("image_file"));
+    }
+
+    #[test]
+    fn map_error_invalid_data_as_fallback() {
+        let issue = map_inspect_error_to_issue("boards 不能为空");
+        assert_eq!(issue.code, "invalid_data");
+        assert_eq!(issue.target.as_deref(), Some("data"));
+    }
+
+    #[test]
+    fn map_error_manifest_attachment_path_invalid() {
+        let issue = map_inspect_error_to_issue(
+            "zip 条目路径不在允许范围内: \"attachments/sub/file.png\"",
+        );
+        assert_eq!(issue.code, "invalid_zip_entry");
+        assert_eq!(issue.target.as_deref(), Some("zip_entry"));
+    }
+
+    #[test]
+    fn map_error_manifest_attachment_count_mismatch() {
+        let issue = map_inspect_error_to_issue(
+            "备份清单图片数量不匹配: attachmentCount=2, attachments=1",
+        );
+        assert_eq!(issue.code, "invalid_manifest");
+        assert_eq!(issue.target.as_deref(), Some("manifest"));
+    }
+
+    #[test]
+    fn map_error_attachment_size_limit_per_file() {
+        let issue = map_inspect_error_to_issue("附件 attachments/a.png 解压后大小超过上限: 999 字节");
+        assert_eq!(issue.code, "image_file_total_size_limit_exceeded");
+        assert_eq!(issue.target.as_deref(), Some("zip"));
     }
 }
