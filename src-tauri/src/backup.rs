@@ -934,10 +934,22 @@ fn validate_restored_data(
 // 恢复核心逻辑
 // ---------------------------------------------------------------------------
 
-fn restore_local_backup_inner(
-    sonotes_base: &Path,
-    source_zip_path: &Path,
-) -> Result<RestoreResult, String> {
+/// 只读检查阶段的结果。
+///
+/// 临时保留图片文件内容以便恢复流程复用；后续 commit 可改为流式验证。
+struct InspectedBackup {
+    manifest: BackupManifest,
+    /// 原始 data.json 字节，用于直接写入 staging。
+    raw_data: Vec<u8>,
+    data: StorageDataForRestore,
+    attachment_contents: std::collections::HashMap<String, Vec<u8>>,
+}
+
+/// 只读检查备份 zip：打开、扫描条目、解析 manifest/data、验证数据完整性。
+///
+/// 不创建 staging 目录、不修改任何文件系统内容。
+/// 所有错误消息与 `restore_local_backup_inner` 原有消息完全一致。
+fn inspect_backup_zip(source_zip_path: &Path) -> Result<InspectedBackup, String> {
     // -- Phase 1: 扫描 zip 条目，验证路径安全，检测重复 --
     let zip_file =
         std::fs::File::open(source_zip_path).map_err(|e| format!("打开备份文件失败: {e}"))?;
@@ -1052,6 +1064,28 @@ fn restore_local_backup_inner(
 
     // -- Phase 4: 验证数据完整性 --
     validate_restored_data(&data_json, &manifest, &attachment_contents)?;
+
+    Ok(InspectedBackup {
+        manifest,
+        raw_data,
+        data: data_json,
+        attachment_contents,
+    })
+}
+
+fn restore_local_backup_inner(
+    sonotes_base: &Path,
+    source_zip_path: &Path,
+) -> Result<RestoreResult, String> {
+    // -- Phase 1–4: 只读检查 --
+    let inspected = inspect_backup_zip(source_zip_path)?;
+
+    let InspectedBackup {
+        manifest,
+        raw_data,
+        data: data_json,
+        attachment_contents,
+    } = inspected;
 
     let note_count = data_json.notes.len() as u32;
     let board_count = data_json.boards.len() as u32;
