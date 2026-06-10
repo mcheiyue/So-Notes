@@ -934,6 +934,46 @@ fn validate_restored_data(
 // 恢复核心逻辑
 // ---------------------------------------------------------------------------
 
+/// 从已验证的 manifest 和 data 构建备份摘要。
+///
+/// 统计来源：
+/// - `textNoteCount`/`imageNoteCount`/`trashNoteCount` 从 `StorageDataForRestore` 的 notes 统计。
+/// - `imageFileCount`/`imageFileTotalBytes` 从 manifest 的 attachments 统计。
+/// - 不读取或返回便签正文内容。
+fn build_summary(manifest: &BackupManifest, data: &StorageDataForRestore) -> BackupSummary {
+    let mut text_note_count: u32 = 0;
+    let mut image_note_count: u32 = 0;
+    let mut trash_note_count: u32 = 0;
+
+    for note in &data.notes {
+        let is_trash = note.deleted_at.is_some();
+        if is_trash {
+            trash_note_count += 1;
+        }
+        match note.kind.as_str() {
+            "image" => image_note_count += 1,
+            _ => text_note_count += 1,
+        }
+    }
+
+    let image_file_count = manifest.attachments.len() as u32;
+    let image_file_total_bytes = manifest.attachments.iter().map(|a| a.size).sum();
+
+    BackupSummary {
+        app: manifest.app.clone(),
+        format_version: manifest.format_version,
+        app_version: manifest.app_version.clone(),
+        created_at: manifest.created_at,
+        note_count: data.notes.len() as u32,
+        board_count: data.boards.len() as u32,
+        text_note_count,
+        image_note_count,
+        trash_note_count,
+        image_file_count,
+        image_file_total_bytes,
+    }
+}
+
 /// 只读检查阶段的结果。
 ///
 /// 临时保留图片文件内容以便恢复流程复用；后续 commit 可改为流式验证。
@@ -943,6 +983,7 @@ struct InspectedBackup {
     raw_data: Vec<u8>,
     data: StorageDataForRestore,
     attachment_contents: std::collections::HashMap<String, Vec<u8>>,
+    summary: BackupSummary,
 }
 
 /// 只读检查备份 zip：打开、扫描条目、解析 manifest/data、验证数据完整性。
@@ -1065,11 +1106,15 @@ fn inspect_backup_zip(source_zip_path: &Path) -> Result<InspectedBackup, String>
     // -- Phase 4: 验证数据完整性 --
     validate_restored_data(&data_json, &manifest, &attachment_contents)?;
 
+    // -- Phase 5: 构建摘要 --
+    let summary = build_summary(&manifest, &data_json);
+
     Ok(InspectedBackup {
         manifest,
         raw_data,
         data: data_json,
         attachment_contents,
+        summary,
     })
 }
 
@@ -1085,7 +1130,9 @@ fn restore_local_backup_inner(
         raw_data,
         data: data_json,
         attachment_contents,
+        summary,
     } = inspected;
+    let _ = summary;
 
     let note_count = data_json.notes.len() as u32;
     let board_count = data_json.boards.len() as u32;
@@ -4354,5 +4401,265 @@ mod tests {
             !json.contains("\"text_note_count\""),
             "不应包含 snake_case: {json}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // build_summary：统计准确性
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn build_summary_counts_text_and_image_notes() {
+        let root = test_dir("summary-text-image");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let img_content = b"summary test image";
+        let rel_path = create_attachment_file(&attach_dir, img_content, "png");
+
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[
+                text_note("n1", "b1"),
+                text_note("n2", "b1"),
+                image_note_for_restore(
+                    "n3",
+                    "b1",
+                    &rel_path,
+                    &compute_test_sha256(img_content),
+                    img_content.len() as u64,
+                ),
+            ],
+        );
+        let att_entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![att_entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let inspected = inspect_backup_zip(&zip_path).unwrap();
+        let summary = &inspected.summary;
+
+        assert_eq!(summary.text_note_count, 2, "应有 2 个文本便签");
+        assert_eq!(summary.image_note_count, 1, "应有 1 个图片便签");
+        assert_eq!(summary.note_count, 3, "便签总数应为 3");
+        assert_eq!(summary.trash_note_count, 0, "无废纸篓便签");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn build_summary_counts_trash_notes() {
+        let root = test_dir("summary-trash");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let img_content = b"trash image";
+        let rel_path = create_attachment_file(&attach_dir, img_content, "png");
+
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[
+                text_note("n1", "b1"),
+                image_note_for_restore(
+                    "n2",
+                    "b1",
+                    &rel_path,
+                    &compute_test_sha256(img_content),
+                    img_content.len() as u64,
+                ),
+                {
+                    let mut note = image_note_for_restore(
+                        "n3",
+                        "b1",
+                        &rel_path,
+                        &compute_test_sha256(img_content),
+                        img_content.len() as u64,
+                    );
+                    note["deletedAt"] = serde_json::json!(1700000000000_u64);
+                    note
+                },
+                {
+                    let mut note = text_note("n4", "b1");
+                    note["deletedAt"] = serde_json::json!(1700000000000_u64);
+                    note
+                },
+            ],
+        );
+        let att_entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![att_entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let inspected = inspect_backup_zip(&zip_path).unwrap();
+        let summary = &inspected.summary;
+
+        assert_eq!(summary.text_note_count, 2, "文本便签含废纸篓文本便签");
+        assert_eq!(summary.image_note_count, 2, "图片便签含废纸篓图片便签");
+        assert_eq!(summary.note_count, 4, "便签总数应为 4");
+        assert_eq!(summary.trash_note_count, 2, "应有 2 个废纸篓便签");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn build_summary_counts_boards_and_image_files() {
+        let root = test_dir("summary-boards-images");
+        let sonotes_base = root.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let img1 = b"image one content";
+        let img2 = b"image two longer content here";
+        let rel1 = create_attachment_file(&attach_dir, img1, "png");
+        let rel2 = create_attachment_file(&attach_dir, img2, "jpg");
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [
+                {"id": "b1", "name": "看板1", "icon": "📋", "createdAt": 0},
+                {"id": "b2", "name": "看板2", "icon": "📝", "createdAt": 0}
+            ],
+            "notes": [
+                {
+                    "id": "n1", "kind": "text", "boardId": "b1",
+                    "x": 0, "y": 0, "z": 1, "title": "", "content": "",
+                    "color": "yellow", "createdAt": 0, "updatedAt": 0
+                },
+                {
+                    "id": "n2", "kind": "image", "boardId": "b2",
+                    "x": 0, "y": 0, "z": 1, "title": "", "content": "",
+                    "color": "yellow", "createdAt": 0, "updatedAt": 0,
+                    "attachments": [{
+                        "id": "n2-att", "hash": compute_test_sha256(img1),
+                        "filename": format!("{}.png", compute_test_sha256(img1)),
+                        "mimeType": "image/png", "size": img1.len() as u64,
+                        "relativePath": rel1, "createdAt": 0
+                    }]
+                },
+                {
+                    "id": "n3", "kind": "image", "boardId": "b1",
+                    "x": 0, "y": 0, "z": 1, "title": "", "content": "",
+                    "color": "yellow", "createdAt": 0, "updatedAt": 0,
+                    "attachments": [{
+                        "id": "n3-att", "hash": compute_test_sha256(img2),
+                        "filename": format!("{}.jpg", compute_test_sha256(img2)),
+                        "mimeType": "image/jpeg", "size": img2.len() as u64,
+                        "relativePath": rel2, "createdAt": 0
+                    }]
+                }
+            ],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+
+        let att1 = make_image_attachment_entry(&rel1, img1);
+        let att2 = make_image_attachment_entry(&rel2, img2);
+        let manifest = minimal_restore_manifest(vec![att1, att2]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(
+            &manifest_json,
+            &data_json,
+            &[(&rel1, img1), (&rel2, img2)],
+        );
+
+        let inspected = inspect_backup_zip(&zip_path).unwrap();
+        let summary = &inspected.summary;
+
+        assert_eq!(summary.board_count, 2, "应有 2 个看板");
+        assert_eq!(summary.image_file_count, 2, "应有 2 个图片文件");
+        assert_eq!(
+            summary.image_file_total_bytes,
+            (img1.len() + img2.len()) as u64,
+            "图片文件总字节数应正确"
+        );
+        assert_eq!(
+            summary.created_at, 1700000000000,
+            "createdAt 应来自 manifest"
+        );
+        assert_eq!(summary.app, "SoNotes");
+        assert_eq!(summary.format_version, BACKUP_FORMAT_VERSION);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn build_summary_empty_backup() {
+        let root = test_dir("summary-empty");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = restore_data_json_with_board("b1", &[]);
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let inspected = inspect_backup_zip(&zip_path).unwrap();
+        let summary = &inspected.summary;
+
+        assert_eq!(summary.note_count, 0);
+        assert_eq!(summary.board_count, 1, "空看板仍应计数");
+        assert_eq!(summary.text_note_count, 0);
+        assert_eq!(summary.image_note_count, 0);
+        assert_eq!(summary.trash_note_count, 0);
+        assert_eq!(summary.image_file_count, 0);
+        assert_eq!(summary.image_file_total_bytes, 0);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // build_summary：序列化不含便签正文
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn summary_serialization_excludes_note_content() {
+        let root = test_dir("summary-no-content");
+        let sonotes_base = root.join("SoNotes");
+        std::fs::create_dir_all(&sonotes_base).unwrap();
+
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "看板", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1", "kind": "text", "boardId": "b1",
+                "x": 0, "y": 0, "z": 1,
+                "title": "敏感标题SECRET_TITLE",
+                "content": "敏感正文SECRET_BODY_12345",
+                "color": "yellow", "createdAt": 0, "updatedAt": 0
+            }],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let inspected = inspect_backup_zip(&zip_path).unwrap();
+        let json = serde_json::to_string(&inspected.summary).expect("序列化失败");
+
+        assert!(
+            !json.contains("SECRET_TITLE"),
+            "摘要序列化不应包含便签标题: {json}"
+        );
+        assert!(
+            !json.contains("SECRET_BODY_12345"),
+            "摘要序列化不应包含便签正文: {json}"
+        );
+        assert!(
+            !json.contains("title"),
+            "摘要不应包含 title 字段: {json}"
+        );
+        assert!(
+            !json.contains("content"),
+            "摘要不应包含 content 字段: {json}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
