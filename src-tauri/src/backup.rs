@@ -4951,4 +4951,611 @@ mod tests {
         assert_eq!(issue.code, "image_file_total_size_limit_exceeded");
         assert_eq!(issue.target.as_deref(), Some("zip"));
     }
+
+    // =======================================================================
+    // validate_local_backup 端到端失败/成功路径测试（Commit 6）
+    //
+    // 直接调用 validate_local_backup 命令函数，覆盖 spawn_blocking + map_inspect_error_to_issue 完整链路。
+    // =======================================================================
+
+    // -----------------------------------------------------------------------
+    // unreadable_backup_file：不存在的路径
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_unreadable_backup_file_nonexistent_path() {
+        let result = validate_local_backup("/nonexistent/path/backup.zip".to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok, "不存在的路径应验证失败");
+        assert!(result.summary.is_none(), "失败时不应有摘要");
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].code, "unreadable_backup_file");
+        assert_eq!(result.errors[0].target.as_deref(), Some("backup_file"));
+        assert_eq!(result.errors[0].severity, "error");
+    }
+
+    // -----------------------------------------------------------------------
+    // invalid_zip：非 zip 文件
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_invalid_zip_text_file() {
+        let dir = test_dir("validate-txt-zip");
+        let zip_path = dir.join("fake.zip");
+        std::fs::write(&zip_path, "this is plain text, not a zip file").unwrap();
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert!(result.summary.is_none());
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].code, "invalid_zip");
+        assert_eq!(result.errors[0].target.as_deref(), Some("zip"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn validate_fails_invalid_zip_empty_file() {
+        let dir = test_dir("validate-empty-zip");
+        let zip_path = dir.join("empty.zip");
+        std::fs::write(&zip_path, b"").unwrap();
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "invalid_zip");
+        assert_eq!(result.errors[0].target.as_deref(), Some("zip"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn validate_fails_invalid_zip_truncated() {
+        let dir = test_dir("validate-truncated-zip");
+        let zip_path = dir.join("truncated.zip");
+
+        // 创建一个合法 zip 然后截断
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let data_json = restore_data_json_with_board("b1", &[]);
+        let full_zip = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let full_bytes = std::fs::read(&full_zip).unwrap();
+        let truncated_len = full_bytes.len() / 2;
+        std::fs::write(&zip_path, &full_bytes[..truncated_len]).unwrap();
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "invalid_zip");
+        assert_eq!(result.errors[0].target.as_deref(), Some("zip"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // missing_manifest：zip 中缺少 manifest.json
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_missing_manifest() {
+        let dir = test_dir("validate-no-manifest");
+        let zip_path = dir.join("no-manifest.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+        zip.finish().unwrap();
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert!(result.summary.is_none());
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].code, "missing_manifest");
+        assert_eq!(result.errors[0].target.as_deref(), Some("manifest"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // invalid_manifest：manifest.json 不是合法 JSON
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_invalid_manifest_bad_json() {
+        let dir = test_dir("validate-bad-manifest-json");
+        let zip_path = dir.join("bad-manifest.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(b"{not valid json!!!}").unwrap();
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+        zip.finish().unwrap();
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "invalid_manifest");
+        assert_eq!(result.errors[0].target.as_deref(), Some("manifest"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // not_sonotes_backup：manifest.app != "SoNotes"
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_not_sonotes_backup() {
+        let dir = test_dir("validate-not-sonotes");
+        let data_json = restore_data_json_with_board("b1", &[]);
+        let mut manifest = minimal_restore_manifest(vec![]);
+        manifest.app = "OtherApp".to_string();
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "not_sonotes_backup");
+        assert_eq!(result.errors[0].target.as_deref(), Some("manifest"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // unsupported_format_version
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_unsupported_format_version() {
+        let dir = test_dir("validate-bad-fmt-ver");
+        let data_json = restore_data_json_with_board("b1", &[]);
+        let mut manifest = minimal_restore_manifest(vec![]);
+        manifest.format_version = 999;
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "unsupported_format_version");
+        assert_eq!(result.errors[0].target.as_deref(), Some("manifest"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // missing_data：zip 中缺少 data.json
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_missing_data() {
+        let dir = test_dir("validate-no-data");
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+
+        let zip_path = dir.join("no-data.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(manifest_json.as_bytes()).unwrap();
+        zip.finish().unwrap();
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "missing_data");
+        assert_eq!(result.errors[0].target.as_deref(), Some("data"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // invalid_data：data.json 不是合法 JSON
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_invalid_data_bad_json() {
+        let dir = test_dir("validate-bad-data-json");
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+
+        let zip_path = dir.join("bad-data.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(manifest_json.as_bytes()).unwrap();
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(b"{broken json!!!}").unwrap();
+        zip.finish().unwrap();
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "invalid_data");
+        assert_eq!(result.errors[0].target.as_deref(), Some("data"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // invalid_data：data.json 不满足 StorageData 契约
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_invalid_data_contract_violation() {
+        let dir = test_dir("validate-data-contract");
+        let data_json = serde_json::json!({
+            "schemaVersion": 999,
+            "storageUpdatedAt": 0,
+            "boards": [],
+            "notes": [],
+            "currentBoardId": "",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "invalid_data");
+        assert_eq!(result.errors[0].target.as_deref(), Some("data"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // invalid_zip_entry：不安全的 zip 条目路径
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_invalid_zip_entry_path_traversal() {
+        let dir = test_dir("validate-zip-slip");
+        let zip_path = dir.join("slip.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("../escape.txt", options).unwrap();
+        zip.write_all(b"escaped").unwrap();
+        zip.finish().unwrap();
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "invalid_zip_entry");
+        assert_eq!(result.errors[0].target.as_deref(), Some("zip_entry"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn validate_fails_invalid_zip_entry_unknown_top_level() {
+        let dir = test_dir("validate-unknown-entry");
+        let data_json = restore_data_json_with_board("b1", &[]);
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+
+        let zip_path = dir.join("unknown.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(manifest_json.as_bytes()).unwrap();
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(data_json.as_bytes()).unwrap();
+        zip.start_file("malware.exe", options).unwrap();
+        zip.write_all(b"bad").unwrap();
+        zip.finish().unwrap();
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "invalid_zip_entry");
+        assert_eq!(result.errors[0].target.as_deref(), Some("zip_entry"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // missing_image_file：manifest 引用图片但 zip 中缺失
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_missing_image_file() {
+        let dir = test_dir("validate-missing-img");
+        let img_content = b"some image";
+        let hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{hash}.png");
+
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash, img_content.len() as u64)],
+        );
+        let entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+
+        // 不在 zip 中放入图片文件
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "missing_image_file");
+        assert_eq!(result.errors[0].target.as_deref(), Some("image_file"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // image_file_hash_mismatch：图片内容与 manifest 中的 SHA-256 不匹配
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_image_file_hash_mismatch() {
+        let dir = test_dir("validate-hash-mismatch");
+        let img_content = b"real image content";
+        let hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{hash}.png");
+
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[image_note_for_restore("n1", "b1", &rel_path, &hash, img_content.len() as u64)],
+        );
+
+        // manifest 中的 sha256 故意写错
+        let mut bad_entry = make_image_attachment_entry(&rel_path, img_content);
+        bad_entry.sha256 = "0".repeat(64);
+
+        let manifest = minimal_restore_manifest(vec![bad_entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "image_file_hash_mismatch");
+        assert_eq!(result.errors[0].target.as_deref(), Some("image_file"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // image_file_total_size_limit_exceeded：附件总大小超限
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_fails_image_file_total_size_limit_exceeded() {
+        let dir = test_dir("validate-total-size-limit");
+        let zip_path = dir.join("too-large.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+        zip.start_file("data.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+
+        zip.start_file(
+            "attachments/0000000000000000000000000000000000000000000000000000000000000000.png",
+            options,
+        )
+        .unwrap();
+        let oversized = vec![b'x'; (MAX_TOTAL_ATTACHMENT_UNCOMPRESSED_BYTES + 1) as usize];
+        zip.write_all(&oversized).unwrap();
+        zip.finish().unwrap();
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "image_file_total_size_limit_exceeded");
+        assert_eq!(result.errors[0].target.as_deref(), Some("zip"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // 只读验证：失败时不创建 staging、不修改本地数据
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_does_not_create_staging_on_failure() {
+        let dir = test_dir("validate-readonly");
+        let sonotes_base = dir.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        // 写入原有数据
+        let original_data = "{\"original\": true}";
+        std::fs::write(sonotes_base.join("data.json"), original_data).unwrap();
+        std::fs::write(attach_dir.join("old.png"), b"old image").unwrap();
+
+        // 构造一个会失败的 zip
+        let bad_zip_path = dir.join("bad.zip");
+        std::fs::write(&bad_zip_path, b"not a real zip").unwrap();
+
+        let result = validate_local_backup(bad_zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+        assert!(!result.ok, "应验证失败");
+
+        // 验证原有数据未被修改
+        let preserved_data = std::fs::read_to_string(sonotes_base.join("data.json")).unwrap();
+        assert_eq!(preserved_data, original_data, "data.json 应保持不变");
+        assert!(attach_dir.join("old.png").exists(), "旧附件应保持不变");
+
+        // 验证没有创建 staging 目录
+        let staging_leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .map(|name| name.contains(".restore_staging_"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert!(
+            staging_leftovers.is_empty(),
+            "验证失败不应创建 staging 目录"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // 旧数据兼容：缺少 kind 的旧 Text Note 通过验证
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_accepts_legacy_text_note_missing_kind() {
+        let dir = test_dir("validate-legacy-note");
+        let data_json = serde_json::json!({
+            "schemaVersion": 2,
+            "storageUpdatedAt": 0,
+            "boards": [{"id": "b1", "name": "A", "icon": "📋", "createdAt": 0}],
+            "notes": [{
+                "id": "n1",
+                "boardId": "b1",
+                "x": 0, "y": 0,
+                "title": "旧文本便签", "content": "legacy",
+                "color": "yellow",
+                "z": 1,
+                "createdAt": 0, "updatedAt": 0
+            }],
+            "currentBoardId": "b1",
+            "config": {"version": 1, "maxZ": 1, "themeMode": "light"}
+        })
+        .to_string();
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(result.ok, "缺少 kind 的旧文本便签应通过验证，实际: {:?}", result.errors);
+        assert!(result.summary.is_some(), "验证通过时应有摘要");
+        let summary = result.summary.unwrap();
+        assert_eq!(summary.note_count, 1);
+        assert_eq!(summary.text_note_count, 1, "缺少 kind 应默认为 text");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // 验证成功：无图片文件
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_success_no_attachments() {
+        let dir = test_dir("validate-ok-noatt");
+        let data_json = restore_data_json_with_board("b1", &[text_note("n1", "b1")]);
+        let manifest = minimal_restore_manifest(vec![]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[]);
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(result.ok, "有效备份应验证通过，实际: {:?}", result.errors);
+        assert!(result.errors.is_empty());
+        assert!(result.summary.is_some());
+        let summary = result.summary.unwrap();
+        assert_eq!(summary.note_count, 1);
+        assert_eq!(summary.board_count, 1);
+        assert_eq!(summary.image_file_count, 0);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // 验证成功：包含 Image Note 与图片文件
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn validate_success_with_image_note_and_attachment() {
+        let dir = test_dir("validate-ok-img");
+        let sonotes_base = dir.join("SoNotes");
+        let attach_dir = sonotes_base.join("attachments");
+        std::fs::create_dir_all(&attach_dir).unwrap();
+
+        let img_content = b"validate success image";
+        let hash = compute_test_sha256(img_content);
+        let rel_path = format!("attachments/{hash}.png");
+
+        let data_json = restore_data_json_with_board(
+            "b1",
+            &[
+                text_note("n1", "b1"),
+                image_note_for_restore("n2", "b1", &rel_path, &hash, img_content.len() as u64),
+            ],
+        );
+        let att_entry = make_image_attachment_entry(&rel_path, img_content);
+        let manifest = minimal_restore_manifest(vec![att_entry]);
+        let manifest_json = serde_json::to_string(&manifest).unwrap();
+        let zip_path = build_test_zip(&manifest_json, &data_json, &[(&rel_path, img_content)]);
+
+        let result = validate_local_backup(zip_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert!(result.ok, "有效备份应验证通过，实际: {:?}", result.errors);
+        assert!(result.summary.is_some());
+        let summary = result.summary.unwrap();
+        assert_eq!(summary.note_count, 2);
+        assert_eq!(summary.text_note_count, 1);
+        assert_eq!(summary.image_note_count, 1);
+        assert_eq!(summary.image_file_count, 1);
+        assert_eq!(summary.image_file_total_bytes, img_content.len() as u64);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
