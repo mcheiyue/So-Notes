@@ -927,6 +927,41 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(feedback?.getAttribute('role')).toBe('alert');
   });
 
+  it('zip 恢复验证失败（多条错误）时展示错误数量与所有错误信息', async () => {
+    const { openZipDialog } = await import('../utils/fileSystem');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(openZipDialog).mockResolvedValue('/backups/multi-error.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: false,
+      summary: null,
+      errors: [
+        { code: 'not_sonotes_backup', severity: 'error', message: '缺少 manifest.json' },
+        { code: 'unreadable_backup_file', severity: 'error', message: 'data.json 已损坏' },
+        { code: 'schema_too_new', severity: 'error', message: '' },
+      ],
+      warnings: [],
+    });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('从 zip 覆盖恢复'));
+
+    expect(restoreLocalBackup).not.toHaveBeenCalled();
+    expect(flushNow).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+
+    const feedback = container.querySelector('[data-testid="zip-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.getAttribute('role')).toBe('alert');
+    expect(feedback?.textContent).toContain('备份验证失败');
+    expect(feedback?.textContent).toContain('3 条错误');
+    expect(feedback?.textContent).toContain('1. 缺少 manifest.json');
+    expect(feedback?.textContent).toContain('2. data.json 已损坏');
+    expect(feedback?.textContent).toContain('3.');
+    expect(feedback?.textContent).toContain('本地数据未受影响');
+  });
+
   it('zip 恢复验证成功但用户取消摘要确认时不调用 flush/pause/restore', async () => {
     const { openZipDialog } = await import('../utils/fileSystem');
     const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
@@ -1735,6 +1770,51 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(feedback?.textContent).toContain('备份验证失败');
     expect(feedback?.textContent).toContain('这不是 SoNotes 备份包');
     expect(feedback?.getAttribute('role')).toBe('alert');
+  });
+
+  it('远端恢复验证失败（多条错误）时展示错误数量与所有错误信息', async () => {
+    const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup, cleanupDownloadedBackup } = await import('../services/backup/WebDavBackupService');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'multi-error.zip', size: 2048, lastModified: '2026-06-08T10:00:00Z', readable: true },
+    ]);
+    vi.mocked(downloadBackup).mockResolvedValue({ success: true, downloadToken: 'tok-multi' });
+    vi.mocked(resolveDownloadedBackup).mockResolvedValue({ success: true, localPath: '/tmp/multi-error.zip' });
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: false,
+      summary: null,
+      errors: [
+        { code: 'not_sonotes_backup', severity: 'error', message: '缺少 manifest.json' },
+        { code: 'unreadable_backup_file', severity: 'error', message: 'data.json 已损坏' },
+      ],
+      warnings: [],
+    });
+    vi.mocked(confirm).mockResolvedValue(true);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+
+    const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
+    await clickElement(restoreBtn);
+
+    expect(validateLocalBackup).toHaveBeenCalledWith('/tmp/multi-error.zip');
+    expect(restoreLocalBackup).not.toHaveBeenCalled();
+    expect(flushNow).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+    expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-multi');
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.getAttribute('role')).toBe('alert');
+    expect(feedback?.textContent).toContain('备份验证失败');
+    expect(feedback?.textContent).toContain('2 条错误');
+    expect(feedback?.textContent).toContain('1. 缺少 manifest.json');
+    expect(feedback?.textContent).toContain('2. data.json 已损坏');
   });
 
   it('远端恢复摘要确认取消时 cleanup token 且不调用恢复', async () => {

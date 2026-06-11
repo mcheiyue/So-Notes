@@ -62,6 +62,26 @@ const formatUnknownError = (err: unknown): string => {
   return '未知错误';
 };
 
+const VALIDATION_ERROR_FALLBACK = '备份包校验未通过，本地数据未受影响。';
+
+const formatValidationErrorMessage = (
+  errors: ReadonlyArray<{ readonly message: string }>,
+): string => {
+  if (errors.length === 0) {
+    return `备份验证失败：${VALIDATION_ERROR_FALLBACK}`;
+  }
+
+  if (errors.length === 1) {
+    const errorMessage = errors[0].message || VALIDATION_ERROR_FALLBACK;
+    return `备份验证失败：${errorMessage}`;
+  }
+
+  const details = errors
+    .map((err, index) => `${index + 1}. ${err.message || VALIDATION_ERROR_FALLBACK}`)
+    .join('\n');
+  return `备份验证失败（${errors.length} 条错误）：\n${details}`;
+};
+
 const formatWebDavLastModified = (value?: string | null): string => {
   if (!value) return '';
   const date = new Date(value);
@@ -438,11 +458,9 @@ export const BoardDock = () => {
       const validation = await validateLocalBackup(sourceZipPath);
 
       if (!validation.ok) {
-        const firstError = validation.errors[0];
-        const errorMessage = firstError?.message;
         setZipFeedback({
           status: 'error',
-          message: `备份验证失败：${errorMessage || '备份包校验未通过，本地数据未受影响。'}`,
+          message: formatValidationErrorMessage(validation.errors),
         });
         return;
       }
@@ -678,11 +696,9 @@ export const BoardDock = () => {
 
       const validation = await validateLocalBackup(resolveResult.localPath);
       if (!validation.ok) {
-        const firstError = validation.errors[0];
-        const errorMessage = firstError?.message;
         setWebdavFeedback({
           status: 'error',
-          message: `备份验证失败：${errorMessage || '备份包校验未通过，本地数据未受影响。'}`,
+          message: formatValidationErrorMessage(validation.errors),
         });
         return;
       }
@@ -1386,7 +1402,7 @@ export const BoardDock = () => {
                                             : 'border-border-subtle bg-secondary-bg/70 text-text-secondary'
                                 )}
                             >
-                                <p className="font-medium">{webdavFeedback.message}</p>
+                                <p className="font-medium whitespace-pre-line">{webdavFeedback.message}</p>
                             </div>
                         )}
                     </div>
