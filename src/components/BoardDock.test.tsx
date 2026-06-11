@@ -970,7 +970,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
         app: 'SoNotes',
         formatVersion: 1,
         appVersion: '1.5.2',
-        createdAt: Date.now(),
+        createdAt: 1749643200000,
         noteCount: 10,
         boardCount: 2,
         textNoteCount: 8,
@@ -997,7 +997,6 @@ describe('BoardDock v1.2.4 最小修复', () => {
     });
     vi.mocked(flushNow).mockResolvedValue(true);
     vi.mocked(pause).mockImplementation(() => {});
-    vi.mocked(resume).mockImplementation(() => {});
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     await openDataSettings();
@@ -1008,6 +1007,9 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(confirmSpy.mock.calls[0][0]).toContain('2 个看板');
     expect(confirmSpy.mock.calls[0][0]).toContain('10 条便签');
     expect(confirmSpy.mock.calls[0][0]).toContain('2 个图片文件');
+    expect(confirmSpy.mock.calls[0][0]).toContain('2025-06-11 12:00');
+    expect(confirmSpy.mock.calls[0][0]).toContain('应用版本：1.5.2');
+    expect(confirmSpy.mock.calls[0][0]).toContain('格式版本：1');
     expect(flushNow).toHaveBeenCalled();
     expect(pause).toHaveBeenCalled();
     expect(restoreLocalBackup).toHaveBeenCalledWith('/backups/full.zip');
@@ -1575,6 +1577,28 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(restoreLocalBackup).not.toHaveBeenCalled();
   });
 
+  it('远端恢复初始确认不含覆盖/不可撤销措辞', async () => {
+    const { loadConfig, listBackups } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+    });
+    vi.mocked(listBackups).mockResolvedValue([
+      { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
+    ]);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('刷新远端列表'));
+
+    const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
+    await clickElement(restoreBtn);
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy.mock.calls[0][0]).not.toContain('覆盖');
+    expect(confirmSpy.mock.calls[0][0]).not.toContain('不可撤销');
+    expect(confirmSpy.mock.calls[0][0]).toContain('下载并验证');
+  });
+
   it('远端恢复成功后调用完整流程并更新反馈', async () => {
     const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup, cleanupDownloadedBackup } = await import('../services/backup/WebDavBackupService');
     const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
@@ -1593,7 +1617,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     vi.mocked(validateLocalBackup).mockResolvedValue({
       ok: true,
       summary: {
-        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: Date.now(),
+        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: 1749643200000,
         noteCount: 5, boardCount: 2, textNoteCount: 4, imageNoteCount: 1, trashNoteCount: 0,
         imageFileCount: 1, imageFileTotalBytes: 456,
       },
@@ -1628,7 +1652,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
       config: { ...useStore.getState().config },
     });
     vi.mocked(flushNow).mockResolvedValue(true);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));
@@ -1647,6 +1671,14 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(restoreLocalBackup).toHaveBeenCalledWith('/tmp/dl.zip');
     expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-abc');
     expect(resume).toHaveBeenCalled();
+
+    expect(confirmSpy.mock.calls[0][0]).not.toContain('覆盖');
+    expect(confirmSpy.mock.calls[0][0]).not.toContain('不可撤销');
+    expect(confirmSpy.mock.calls[0][0]).toContain('下载并验证');
+    expect(confirmSpy.mock.calls[1][0]).toContain('2025-06-11 12:00');
+    expect(confirmSpy.mock.calls[1][0]).toContain('应用版本：1.5.2');
+    expect(confirmSpy.mock.calls[1][0]).toContain('格式版本：1');
+    expect(confirmSpy.mock.calls[1][0]).toContain('5 条便签');
 
     const feedback = container.querySelector('[data-testid="webdav-feedback"]');
     expect(feedback).not.toBeNull();
@@ -1716,13 +1748,12 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     vi.mocked(validateLocalBackup).mockResolvedValue({
       ok: true,
       summary: {
-        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: Date.now(),
+        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: 1749643200000,
         noteCount: 10, boardCount: 2, textNoteCount: 8, imageNoteCount: 2, trashNoteCount: 0,
         imageFileCount: 2, imageFileTotalBytes: 4096,
       },
       errors: [], warnings: [],
     });
-    // 初始确认通过，摘要确认取消
     const confirmSpy = vi.spyOn(window, 'confirm');
     confirmSpy.mockReturnValueOnce(true);  // 初始确认
     confirmSpy.mockReturnValueOnce(false); // 摘要确认取消
@@ -1738,6 +1769,11 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(flushNow).not.toHaveBeenCalled();
     expect(pause).not.toHaveBeenCalled();
     expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-cancel');
+    expect(confirmSpy.mock.calls[0][0]).not.toContain('覆盖');
+    expect(confirmSpy.mock.calls[0][0]).not.toContain('不可撤销');
+    expect(confirmSpy.mock.calls[1][0]).toContain('2025-06-11 12:00');
+    expect(confirmSpy.mock.calls[1][0]).toContain('应用版本：1.5.2');
+    expect(confirmSpy.mock.calls[1][0]).toContain('格式版本：1');
   });
 
   it('远端恢复 restoreLocalBackup 失败时 cleanup token 并恢复持久化', async () => {

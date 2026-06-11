@@ -399,17 +399,30 @@ export const BoardDock = () => {
     trashNoteCount: number;
     imageFileCount: number;
     imageFileTotalBytes: number;
-  }): string => [
-    '备份验证通过。',
-    '',
-    '将恢复：',
-    `${summary.boardCount} 个看板`,
-    `${summary.noteCount} 条便签（文本 ${summary.textNoteCount}，图片 ${summary.imageNoteCount}）`,
-    `${summary.trashNoteCount} 条废纸篓便签`,
-    `${summary.imageFileCount} 个图片文件（${formatBytesForRestore(summary.imageFileTotalBytes)}）`,
-    '',
-    '当前本地数据将被替换。是否继续？',
-  ].join('\n');
+    createdAt: number;
+    appVersion: string;
+    formatVersion: number;
+  }): string => {
+    const d = new Date(summary.createdAt);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const dateStr = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    return [
+      '备份验证通过。',
+      '',
+      '备份信息：',
+      `创建时间：${dateStr}`,
+      `应用版本：${summary.appVersion}`,
+      `格式版本：${summary.formatVersion}`,
+      '',
+      '将恢复：',
+      `${summary.boardCount} 个看板`,
+      `${summary.noteCount} 条便签（文本 ${summary.textNoteCount}，图片 ${summary.imageNoteCount}）`,
+      `${summary.trashNoteCount} 条废纸篓便签`,
+      `${summary.imageFileCount} 个图片文件（${formatBytesForRestore(summary.imageFileTotalBytes)}）`,
+      '',
+      '当前本地数据将被替换。是否继续？',
+    ].join('\n');
+  };
 
   const onZipRestoreClick = async () => {
     const sourceZipPath = await openZipDialog();
@@ -632,7 +645,7 @@ export const BoardDock = () => {
 
   const onWebdavRestore = async (fileName: string) => {
     const initialConfirmed = window.confirm(
-      `即将从远端备份 "${fileName}" 下载并验证，通过后覆盖恢复所有数据。此操作不可撤销，是否继续？`,
+      `即将从远端备份 "${fileName}" 下载并验证，是否继续？`,
     );
     if (!initialConfirmed) return;
 
