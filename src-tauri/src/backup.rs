@@ -1412,6 +1412,33 @@ fn create_local_backup_inner(
 // 验证命令辅助：错误码映射
 // ---------------------------------------------------------------------------
 
+/// 从固定前缀的错误消息中提取前缀之后的路径。
+///
+/// 用于 `"zip 中存在重复条目: <path>"` 等冒号后直接跟随路径的格式。
+fn extract_path_after_prefix<'a>(err: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = err.strip_prefix(prefix)?;
+    let candidate = rest.trim();
+    if candidate.is_empty() {
+        None
+    } else {
+        Some(candidate)
+    }
+}
+
+/// 从固定前缀与后缀之间的错误消息中提取路径。
+///
+/// 用于 `"图片文件 <path> 的 SHA-256 不匹配"` 等路径被夹在两个固定片段之间的格式。
+fn extract_path_between<'a>(err: &'a str, prefix: &str, suffix: &str) -> Option<&'a str> {
+    let after_prefix = err.strip_prefix(prefix)?;
+    let end = after_prefix.find(suffix)?;
+    let candidate = after_prefix[..end].trim();
+    if candidate.is_empty() {
+        None
+    } else {
+        Some(candidate)
+    }
+}
+
 /// 将 `inspect_backup_zip` 返回的 `String` 错误映射为结构化 `BackupValidationIssue`。
 ///
 /// 匹配顺序至关重要：更具体的模式必须排在通用模式之前。
@@ -1431,8 +1458,12 @@ fn map_inspect_error_to_issue(err: &str) -> BackupValidationIssue {
     // -- zip 条目（必须在通用 "附件" 之前） --
 
     if err.contains("zip 中存在重复条目") {
-        return BackupValidationIssue::error("duplicate_zip_entry", err)
+        let mut issue = BackupValidationIssue::error("duplicate_zip_entry", err)
             .with_target("zip_entry");
+        if let Some(path) = extract_path_after_prefix(err, "zip 中存在重复条目: ") {
+            issue = issue.with_path(path);
+        }
+        return issue;
     }
 
     if err.contains("附件数量超过上限") {
@@ -1445,7 +1476,16 @@ fn map_inspect_error_to_issue(err: &str) -> BackupValidationIssue {
             .with_target("zip");
     }
 
-    if err.contains("zip 条目") || err.contains("zip 中包含未知条目") {
+    if err.contains("zip 中包含未知条目") {
+        let mut issue = BackupValidationIssue::error("invalid_zip_entry", err)
+            .with_target("zip_entry");
+        if let Some(path) = extract_path_after_prefix(err, "zip 中包含未知条目: ") {
+            issue = issue.with_path(path);
+        }
+        return issue;
+    }
+
+    if err.contains("zip 条目") {
         return BackupValidationIssue::error("invalid_zip_entry", err)
             .with_target("zip_entry");
     }
@@ -1492,20 +1532,34 @@ fn map_inspect_error_to_issue(err: &str) -> BackupValidationIssue {
     // -- 图片文件校验（必须在通用 "附件" 之前） --
 
     if err.contains("zip 中缺少图片文件") || err.contains("数据中缺少图片引用") {
-        return BackupValidationIssue::error("missing_image_file", err)
+        let mut issue = BackupValidationIssue::error("missing_image_file", err)
             .with_target("image_file");
+        if let Some(path) = extract_path_after_prefix(err, "zip 中缺少图片文件: ")
+            .or_else(|| extract_path_after_prefix(err, "数据中缺少图片引用: "))
+        {
+            issue = issue.with_path(path);
+        }
+        return issue;
     }
 
     if err.contains("SHA-256 不匹配") {
-        return BackupValidationIssue::error("image_file_hash_mismatch", err)
+        let mut issue = BackupValidationIssue::error("image_file_hash_mismatch", err)
             .with_target("image_file");
+        if let Some(path) = extract_path_between(err, "图片文件 ", " 的 SHA-256 不匹配") {
+            issue = issue.with_path(path);
+        }
+        return issue;
     }
 
     // -- 附件大小限制 --
 
     if err.contains("解压后大小超过上限") {
-        return BackupValidationIssue::error("image_file_total_size_limit_exceeded", err)
+        let mut issue = BackupValidationIssue::error("image_file_total_size_limit_exceeded", err)
             .with_target("zip");
+        if let Some(path) = extract_path_between(err, "附件 ", " 解压后大小超过上限") {
+            issue = issue.with_path(path);
+        }
+        return issue;
     }
 
     // -- 数据契约校验兜底 --
@@ -4867,6 +4921,7 @@ mod tests {
         let issue = map_inspect_error_to_issue("zip 中存在重复条目: manifest.json");
         assert_eq!(issue.code, "duplicate_zip_entry");
         assert_eq!(issue.target.as_deref(), Some("zip_entry"));
+        assert_eq!(issue.path.as_deref(), Some("manifest.json"));
     }
 
     #[test]
@@ -4874,6 +4929,7 @@ mod tests {
         let issue = map_inspect_error_to_issue("zip 条目路径为空");
         assert_eq!(issue.code, "invalid_zip_entry");
         assert_eq!(issue.target.as_deref(), Some("zip_entry"));
+        assert!(issue.path.is_none(), "通用 zip 条目错误不应设置 path");
     }
 
     #[test]
@@ -4881,6 +4937,7 @@ mod tests {
         let issue = map_inspect_error_to_issue("zip 中包含未知条目: malware.exe");
         assert_eq!(issue.code, "invalid_zip_entry");
         assert_eq!(issue.target.as_deref(), Some("zip_entry"));
+        assert_eq!(issue.path.as_deref(), Some("malware.exe"));
     }
 
     #[test]
@@ -4895,6 +4952,7 @@ mod tests {
         let issue = map_inspect_error_to_issue("附件总解压大小超过上限: 999 字节");
         assert_eq!(issue.code, "image_file_total_size_limit_exceeded");
         assert_eq!(issue.target.as_deref(), Some("zip"));
+        assert!(issue.path.is_none(), "总大小限制错误不应设置 path");
     }
 
     #[test]
@@ -4902,6 +4960,7 @@ mod tests {
         let issue = map_inspect_error_to_issue("zip 中缺少图片文件: attachments/abc.png");
         assert_eq!(issue.code, "missing_image_file");
         assert_eq!(issue.target.as_deref(), Some("image_file"));
+        assert_eq!(issue.path.as_deref(), Some("attachments/abc.png"));
     }
 
     #[test]
@@ -4909,6 +4968,7 @@ mod tests {
         let issue = map_inspect_error_to_issue("数据中缺少图片引用: attachments/abc.png");
         assert_eq!(issue.code, "missing_image_file");
         assert_eq!(issue.target.as_deref(), Some("image_file"));
+        assert_eq!(issue.path.as_deref(), Some("attachments/abc.png"));
     }
 
     #[test]
@@ -4918,6 +4978,7 @@ mod tests {
         );
         assert_eq!(issue.code, "image_file_hash_mismatch");
         assert_eq!(issue.target.as_deref(), Some("image_file"));
+        assert_eq!(issue.path.as_deref(), Some("attachments/a.png"));
     }
 
     #[test]
@@ -4950,6 +5011,7 @@ mod tests {
         let issue = map_inspect_error_to_issue("附件 attachments/a.png 解压后大小超过上限: 999 字节");
         assert_eq!(issue.code, "image_file_total_size_limit_exceeded");
         assert_eq!(issue.target.as_deref(), Some("zip"));
+        assert_eq!(issue.path.as_deref(), Some("attachments/a.png"));
     }
 
     // =======================================================================
@@ -5322,6 +5384,11 @@ mod tests {
         assert!(!result.ok);
         assert_eq!(result.errors[0].code, "missing_image_file");
         assert_eq!(result.errors[0].target.as_deref(), Some("image_file"));
+        assert_eq!(
+            result.errors[0].path.as_deref(),
+            Some(rel_path.as_str()),
+            "path 应为缺失图片的 zip 条目路径"
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -5357,6 +5424,11 @@ mod tests {
         assert!(!result.ok);
         assert_eq!(result.errors[0].code, "image_file_hash_mismatch");
         assert_eq!(result.errors[0].target.as_deref(), Some("image_file"));
+        assert_eq!(
+            result.errors[0].path.as_deref(),
+            Some(rel_path.as_str()),
+            "path 应为哈希不匹配的图片 zip 条目路径"
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }
