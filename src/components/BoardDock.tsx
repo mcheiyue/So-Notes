@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm } from "../store/confirmStore";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
 import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw, Cloud, Wifi, RefreshCw, Save } from "lucide-react";
@@ -273,10 +273,11 @@ export const BoardDock = () => {
 
   const onOrphanCleanupClick = async () => {
     if (attachmentScanState.orphanPaths.length === 0) return;
-    const confirmed = await confirm(
-            `即将永久删除 ${attachmentScanState.orphanCount} 个孤儿图片文件本体，并同时清空撤销/重做历史。此操作不可撤销，是否继续？`,
-            { title: '清理孤儿图片', kind: 'warning' },
-    );
+    const confirmed = await confirm({
+            title: '清理孤儿图片',
+            message: `即将永久删除 ${attachmentScanState.orphanCount} 个孤儿图片文件本体，并同时清空撤销/重做历史。此操作不可撤销，是否继续？`,
+            kind: 'danger',
+    });
     if (!confirmed) return;
 
     try {
@@ -452,7 +453,7 @@ export const BoardDock = () => {
         return;
       }
 
-      const confirmed = await confirm(buildRestoreSummaryMessage(summary), { title: '覆盖恢复确认', kind: 'warning' });
+      const confirmed = await confirm({ title: '覆盖恢复确认', message: buildRestoreSummaryMessage(summary), kind: 'danger' });
       if (!confirmed) return;
 
       const flushed = await persistenceFacade.flushNow();
@@ -615,10 +616,11 @@ export const BoardDock = () => {
   };
 
   const onWebdavDeleteBackup = async (fileName: string) => {
-    const confirmed = await confirm(
-      `确定要删除远端备份 "${fileName}" 吗？这不会影响当前本地看板和便签，但远端备份文件删除后不可恢复。`,
-      { title: '删除远端备份', kind: 'warning' },
-    );
+    const confirmed = await confirm({
+      title: '删除远端备份',
+      message: `确定要删除远端备份 "${fileName}" 吗？这不会影响当前本地看板和便签，但远端备份文件删除后不可恢复。`,
+      kind: 'danger',
+    });
     if (!confirmed) return;
 
     const config = buildWebdavConfig();
@@ -647,10 +649,10 @@ export const BoardDock = () => {
   };
 
   const onWebdavRestore = async (fileName: string) => {
-    const initialConfirmed = await confirm(
-      `即将从远端备份 "${fileName}" 下载并验证，是否继续？`,
-      { title: '下载并验证备份' },
-    );
+    const initialConfirmed = await confirm({
+      title: '下载并验证备份',
+      message: `即将从远端备份 "${fileName}" 下载并验证，是否继续？`,
+    });
     if (!initialConfirmed) return;
 
     const config = buildWebdavConfig();
@@ -691,7 +693,7 @@ export const BoardDock = () => {
         return;
       }
 
-      const restoreConfirmed = await confirm(buildRestoreSummaryMessage(summary), { title: '覆盖恢复确认', kind: 'warning' });
+      const restoreConfirmed = await confirm({ title: '覆盖恢复确认', message: buildRestoreSummaryMessage(summary), kind: 'danger' });
       if (!restoreConfirmed) return;
 
       const flushed = await persistenceFacade.flushNow();

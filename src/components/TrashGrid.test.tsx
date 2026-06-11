@@ -23,12 +23,12 @@ vi.mock('./NoteCard', () => ({
     NoteCard: ({ id }: { id: string }) => <div data-testid={`note-card-${id}`} />,
 }));
 
-vi.mock('@tauri-apps/plugin-dialog', () => ({
+vi.mock('../store/confirmStore', () => ({
     confirm: vi.fn(async () => true),
 }));
 
 import { TrashGrid } from './TrashGrid';
-import { confirm } from '@tauri-apps/plugin-dialog';
+import { confirm } from '../store/confirmStore';
 import { useStore } from '../store/useStore';
 import { normalizeNotes } from '../store/normalization';
 import { Note } from '../store/types';
@@ -186,8 +186,8 @@ describe('TrashGrid 废纸篓搜索', () => {
             emptyTrashButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
         });
 
-        expect(confirm).toHaveBeenNthCalledWith(1, '确认永久删除选中的 1 个便签？此操作无法撤销。', { title: '永久删除', kind: 'warning' });
-        expect(confirm).toHaveBeenNthCalledWith(2, '确认还原所有便签？', { title: '全部还原' });
-        expect(confirm).toHaveBeenNthCalledWith(3, '确认清空废纸篓？此操作无法撤销。', { title: '清空废纸篓', kind: 'warning' });
+        expect(confirm).toHaveBeenNthCalledWith(1, { title: '永久删除', message: '确认永久删除选中的 1 个便签？此操作无法撤销。', kind: 'danger' });
+        expect(confirm).toHaveBeenNthCalledWith(2, { title: '全部还原', message: '确认还原所有便签？' });
+        expect(confirm).toHaveBeenNthCalledWith(3, { title: '清空废纸篓', message: '确认清空废纸篓？此操作无法撤销。', kind: 'danger' });
     });
 });

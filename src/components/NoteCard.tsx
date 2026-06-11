@@ -2,7 +2,7 @@ import React, { useRef, useState, useLayoutEffect, useEffect } from "react";
 import { DraggableCore, DraggableEvent } from "react-draggable";
 import { Image } from "@tauri-apps/api/image";
 import { writeImage } from "@tauri-apps/plugin-clipboard-manager";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm } from "../store/confirmStore";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
 import { NOTE_UI_COLORS } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
@@ -838,7 +838,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                   onClick={async (e) => {
                       e.stopPropagation();
                       if (isStatic) {
-                          if (await confirm("确认永久删除此便签？此操作无法撤销。", { title: '永久删除', kind: 'warning' })) {
+                          if (await confirm({ title: '永久删除', message: '确认永久删除此便签？此操作无法撤销。', kind: 'danger' })) {
                               deleteNotePermanently(note.id);
                           }
                       } else {

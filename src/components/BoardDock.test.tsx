@@ -88,12 +88,12 @@ vi.mock('../services/storage/tauriPersistence', () => ({
   getLatestUpdateTimestamp: vi.fn(() => 0),
 }));
 
-vi.mock('@tauri-apps/plugin-dialog', () => ({
+vi.mock('../store/confirmStore', () => ({
   confirm: vi.fn(async () => true),
 }));
 
 import { BoardDock } from './BoardDock';
-import { confirm } from '@tauri-apps/plugin-dialog';
+import { confirm } from '../store/confirmStore';
 import { Z_INDEX } from '../constants/layout';
 import { createEmptyNormalizedNotesState, normalizeNotes } from '../store/normalization';
 import { useStore } from '../store/useStore';
@@ -1009,12 +1009,12 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     expect(validateLocalBackup).toHaveBeenCalledWith('/backups/full.zip');
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('2 个看板');
-    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('10 条便签');
-    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('2 个图片文件');
-    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('2025-06-11 12:00');
-    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('应用版本：1.5.2');
-    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('格式版本：1');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('2 个看板');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('10 条便签');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('2 个图片文件');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('2025-06-11 12:00');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('应用版本：1.5.2');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('格式版本：1');
     expect(flushNow).toHaveBeenCalled();
     expect(pause).toHaveBeenCalled();
     expect(restoreLocalBackup).toHaveBeenCalledWith('/backups/full.zip');
@@ -1599,9 +1599,9 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     await clickElement(restoreBtn);
 
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('覆盖');
-    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('不可撤销');
-    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('下载并验证');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('覆盖');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('不可撤销');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('下载并验证');
   });
 
   it('远端恢复成功后调用完整流程并更新反馈', async () => {
@@ -1677,13 +1677,13 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-abc');
     expect(resume).toHaveBeenCalled();
 
-    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('覆盖');
-    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('不可撤销');
-    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('下载并验证');
-    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('2025-06-11 12:00');
-    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('应用版本：1.5.2');
-    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('格式版本：1');
-    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('5 条便签');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('覆盖');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('不可撤销');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('下载并验证');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('2025-06-11 12:00');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('应用版本：1.5.2');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('格式版本：1');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('5 条便签');
 
     const feedback = container.querySelector('[data-testid="webdav-feedback"]');
     expect(feedback).not.toBeNull();
@@ -1774,11 +1774,11 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(flushNow).not.toHaveBeenCalled();
     expect(pause).not.toHaveBeenCalled();
     expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-cancel');
-    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('覆盖');
-    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('不可撤销');
-    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('2025-06-11 12:00');
-    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('应用版本：1.5.2');
-    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('格式版本：1');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('覆盖');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('不可撤销');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('2025-06-11 12:00');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('应用版本：1.5.2');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('格式版本：1');
   });
 
   it('远端恢复 restoreLocalBackup 失败时 cleanup token 并恢复持久化', async () => {

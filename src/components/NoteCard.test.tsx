@@ -90,12 +90,12 @@ vi.mock('react-draggable', () => ({
   },
 }));
 
-vi.mock('@tauri-apps/plugin-dialog', () => ({
+vi.mock('../store/confirmStore', () => ({
   confirm: vi.fn(async () => true),
 }));
 
 import { NoteCard } from './NoteCard';
-import { confirm } from '@tauri-apps/plugin-dialog';
+import { confirm } from '../store/confirmStore';
 import { useStore } from '../store/useStore';
 import { useUIStore } from '../store';
 import { normalizeNotes } from '../store/normalization';
@@ -1378,7 +1378,7 @@ describe('NoteCard TRASH 右键菜单守卫', () => {
       deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
 
-    expect(confirm).toHaveBeenCalledWith('确认永久删除此便签？此操作无法撤销。', { title: '永久删除', kind: 'warning' });
+    expect(confirm).toHaveBeenCalledWith({ title: '永久删除', message: '确认永久删除此便签？此操作无法撤销。', kind: 'danger' });
     expect(deleteNotePermanently).not.toHaveBeenCalled();
   });
 });

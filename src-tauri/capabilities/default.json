@@ -18,7 +18,6 @@
     "fs:allow-read-text-file",
     "dialog:allow-save",
     "dialog:allow-open",
-    "dialog:allow-confirm",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-unregister-all",
