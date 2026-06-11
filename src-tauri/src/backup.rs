@@ -1181,7 +1181,7 @@ fn restore_local_backup_inner(
         if had_old_data {
             let _ = std::fs::rename(&data_bak, &old_data_path);
         }
-        let _ = std::fs::remove_dir_all(&staging_dir);
+        // staging 目录由 _staging_guard Drop 统一清理
         return Err(format!("替换 data.json 失败: {e}"));
     }
 
@@ -1190,7 +1190,7 @@ fn restore_local_backup_inner(
     if had_old_attach {
         if let Err(e) = std::fs::rename(&old_attach_dir, &attach_old) {
             restore_data_file(&data_bak, &old_data_path, had_old_data);
-            let _ = std::fs::remove_dir_all(&staging_dir);
+            // staging 目录由 _staging_guard Drop 统一清理
             return Err(format!("备份旧附件目录失败: {e}"));
         }
     }
@@ -1203,7 +1203,7 @@ fn restore_local_backup_inner(
         if let Err(e) = std::fs::rename(&staged_attach, &old_attach_dir) {
             restore_attachment_dir(&attach_old, &old_attach_dir, had_old_attach);
             restore_data_file(&data_bak, &old_data_path, had_old_data);
-            let _ = std::fs::remove_dir_all(&staging_dir);
+            // staging 目录由 _staging_guard Drop 统一清理
             return Err(format!("替换附件目录失败: {e}"));
         }
     }
@@ -1538,6 +1538,24 @@ fn map_inspect_error_to_issue(err: &str) -> BackupValidationIssue {
         if let Some(path) = extract_path_after_prefix(err, "zip 中缺少图片文件: ")
             .or_else(|| extract_path_after_prefix(err, "数据中缺少图片引用: "))
         {
+            issue = issue.with_path(path);
+        }
+        return issue;
+    }
+
+    if err.contains("文件名哈希与内容哈希不匹配") {
+        let mut issue = BackupValidationIssue::error("image_file_hash_mismatch", err)
+            .with_target("image_file");
+        if let Some(path) = extract_path_between(err, "图片文件 ", " 的文件名哈希") {
+            issue = issue.with_path(path);
+        }
+        return issue;
+    }
+
+    if err.contains("大小不匹配") && err.contains("图片文件") {
+        let mut issue = BackupValidationIssue::error("image_file_size_mismatch", err)
+            .with_target("image_file");
+        if let Some(path) = extract_path_between(err, "图片文件 ", " 的大小") {
             issue = issue.with_path(path);
         }
         return issue;
@@ -4986,6 +5004,26 @@ mod tests {
         assert_eq!(issue.code, "image_file_hash_mismatch");
         assert_eq!(issue.target.as_deref(), Some("image_file"));
         assert_eq!(issue.path.as_deref(), Some("attachments/a.png"));
+    }
+
+    #[test]
+    fn map_error_image_file_size_mismatch() {
+        let issue = map_inspect_error_to_issue(
+            "图片文件 abc.png 的大小不匹配: 期望 100 字节, 实际 200 字节",
+        );
+        assert_eq!(issue.code, "image_file_size_mismatch");
+        assert_eq!(issue.target.as_deref(), Some("image_file"));
+        assert_eq!(issue.path.as_deref(), Some("abc.png"));
+    }
+
+    #[test]
+    fn map_error_image_file_hash_stem_mismatch() {
+        let issue = map_inspect_error_to_issue(
+            "图片文件 abc.png 的文件名哈希与内容哈希不匹配: 文件名 abc, 内容 def",
+        );
+        assert_eq!(issue.code, "image_file_hash_mismatch");
+        assert_eq!(issue.target.as_deref(), Some("image_file"));
+        assert_eq!(issue.path.as_deref(), Some("abc.png"));
     }
 
     #[test]

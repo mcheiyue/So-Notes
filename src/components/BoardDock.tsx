@@ -649,7 +649,7 @@ export const BoardDock = () => {
     try {
       const result = await WebDavBackupService.deleteBackup(config, fileName);
       if (result.success) {
-        setWebdavFeedback({ status: 'success', message: result.error ?? '远端备份已删除。' });
+        setWebdavFeedback({ status: 'success', message: '远端备份已删除。' });
         try {
           const backups = await WebDavBackupService.listBackups(config);
           setWebdavBackups(backups);
