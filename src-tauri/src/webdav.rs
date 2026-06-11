@@ -1658,14 +1658,20 @@ pub async fn webdav_create_remote_backup(
     result
 }
 
-async fn webdav_download_backup_with_client(
+/// 下载核心实现：接受注入的临时目录和大小上限，便于测试。
+///
+/// 生产入口 `webdav_download_backup_with_client` 委托本函数，
+/// 传入应用缓存目录和 `MAX_WEBDAV_BACKUP_DOWNLOAD_BYTES`。
+/// 测试入口传入临时目录和较小的 `max_bytes` 以避免分配大内存。
+async fn download_backup_with_limit(
     client: &reqwest::Client,
     target: &WebDavRequestTarget,
-    remote_file_name: &str,
-    downloads_dir: &Path,
-) -> Result<WebDavDownloadResult, String> {
+    file_name: &str,
+    temp_root: &Path,
+    max_bytes: u64,
+) -> Result<WebDavDownloadResult, WebDavOperationError> {
     let dir_url = build_remote_dir_url(&target.base_url, &target.remote_dir);
-    let download_url = format!("{}{}", dir_url, remote_file_name);
+    let download_url = format!("{}{}", dir_url, file_name);
 
     let mut req = client.get(&download_url);
     if let Some(pw) = &target.password {
@@ -1677,47 +1683,70 @@ async fn webdav_download_backup_with_client(
     let resp = req
         .send()
         .await
-        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+        .map_err(|e| classify_reqwest_error(WebDavOperation::DownloadBackup, &e))?;
 
-    let status = resp.status().as_u16();
-    match status {
-        200..=299 => {}
-        401 | 403 => return Err("WebDAV 鉴权失败".to_string()),
-        404 => return Err("远端备份文件不存在".to_string()),
-        _ => return Err(format!("远端备份下载失败 (HTTP {status})，本地数据未受影响")),
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(classify_webdav_status(
+            WebDavOperation::DownloadBackup,
+            status,
+        ));
     }
 
     if let Some(content_length) = resp.content_length() {
-        if content_length > MAX_WEBDAV_BACKUP_DOWNLOAD_BYTES {
-            return Err("远端备份超过允许大小，本地数据未受影响".to_string());
+        if content_length > max_bytes {
+            return Err(WebDavOperationError {
+                kind: WebDavErrorKind::DownloadTooLarge,
+                status: None,
+                retryable: false,
+            });
         }
     }
 
+    std::fs::create_dir_all(temp_root).map_err(|_| WebDavOperationError {
+        kind: WebDavErrorKind::LocalTempFileError,
+        status: None,
+        retryable: false,
+    })?;
+
     let dl_id: u64 = rand::random();
     let dl_file_name = format!("webdav-dl-{dl_id:016x}.zip");
-    let dl_path = downloads_dir.join(&dl_file_name);
+    let dl_path = temp_root.join(&dl_file_name);
 
-    let mut file = std::fs::File::create(&dl_path)
-        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+    let mut file = std::fs::File::create(&dl_path).map_err(|_| WebDavOperationError {
+        kind: WebDavErrorKind::LocalTempFileError,
+        status: None,
+        retryable: false,
+    })?;
 
     let mut total_bytes: u64 = 0;
     let mut resp = resp;
 
-    use std::io::Write;
-
     while let Some(chunk) = resp.chunk().await.map_err(|_| {
         let _ = std::fs::remove_file(&dl_path);
-        "远端备份下载失败，本地数据未受影响".to_string()
+        WebDavOperationError {
+            kind: WebDavErrorKind::UnexpectedStatus,
+            status: None,
+            retryable: false,
+        }
     })? {
         total_bytes += chunk.len() as u64;
-        if total_bytes > MAX_WEBDAV_BACKUP_DOWNLOAD_BYTES {
+        if total_bytes > max_bytes {
             let _ = std::fs::remove_file(&dl_path);
-            return Err("远端备份超过允许大小，本地数据未受影响".to_string());
+            return Err(WebDavOperationError {
+                kind: WebDavErrorKind::DownloadTooLarge,
+                status: None,
+                retryable: false,
+            });
         }
 
         file.write_all(&chunk).map_err(|_| {
             let _ = std::fs::remove_file(&dl_path);
-            "远端备份下载失败，本地数据未受影响".to_string()
+            WebDavOperationError {
+                kind: WebDavErrorKind::LocalTempFileError,
+                status: None,
+                retryable: false,
+            }
         })?;
     }
 
@@ -1731,6 +1760,23 @@ async fn webdav_download_backup_with_client(
         download_token: Some(token),
         error: None,
     })
+}
+
+async fn webdav_download_backup_with_client(
+    client: &reqwest::Client,
+    target: &WebDavRequestTarget,
+    remote_file_name: &str,
+    downloads_dir: &Path,
+) -> Result<WebDavDownloadResult, String> {
+    download_backup_with_limit(
+        client,
+        target,
+        remote_file_name,
+        downloads_dir,
+        MAX_WEBDAV_BACKUP_DOWNLOAD_BYTES,
+    )
+    .await
+    .map_err(|e| webdav_error_message(&e))
 }
 
 #[tauri::command]
@@ -3869,6 +3915,109 @@ mod tests {
                 })
                 .collect()
         }
+
+        fn accept_one_download_request(
+            &self,
+            status_line: &str,
+            explicit_content_length: Option<u64>,
+            body_bytes: &[u8],
+        ) -> MockRequestRecord {
+            self.listener
+                .set_nonblocking(true)
+                .expect("设置非阻塞失败");
+
+            let stream = {
+                let deadline =
+                    std::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    match self.listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(ref e)
+                            if e.kind() == std::io::ErrorKind::WouldBlock =>
+                        {
+                            if std::time::Instant::now() >= deadline {
+                                panic!("MockWebDavServer 等待连接超时（5 秒）");
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            continue;
+                        }
+                        Err(e) => panic!("MockWebDavServer accept 失败: {e}"),
+                    }
+                }
+            };
+            self.listener
+                .set_nonblocking(false)
+                .expect("恢复阻塞模式失败");
+
+            stream
+                .set_nonblocking(false)
+                .expect("恢复 accepted stream 阻塞模式失败");
+
+            let mut stream = stream.try_clone().expect("克隆 TcpStream 失败");
+
+            let reader_stream = stream.try_clone().expect("克隆 reader stream 失败");
+            let mut reader = BufReader::new(reader_stream);
+
+            let mut method = String::new();
+            let mut path = String::new();
+            let mut depth: Option<String> = None;
+            let mut authorization_present = false;
+
+            let mut request_line = String::new();
+            reader
+                .read_line(&mut request_line)
+                .expect("读取请求行失败");
+            let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+            if parts.len() >= 2 {
+                method = parts[0].to_string();
+                path = parts[1].to_string();
+            }
+
+            loop {
+                let mut line = String::new();
+                reader
+                    .read_line(&mut line)
+                    .expect("读取头部行失败");
+                let trimmed = line.trim().to_string();
+                if trimmed.is_empty() {
+                    break;
+                }
+                if let Some(val) = trimmed.strip_prefix("Depth:") {
+                    depth = Some(val.trim().to_string());
+                }
+                if trimmed
+                    .to_ascii_lowercase()
+                    .starts_with("authorization:")
+                {
+                    authorization_present = true;
+                }
+            }
+
+            let mut response = format!("{status_line}\r\n");
+            response.push_str("Content-Type: application/octet-stream\r\n");
+            response.push_str("Connection: close\r\n");
+            if let Some(len) = explicit_content_length {
+                response.push_str(&format!("Content-Length: {len}\r\n"));
+            }
+            response.push_str("\r\n");
+
+            stream
+                .write_all(response.as_bytes())
+                .expect("写入响应头失败");
+            if !body_bytes.is_empty() {
+                stream
+                    .write_all(body_bytes)
+                    .expect("写入响应体失败");
+            }
+            drop(stream);
+
+            MockRequestRecord {
+                method,
+                path,
+                depth,
+                authorization_present,
+            }
+        }
     }
 
     fn load_fixture(name: &str) -> String {
@@ -4965,5 +5114,338 @@ mod tests {
         assert!(!zip_path.exists(), "401 失败后临时 zip 应被清理");
 
         let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // Commit 8：下载 Content-Length / 流式上限 / 临时目录错误测试
+    // -----------------------------------------------------------------------
+
+    fn download_test_temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "webdav-dl-test-{label}-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&dir).expect("创建测试临时目录失败");
+        dir
+    }
+
+    fn download_test_client_and_target(base_url: &str) -> (reqwest::Client, WebDavRequestTarget) {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("创建测试 reqwest::Client 失败");
+        let target = WebDavRequestTarget::for_test_with_auth(
+            base_url,
+            "SoNotes_Backups/",
+            "dl_user",
+            Some("dl_pass".to_string()),
+        );
+        (client, target)
+    }
+
+    #[tokio::test]
+    async fn download_no_content_length_succeeds_and_creates_token() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let body = b"PK\x03\x04fake zip content here";
+        let handle = std::thread::spawn(move || {
+            server.accept_one_download_request("HTTP/1.1 200 OK", None, body)
+        });
+
+        let (client, target) = download_test_client_and_target(&base_url);
+        let temp_dir = download_test_temp_dir("no-cl");
+
+        let result = download_backup_with_limit(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+            &temp_dir,
+            1024,
+        )
+        .await;
+        let record = handle.join().expect("mock server 线程 panic");
+
+        assert_eq!(record.method, "GET");
+        assert!(record.authorization_present, "下载请求应携带 Authorization");
+
+        let dl_result = result.expect("无 Content-Length 下载应成功");
+        assert!(dl_result.success);
+        assert!(
+            dl_result.download_token.is_some(),
+            "成功下载应生成 download token"
+        );
+
+        if let Some(token) = &dl_result.download_token {
+            let _ = cleanup_download_token(token);
+        }
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn download_content_length_over_max_fails_before_body() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_download_request(
+                "HTTP/1.1 200 OK",
+                Some(2_000_000_000),
+                b"",
+            )
+        });
+
+        let (client, target) = download_test_client_and_target(&base_url);
+        let temp_dir = download_test_temp_dir("cl-over");
+
+        let result = download_backup_with_limit(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+            &temp_dir,
+            1024,
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.kind,
+            WebDavErrorKind::DownloadTooLarge,
+            "Content-Length 超限应返回 DownloadTooLarge: {:?}",
+            err.kind
+        );
+        assert!(!err.retryable);
+
+        let entries: Vec<_> = std::fs::read_dir(&temp_dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "zip"))
+            .collect();
+        assert!(entries.is_empty(), "Content-Length 超限不应创建临时文件");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn download_streaming_over_max_deletes_temp_file() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let big_body = vec![0u8; 64];
+        let handle = std::thread::spawn(move || {
+            server.accept_one_download_request("HTTP/1.1 200 OK", None, &big_body)
+        });
+
+        let (client, target) = download_test_client_and_target(&base_url);
+        let temp_dir = download_test_temp_dir("stream-over");
+
+        let result = download_backup_with_limit(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+            &temp_dir,
+            16,
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.kind,
+            WebDavErrorKind::DownloadTooLarge,
+            "流式超限应返回 DownloadTooLarge: {:?}",
+            err.kind
+        );
+
+        let entries: Vec<_> = std::fs::read_dir(&temp_dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "zip"))
+            .collect();
+        assert!(entries.is_empty(), "流式超限后临时文件应被删除");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn download_404_returns_not_found_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_download_request("HTTP/1.1 404 Not Found", None, b"")
+        });
+
+        let (client, target) = download_test_client_and_target(&base_url);
+        let temp_dir = download_test_temp_dir("404");
+
+        let result = download_backup_with_limit(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+            &temp_dir,
+            1024,
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.kind,
+            WebDavErrorKind::NotFound,
+            "404 应映射到 NotFound: {:?}",
+            err.kind
+        );
+        assert_eq!(err.status, Some(404));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn download_401_returns_auth_failed_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_download_request(
+                "HTTP/1.1 401 Unauthorized",
+                None,
+                b"",
+            )
+        });
+
+        let (client, target) = download_test_client_and_target(&base_url);
+        let temp_dir = download_test_temp_dir("401");
+
+        let result = download_backup_with_limit(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+            &temp_dir,
+            1024,
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.kind,
+            WebDavErrorKind::AuthFailed,
+            "401 应映射到 AuthFailed: {:?}",
+            err.kind
+        );
+        assert_eq!(err.status, Some(401));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn download_403_returns_forbidden_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_download_request(
+                "HTTP/1.1 403 Forbidden",
+                None,
+                b"",
+            )
+        });
+
+        let (client, target) = download_test_client_and_target(&base_url);
+        let temp_dir = download_test_temp_dir("403");
+
+        let result = download_backup_with_limit(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+            &temp_dir,
+            1024,
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.kind,
+            WebDavErrorKind::Forbidden,
+            "403 应映射到 Forbidden: {:?}",
+            err.kind
+        );
+        assert_eq!(err.status, Some(403));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn download_file_as_temp_root_returns_local_temp_file_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_download_request(
+                "HTTP/1.1 200 OK",
+                None,
+                b"some data",
+            )
+        });
+
+        let (client, target) = download_test_client_and_target(&base_url);
+        let temp_dir = download_test_temp_dir("file-root");
+        let file_as_root = temp_dir.join("not_a_dir.txt");
+        std::fs::write(&file_as_root, b"I am a file").unwrap();
+
+        let result = download_backup_with_limit(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+            &file_as_root,
+            1024,
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.kind,
+            WebDavErrorKind::LocalTempFileError,
+            "文件路径作为 temp_root 应返回 LocalTempFileError: {:?}",
+            err.kind
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn download_nested_file_as_temp_root_returns_local_temp_file_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_download_request(
+                "HTTP/1.1 200 OK",
+                None,
+                b"some data",
+            )
+        });
+
+        let (client, target) = download_test_client_and_target(&base_url);
+        let temp_dir = download_test_temp_dir("nested-root");
+        let file_as_parent = temp_dir.join("blocker.txt");
+        std::fs::write(&file_as_parent, b"blocker").unwrap();
+        let nested_bad = file_as_parent.join("subdir");
+
+        let result = download_backup_with_limit(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+            &nested_bad,
+            1024,
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.kind,
+            WebDavErrorKind::LocalTempFileError,
+            "不存在的 temp_root 应返回 LocalTempFileError: {:?}",
+            err.kind
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
