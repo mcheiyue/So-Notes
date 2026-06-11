@@ -1657,6 +1657,260 @@ pub async fn cleanup_downloaded_backup(
 }
 
 // ===========================================================================
+// WebDAV 错误分类（内部使用，不改变前端返回类型）
+// ===========================================================================
+
+/// WebDAV 操作过程中的错误类型分类。
+///
+/// 本枚举仅用于 Rust 内部分类与测试断言，不直接暴露给前端。
+/// 前端可见文案由 `webdav_error_message()` 在 Tauri 命令返回前生成。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebDavErrorKind {
+    /// 鉴权失败（HTTP 401）。
+    AuthFailed,
+    /// 权限不足或访问被拒绝（HTTP 403）。
+    Forbidden,
+    /// 目标不存在（HTTP 404）。
+    NotFound,
+    /// 远端目录不存在、父路径冲突或同名对象已存在（HTTP 409/412）。
+    PathConflict,
+    /// 资源被锁定（HTTP 423）。
+    Locked,
+    /// 远端存储空间不足（HTTP 507）。
+    InsufficientStorage,
+    /// 服务端不支持当前方法或路径不正确（HTTP 405）。
+    MethodNotAllowed,
+    /// 请求超时。
+    Timeout,
+    /// 网络不可达或连接失败。
+    NetworkUnreachable,
+    /// 重定向被安全策略拒绝。
+    RedirectRejected,
+    /// 非预期的 HTTP 状态码。
+    UnexpectedStatus,
+    /// PROPFIND 响应 XML 无效或无法解析。
+    InvalidPropfindResponse,
+    /// 下载内容超过允许大小上限。
+    DownloadTooLarge,
+    /// 远端文件名校验失败。
+    InvalidRemoteFileName,
+    /// 本地临时文件操作失败。
+    LocalTempFileError,
+}
+
+/// WebDAV 操作类型，用于区分同一状态码在不同操作下的语义。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebDavOperation {
+    /// 连接测试。
+    TestConnection,
+    /// 列出远端备份。
+    ListBackups,
+    /// 上传备份。
+    UploadBackup,
+    /// 下载备份。
+    DownloadBackup,
+    /// 删除备份。
+    DeleteBackup,
+}
+
+/// WebDAV 操作错误，包含分类、可选 HTTP 状态码和可重试标记。
+///
+/// 本结构体不保存用户文案，避免结构体相等比较被中文文案变化拖动。
+/// 用户可见文案由 `webdav_error_message()` 在调用点生成。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebDavOperationError {
+    pub kind: WebDavErrorKind,
+    pub status: Option<u16>,
+    pub retryable: bool,
+}
+
+/// 传输层故障分类，用于将 `reqwest::Error` 转换为内部分类。
+///
+/// 拆分此层使得单元测试可以直接断言映射逻辑，无需在 CI 中制造真实超时或网络故障。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebDavTransportFailure {
+    /// 请求超时。
+    Timeout,
+    /// 网络不可达或连接失败。
+    NetworkUnreachable,
+    /// 重定向被安全策略拒绝。
+    RedirectRejected,
+    /// 其他传输层错误。
+    Other,
+}
+
+/// 将 HTTP 状态码分类为 `WebDavOperationError`。
+///
+/// 映射规则：
+/// - 401 → AuthFailed
+/// - 403 → Forbidden
+/// - 404 → NotFound
+/// - 405 → MethodNotAllowed
+/// - 409 → PathConflict
+/// - 412 → PathConflict
+/// - 423 → Locked
+/// - 507 → InsufficientStorage
+/// - 408/429 → Timeout（可重试）
+/// - 5xx → UnexpectedStatus（可重试）
+/// - 其他 → UnexpectedStatus（不可重试）
+pub fn classify_webdav_status(
+    _operation: WebDavOperation,
+    status: reqwest::StatusCode,
+) -> WebDavOperationError {
+    let code = status.as_u16();
+    match code {
+        401 => WebDavOperationError {
+            kind: WebDavErrorKind::AuthFailed,
+            status: Some(code),
+            retryable: false,
+        },
+        403 => WebDavOperationError {
+            kind: WebDavErrorKind::Forbidden,
+            status: Some(code),
+            retryable: false,
+        },
+        404 => WebDavOperationError {
+            kind: WebDavErrorKind::NotFound,
+            status: Some(code),
+            retryable: false,
+        },
+        405 => WebDavOperationError {
+            kind: WebDavErrorKind::MethodNotAllowed,
+            status: Some(code),
+            retryable: false,
+        },
+        408 => WebDavOperationError {
+            kind: WebDavErrorKind::Timeout,
+            status: Some(code),
+            retryable: true,
+        },
+        409 => WebDavOperationError {
+            kind: WebDavErrorKind::PathConflict,
+            status: Some(code),
+            retryable: false,
+        },
+        412 => WebDavOperationError {
+            kind: WebDavErrorKind::PathConflict,
+            status: Some(code),
+            retryable: false,
+        },
+        423 => WebDavOperationError {
+            kind: WebDavErrorKind::Locked,
+            status: Some(code),
+            retryable: false,
+        },
+        429 => WebDavOperationError {
+            kind: WebDavErrorKind::Timeout,
+            status: Some(code),
+            retryable: true,
+        },
+        507 => WebDavOperationError {
+            kind: WebDavErrorKind::InsufficientStorage,
+            status: Some(code),
+            retryable: false,
+        },
+        500..=599 => WebDavOperationError {
+            kind: WebDavErrorKind::UnexpectedStatus,
+            status: Some(code),
+            retryable: true,
+        },
+        _ => WebDavOperationError {
+            kind: WebDavErrorKind::UnexpectedStatus,
+            status: Some(code),
+            retryable: false,
+        },
+    }
+}
+
+/// 将传输层故障分类映射为 `WebDavOperationError`。
+///
+/// 测试可直接构造 `WebDavTransportFailure::Timeout` 断言映射逻辑，
+/// 无需在 CI 中制造真实超时。
+pub fn classify_transport_failure(
+    failure: WebDavTransportFailure,
+    _operation: WebDavOperation,
+) -> WebDavOperationError {
+    match failure {
+        WebDavTransportFailure::Timeout => WebDavOperationError {
+            kind: WebDavErrorKind::Timeout,
+            status: None,
+            retryable: true,
+        },
+        WebDavTransportFailure::NetworkUnreachable => WebDavOperationError {
+            kind: WebDavErrorKind::NetworkUnreachable,
+            status: None,
+            retryable: true,
+        },
+        WebDavTransportFailure::RedirectRejected => WebDavOperationError {
+            kind: WebDavErrorKind::RedirectRejected,
+            status: None,
+            retryable: false,
+        },
+        WebDavTransportFailure::Other => WebDavOperationError {
+            kind: WebDavErrorKind::UnexpectedStatus,
+            status: None,
+            retryable: false,
+        },
+    }
+}
+
+/// 将 `reqwest::Error` 转换为内部传输层故障分类。
+///
+/// 调用链：`reqwest::Error` → `WebDavTransportFailure` → `WebDavOperationError`。
+pub fn classify_reqwest_error(
+    _operation: WebDavOperation,
+    error: &reqwest::Error,
+) -> WebDavOperationError {
+    let failure = if error.is_timeout() {
+        WebDavTransportFailure::Timeout
+    } else if error.is_connect() {
+        WebDavTransportFailure::NetworkUnreachable
+    } else if error.is_redirect() {
+        WebDavTransportFailure::RedirectRejected
+    } else {
+        WebDavTransportFailure::Other
+    };
+
+    classify_transport_failure(failure, _operation)
+}
+
+/// 将 `WebDavOperationError` 映射为用户可见的中文错误信息。
+///
+/// 本函数仅作为内部映射，本版本不接入命令函数，保持现有用户可见文案不变。
+/// 后续 Commit 6+ 会逐步将命令函数的错误路径接入此映射。
+pub fn webdav_error_message(error: &WebDavOperationError) -> String {
+    match error.kind {
+        WebDavErrorKind::AuthFailed => "WebDAV 鉴权失败".to_string(),
+        WebDavErrorKind::Forbidden => "WebDAV 权限不足或访问被拒绝".to_string(),
+        WebDavErrorKind::NotFound => match error.status {
+            Some(404) => "远端目标不存在".to_string(),
+            _ => "远端目标不存在".to_string(),
+        },
+        WebDavErrorKind::PathConflict => "远端路径冲突".to_string(),
+        WebDavErrorKind::Locked => "远端资源被锁定".to_string(),
+        WebDavErrorKind::InsufficientStorage => "远端存储空间不足".to_string(),
+        WebDavErrorKind::MethodNotAllowed => "WebDAV 服务端不支持当前方法或路径不正确".to_string(),
+        WebDavErrorKind::Timeout => {
+            if error.status.is_some() {
+                "WebDAV 请求超时".to_string()
+            } else {
+                "WebDAV 连接超时".to_string()
+            }
+        }
+        WebDavErrorKind::NetworkUnreachable => "WebDAV 网络不可达".to_string(),
+        WebDavErrorKind::RedirectRejected => "WebDAV 重定向被拒绝".to_string(),
+        WebDavErrorKind::UnexpectedStatus => match error.status {
+            Some(code) => format!("WebDAV 服务器返回异常状态码: {code}"),
+            None => "WebDAV 未知错误".to_string(),
+        },
+        WebDavErrorKind::InvalidPropfindResponse => "WebDAV 列表 XML 解析失败".to_string(),
+        WebDavErrorKind::DownloadTooLarge => "远端备份超过允许大小".to_string(),
+        WebDavErrorKind::InvalidRemoteFileName => "远端备份文件名不合法".to_string(),
+        WebDavErrorKind::LocalTempFileError => "本地临时文件操作失败".to_string(),
+    }
+}
+
+// ===========================================================================
 // 单元测试
 // ===========================================================================
 
@@ -2878,5 +3132,442 @@ mod tests {
         assert!(not_zip.exists());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // WebDAV 错误分类：状态码映射测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn classify_status_401_maps_to_auth_failed() {
+        let result = classify_webdav_status(
+            WebDavOperation::TestConnection,
+            reqwest::StatusCode::from_u16(401).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::AuthFailed);
+        assert_eq!(result.status, Some(401));
+        assert!(!result.retryable);
+    }
+
+    #[test]
+    fn classify_status_403_maps_to_forbidden() {
+        let result = classify_webdav_status(
+            WebDavOperation::ListBackups,
+            reqwest::StatusCode::from_u16(403).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::Forbidden);
+        assert_eq!(result.status, Some(403));
+        assert!(!result.retryable);
+    }
+
+    #[test]
+    fn classify_status_404_maps_to_not_found() {
+        let result = classify_webdav_status(
+            WebDavOperation::DownloadBackup,
+            reqwest::StatusCode::from_u16(404).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::NotFound);
+        assert_eq!(result.status, Some(404));
+        assert!(!result.retryable);
+    }
+
+    #[test]
+    fn classify_status_405_maps_to_method_not_allowed() {
+        let result = classify_webdav_status(
+            WebDavOperation::TestConnection,
+            reqwest::StatusCode::from_u16(405).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::MethodNotAllowed);
+        assert_eq!(result.status, Some(405));
+        assert!(!result.retryable);
+    }
+
+    #[test]
+    fn classify_status_409_maps_to_path_conflict() {
+        let result = classify_webdav_status(
+            WebDavOperation::UploadBackup,
+            reqwest::StatusCode::from_u16(409).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::PathConflict);
+        assert_eq!(result.status, Some(409));
+        assert!(!result.retryable);
+    }
+
+    #[test]
+    fn classify_status_412_maps_to_path_conflict() {
+        let result = classify_webdav_status(
+            WebDavOperation::UploadBackup,
+            reqwest::StatusCode::from_u16(412).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::PathConflict);
+        assert_eq!(result.status, Some(412));
+        assert!(!result.retryable);
+    }
+
+    #[test]
+    fn classify_status_423_maps_to_locked() {
+        let result = classify_webdav_status(
+            WebDavOperation::DeleteBackup,
+            reqwest::StatusCode::from_u16(423).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::Locked);
+        assert_eq!(result.status, Some(423));
+        assert!(!result.retryable);
+    }
+
+    #[test]
+    fn classify_status_507_maps_to_insufficient_storage() {
+        let result = classify_webdav_status(
+            WebDavOperation::UploadBackup,
+            reqwest::StatusCode::from_u16(507).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::InsufficientStorage);
+        assert_eq!(result.status, Some(507));
+        assert!(!result.retryable);
+    }
+
+    #[test]
+    fn classify_status_5xx_maps_to_unexpected_status_retryable() {
+        for code in [500, 502, 503, 504] {
+            let result = classify_webdav_status(
+                WebDavOperation::TestConnection,
+                reqwest::StatusCode::from_u16(code).unwrap(),
+            );
+            assert_eq!(
+                result.kind,
+                WebDavErrorKind::UnexpectedStatus,
+                "HTTP {code} 应映射到 UnexpectedStatus"
+            );
+            assert_eq!(result.status, Some(code));
+            assert!(
+                result.retryable,
+                "HTTP {code} 应标记为 retryable"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_status_408_maps_to_timeout_retryable() {
+        let result = classify_webdav_status(
+            WebDavOperation::DownloadBackup,
+            reqwest::StatusCode::from_u16(408).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::Timeout);
+        assert_eq!(result.status, Some(408));
+        assert!(result.retryable);
+    }
+
+    #[test]
+    fn classify_status_429_maps_to_timeout_retryable() {
+        let result = classify_webdav_status(
+            WebDavOperation::UploadBackup,
+            reqwest::StatusCode::from_u16(429).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::Timeout);
+        assert_eq!(result.status, Some(429));
+        assert!(result.retryable);
+    }
+
+    #[test]
+    fn classify_status_other_maps_to_unexpected_status_not_retryable() {
+        let result = classify_webdav_status(
+            WebDavOperation::TestConnection,
+            reqwest::StatusCode::from_u16(301).unwrap(),
+        );
+        assert_eq!(result.kind, WebDavErrorKind::UnexpectedStatus);
+        assert_eq!(result.status, Some(301));
+        assert!(!result.retryable);
+    }
+
+    // -----------------------------------------------------------------------
+    // WebDAV 错误分类：transport failure 映射测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn classify_transport_timeout_maps_to_timeout() {
+        let result = classify_transport_failure(
+            WebDavTransportFailure::Timeout,
+            WebDavOperation::DownloadBackup,
+        );
+        assert_eq!(result.kind, WebDavErrorKind::Timeout);
+        assert_eq!(result.status, None);
+        assert!(result.retryable);
+    }
+
+    #[test]
+    fn classify_transport_network_unreachable_maps_to_network_unreachable() {
+        let result = classify_transport_failure(
+            WebDavTransportFailure::NetworkUnreachable,
+            WebDavOperation::TestConnection,
+        );
+        assert_eq!(result.kind, WebDavErrorKind::NetworkUnreachable);
+        assert_eq!(result.status, None);
+        assert!(result.retryable);
+    }
+
+    #[test]
+    fn classify_transport_redirect_rejected_maps_to_redirect_rejected() {
+        let result = classify_transport_failure(
+            WebDavTransportFailure::RedirectRejected,
+            WebDavOperation::ListBackups,
+        );
+        assert_eq!(result.kind, WebDavErrorKind::RedirectRejected);
+        assert_eq!(result.status, None);
+        assert!(!result.retryable);
+    }
+
+    #[test]
+    fn classify_transport_other_maps_to_unexpected_status() {
+        let result = classify_transport_failure(
+            WebDavTransportFailure::Other,
+            WebDavOperation::UploadBackup,
+        );
+        assert_eq!(result.kind, WebDavErrorKind::UnexpectedStatus);
+        assert_eq!(result.status, None);
+        assert!(!result.retryable);
+    }
+
+    // -----------------------------------------------------------------------
+    // WebDAV 错误分类：classify_reqwest_error 合成测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn classify_reqwest_error_is_functional() {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(1))
+            .build()
+            .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async {
+            // 请求一个不可达地址以触发连接错误
+            let err = client
+                .get("http://127.0.0.1:1")
+                .send()
+                .await
+                .unwrap_err();
+            classify_reqwest_error(WebDavOperation::TestConnection, &err)
+        });
+
+        assert!(
+            matches!(
+                result.kind,
+                WebDavErrorKind::NetworkUnreachable
+                    | WebDavErrorKind::Timeout
+                    | WebDavErrorKind::UnexpectedStatus
+            ),
+            "连接本地不可达端口应产生 NetworkUnreachable、Timeout 或 UnexpectedStatus，实际: {:?}",
+            result.kind
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // WebDAV 错误分类：webdav_error_message 映射测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn error_message_auth_failed() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::AuthFailed,
+            status: Some(401),
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("鉴权失败"), "应提及鉴权失败: {msg}");
+    }
+
+    #[test]
+    fn error_message_forbidden() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::Forbidden,
+            status: Some(403),
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("权限不足") || msg.contains("访问被拒绝"), "应提及权限: {msg}");
+    }
+
+    #[test]
+    fn error_message_not_found() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::NotFound,
+            status: Some(404),
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("不存在"), "应提及不存在: {msg}");
+    }
+
+    #[test]
+    fn error_message_locked() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::Locked,
+            status: Some(423),
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("锁定"), "应提及锁定: {msg}");
+    }
+
+    #[test]
+    fn error_message_insufficient_storage() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::InsufficientStorage,
+            status: Some(507),
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("空间不足"), "应提及空间不足: {msg}");
+    }
+
+    #[test]
+    fn error_message_method_not_allowed() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::MethodNotAllowed,
+            status: Some(405),
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("不支持") || msg.contains("方法"), "应提及方法不支持: {msg}");
+    }
+
+    #[test]
+    fn error_message_timeout_with_status() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::Timeout,
+            status: Some(408),
+            retryable: true,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("超时"), "应提及超时: {msg}");
+    }
+
+    #[test]
+    fn error_message_timeout_without_status() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::Timeout,
+            status: None,
+            retryable: true,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("超时"), "应提及超时: {msg}");
+    }
+
+    #[test]
+    fn error_message_network_unreachable() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::NetworkUnreachable,
+            status: None,
+            retryable: true,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("网络不可达"), "应提及网络不可达: {msg}");
+    }
+
+    #[test]
+    fn error_message_redirect_rejected() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::RedirectRejected,
+            status: None,
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("重定向"), "应提及重定向: {msg}");
+    }
+
+    #[test]
+    fn error_message_unexpected_status_with_code() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::UnexpectedStatus,
+            status: Some(502),
+            retryable: true,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("502"), "应包含状态码 502: {msg}");
+    }
+
+    #[test]
+    fn error_message_invalid_propfind_response() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::InvalidPropfindResponse,
+            status: None,
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("XML 解析失败"), "应提及 XML 解析失败: {msg}");
+    }
+
+    #[test]
+    fn error_message_download_too_large() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::DownloadTooLarge,
+            status: None,
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("超过") || msg.contains("大小"), "应提及大小超限: {msg}");
+    }
+
+    #[test]
+    fn error_message_invalid_remote_file_name() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::InvalidRemoteFileName,
+            status: None,
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("文件名"), "应提及文件名: {msg}");
+    }
+
+    #[test]
+    fn error_message_local_temp_file_error() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::LocalTempFileError,
+            status: None,
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert!(msg.contains("临时文件"), "应提及临时文件: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // WebDAV 错误分类：操作上下文独立性测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn classify_status_same_code_different_operations_produce_same_kind() {
+        let status = reqwest::StatusCode::from_u16(401).unwrap();
+        let ops = [
+            WebDavOperation::TestConnection,
+            WebDavOperation::ListBackups,
+            WebDavOperation::UploadBackup,
+            WebDavOperation::DownloadBackup,
+            WebDavOperation::DeleteBackup,
+        ];
+
+        for op in ops {
+            let result = classify_webdav_status(op, status);
+            assert_eq!(
+                result.kind,
+                WebDavErrorKind::AuthFailed,
+                "操作 {:?} 的 401 应映射到 AuthFailed",
+                op
+            );
+        }
+    }
+
+    #[test]
+    fn operation_error_eq_derives_work() {
+        let a = WebDavOperationError {
+            kind: WebDavErrorKind::Timeout,
+            status: None,
+            retryable: true,
+        };
+        let b = WebDavOperationError {
+            kind: WebDavErrorKind::Timeout,
+            status: None,
+            retryable: true,
+        };
+        assert_eq!(a, b);
     }
 }
