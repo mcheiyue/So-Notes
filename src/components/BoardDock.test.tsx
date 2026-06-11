@@ -1045,9 +1045,9 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(validateLocalBackup).toHaveBeenCalledWith('/backups/full.zip');
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('2 个看板');
-    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('10 条便签');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('9 条便签');
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('2 个图片文件');
-    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('2025-06-11 12:00');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('2025-06-11 20:00');
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('应用版本：1.5.2');
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('格式版本：1');
     expect(flushNow).toHaveBeenCalled();
@@ -1715,7 +1715,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('覆盖');
     expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('不可撤销');
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('下载并验证');
-    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('2025-06-11 12:00');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('2025-06-11 20:00');
     expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('应用版本：1.5.2');
     expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('格式版本：1');
     expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('5 条便签');
@@ -1856,7 +1856,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-cancel');
     expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('覆盖');
     expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('不可撤销');
-    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('2025-06-11 12:00');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('2025-06-11 20:00');
     expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('应用版本：1.5.2');
     expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('格式版本：1');
   });

@@ -428,7 +428,7 @@ export const BoardDock = () => {
   }): string => {
     const d = new Date(summary.createdAt);
     const pad = (n: number) => String(n).padStart(2, '0');
-    const dateStr = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     return [
       '备份验证通过。',
       '',
@@ -439,7 +439,7 @@ export const BoardDock = () => {
       '',
       '将恢复：',
       `${summary.boardCount} 个看板`,
-      `${summary.noteCount} 条便签（文本 ${summary.textNoteCount}，图片 ${summary.imageNoteCount}）`,
+      `${summary.noteCount - summary.trashNoteCount} 条便签（文本 ${summary.textNoteCount}，图片 ${summary.imageNoteCount}）`,
       `${summary.trashNoteCount} 条废纸篓便签`,
       `${summary.imageFileCount} 个图片文件（${formatBytesForRestore(summary.imageFileTotalBytes)}）`,
       '',
