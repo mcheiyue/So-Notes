@@ -1260,19 +1260,25 @@ async fn webdav_delete_backup_with_client(
     )
     .send()
     .await
-    .map_err(|_| "远端备份删除失败".to_string())?;
+    .map_err(|e| {
+        let op_error = classify_reqwest_error(WebDavOperation::DeleteBackup, &e);
+        webdav_error_message(&op_error)
+    })?;
 
-    match resp.status().as_u16() {
+    let status = resp.status();
+    match status.as_u16() {
         200..=299 => Ok(WebDavDeleteResult {
             success: true,
             error: None,
         }),
-        401 | 403 => Err("WebDAV 鉴权失败".to_string()),
         404 => Ok(WebDavDeleteResult {
             success: true,
             error: Some("远端备份已不存在".to_string()),
         }),
-        status => Err(format!("远端备份删除失败 (HTTP {status})")),
+        _ => {
+            let op_error = classify_webdav_status(WebDavOperation::DeleteBackup, status);
+            Err(webdav_error_message(&op_error))
+        }
     }
 }
 
@@ -5447,5 +5453,180 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // Commit 9：删除状态码分类与幂等语义测试
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn delete_204_returns_success() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 204 No Content", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "del_user",
+            Some("del_pass".to_string()),
+        );
+
+        let result = webdav_delete_backup_with_client(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+        )
+        .await;
+        let record = handle.join().expect("mock server 线程 panic");
+
+        assert_eq!(record.method, "DELETE", "请求方法应为 DELETE");
+        assert!(
+            record.authorization_present,
+            "DELETE 请求应携带 Authorization"
+        );
+
+        let del_result = result.expect("204 应返回 Ok");
+        assert!(del_result.success, "204 应标记为成功");
+        assert!(del_result.error.is_none(), "204 不应携带 error");
+    }
+
+    #[tokio::test]
+    async fn delete_200_returns_success() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 200 OK", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "del_user",
+            Some("del_pass".to_string()),
+        );
+
+        let result = webdav_delete_backup_with_client(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let del_result = result.expect("200 应返回 Ok");
+        assert!(del_result.success, "200 应标记为成功");
+        assert!(del_result.error.is_none(), "200 不应携带 error");
+    }
+
+    #[tokio::test]
+    async fn delete_404_returns_idempotent_success_with_message() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 404 Not Found", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "del_user",
+            Some("del_pass".to_string()),
+        );
+
+        let result = webdav_delete_backup_with_client(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+        )
+        .await;
+        let record = handle.join().expect("mock server 线程 panic");
+
+        assert_eq!(record.method, "DELETE");
+        assert!(record.authorization_present, "DELETE 应携带 Authorization");
+
+        let del_result = result.expect("404 幂等删除应返回 Ok");
+        assert!(del_result.success, "404 幂等删除应标记为成功");
+        assert_eq!(
+            del_result.error.as_deref(),
+            Some("远端备份已不存在"),
+            "404 应保留现有幂等消息"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_423_returns_locked_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 423 Locked", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "lock_del_user",
+            Some("lock_del_pass".to_string()),
+        );
+
+        let result = webdav_delete_backup_with_client(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert!(err.contains("锁定"), "423 应映射到锁定语义: {err}");
+        assert!(
+            !err.contains("lock_del_user") && !err.contains("lock_del_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+    }
+
+    #[test]
+    fn delete_invalid_remote_filename_fails_before_request() {
+        let config = WebDavConfig {
+            server_url: "https://example.com".to_string(),
+            username: "user".to_string(),
+            password: Some("pass".to_string()),
+            remote_dir: Some("SoNotes_Backups/".to_string()),
+        };
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let err = rt
+            .block_on(webdav_delete_backup(
+                config,
+                "readme.txt".to_string(),
+            ))
+            .unwrap_err();
+
+        assert!(
+            err.contains("文件名") || err.contains("长度") || err.contains("前缀"),
+            "非法文件名应在请求前被拒绝: {err}"
+        );
+        assert!(
+            !err.contains("pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
     }
 }
