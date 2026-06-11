@@ -913,6 +913,7 @@ async fn ensure_remote_dir_exists(
 // PROPFIND XML 解析
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 struct PropfindEntry {
     href: String,
     status: Option<String>,
@@ -1054,29 +1055,80 @@ fn extract_status_code(status: &str) -> Option<u16> {
         .and_then(|s| s.parse().ok())
 }
 
+/// 对 href basename 做 percent-decode（`%XX` → 对应字节）。
+///
+/// 解码失败（如 `%` 后跟非 hex 字符）时返回 `None`。
+/// 解码后的字节逐个检查合法性：拒绝路径分隔符、`..`、空字节、冒号。
+fn decode_href_basename(href: &str) -> Option<String> {
+    let basename = href.trim_end_matches('/').rsplit('/').next()?;
+
+    let mut decoded = Vec::with_capacity(basename.len());
+    let bytes = basename.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 2 >= bytes.len() {
+                return None;
+            }
+            let hi = hex_val(bytes[i + 1])?;
+            let lo = hex_val(bytes[i + 2])?;
+            decoded.push(hi * 16 + lo);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+
+    if decoded.contains(&b'/') || decoded.contains(&b'\\') {
+        return None;
+    }
+    if decoded.contains(&0) {
+        return None;
+    }
+    if decoded.contains(&b':') {
+        return None;
+    }
+    if decoded == b".." {
+        return None;
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_val(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn filter_backup_entries(entries: Vec<PropfindEntry>) -> Vec<WebDavRemoteBackup> {
     entries
         .into_iter()
         .filter(|e| !e.is_collection)
         .filter_map(|e| {
-            let href = e.href.trim_end_matches('/');
-            let file_name = href.rsplit('/').next()?.to_string();
+            let file_name = decode_href_basename(&e.href)?;
 
             if validate_remote_backup_filename(&file_name).is_err() {
                 return None;
             }
 
             let status_code = e.status.as_deref().and_then(extract_status_code);
-            let status_ok = status_code
-                .map(|c| (200..400).contains(&c))
-                .unwrap_or(true);
+            if let Some(code) = status_code {
+                if !(200..300).contains(&code) {
+                    return None;
+                }
+            }
 
             Some(WebDavRemoteBackup {
                 file_name,
                 size: e.content_length,
                 last_modified: e.last_modified,
                 status: status_code,
-                readable: status_ok,
+                readable: true,
             })
         })
         .collect()
@@ -2957,8 +3009,7 @@ mod tests {
 
         let entries = parse_propfind_response(xml).unwrap();
         let filtered = filter_backup_entries(entries);
-        assert_eq!(filtered.len(), 1);
-        assert!(!filtered[0].readable);
+        assert_eq!(filtered.len(), 0, "403 propstat 条目应被跳过");
     }
 
     // -----------------------------------------------------------------------
@@ -3890,5 +3941,247 @@ mod tests {
         let backups = result.expect("无凭据请求应成功（mock server 不验证凭据）");
         assert_eq!(backups.len(), 1, "无凭据也应返回 1 条备份");
         assert_eq!(backups[0].file_name, "SoNotes_Backup_20240615143022.zip");
+    }
+
+    // -----------------------------------------------------------------------
+    // Commit 5：decode_href_basename 单元测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_basename_accepts_plain_name() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/SoNotes_Backup_20240101120000.zip"),
+            Some("SoNotes_Backup_20240101120000.zip".to_string())
+        );
+    }
+
+    #[test]
+    fn decode_basename_accepts_valid_percent_encoding() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/SoNotes_Backup%2020240101120000.zip"),
+            Some("SoNotes_Backup 20240101120000.zip".to_string())
+        );
+    }
+
+    #[test]
+    fn decode_basename_rejects_encoded_slash() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/..%2FSoNotes_Backup_20240101120000.zip"),
+            None
+        );
+    }
+
+    #[test]
+    fn decode_basename_rejects_encoded_backslash() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/%5Csecret.zip"),
+            None
+        );
+    }
+
+    #[test]
+    fn decode_basename_rejects_encoded_null() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/SoNotes_Backup%00_20240101120000.zip"),
+            None
+        );
+    }
+
+    #[test]
+    fn decode_basename_rejects_encoded_colon() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/SoNotes_Backup%3A_20240101120000.zip"),
+            None
+        );
+    }
+
+    #[test]
+    fn decode_basename_rejects_encoded_dotdot() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/%2E%2E"),
+            None
+        );
+    }
+
+    #[test]
+    fn decode_basename_rejects_invalid_hex() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/file%GG.zip"),
+            None
+        );
+    }
+
+    #[test]
+    fn decode_basename_rejects_truncated_percent() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/file%.zip"),
+            None
+        );
+    }
+
+    #[test]
+    fn decode_basename_rejects_percent_at_end() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/file%"),
+            None
+        );
+    }
+
+    #[test]
+    fn decode_basename_rejects_incomplete_hex() {
+        assert_eq!(
+            decode_href_basename("/dav/SoNotes_Backups/file%2.zip"),
+            None
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Commit 5：fixture 驱动的 PROPFIND 解析边界测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn fixture_directory_self_entry_skipped() {
+        let xml = load_fixture("propfind_directory_self_entry.xml");
+        let entries = parse_propfind_response(&xml).unwrap();
+        let filtered = filter_backup_entries(entries);
+        assert_eq!(filtered.len(), 1, "目录自身 collection entry 应被跳过，只保留 1 条备份");
+        assert_eq!(filtered[0].file_name, "SoNotes_Backup_20240701120000.zip");
+        assert_eq!(filtered[0].size, Some(4096));
+    }
+
+    #[test]
+    fn fixture_mixed_status_skips_non_2xx() {
+        let xml = load_fixture("propfind_mixed_status.xml");
+        let entries = parse_propfind_response(&xml).unwrap();
+        let filtered = filter_backup_entries(entries);
+
+        assert_eq!(filtered.len(), 1, "非 2xx propstat 条目应被跳过，只保留 200 条目");
+        assert_eq!(filtered[0].file_name, "SoNotes_Backup_20240701120000.zip");
+        assert!(filtered[0].readable);
+        assert_eq!(filtered[0].status, Some(200));
+    }
+
+    #[test]
+    fn fixture_missing_size_maps_to_none() {
+        let xml = load_fixture("propfind_missing_size.xml");
+        let entries = parse_propfind_response(&xml).unwrap();
+        let filtered = filter_backup_entries(entries);
+        assert_eq!(filtered.len(), 2, "缺失 size 的 entry 应保留");
+        assert!(
+            filtered.iter().all(|b| b.size.is_none()),
+            "缺失 getcontentlength 应映射为 size: None"
+        );
+        assert_eq!(filtered[0].last_modified, None, "缺失 getlastmodified 应映射为 None");
+        assert_eq!(
+            filtered[1].last_modified.as_deref(),
+            Some("Tue, 02 Jul 2024 12:00:00 GMT")
+        );
+    }
+
+    #[test]
+    fn fixture_invalid_size_maps_to_none() {
+        let xml = load_fixture("propfind_invalid_size.xml");
+        let entries = parse_propfind_response(&xml).unwrap();
+        let filtered = filter_backup_entries(entries);
+        assert_eq!(filtered.len(), 3, "非法 size 的 entry 应保留");
+        assert!(
+            filtered.iter().all(|b| b.size.is_none()),
+            "非法 getcontentlength 应映射为 size: None"
+        );
+    }
+
+    #[test]
+    fn fixture_encoded_file_name_decoded_and_filtered() {
+        let xml = load_fixture("propfind_encoded_file_name.xml");
+        let entries = parse_propfind_response(&xml).unwrap();
+        let filtered = filter_backup_entries(entries);
+
+        assert_eq!(
+            filtered.len(),
+            2,
+            "未编码合法条目 + 解码后合法条目应保留；含编码非法字符的应被跳过"
+        );
+        assert_eq!(
+            filtered[0].file_name,
+            "SoNotes_Backup_20240701120000.zip",
+            "第一个合法条目应是未编码的备份文件"
+        );
+        assert_eq!(
+            filtered[1].file_name,
+            "SoNotes_Backup_20240706120000.zip",
+            "第二个合法条目应是 %5F 解码后的备份文件"
+        );
+        assert_eq!(filtered[1].size, Some(8192));
+    }
+
+    #[test]
+    fn fixture_malformed_xml_returns_error() {
+        let xml = load_fixture("propfind_malformed.xml");
+        let result = parse_propfind_response(&xml);
+        assert!(result.is_err(), "畸形 XML 应返回错误");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("XML 解析失败"),
+            "错误应提及 XML 解析失败: {err}"
+        );
+    }
+
+    #[test]
+    fn filter_non_so_notes_zip_entries_are_skipped() {
+        let entries = vec![
+            PropfindEntry {
+                href: "/dav/SoNotes_Backups/readme.txt".to_string(),
+                status: Some("HTTP/1.1 200 OK".to_string()),
+                content_length: Some(128),
+                last_modified: None,
+                is_collection: false,
+            },
+            PropfindEntry {
+                href: "/dav/SoNotes_Backups/config.json".to_string(),
+                status: Some("HTTP/1.1 200 OK".to_string()),
+                content_length: Some(64),
+                last_modified: None,
+                is_collection: false,
+            },
+            PropfindEntry {
+                href: "/dav/SoNotes_Backups/image.png".to_string(),
+                status: Some("HTTP/1.1 200 OK".to_string()),
+                content_length: Some(2048),
+                last_modified: None,
+                is_collection: false,
+            },
+        ];
+        let filtered = filter_backup_entries(entries);
+        assert_eq!(filtered.len(), 0, "非 SoNotes zip 条目应全部被跳过");
+    }
+
+    #[tokio::test]
+    async fn smoke_mock_server_fixture_mixed_status() {
+        let server = MockWebDavServer::bind();
+        let fixture_xml = load_fixture("propfind_mixed_status.xml");
+
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request(
+                "HTTP/1.1 207 Multi-Status",
+                &[],
+                &fixture_xml,
+            )
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("创建测试 reqwest::Client 失败");
+
+        let target = WebDavRequestTarget::for_test(&base_url, "SoNotes_Backups/");
+
+        let result = webdav_list_backups_with_client(&client, &target).await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let backups = result.expect("webdav_list_backups_with_client 应成功");
+        assert_eq!(backups.len(), 1, "端到端：非 2xx 条目应被跳过，只返回 1 条备份");
+        assert_eq!(backups[0].file_name, "SoNotes_Backup_20240701120000.zip");
+        assert!(backups[0].readable);
     }
 }

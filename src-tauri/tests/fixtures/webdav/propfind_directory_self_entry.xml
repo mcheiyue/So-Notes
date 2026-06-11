@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 目录自身 entry：href 指向远端目录本身，应被 filter_backup_entries 跳过 -->
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/dav/SoNotes_Backups/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection/></D:resourcetype>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/dav/SoNotes_Backups/SoNotes_Backup_20240701120000.zip</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getcontentlength>4096</D:getcontentlength>
+        <D:getlastmodified>Mon, 01 Jul 2024 12:00:00 GMT</D:getlastmodified>
+        <D:resourcetype/>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>
