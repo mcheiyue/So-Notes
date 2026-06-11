@@ -3658,4 +3658,237 @@ mod tests {
         };
         assert_eq!(a, b);
     }
+
+    // -----------------------------------------------------------------------
+    // Mock WebDAV Server Helper（Commit 4 基础设施）
+    // -----------------------------------------------------------------------
+
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+
+    /// 请求元数据。不保存完整 Authorization 值，只记录是否存在。
+    #[derive(Debug, Clone)]
+    struct MockRequestRecord {
+        method: String,
+        path: String,
+        depth: Option<String>,
+        authorization_present: bool,
+    }
+
+    /// 轻量级 mock server：`127.0.0.1:0`，单请求，不支持延迟或多响应序列。
+    struct MockWebDavServer {
+        listener: TcpListener,
+        base_url: String,
+    }
+
+    impl MockWebDavServer {
+        fn bind() -> Self {
+            let listener =
+                TcpListener::bind("127.0.0.1:0").expect("MockWebDavServer 绑定 127.0.0.1:0 失败");
+            let addr = listener.local_addr().expect("获取 mock server 地址失败");
+            let base_url = format!("http://127.0.0.1:{}", addr.port());
+            Self { listener, base_url }
+        }
+
+        fn base_url(&self) -> &str {
+            &self.base_url
+        }
+
+        fn accept_one_request(
+            &self,
+            status_line: &str,
+            extra_headers: &[&str],
+            body: &str,
+        ) -> MockRequestRecord {
+            self.listener
+                .set_nonblocking(true)
+                .expect("设置非阻塞失败");
+
+            let stream = {
+                let deadline =
+                    std::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    match self.listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(ref e)
+                            if e.kind() == std::io::ErrorKind::WouldBlock =>
+                        {
+                            if std::time::Instant::now() >= deadline {
+                                panic!("MockWebDavServer 等待连接超时（5 秒）");
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            continue;
+                        }
+                        Err(e) => panic!("MockWebDavServer accept 失败: {e}"),
+                    }
+                }
+            };
+            self.listener
+                .set_nonblocking(false)
+                .expect("恢复阻塞模式失败");
+
+            let mut stream = stream.try_clone().expect("克隆 TcpStream 失败");
+
+            let reader_stream = stream.try_clone().expect("克隆 reader stream 失败");
+            let mut reader = BufReader::new(reader_stream);
+
+            let mut method = String::new();
+            let mut path = String::new();
+            let mut depth: Option<String> = None;
+            let mut authorization_present = false;
+
+            // HTTP/1.1 请求格式：请求行 + 头部行（空行终止）+ 可选 body
+            let mut request_line = String::new();
+            reader
+                .read_line(&mut request_line)
+                .expect("读取请求行失败");
+            let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+            if parts.len() >= 2 {
+                method = parts[0].to_string();
+                path = parts[1].to_string();
+            }
+
+            loop {
+                let mut line = String::new();
+                reader
+                    .read_line(&mut line)
+                    .expect("读取头部行失败");
+                let trimmed = line.trim().to_string();
+                if trimmed.is_empty() {
+                    break;
+                }
+                if let Some(val) = trimmed.strip_prefix("Depth:") {
+                    depth = Some(val.trim().to_string());
+                }
+                if trimmed
+                    .to_ascii_lowercase()
+                    .starts_with("authorization:")
+                {
+                    authorization_present = true;
+                }
+            }
+
+            let mut response = format!("{status_line}\r\n");
+            response.push_str("Content-Type: application/xml; charset=utf-8\r\n");
+            for header in extra_headers {
+                response.push_str(&format!("{header}\r\n"));
+            }
+            response.push_str(&format!("Content-Length: {}\r\n", body.len()));
+            response.push_str("\r\n");
+            response.push_str(body);
+
+            stream
+                .write_all(response.as_bytes())
+                .expect("写入响应失败");
+            drop(stream);
+
+            MockRequestRecord {
+                method,
+                path,
+                depth,
+                authorization_present,
+            }
+        }
+    }
+
+    fn load_fixture(name: &str) -> String {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = std::path::Path::new(manifest_dir)
+            .join("tests")
+            .join("fixtures")
+            .join("webdav")
+            .join(name);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("加载 fixture {name} 失败: {e}"))
+    }
+
+    // -----------------------------------------------------------------------
+    // Smoke 测试：Mock Server + with-client 边界（Commit 4）
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn smoke_mock_server_propfind_returns_one_backup() {
+        let server = MockWebDavServer::bind();
+        let fixture_xml = load_fixture("propfind_standard_207.xml");
+
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request(
+                "HTTP/1.1 207 Multi-Status",
+                &[],
+                &fixture_xml,
+            )
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("创建测试 reqwest::Client 失败");
+
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "testuser",
+            Some("testpass".to_string()),
+        );
+
+        let result = webdav_list_backups_with_client(&client, &target).await;
+        let record = handle.join().expect("mock server 线程 panic");
+
+        assert_eq!(record.method, "PROPFIND", "请求方法应为 PROPFIND");
+        assert!(
+            record.path.contains("SoNotes_Backups"),
+            "请求路径应包含远端目录: {}",
+            record.path
+        );
+        assert_eq!(record.depth.as_deref(), Some("1"), "Depth 头应为 1");
+        assert!(
+            record.authorization_present,
+            "应记录到 Authorization 头存在（basic auth）"
+        );
+
+        let backups = result.expect("webdav_list_backups_with_client 应成功");
+        assert_eq!(backups.len(), 1, "应恰好返回 1 条备份");
+        assert_eq!(backups[0].file_name, "SoNotes_Backup_20240615143022.zip");
+        assert_eq!(backups[0].size, Some(2048576));
+        assert!(backups[0].readable);
+        assert_eq!(
+            backups[0].last_modified.as_deref(),
+            Some("Sat, 15 Jun 2024 14:30:22 GMT")
+        );
+    }
+
+    #[tokio::test]
+    async fn smoke_mock_server_no_auth_not_recorded() {
+        let server = MockWebDavServer::bind();
+        let fixture_xml = load_fixture("propfind_standard_207.xml");
+
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request(
+                "HTTP/1.1 207 Multi-Status",
+                &[],
+                &fixture_xml,
+            )
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("创建测试 reqwest::Client 失败");
+
+        let target = WebDavRequestTarget::for_test(&base_url, "SoNotes_Backups/");
+
+        let result = webdav_list_backups_with_client(&client, &target).await;
+        let record = handle.join().expect("mock server 线程 panic");
+
+        assert!(
+            !record.authorization_present,
+            "无凭据时不应出现 Authorization 头"
+        );
+
+        let backups = result.expect("无凭据请求应成功（mock server 不验证凭据）");
+        assert_eq!(backups.len(), 1, "无凭据也应返回 1 条备份");
+        assert_eq!(backups[0].file_name, "SoNotes_Backup_20240615143022.zip");
+    }
 }

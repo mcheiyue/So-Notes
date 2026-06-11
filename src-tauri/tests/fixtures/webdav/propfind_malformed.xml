@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 故意未闭合的 XML，用于测试解析器对畸形响应的错误处理 -->
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/dav/SoNotes_Backups/SoNotes_Backup_20240101120000.zip</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getcontentlength>1024
+        <D:resourcetype/>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+<!-- 缺少 </D:multistatus> 闭合标签 -->

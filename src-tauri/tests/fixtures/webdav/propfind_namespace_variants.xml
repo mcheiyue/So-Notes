@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 使用 dc: 前缀（非标准 DAV: 前缀），测试解析器对命名空间前缀的容错能力 -->
+<dc:multistatus xmlns:dc="DAV:">
+  <dc:response>
+    <dc:href>/dav/SoNotes_Backups/</dc:href>
+    <dc:propstat>
+      <dc:prop>
+        <dc:resourcetype><dc:collection/></dc:resourcetype>
+      </dc:prop>
+      <dc:status>HTTP/1.1 200 OK</dc:status>
+    </dc:propstat>
+  </dc:response>
+  <dc:response>
+    <dc:href>/dav/SoNotes_Backups/SoNotes_Backup_20240301081500.zip</dc:href>
+    <dc:propstat>
+      <dc:prop>
+        <dc:getcontentlength>1048576</dc:getcontentlength>
+        <dc:getlastmodified>Fri, 01 Mar 2024 08:15:00 GMT</dc:getlastmodified>
+        <dc:resourcetype/>
+      </dc:prop>
+      <dc:status>HTTP/1.1 200 OK</dc:status>
+    </dc:propstat>
+  </dc:response>
+  <dc:response>
+    <dc:href>/dav/SoNotes_Backups/readme.txt</dc:href>
+    <dc:propstat>
+      <dc:prop>
+        <dc:getcontentlength>128</dc:getcontentlength>
+        <dc:resourcetype/>
+      </dc:prop>
+      <dc:status>HTTP/1.1 200 OK</dc:status>
+    </dc:propstat>
+  </dc:response>
+</dc:multistatus>
