@@ -769,17 +769,78 @@ fn build_remote_dir_url(base_url: &str, remote_dir: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// 内部请求目标（已完成 URL/目录规范化）
+// ---------------------------------------------------------------------------
+
+/// 已完成规范化的 WebDAV 请求目标，携带基础 URL、远端目录和凭据。
+///
+/// 生产路径通过 `build_webdav_request_target(config)` 构造；
+/// 测试路径可以直接构造本地 mock target（例如 `http://127.0.0.1:PORT`）。
+pub struct WebDavRequestTarget {
+    /// 规范化后的基础 URL（例如 `https://example.com/dav`）。
+    pub base_url: String,
+    /// 规范化后的远端目录（带尾部斜杠，例如 `SoNotes_Backups/`）。
+    pub remote_dir: String,
+    /// 用户名。
+    pub username: String,
+    /// 密码或应用令牌（仅在本次请求中使用）。
+    pub password: Option<String>,
+}
+
+impl WebDavRequestTarget {
+    /// 从规范化后的基础 URL 和远端目录构造请求目标（测试用，无凭据）。
+    #[cfg(test)]
+    pub fn for_test(base_url: &str, remote_dir: &str) -> Self {
+        Self {
+            base_url: base_url.to_string(),
+            remote_dir: remote_dir.to_string(),
+            username: String::new(),
+            password: None,
+        }
+    }
+
+    /// 从规范化后的基础 URL、远端目录和凭据构造请求目标（测试用）。
+    #[cfg(test)]
+    pub fn for_test_with_auth(
+        base_url: &str,
+        remote_dir: &str,
+        username: &str,
+        password: Option<String>,
+    ) -> Self {
+        Self {
+            base_url: base_url.to_string(),
+            remote_dir: remote_dir.to_string(),
+            username: username.to_string(),
+            password,
+        }
+    }
+}
+
+/// 从 `WebDavConfig` 构造已规范化的请求目标。
+///
+/// 执行 URL 规范化和远端目录规范化，失败时返回 `String` 错误。
+pub fn build_webdav_request_target(config: &WebDavConfig) -> Result<WebDavRequestTarget, String> {
+    let base_url = normalize_webdav_url(&config.server_url)?;
+    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
+    Ok(WebDavRequestTarget {
+        base_url,
+        remote_dir,
+        username: config.username.clone(),
+        password: config.password.clone(),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // PROPFIND 请求
 // ---------------------------------------------------------------------------
 
 fn propfind_request(
+    client: &reqwest::Client,
     url: &str,
     depth: &str,
     username: &str,
     password: Option<&str>,
 ) -> reqwest::RequestBuilder {
-    let client = build_webdav_http_client(Duration::from_secs(15)).expect("reqwest client build");
-
     let body = r#"<?xml version="1.0" encoding="utf-8"?>
 <D:propfind xmlns:D="DAV:">
   <D:allprop/>
@@ -822,7 +883,7 @@ async fn ensure_remote_dir_exists(
     username: &str,
     password: Option<&str>,
 ) -> Result<(), String> {
-    let propfind_resp = propfind_request(dir_url, "0", username, password)
+    let propfind_resp = propfind_request(client, dir_url, "0", username, password)
         .send()
         .await
         .map_err(|_| "WebDAV 地址不可访问".to_string())?;
@@ -1025,20 +1086,18 @@ fn filter_backup_entries(entries: Vec<PropfindEntry>) -> Vec<WebDavRemoteBackup>
 // Tauri 命令：transport
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub async fn webdav_test_connection(config: WebDavConfig) -> Result<WebDavConnectionResult, String> {
-    let base_url = normalize_webdav_url(&config.server_url)?;
-    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
-    let dir_url = build_remote_dir_url(&base_url, &remote_dir);
-
-    let client = build_webdav_http_client(Duration::from_secs(15))
-        .map_err(|_| "WebDAV 地址不可访问".to_string())?;
+async fn webdav_test_connection_with_client(
+    client: &reqwest::Client,
+    target: &WebDavRequestTarget,
+) -> Result<WebDavConnectionResult, String> {
+    let dir_url = build_remote_dir_url(&target.base_url, &target.remote_dir);
 
     let resp = propfind_request(
+        client,
         &dir_url,
         "0",
-        &config.username,
-        config.password.as_deref(),
+        &target.username,
+        target.password.as_deref(),
     )
     .send()
     .await
@@ -1063,10 +1122,10 @@ pub async fn webdav_test_connection(config: WebDavConfig) -> Result<WebDavConnec
             error: Some("WebDAV 鉴权失败".to_string()),
         }),
         404 => match ensure_remote_dir_exists(
-            &client,
+            client,
             &dir_url,
-            &config.username,
-            config.password.as_deref(),
+            &target.username,
+            target.password.as_deref(),
         )
         .await
         {
@@ -1087,18 +1146,25 @@ pub async fn webdav_test_connection(config: WebDavConfig) -> Result<WebDavConnec
 }
 
 #[tauri::command]
-pub async fn webdav_list_backups(
-    config: WebDavConfig,
+pub async fn webdav_test_connection(config: WebDavConfig) -> Result<WebDavConnectionResult, String> {
+    let target = build_webdav_request_target(&config)?;
+    let client = build_webdav_http_client(Duration::from_secs(15))
+        .map_err(|_| "WebDAV 地址不可访问".to_string())?;
+    webdav_test_connection_with_client(&client, &target).await
+}
+
+async fn webdav_list_backups_with_client(
+    client: &reqwest::Client,
+    target: &WebDavRequestTarget,
 ) -> Result<Vec<WebDavRemoteBackup>, String> {
-    let base_url = normalize_webdav_url(&config.server_url)?;
-    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
-    let dir_url = build_remote_dir_url(&base_url, &remote_dir);
+    let dir_url = build_remote_dir_url(&target.base_url, &target.remote_dir);
 
     let resp = propfind_request(
+        client,
         &dir_url,
         "1",
-        &config.username,
-        config.password.as_deref(),
+        &target.username,
+        target.password.as_deref(),
     )
     .send()
     .await
@@ -1118,26 +1184,29 @@ pub async fn webdav_list_backups(
 }
 
 #[tauri::command]
-pub async fn webdav_delete_backup(
+pub async fn webdav_list_backups(
     config: WebDavConfig,
-    remote_file_name: String,
-) -> Result<WebDavDeleteResult, String> {
-    validate_remote_backup_filename(&remote_file_name)?;
+) -> Result<Vec<WebDavRemoteBackup>, String> {
+    let target = build_webdav_request_target(&config)?;
+    let client = build_webdav_http_client(Duration::from_secs(15))
+        .map_err(|_| "远端备份列表读取失败".to_string())?;
+    webdav_list_backups_with_client(&client, &target).await
+}
 
-    let base_url = normalize_webdav_url(&config.server_url)?;
-    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
-    let dir_url = build_remote_dir_url(&base_url, &remote_dir);
+async fn webdav_delete_backup_with_client(
+    client: &reqwest::Client,
+    target: &WebDavRequestTarget,
+    remote_file_name: &str,
+) -> Result<WebDavDeleteResult, String> {
+    let dir_url = build_remote_dir_url(&target.base_url, &target.remote_dir);
     let file_url = format!("{}{}", dir_url, remote_file_name);
 
-    let client = build_webdav_http_client(Duration::from_secs(30))
-        .map_err(|_| "远端备份删除失败".to_string())?;
-
     let resp = webdav_request_with_auth(
-        &client,
+        client,
         reqwest::Method::DELETE,
         &file_url,
-        &config.username,
-        config.password.as_deref(),
+        &target.username,
+        target.password.as_deref(),
     )
     .send()
     .await
@@ -1155,6 +1224,19 @@ pub async fn webdav_delete_backup(
         }),
         status => Err(format!("远端备份删除失败 (HTTP {status})")),
     }
+}
+
+#[tauri::command]
+pub async fn webdav_delete_backup(
+    config: WebDavConfig,
+    remote_file_name: String,
+) -> Result<WebDavDeleteResult, String> {
+    validate_remote_backup_filename(&remote_file_name)?;
+
+    let target = build_webdav_request_target(&config)?;
+    let client = build_webdav_http_client(Duration::from_secs(30))
+        .map_err(|_| "远端备份删除失败".to_string())?;
+    webdav_delete_backup_with_client(&client, &target, &remote_file_name).await
 }
 
 // ---------------------------------------------------------------------------
@@ -1373,13 +1455,110 @@ pub fn cleanup_webdav_temp_files(app: &tauri::AppHandle) -> Result<(), String> {
 // Tauri 命令：上传/下载/Token 生命周期
 // ---------------------------------------------------------------------------
 
+async fn webdav_upload_backup_with_client(
+    client: &reqwest::Client,
+    target: &WebDavRequestTarget,
+    zip_path: &Path,
+) -> Result<WebDavUploadResult, String> {
+    let dir_url = build_remote_dir_url(&target.base_url, &target.remote_dir);
+
+    ensure_remote_dir_exists(
+        client,
+        &dir_url,
+        &target.username,
+        target.password.as_deref(),
+    )
+    .await
+    .map_err(|error| {
+        let _ = std::fs::remove_file(zip_path);
+        if error == "WebDAV 鉴权失败" {
+            error
+        } else {
+            "远端备份上传失败，本地数据未受影响".to_string()
+        }
+    })?;
+
+    let mut last_error = String::new();
+
+    for attempt in 0..UPLOAD_RETRY_LIMIT {
+        let remote_filename = if attempt == 0 {
+            generate_current_remote_backup_filename()
+        } else {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            generate_current_remote_backup_filename()
+        };
+
+        let upload_url = format!("{}{}", dir_url, remote_filename);
+        let zip_len = tokio::fs::metadata(zip_path)
+            .await
+            .map_err(|_| {
+                let _ = std::fs::remove_file(zip_path);
+                "远端备份上传失败，本地数据未受影响".to_string()
+            })?
+            .len();
+        let zip_file = tokio::fs::File::open(zip_path).await.map_err(|_| {
+            let _ = std::fs::remove_file(zip_path);
+            "远端备份上传失败，本地数据未受影响".to_string()
+        })?;
+
+        let mut req = client
+            .put(&upload_url)
+            .header("Content-Type", "application/zip")
+            .header(reqwest::header::CONTENT_LENGTH, zip_len)
+            .header("If-None-Match", "*")
+            .body(reqwest::Body::from(zip_file));
+
+        if let Some(pw) = &target.password {
+            req = req.basic_auth(&target.username, Some(pw));
+        } else if !target.username.is_empty() {
+            req = req.basic_auth(&target.username, None::<&str>);
+        }
+
+        match req.send().await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                match status {
+                    200..=299 => {
+                        let _ = std::fs::remove_file(zip_path);
+                        return Ok(WebDavUploadResult {
+                            success: true,
+                            remote_file_name: Some(remote_filename),
+                            error: None,
+                        });
+                    }
+                    401 | 403 => {
+                        let _ = std::fs::remove_file(zip_path);
+                        return Err("WebDAV 鉴权失败".to_string());
+                    }
+                    409 | 412 => {
+                        last_error = "远端已存在同名备份，请稍后重试".to_string();
+                        continue;
+                    }
+                    _ => {
+                        last_error = format!(
+                            "远端备份上传失败 (HTTP {status})，本地数据未受影响"
+                        );
+                        continue;
+                    }
+                }
+            }
+            Err(_) => {
+                last_error = "远端备份上传失败，本地数据未受影响".to_string();
+                continue;
+            }
+        }
+    }
+
+    let _ = std::fs::remove_file(zip_path);
+    Err(last_error)
+}
+
 #[tauri::command]
 pub async fn webdav_create_remote_backup(
     app: tauri::AppHandle,
     config: WebDavConfig,
 ) -> Result<WebDavUploadResult, String> {
-    let base_url = normalize_webdav_url(&config.server_url)?;
-    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
+    let target = build_webdav_request_target(&config)?;
 
     let pending_dir = webdav_pending_dir(&app)?;
     std::fs::create_dir_all(&pending_dir)
@@ -1418,140 +1597,29 @@ pub async fn webdav_create_remote_backup(
     let client = build_webdav_http_client(Duration::from_secs(60))
         .map_err(|_| "远端备份上传失败，本地数据未受影响".to_string())?;
 
-    let dir_url = build_remote_dir_url(&base_url, &remote_dir);
-    ensure_remote_dir_exists(
-        &client,
-        &dir_url,
-        &config.username,
-        config.password.as_deref(),
-    )
-    .await
-    .map_err(|error| {
-        let _ = std::fs::remove_file(&actual_zip_path);
-        if actual_zip_path != temp_zip_path {
-            let _ = std::fs::remove_file(&temp_zip_path);
-        }
-        if error == "WebDAV 鉴权失败" {
-            error
-        } else {
-            "远端备份上传失败，本地数据未受影响".to_string()
-        }
-    })?;
+    let result = webdav_upload_backup_with_client(&client, &target, &actual_zip_path).await;
 
-    let mut last_error = String::new();
-
-    for attempt in 0..UPLOAD_RETRY_LIMIT {
-        let remote_filename = if attempt == 0 {
-            generate_current_remote_backup_filename()
-        } else {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            generate_current_remote_backup_filename()
-        };
-
-        let upload_url = format!("{}{}", dir_url, remote_filename);
-        let zip_len = tokio::fs::metadata(&actual_zip_path)
-            .await
-            .map_err(|_| {
-                let _ = std::fs::remove_file(&actual_zip_path);
-                if actual_zip_path != temp_zip_path {
-                    let _ = std::fs::remove_file(&temp_zip_path);
-                }
-                "远端备份上传失败，本地数据未受影响".to_string()
-            })?
-            .len();
-        let zip_file = tokio::fs::File::open(&actual_zip_path).await.map_err(|_| {
-            let _ = std::fs::remove_file(&actual_zip_path);
-            if actual_zip_path != temp_zip_path {
-                let _ = std::fs::remove_file(&temp_zip_path);
-            }
-            "远端备份上传失败，本地数据未受影响".to_string()
-        })?;
-
-        let mut req = client
-            .put(&upload_url)
-            .header("Content-Type", "application/zip")
-            .header(reqwest::header::CONTENT_LENGTH, zip_len)
-            .header("If-None-Match", "*")
-            .body(reqwest::Body::from(zip_file));
-
-        if let Some(pw) = &config.password {
-            req = req.basic_auth(&config.username, Some(pw));
-        } else if !config.username.is_empty() {
-            req = req.basic_auth(&config.username, None::<&str>);
-        }
-
-        match req.send().await {
-            Ok(resp) => {
-                let status = resp.status().as_u16();
-                match status {
-                    200..=299 => {
-                        let _ = std::fs::remove_file(&actual_zip_path);
-                        if actual_zip_path != temp_zip_path {
-                            let _ = std::fs::remove_file(&temp_zip_path);
-                        }
-                        return Ok(WebDavUploadResult {
-                            success: true,
-                            remote_file_name: Some(remote_filename),
-                            error: None,
-                        });
-                    }
-                    401 | 403 => {
-                        let _ = std::fs::remove_file(&actual_zip_path);
-                        if actual_zip_path != temp_zip_path {
-                            let _ = std::fs::remove_file(&temp_zip_path);
-                        }
-                        return Err("WebDAV 鉴权失败".to_string());
-                    }
-                    409 | 412 => {
-                        last_error = "远端已存在同名备份，请稍后重试".to_string();
-                        continue;
-                    }
-                    _ => {
-                        last_error = format!("远端备份上传失败 (HTTP {status})，本地数据未受影响");
-                        continue;
-                    }
-                }
-            }
-            Err(_) => {
-                last_error = "远端备份上传失败，本地数据未受影响".to_string();
-                continue;
-            }
-        }
-    }
-
-    let _ = std::fs::remove_file(&actual_zip_path);
     if actual_zip_path != temp_zip_path {
         let _ = std::fs::remove_file(&temp_zip_path);
     }
-    Err(last_error)
+
+    result
 }
 
-#[tauri::command]
-pub async fn webdav_download_backup(
-    app: tauri::AppHandle,
-    config: WebDavConfig,
-    remote_file_name: String,
+async fn webdav_download_backup_with_client(
+    client: &reqwest::Client,
+    target: &WebDavRequestTarget,
+    remote_file_name: &str,
+    downloads_dir: &Path,
 ) -> Result<WebDavDownloadResult, String> {
-    validate_remote_backup_filename(&remote_file_name)?;
-
-    let base_url = normalize_webdav_url(&config.server_url)?;
-    let remote_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))?;
-
-    let downloads_dir = webdav_downloads_dir(&app)?;
-    std::fs::create_dir_all(&downloads_dir)
-        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
-
-    let dir_url = build_remote_dir_url(&base_url, &remote_dir);
+    let dir_url = build_remote_dir_url(&target.base_url, &target.remote_dir);
     let download_url = format!("{}{}", dir_url, remote_file_name);
 
-    let client = build_webdav_http_client(Duration::from_secs(120))
-        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
-
     let mut req = client.get(&download_url);
-    if let Some(pw) = &config.password {
-        req = req.basic_auth(&config.username, Some(pw));
-    } else if !config.username.is_empty() {
-        req = req.basic_auth(&config.username, None::<&str>);
+    if let Some(pw) = &target.password {
+        req = req.basic_auth(&target.username, Some(pw));
+    } else if !target.username.is_empty() {
+        req = req.basic_auth(&target.username, None::<&str>);
     }
 
     let resp = req
@@ -1611,6 +1679,26 @@ pub async fn webdav_download_backup(
         download_token: Some(token),
         error: None,
     })
+}
+
+#[tauri::command]
+pub async fn webdav_download_backup(
+    app: tauri::AppHandle,
+    config: WebDavConfig,
+    remote_file_name: String,
+) -> Result<WebDavDownloadResult, String> {
+    validate_remote_backup_filename(&remote_file_name)?;
+
+    let target = build_webdav_request_target(&config)?;
+
+    let downloads_dir = webdav_downloads_dir(&app)?;
+    std::fs::create_dir_all(&downloads_dir)
+        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+
+    let client = build_webdav_http_client(Duration::from_secs(120))
+        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+
+    webdav_download_backup_with_client(&client, &target, &remote_file_name, &downloads_dir).await
 }
 
 #[tauri::command]
