@@ -98,6 +98,13 @@ import { Z_INDEX } from '../constants/layout';
 import { createEmptyNormalizedNotesState, normalizeNotes } from '../store/normalization';
 import { useStore } from '../store/useStore';
 
+/** 用本地时间格式化时间戳，与 BoardDock 摘要格式化逻辑一致，避免跨时区断言失败。 */
+const formatLocalDate = (ts: number) => {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 describe('BoardDock v1.2.4 最小修复', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -1047,7 +1054,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('2 个看板');
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('9 条便签');
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('2 个图片文件');
-    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('2025-06-11 20:00');
+    expect(vi.mocked(confirm).mock.calls[0][0].message).toContain(formatLocalDate(1749643200000));
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('应用版本：1.5.2');
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('格式版本：1');
     expect(flushNow).toHaveBeenCalled();
@@ -1715,7 +1722,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('覆盖');
     expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('不可撤销');
     expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('下载并验证');
-    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('2025-06-11 20:00');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain(formatLocalDate(1749643200000));
     expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('应用版本：1.5.2');
     expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('格式版本：1');
     expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('5 条便签');
@@ -1856,7 +1863,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-cancel');
     expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('覆盖');
     expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain('不可撤销');
-    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('2025-06-11 20:00');
+    expect(vi.mocked(confirm).mock.calls[1][0].message).toContain(formatLocalDate(1749643200000));
     expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('应用版本：1.5.2');
     expect(vi.mocked(confirm).mock.calls[1][0].message).toContain('格式版本：1');
   });
