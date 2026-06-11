@@ -1154,24 +1154,15 @@ async fn webdav_test_connection_with_client(
     .send()
     .await
     .map_err(|e| {
-        if e.is_timeout() {
-            "WebDAV 地址不可访问".to_string()
-        } else if e.is_connect() {
-            "WebDAV 地址不可访问".to_string()
-        } else {
-            "WebDAV 地址不可访问".to_string()
-        }
+        let op_error = classify_reqwest_error(WebDavOperation::TestConnection, &e);
+        webdav_error_message(&op_error)
     })?;
 
-    let status = resp.status().as_u16();
-    match status {
+    let status = resp.status();
+    match status.as_u16() {
         200..=299 => Ok(WebDavConnectionResult {
             success: true,
             error: None,
-        }),
-        401 | 403 => Ok(WebDavConnectionResult {
-            success: false,
-            error: Some("WebDAV 鉴权失败".to_string()),
         }),
         404 => match ensure_remote_dir_exists(
             client,
@@ -1190,10 +1181,13 @@ async fn webdav_test_connection_with_client(
                 error: Some(error),
             }),
         },
-        _ => Ok(WebDavConnectionResult {
-            success: false,
-            error: Some(format!("WebDAV 服务器返回异常状态码: {status}")),
-        }),
+        _ => {
+            let op_error = classify_webdav_status(WebDavOperation::TestConnection, status);
+            Ok(WebDavConnectionResult {
+                success: false,
+                error: Some(webdav_error_message(&op_error)),
+            })
+        }
     }
 }
 
@@ -1220,14 +1214,18 @@ async fn webdav_list_backups_with_client(
     )
     .send()
     .await
-    .map_err(|_| "远端备份列表读取失败".to_string())?;
+    .map_err(|e| {
+        let op_error = classify_reqwest_error(WebDavOperation::ListBackups, &e);
+        webdav_error_message(&op_error)
+    })?;
 
-    let status = resp.status().as_u16();
-    match status {
+    let status = resp.status();
+    match status.as_u16() {
         200..=299 => {}
-        401 | 403 => return Err("WebDAV 鉴权失败".to_string()),
-        404 => return Err("远端备份目录不可用".to_string()),
-        _ => return Err(format!("远端备份列表读取失败 (HTTP {status})")),
+        _ => {
+            let op_error = classify_webdav_status(WebDavOperation::ListBackups, status);
+            return Err(webdav_error_message(&op_error));
+        }
     }
 
     let xml = resp.text().await.map_err(|_| "远端备份列表读取失败".to_string())?;
@@ -3778,6 +3776,10 @@ mod tests {
                 .set_nonblocking(false)
                 .expect("恢复阻塞模式失败");
 
+            stream
+                .set_nonblocking(false)
+                .expect("恢复 accepted stream 阻塞模式失败");
+
             let mut stream = stream.try_clone().expect("克隆 TcpStream 失败");
 
             let reader_stream = stream.try_clone().expect("克隆 reader stream 失败");
@@ -4183,5 +4185,223 @@ mod tests {
         assert_eq!(backups.len(), 1, "端到端：非 2xx 条目应被跳过，只返回 1 条备份");
         assert_eq!(backups[0].file_name, "SoNotes_Backup_20240701120000.zip");
         assert!(backups[0].readable);
+    }
+
+    // -----------------------------------------------------------------------
+    // Commit 6：Mock Server 401/403/405 连接测试错误分类
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn mock_server_connection_401_returns_auth_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 401 Unauthorized", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "testuser",
+            Some("testpass".to_string()),
+        );
+
+        let result = webdav_test_connection_with_client(&client, &target).await;
+        let record = handle.join().expect("mock server 线程 panic");
+
+        let conn_result = result.expect("401 应返回 Ok(WebDavConnectionResult)");
+        assert!(!conn_result.success, "401 连接测试应返回 success=false");
+        let error = conn_result.error.expect("401 应携带 error");
+        assert!(
+            error.contains("鉴权失败"),
+            "401 应映射到鉴权失败语义: {error}"
+        );
+        assert!(
+            !error.contains("testuser") && !error.contains("testpass"),
+            "错误信息不得泄漏凭据: {error}"
+        );
+        assert!(
+            record.authorization_present,
+            "请求应携带 Authorization 头"
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_server_connection_403_returns_forbidden_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 403 Forbidden", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "user403",
+            Some("pass403".to_string()),
+        );
+
+        let result = webdav_test_connection_with_client(&client, &target).await;
+        let record = handle.join().expect("mock server 线程 panic");
+
+        let conn_result = result.expect("403 应返回 Ok(WebDavConnectionResult)");
+        assert!(!conn_result.success, "403 连接测试应返回 success=false");
+        let error = conn_result.error.expect("403 应携带 error");
+        assert!(
+            error.contains("权限不足") || error.contains("访问被拒绝"),
+            "403 应映射到权限不足/访问被拒绝语义: {error}"
+        );
+        assert!(
+            !error.contains("user403") && !error.contains("pass403"),
+            "错误信息不得泄漏凭据: {error}"
+        );
+        assert!(
+            record.authorization_present,
+            "请求应携带 Authorization 头"
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_server_connection_405_returns_method_not_allowed_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 405 Method Not Allowed", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test(&base_url, "SoNotes_Backups/");
+
+        let result = webdav_test_connection_with_client(&client, &target).await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let conn_result = result.expect("405 应返回 Ok(WebDavConnectionResult)");
+        assert!(!conn_result.success, "405 连接测试应返回 success=false");
+        let error = conn_result.error.expect("405 应携带 error");
+        assert!(
+            error.contains("不支持") || error.contains("方法"),
+            "405 应映射到方法不支持语义: {error}"
+        );
+        assert!(
+            !error.contains("testpass") && !error.contains("password"),
+            "错误信息不得泄漏凭据: {error}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Commit 6：Mock Server 401/403/405 列表测试错误分类
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn mock_server_list_401_returns_auth_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 401 Unauthorized", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "listuser",
+            Some("listpass".to_string()),
+        );
+
+        let result = webdav_list_backups_with_client(&client, &target).await;
+        let record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("鉴权失败"),
+            "列表 401 应映射到鉴权失败语义: {err}"
+        );
+        assert!(
+            !err.contains("listuser") && !err.contains("listpass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+        assert!(
+            record.authorization_present,
+            "请求应携带 Authorization 头"
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_server_list_403_returns_forbidden_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 403 Forbidden", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "forbidden_user",
+            Some("forbidden_pass".to_string()),
+        );
+
+        let result = webdav_list_backups_with_client(&client, &target).await;
+        let record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("权限不足") || err.contains("访问被拒绝"),
+            "列表 403 应映射到权限不足/访问被拒绝语义: {err}"
+        );
+        assert!(
+            !err.contains("forbidden_user") && !err.contains("forbidden_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+        assert!(
+            record.authorization_present,
+            "请求应携带 Authorization 头"
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_server_list_405_returns_method_not_allowed_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 405 Method Not Allowed", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test(&base_url, "SoNotes_Backups/");
+
+        let result = webdav_list_backups_with_client(&client, &target).await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("不支持") || err.contains("方法"),
+            "列表 405 应映射到方法不支持语义: {err}"
+        );
+        assert!(
+            !err.contains("password") && !err.contains("token"),
+            "错误信息不得泄漏凭据: {err}"
+        );
     }
 }
