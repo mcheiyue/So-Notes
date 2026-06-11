@@ -26,11 +26,11 @@ export const useConfirmStore = create<ConfirmStoreState>()((set) => ({
   isOpen: false,
   options: DEFAULT_OPTIONS,
   resolve: null,
-  open: (options, resolve) => set((state) => {
-    state.resolve?.(false);
-
-    return { isOpen: true, options, resolve };
-  }),
+  open: (options, resolve) => {
+    const previousResolve = useConfirmStore.getState().resolve;
+    previousResolve?.(false);
+    set({ isOpen: true, options, resolve });
+  },
   close: () => set({ isOpen: false, options: DEFAULT_OPTIONS, resolve: null }),
 }));
 
