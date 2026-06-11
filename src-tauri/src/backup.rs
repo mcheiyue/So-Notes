@@ -937,7 +937,8 @@ fn validate_restored_data(
 /// 从已验证的 manifest 和 data 构建备份摘要。
 ///
 /// 统计来源：
-/// - `textNoteCount`/`imageNoteCount`/`trashNoteCount` 从 `StorageDataForRestore` 的 notes 统计。
+/// - `textNoteCount`/`imageNoteCount` 仅统计活跃便签（`deleted_at` 为 `None`）。
+/// - `trashNoteCount` 统计废纸篓便签（`deleted_at` 为 `Some`）。
 /// - `imageFileCount`/`imageFileTotalBytes` 从 manifest 的 attachments 统计。
 /// - 不读取或返回便签正文内容。
 fn build_summary(manifest: &BackupManifest, data: &StorageDataForRestore) -> BackupSummary {
@@ -949,10 +950,11 @@ fn build_summary(manifest: &BackupManifest, data: &StorageDataForRestore) -> Bac
         let is_trash = note.deleted_at.is_some();
         if is_trash {
             trash_note_count += 1;
-        }
-        match note.kind.as_str() {
-            "image" => image_note_count += 1,
-            _ => text_note_count += 1,
+        } else {
+            match note.kind.as_str() {
+                "image" => image_note_count += 1,
+                _ => text_note_count += 1,
+            }
         }
     }
 
@@ -1206,14 +1208,13 @@ fn restore_local_backup_inner(
         }
     }
 
-    // 成功：清理临时文件
+    // 成功：清理临时备份文件（staging 目录由 _staging_guard Drop 统一清理）
     if had_old_data {
         let _ = std::fs::remove_file(&data_bak);
     }
     if had_old_attach {
         let _ = std::fs::remove_dir_all(&attach_old);
     }
-    let _ = std::fs::remove_dir_all(&staging_dir);
 
     Ok(RestoreResult {
         success: true,
@@ -2919,6 +2920,7 @@ mod tests {
 
         let restored_att = std::fs::read(sonotes_base.join(&rel_path)).unwrap();
         assert_eq!(restored_att, img_content);
+        assert_no_restore_staging_leftover(&sonotes_base);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -2942,6 +2944,7 @@ mod tests {
         let restored = std::fs::read_to_string(sonotes_base.join("data.json")).unwrap();
         assert!(restored.contains("\"n1\""));
         assert!(!restored.contains("\"old\""));
+        assert_no_restore_staging_leftover(&sonotes_base);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -3302,6 +3305,7 @@ mod tests {
 
         let restored = std::fs::read_to_string(sonotes_base.join("data.json")).unwrap();
         assert!(restored.contains("旧文本便签"));
+        assert_no_restore_staging_leftover(&sonotes_base);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -3745,6 +3749,7 @@ mod tests {
             old_attach_dir.join(format!("{hash}.png")).exists(),
             "新附件应存在"
         );
+        assert_no_restore_staging_leftover(&sonotes_base);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -3765,6 +3770,7 @@ mod tests {
         let result = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap();
         assert!(result.success);
         assert!(!old_attach_dir.exists(), "旧附件目录应被整体移除");
+        assert_no_restore_staging_leftover(&sonotes_base);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -4041,6 +4047,7 @@ mod tests {
 
         let result = restore_local_backup_inner(&sonotes_base, &zip_path).unwrap();
         assert!(result.success);
+        assert_no_restore_staging_leftover(&sonotes_base);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -4685,8 +4692,8 @@ mod tests {
         let inspected = inspect_backup_zip(&zip_path).unwrap();
         let summary = &inspected.summary;
 
-        assert_eq!(summary.text_note_count, 2, "文本便签含废纸篓文本便签");
-        assert_eq!(summary.image_note_count, 2, "图片便签含废纸篓图片便签");
+        assert_eq!(summary.text_note_count, 1, "文本便签仅计活跃便签");
+        assert_eq!(summary.image_note_count, 1, "图片便签仅计活跃便签");
         assert_eq!(summary.note_count, 4, "便签总数应为 4");
         assert_eq!(summary.trash_note_count, 2, "应有 2 个废纸篓便签");
 
