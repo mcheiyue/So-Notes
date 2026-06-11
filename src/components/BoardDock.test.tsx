@@ -88,7 +88,12 @@ vi.mock('../services/storage/tauriPersistence', () => ({
   getLatestUpdateTimestamp: vi.fn(() => 0),
 }));
 
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  confirm: vi.fn(async () => true),
+}));
+
 import { BoardDock } from './BoardDock';
+import { confirm } from '@tauri-apps/plugin-dialog';
 import { Z_INDEX } from '../constants/layout';
 import { createEmptyNormalizedNotesState, normalizeNotes } from '../store/normalization';
 import { useStore } from '../store/useStore';
@@ -654,7 +659,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
       config: { ...useStore.getState().config },
     });
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     useStore.getState().addNote(0, 0);
     expect(useStore.getState().domainHistory.undoStack.length).toBeGreaterThan(0);
@@ -707,7 +712,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
       errors: [],
       warnings: [],
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    vi.mocked(confirm).mockResolvedValue(false);
 
     await openDataSettings();
     await clickElement(findButtonByText('从 zip 覆盖恢复'));
@@ -758,7 +763,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
     vi.mocked(restoreLocalBackup).mockResolvedValue({
       success: false, noteCount: 0, boardCount: 0, attachmentCount: 0, error: 'zip 文件损坏',
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     await openDataSettings();
     await clickElement(findButtonByText('从 zip 覆盖恢复'));
@@ -854,7 +859,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
       config: { ...useStore.getState().config },
     });
     vi.mocked(flushNow).mockResolvedValue(true);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     useStore.setState({ viewMode: 'TRASH', isDockVisible: true });
 
@@ -946,7 +951,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
       errors: [],
       warnings: [],
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    vi.mocked(confirm).mockResolvedValue(false);
 
     await openDataSettings();
     await clickElement(findButtonByText('从 zip 覆盖恢复'));
@@ -997,19 +1002,19 @@ describe('BoardDock v1.2.4 最小修复', () => {
     });
     vi.mocked(flushNow).mockResolvedValue(true);
     vi.mocked(pause).mockImplementation(() => {});
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     await openDataSettings();
     await clickElement(findButtonByText('从 zip 覆盖恢复'));
 
     expect(validateLocalBackup).toHaveBeenCalledWith('/backups/full.zip');
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy.mock.calls[0][0]).toContain('2 个看板');
-    expect(confirmSpy.mock.calls[0][0]).toContain('10 条便签');
-    expect(confirmSpy.mock.calls[0][0]).toContain('2 个图片文件');
-    expect(confirmSpy.mock.calls[0][0]).toContain('2025-06-11 12:00');
-    expect(confirmSpy.mock.calls[0][0]).toContain('应用版本：1.5.2');
-    expect(confirmSpy.mock.calls[0][0]).toContain('格式版本：1');
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('2 个看板');
+    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('10 条便签');
+    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('2 个图片文件');
+    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('2025-06-11 12:00');
+    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('应用版本：1.5.2');
+    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('格式版本：1');
     expect(flushNow).toHaveBeenCalled();
     expect(pause).toHaveBeenCalled();
     expect(restoreLocalBackup).toHaveBeenCalledWith('/backups/full.zip');
@@ -1179,7 +1184,7 @@ describe('BoardDock 图片文件一致性管理入口', () => {
     useStore.getState().addNote(0, 0);
     expect(useStore.getState().domainHistory.undoStack.length).toBeGreaterThan(0);
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     await openDataSettings();
     await clickElement(findButtonByText('检查图片文件一致性'));
@@ -1202,7 +1207,7 @@ describe('BoardDock 图片文件一致性管理入口', () => {
       { relativePath: 'attachments/orphan.png', hash: undefined },
     ]);
 
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    vi.mocked(confirm).mockResolvedValue(false);
 
     await openDataSettings();
     await clickElement(findButtonByText('检查图片文件一致性'));
@@ -1521,7 +1526,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'SoNotes_Backup_20260609151929.zip', size: 102400, lastModified: 'Tue, 09 Jun 2026 07:19:29 GMT', readable: true },
     ]);
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    vi.mocked(confirm).mockResolvedValue(false);
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));
@@ -1541,7 +1546,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
       ])
       .mockResolvedValueOnce([]);
     vi.mocked(deleteBackup).mockResolvedValue({ success: true });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));
@@ -1565,7 +1570,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
     ]);
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    vi.mocked(confirm).mockResolvedValue(false);
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));
@@ -1585,7 +1590,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
     ]);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    vi.mocked(confirm).mockResolvedValue(false);
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));
@@ -1593,10 +1598,10 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
     await clickElement(restoreBtn);
 
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy.mock.calls[0][0]).not.toContain('覆盖');
-    expect(confirmSpy.mock.calls[0][0]).not.toContain('不可撤销');
-    expect(confirmSpy.mock.calls[0][0]).toContain('下载并验证');
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('覆盖');
+    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('不可撤销');
+    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('下载并验证');
   });
 
   it('远端恢复成功后调用完整流程并更新反馈', async () => {
@@ -1652,7 +1657,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
       config: { ...useStore.getState().config },
     });
     vi.mocked(flushNow).mockResolvedValue(true);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));
@@ -1672,13 +1677,13 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-abc');
     expect(resume).toHaveBeenCalled();
 
-    expect(confirmSpy.mock.calls[0][0]).not.toContain('覆盖');
-    expect(confirmSpy.mock.calls[0][0]).not.toContain('不可撤销');
-    expect(confirmSpy.mock.calls[0][0]).toContain('下载并验证');
-    expect(confirmSpy.mock.calls[1][0]).toContain('2025-06-11 12:00');
-    expect(confirmSpy.mock.calls[1][0]).toContain('应用版本：1.5.2');
-    expect(confirmSpy.mock.calls[1][0]).toContain('格式版本：1');
-    expect(confirmSpy.mock.calls[1][0]).toContain('5 条便签');
+    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('覆盖');
+    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('不可撤销');
+    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('下载并验证');
+    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('2025-06-11 12:00');
+    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('应用版本：1.5.2');
+    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('格式版本：1');
+    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('5 条便签');
 
     const feedback = container.querySelector('[data-testid="webdav-feedback"]');
     expect(feedback).not.toBeNull();
@@ -1711,7 +1716,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
       errors: [{ code: 'not_sonotes_backup', severity: 'error', message: '这不是 SoNotes 备份包，本地数据未受影响。' }],
       warnings: [],
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));
@@ -1754,9 +1759,9 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
       },
       errors: [], warnings: [],
     });
-    const confirmSpy = vi.spyOn(window, 'confirm');
-    confirmSpy.mockReturnValueOnce(true);  // 初始确认
-    confirmSpy.mockReturnValueOnce(false); // 摘要确认取消
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)  // 初始确认
+      .mockResolvedValueOnce(false); // 摘要确认取消
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));
@@ -1769,11 +1774,11 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(flushNow).not.toHaveBeenCalled();
     expect(pause).not.toHaveBeenCalled();
     expect(cleanupDownloadedBackup).toHaveBeenCalledWith('tok-cancel');
-    expect(confirmSpy.mock.calls[0][0]).not.toContain('覆盖');
-    expect(confirmSpy.mock.calls[0][0]).not.toContain('不可撤销');
-    expect(confirmSpy.mock.calls[1][0]).toContain('2025-06-11 12:00');
-    expect(confirmSpy.mock.calls[1][0]).toContain('应用版本：1.5.2');
-    expect(confirmSpy.mock.calls[1][0]).toContain('格式版本：1');
+    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('覆盖');
+    expect(vi.mocked(confirm).mock.calls[0][0]).not.toContain('不可撤销');
+    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('2025-06-11 12:00');
+    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('应用版本：1.5.2');
+    expect(vi.mocked(confirm).mock.calls[1][0]).toContain('格式版本：1');
   });
 
   it('远端恢复 restoreLocalBackup 失败时 cleanup token 并恢复持久化', async () => {
@@ -1802,7 +1807,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
       success: false, noteCount: 0, boardCount: 0, attachmentCount: 0, error: 'zip 文件损坏',
     });
     vi.mocked(flushNow).mockResolvedValue(true);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));
@@ -1836,7 +1841,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     vi.mocked(downloadBackup).mockResolvedValue({ success: true, downloadToken: 'tok-throw' });
     vi.mocked(resolveDownloadedBackup).mockResolvedValue({ success: true, localPath: '/tmp/io-error.zip' });
     vi.mocked(validateLocalBackup).mockRejectedValue(new Error('I/O 错误'));
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));
@@ -1878,7 +1883,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
       errors: [], warnings: [],
     });
     vi.mocked(flushNow).mockResolvedValue(false);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
 
     await openWebdavView();
     await clickElement(findButtonByText('刷新远端列表'));

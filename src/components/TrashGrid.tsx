@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { confirm } from '@tauri-apps/plugin-dialog';
 import { useDomainStore } from '../store';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -63,9 +64,9 @@ export const TrashGrid: React.FC = () => {
         setSelectedTrashIds([]);
     };
 
-    const handleBatchDelete = () => {
+    const handleBatchDelete = async () => {
         if (selectedTrashIds.length === 0) return;
-        if (window.confirm(`确认永久删除选中的 ${selectedTrashIds.length} 个便签？此操作无法撤销。`)) {
+        if (await confirm(`确认永久删除选中的 ${selectedTrashIds.length} 个便签？此操作无法撤销。`, { title: '永久删除', kind: 'warning' })) {
             deleteSelectedPermanently(selectedTrashIds);
             setSelectedTrashIds([]);
         }
@@ -131,8 +132,8 @@ export const TrashGrid: React.FC = () => {
                     )}
                     <button 
                         type="button"
-                        onClick={() => {
-                            if (window.confirm('确认还原所有便签？')) restoreAllTrash();
+                        onClick={async () => {
+                            if (await confirm('确认还原所有便签？', { title: '全部还原' })) restoreAllTrash();
                         }}
                         className="flex items-center gap-2 px-4 py-2 bg-secondary-bg border border-border-subtle text-text-primary rounded-lg hover:bg-secondary-bg/80 transition-colors text-sm font-medium shadow-sm"
                     >
@@ -141,8 +142,8 @@ export const TrashGrid: React.FC = () => {
                     </button>
                     <button 
                         type="button"
-                        onClick={() => {
-                            if (window.confirm('确认清空废纸篓？此操作无法撤销。')) emptyTrash();
+                        onClick={async () => {
+                            if (await confirm('确认清空废纸篓？此操作无法撤销。', { title: '清空废纸篓', kind: 'warning' })) emptyTrash();
                         }}
                         className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 dark:border-red-900/50 dark:hover:bg-red-900/50 transition-colors text-sm font-medium shadow-sm"
                     >
@@ -238,9 +239,9 @@ export const TrashGrid: React.FC = () => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={(e) => {
+                                    onClick={async (e) => {
                                         e.stopPropagation();
-                                        if (window.confirm('确认永久删除此便签？此操作无法撤销。')) deleteNotePermanently(note.id);
+                                        if (await confirm('确认永久删除此便签？此操作无法撤销。', { title: '永久删除', kind: 'warning' })) deleteNotePermanently(note.id);
                                     }}
                                     className="p-1.5 bg-red-50 text-red-600 rounded-md hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 transition-colors"
                                     title="永久删除"

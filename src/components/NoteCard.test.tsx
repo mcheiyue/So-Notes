@@ -90,7 +90,12 @@ vi.mock('react-draggable', () => ({
   },
 }));
 
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  confirm: vi.fn(async () => true),
+}));
+
 import { NoteCard } from './NoteCard';
+import { confirm } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store/useStore';
 import { useUIStore } from '../store';
 import { normalizeNotes } from '../store/normalization';
@@ -1358,7 +1363,7 @@ describe('NoteCard TRASH 右键菜单守卫', () => {
   });
 
   it('isStatic=true 时永久删除使用统一确认文案', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    vi.mocked(confirm).mockResolvedValue(false);
     const deleteNotePermanently = vi.fn();
     useStore.setState({ deleteNotePermanently });
 
@@ -1373,9 +1378,7 @@ describe('NoteCard TRASH 右键菜单守卫', () => {
       deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
 
-    expect(confirmSpy).toHaveBeenCalledWith('确认永久删除此便签？此操作无法撤销。');
+    expect(confirm).toHaveBeenCalledWith('确认永久删除此便签？此操作无法撤销。', { title: '永久删除', kind: 'warning' });
     expect(deleteNotePermanently).not.toHaveBeenCalled();
-
-    confirmSpy.mockRestore();
   });
 });
