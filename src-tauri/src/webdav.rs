@@ -1613,9 +1613,10 @@ async fn webdav_upload_backup_with_client(
                     }
                 }
             }
-            Err(_) => {
-                last_error = "远端备份上传失败，本地数据未受影响".to_string();
-                continue;
+            Err(e) => {
+                let _ = std::fs::remove_file(zip_path);
+                let op_error = classify_reqwest_error(WebDavOperation::UploadBackup, &e);
+                return Err(webdav_error_message(&op_error));
             }
         }
     }
@@ -4046,6 +4047,88 @@ mod tests {
                 authorization_present,
             }
         }
+
+        /// 接受一个请求，读取请求行和头部，但不发送响应直接关闭连接。
+        /// 用于模拟传输层错误（连接重置、对端关闭等），使 `req.send().await` 返回 `Err`。
+        fn accept_one_request_drop_without_response(&self) -> MockRequestRecord {
+            self.listener
+                .set_nonblocking(true)
+                .expect("设置非阻塞失败");
+
+            let stream = {
+                let deadline =
+                    std::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    match self.listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(ref e)
+                            if e.kind() == std::io::ErrorKind::WouldBlock =>
+                        {
+                            if std::time::Instant::now() >= deadline {
+                                panic!("MockWebDavServer 等待连接超时（5 秒）");
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            continue;
+                        }
+                        Err(e) => panic!("MockWebDavServer accept 失败: {e}"),
+                    }
+                }
+            };
+            self.listener
+                .set_nonblocking(false)
+                .expect("恢复阻塞模式失败");
+
+            stream
+                .set_nonblocking(false)
+                .expect("恢复 accepted stream 阻塞模式失败");
+
+            let reader_stream = stream.try_clone().expect("克隆 reader stream 失败");
+            let mut reader = BufReader::new(reader_stream);
+
+            let mut method = String::new();
+            let mut path = String::new();
+            let mut depth: Option<String> = None;
+            let mut authorization_present = false;
+
+            let mut request_line = String::new();
+            reader
+                .read_line(&mut request_line)
+                .expect("读取请求行失败");
+            let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+            if parts.len() >= 2 {
+                method = parts[0].to_string();
+                path = parts[1].to_string();
+            }
+
+            loop {
+                let mut line = String::new();
+                reader
+                    .read_line(&mut line)
+                    .expect("读取头部行失败");
+                let trimmed = line.trim().to_string();
+                if trimmed.is_empty() {
+                    break;
+                }
+                if let Some(val) = trimmed.strip_prefix("Depth:") {
+                    depth = Some(val.trim().to_string());
+                }
+                if trimmed
+                    .to_ascii_lowercase()
+                    .starts_with("authorization:")
+                {
+                    authorization_present = true;
+                }
+            }
+
+            drop(stream);
+
+            MockRequestRecord {
+                method,
+                path,
+                depth,
+                authorization_present,
+            }
+        }
     }
 
     fn load_fixture(name: &str) -> String {
@@ -5263,6 +5346,64 @@ mod tests {
 
         assert!(result.is_err(), "401 应返回错误");
         assert!(!zip_path.exists(), "401 失败后临时 zip 应被清理");
+
+        let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    #[tokio::test]
+    async fn upload_transport_error_returns_immediately_without_retry() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            let propfind = server.accept_one_request(
+                "HTTP/1.1 200 OK",
+                &[] as &[&str],
+                "",
+            );
+            let put = server.accept_one_request_drop_without_response();
+            vec![propfind, put]
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "transport_user",
+            Some("transport_pass".to_string()),
+        );
+
+        let zip_dir = std::env::temp_dir().join(format!(
+            "webdav-upload-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&zip_dir).unwrap();
+        let zip_path = zip_dir.join("test.zip");
+        create_test_zip(&zip_path);
+
+        let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
+        let records = handle.join().expect("mock server 线程 panic");
+
+        assert_eq!(
+            records.len(),
+            2,
+            "传输错误应立即返回，只收到 PROPFIND + 1 PUT，不应重试"
+        );
+        assert_eq!(records[0].method, "PROPFIND");
+        assert_eq!(records[1].method, "PUT");
+
+        let err = result.expect_err("传输错误应返回 Err");
+        assert!(
+            err.contains("WebDAV"),
+            "错误消息应来自 classify_reqwest_error 分类: {err}"
+        );
+        assert!(
+            !err.contains("transport_user") && !err.contains("transport_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+        assert!(!zip_path.exists(), "传输错误后临时 zip 应被清理");
 
         let _ = std::fs::remove_dir_all(&zip_dir);
     }
