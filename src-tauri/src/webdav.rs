@@ -882,30 +882,41 @@ async fn ensure_remote_dir_exists(
     dir_url: &str,
     username: &str,
     password: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), WebDavOperationError> {
     let propfind_resp = propfind_request(client, dir_url, "0", username, password)
         .send()
         .await
-        .map_err(|_| "WebDAV 地址不可访问".to_string())?;
+        .map_err(|e| classify_reqwest_error(WebDavOperation::UploadBackup, &e))?;
 
     match propfind_resp.status().as_u16() {
         200..=299 => return Ok(()),
-        401 | 403 => return Err("WebDAV 鉴权失败".to_string()),
         404 => {}
-        status => return Err(format!("WebDAV 服务器返回异常状态码: {status}")),
+        _ => {
+            return Err(classify_webdav_status(
+                WebDavOperation::UploadBackup,
+                propfind_resp.status(),
+            ));
+        }
     }
 
-    let mkcol_method = reqwest::Method::from_bytes(b"MKCOL")
-        .map_err(|_| "远端备份目录不可用".to_string())?;
+    let mkcol_method = reqwest::Method::from_bytes(b"MKCOL").map_err(|_| {
+        WebDavOperationError {
+            kind: WebDavErrorKind::UnexpectedStatus,
+            status: None,
+            retryable: false,
+        }
+    })?;
     let mkcol_resp = webdav_request_with_auth(client, mkcol_method, dir_url, username, password)
         .send()
         .await
-        .map_err(|_| "远端备份目录不可用".to_string())?;
+        .map_err(|e| classify_reqwest_error(WebDavOperation::UploadBackup, &e))?;
 
     match mkcol_resp.status().as_u16() {
         200 | 201 | 204 => Ok(()),
-        401 | 403 => Err("WebDAV 鉴权失败".to_string()),
-        status => Err(format!("远端备份目录不可用 (HTTP {status})")),
+        _ => Err(classify_webdav_status(
+            WebDavOperation::UploadBackup,
+            mkcol_resp.status(),
+        )),
     }
 }
 
@@ -1176,9 +1187,9 @@ async fn webdav_test_connection_with_client(
                 success: true,
                 error: None,
             }),
-            Err(error) => Ok(WebDavConnectionResult {
+            Err(op_error) => Ok(WebDavConnectionResult {
                 success: false,
-                error: Some(error),
+                error: Some(webdav_error_message(&op_error)),
             }),
         },
         _ => {
@@ -1525,13 +1536,9 @@ async fn webdav_upload_backup_with_client(
         target.password.as_deref(),
     )
     .await
-    .map_err(|error| {
+    .map_err(|op_error| {
         let _ = std::fs::remove_file(zip_path);
-        if error == "WebDAV 鉴权失败" {
-            error
-        } else {
-            "远端备份上传失败，本地数据未受影响".to_string()
-        }
+        webdav_error_message(&op_error)
     })?;
 
     let mut last_error = String::new();
@@ -5744,5 +5751,357 @@ mod tests {
             !err.contains("pass"),
             "错误信息不得泄漏凭据: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn upload_preflight_propfind_405_returns_method_not_allowed() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        // PROPFIND 返回 405 → 不再走 MKCOL，直接报错
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 405 Method Not Allowed", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "preflight_user",
+            Some("preflight_pass".to_string()),
+        );
+
+        let zip_dir = std::env::temp_dir().join(format!(
+            "webdav-preflight-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&zip_dir).unwrap();
+        let zip_path = zip_dir.join("test.zip");
+        create_test_zip(&zip_path);
+
+        let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        // 应保留 MethodNotAllowed 语义，不应被折叠为通用上传失败
+        assert!(
+            err.contains("不支持") || err.contains("方法"),
+            "PROPFIND 405 应映射到方法不支持语义，而非通用上传失败: {err}"
+        );
+        assert!(
+            !err.contains("preflight_user") && !err.contains("preflight_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+        assert!(
+            !zip_path.exists(),
+            "失败后临时 zip 应被清理"
+        );
+
+        let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    #[tokio::test]
+    async fn upload_preflight_mkcol_423_returns_locked() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        // PROPFIND 404 → MKCOL 423
+        let handle = std::thread::spawn(move || {
+            server.accept_sequential_requests(&[
+                ("HTTP/1.1 404 Not Found", &[] as &[&str], ""),
+                ("HTTP/1.1 423 Locked", &[] as &[&str], ""),
+            ])
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "mkcol_user",
+            Some("mkcol_pass".to_string()),
+        );
+
+        let zip_dir = std::env::temp_dir().join(format!(
+            "webdav-preflight-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&zip_dir).unwrap();
+        let zip_path = zip_dir.join("test.zip");
+        create_test_zip(&zip_path);
+
+        let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
+        let _records = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        // 应保留 Locked 语义，不应被折叠为通用上传失败
+        assert!(
+            err.contains("锁定"),
+            "MKCOL 423 应映射到锁定语义，而非通用上传失败: {err}"
+        );
+        assert!(
+            !err.contains("mkcol_user") && !err.contains("mkcol_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+        assert!(
+            !zip_path.exists(),
+            "失败后临时 zip 应被清理"
+        );
+
+        let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    #[tokio::test]
+    async fn upload_preflight_mkcol_507_returns_insufficient_storage() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        // PROPFIND 404 → MKCOL 507
+        let handle = std::thread::spawn(move || {
+            server.accept_sequential_requests(&[
+                ("HTTP/1.1 404 Not Found", &[] as &[&str], ""),
+                ("HTTP/1.1 507 Insufficient Storage", &[] as &[&str], ""),
+            ])
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "storage_user",
+            Some("storage_pass".to_string()),
+        );
+
+        let zip_dir = std::env::temp_dir().join(format!(
+            "webdav-preflight-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&zip_dir).unwrap();
+        let zip_path = zip_dir.join("test.zip");
+        create_test_zip(&zip_path);
+
+        let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
+        let _records = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        // 应保留 InsufficientStorage 语义，不应被折叠为通用上传失败
+        assert!(
+            err.contains("空间不足"),
+            "MKCOL 507 应映射到空间不足语义，而非通用上传失败: {err}"
+        );
+        assert!(
+            !err.contains("storage_user") && !err.contains("storage_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+        assert!(
+            !zip_path.exists(),
+            "失败后临时 zip 应被清理"
+        );
+
+        let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    #[tokio::test]
+    async fn upload_preflight_preserves_auth_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        // PROPFIND 返回 401 → 鉴权失败
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 401 Unauthorized", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "auth_user",
+            Some("auth_pass".to_string()),
+        );
+
+        let zip_dir = std::env::temp_dir().join(format!(
+            "webdav-preflight-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&zip_dir).unwrap();
+        let zip_path = zip_dir.join("test.zip");
+        create_test_zip(&zip_path);
+
+        let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        // 鉴权错误应保留现有语义
+        assert!(
+            err.contains("鉴权失败"),
+            "PROPFIND 401 应映射到鉴权失败语义: {err}"
+        );
+        assert!(
+            !err.contains("auth_user") && !err.contains("auth_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+        assert!(
+            !zip_path.exists(),
+            "失败后临时 zip 应被清理"
+        );
+
+        let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    #[tokio::test]
+    async fn upload_preflight_propfind_404_mkcol_200_succeeds() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        // PROPFIND 404 → MKCOL 200 → PUT 201
+        let handle = std::thread::spawn(move || {
+            server.accept_sequential_requests(&[
+                ("HTTP/1.1 404 Not Found", &[] as &[&str], ""),
+                ("HTTP/1.1 200 OK", &[] as &[&str], ""),
+                ("HTTP/1.1 201 Created", &[] as &[&str], ""),
+            ])
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "mkcol_ok_user",
+            Some("mkcol_ok_pass".to_string()),
+        );
+
+        let zip_dir = std::env::temp_dir().join(format!(
+            "webdav-preflight-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&zip_dir).unwrap();
+        let zip_path = zip_dir.join("test.zip");
+        create_test_zip(&zip_path);
+
+        let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
+        let _records = handle.join().expect("mock server 线程 panic");
+
+        let upload_result = result.expect("404→MKCOL 200→PUT 201 应成功");
+        assert!(upload_result.success, "目录创建后上传应标记为成功");
+        assert!(upload_result.remote_file_name.is_some(), "成功后应返回文件名");
+        assert!(!zip_path.exists(), "成功后临时 zip 应被清理");
+
+        let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    #[tokio::test]
+    async fn upload_preflight_error_no_credential_leak() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        // PROPFIND 404 → MKCOL 507，使用极敏感凭据
+        let handle = std::thread::spawn(move || {
+            server.accept_sequential_requests(&[
+                ("HTTP/1.1 404 Not Found", &[] as &[&str], ""),
+                ("HTTP/1.1 507 Insufficient Storage", &[] as &[&str], ""),
+            ])
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "sensitive_user_xyz_abc",
+            Some("super_secret_token_12345".to_string()),
+        );
+
+        let zip_dir = std::env::temp_dir().join(format!(
+            "webdav-preflight-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&zip_dir).unwrap();
+        let zip_path = zip_dir.join("test.zip");
+        create_test_zip(&zip_path);
+
+        let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
+        let records = handle.join().expect("mock server 线程 panic");
+
+        // PROPFIND 和 MKCOL 都应携带 Authorization
+        assert!(records[0].authorization_present, "PROPFIND 应携带 Authorization");
+        assert!(records[1].authorization_present, "MKCOL 应携带 Authorization");
+
+        let err = result.unwrap_err();
+        assert!(
+            !err.contains("sensitive_user_xyz_abc"),
+            "错误信息不得泄漏用户名: {err}"
+        );
+        assert!(
+            !err.contains("super_secret_token_12345"),
+            "错误信息不得泄漏密码: {err}"
+        );
+        assert!(
+            !err.contains("Authorization"),
+            "错误信息不得提及 Authorization 头: {err}"
+        );
+        assert!(
+            !err.contains("Basic"),
+            "错误信息不得提及 Basic 认证: {err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    #[tokio::test]
+    async fn upload_preflight_mkcol_409_returns_path_conflict() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        // PROPFIND 404 → MKCOL 409
+        let handle = std::thread::spawn(move || {
+            server.accept_sequential_requests(&[
+                ("HTTP/1.1 404 Not Found", &[] as &[&str], ""),
+                ("HTTP/1.1 409 Conflict", &[] as &[&str], ""),
+            ])
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "conflict_user",
+            Some("conflict_pass".to_string()),
+        );
+
+        let zip_dir = std::env::temp_dir().join(format!(
+            "webdav-preflight-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&zip_dir).unwrap();
+        let zip_path = zip_dir.join("test.zip");
+        create_test_zip(&zip_path);
+
+        let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
+        let _records = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        // 应保留 PathConflict 语义
+        assert!(
+            err.contains("冲突"),
+            "MKCOL 409 应映射到冲突语义，而非通用上传失败: {err}"
+        );
+        assert!(
+            !err.contains("conflict_user") && !err.contains("conflict_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&zip_dir);
     }
 }
