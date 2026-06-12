@@ -5,6 +5,7 @@
 
 use crate::backup;
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -161,6 +162,8 @@ pub struct WebDavConfigLoadResult {
 pub struct WebDavConfigSaveResult {
     /// 是否成功。
     pub success: bool,
+    /// 非致命警告（如凭据删除失败）。
+    pub warning: Option<String>,
     /// 错误信息（失败时）。
     pub error: Option<String>,
 }
@@ -225,6 +228,26 @@ struct WebDavConfigFile {
     remote_dir: String,
     /// 是否标记为"已记住密码"。实际凭据不在此文件中存储。
     password_saved: bool,
+    /// 密钥链 account 标识（SHA-256 哈希前 32 字符）。
+    /// 仅在 `password_saved=true` 时写入，用于定位系统凭据。
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    credential_key: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// credential_key 计算
+// ---------------------------------------------------------------------------
+
+/// 基于 server_url / username / remote_dir 计算密钥链 account 标识。
+///
+/// 输入格式：`v1\n{server_url}\n{username}\n{remote_dir}`
+/// 输出：SHA-256 哈希的前 32 字符十六进制字符串。
+/// 不包含 password，确保配置文件中不泄露凭据。
+fn compute_credential_key(server_url: &str, username: &str, remote_dir: &str) -> String {
+    let input = format!("v1\n{server_url}\n{username}\n{remote_dir}");
+    let hash = sha2::Sha256::digest(input.as_bytes());
+    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    hex[..32].to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -670,7 +693,7 @@ pub async fn webdav_load_config(app: tauri::AppHandle) -> Result<WebDavConfigLoa
         server_url: Some(config.server_url),
         username: Some(config.username),
         remote_dir: Some(config.remote_dir),
-        password_saved: config.password_saved,
+        password_saved: config.password_saved && config.credential_key.is_some(),
         error: None,
     })
 }
@@ -678,45 +701,128 @@ pub async fn webdav_load_config(app: tauri::AppHandle) -> Result<WebDavConfigLoa
 /// 纯校验+规范化：将前端保存请求转换为可安全持久化的配置结构。
 ///
 /// 职责：
-/// - 拒绝 `remember_password=true`（系统密钥链未实现，无法安全存储凭据）。
 /// - 通过 `normalize_webdav_url` 规范化 `server_url`。
 /// - 通过 `normalize_remote_dir` 规范化 `remote_dir`。
-/// - 永远不持久化 `password_saved=true`（无密钥链时该标记无意义且误导）。
+/// - 计算 `credential_key`（不含密码）。
 /// - 永远不将密码/令牌写入磁盘。
-fn prepare_config_save(request: &WebDavConfigSaveRequest) -> Result<WebDavConfigFile, String> {
-    if request.remember_password {
-        return Err(
-            "系统密钥链尚未实现，无法安全存储密码。请取消勾选「记住密码」".to_string(),
-        );
-    }
-
+fn prepare_config_save(
+    request: &WebDavConfigSaveRequest,
+    old_config: Option<&WebDavConfigFile>,
+) -> Result<(WebDavConfigFile, Option<String>), String> {
     let server_url = normalize_webdav_url(&request.server_url)?;
     let remote_dir = normalize_remote_dir(request.remote_dir.as_deref().unwrap_or(""))?;
 
-    Ok(WebDavConfigFile {
+    let new_key = compute_credential_key(&server_url, &request.username, &remote_dir);
+    let old_credential_key = old_config.and_then(|c| c.credential_key.clone());
+
+    if request.remember_password {
+        if request.password.as_deref().unwrap_or("").is_empty() {
+            return Err("勾选记住密码时必须提供密码".to_string());
+        }
+
+        let config = WebDavConfigFile {
+            server_url,
+            username: request.username.clone(),
+            remote_dir,
+            password_saved: true,
+            credential_key: Some(new_key),
+        };
+        return Ok((config, old_credential_key));
+    }
+
+    let config = WebDavConfigFile {
         server_url,
         username: request.username.clone(),
         remote_dir,
         password_saved: false,
-    })
+        credential_key: None,
+    };
+    Ok((config, old_credential_key))
 }
 
 /// 保存 WebDAV 配置。
 ///
 /// 将非敏感字段写入应用配置目录的 `webdav-config.json`。
-/// - 若 `remember_password` 为 `true`，直接拒绝（系统密钥链未实现）。
-/// - 密码/令牌字段仅在本次请求中使用，不写入磁盘。
+/// 当 `remember_password=true` 时，密码通过系统密钥链存储，配置文件仅保存引用。
 #[tauri::command]
 pub async fn webdav_save_config(
     app: tauri::AppHandle,
     request: WebDavConfigSaveRequest,
 ) -> Result<WebDavConfigSaveResult, String> {
-    let config = prepare_config_save(&request).map_err(|e| e)?;
+    let path = config_file_path(&app)?;
+
+    let old_config = if path.exists() {
+        let content =
+            std::fs::read_to_string(&path).map_err(|e| format!("读取 WebDAV 配置文件失败: {e}"))?;
+        serde_json::from_str::<WebDavConfigFile>(&content)
+            .map_err(|e| format!("解析 WebDAV 配置文件失败: {e}"))?
+            .into()
+    } else {
+        None
+    };
+
+    let (config, old_credential_key) = prepare_config_save(&request, old_config.as_ref())?;
+
+    if request.remember_password {
+        let password = request.password.as_deref().unwrap_or("");
+        let new_key = config.credential_key.as_ref().unwrap();
+        let store = SystemWebDavCredentialStore::new();
+
+        // 旧 key 与新 key 不同时，先删除旧 secret
+        if let Some(ref old_key_str) = old_credential_key {
+            if old_key_str != new_key {
+                let old_cred_key = WebDavCredentialKey {
+                    service: "SoNotes.WebDAV".to_string(),
+                    account: old_key_str.clone(),
+                };
+                store
+                    .delete(&old_cred_key)
+                    .map_err(|e| format!("删除旧凭据失败: {e}"))?;
+            }
+        }
+
+        let new_cred_key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: new_key.clone(),
+        };
+        store
+            .save(&new_cred_key, password)
+            .map_err(|e| format!("保存密码到系统凭据失败: {e}"))?;
+
+        let json = serde_json::to_string_pretty(&config)
+            .map_err(|e| format!("序列化 WebDAV 配置失败: {e}"))?;
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建 WebDAV 配置目录失败: {e}"))?;
+        }
+
+        if let Err(e) = write_webdav_config_atomic(&path, &json) {
+            let _ = store.delete(&new_cred_key);
+            return Err(format!("写入 WebDAV 配置文件失败: {e}"));
+        }
+
+        return Ok(WebDavConfigSaveResult {
+            success: true,
+            warning: None,
+            error: None,
+        });
+    }
+
+    // remember_password=false：尝试删除旧 secret
+    let mut warning = None;
+    if let Some(ref old_key_str) = old_credential_key {
+        let old_cred_key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: old_key_str.clone(),
+        };
+        if let Err(_e) = SystemWebDavCredentialStore::new().delete(&old_cred_key) {
+            warning = Some("配置已更新，但系统凭据可能需要手动删除".to_string());
+        }
+    }
 
     let json = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("序列化 WebDAV 配置失败: {e}"))?;
-
-    let path = config_file_path(&app)?;
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -727,6 +833,7 @@ pub async fn webdav_save_config(
 
     Ok(WebDavConfigSaveResult {
         success: true,
+        warning,
         error: None,
     })
 }
@@ -2111,6 +2218,41 @@ impl WebDavCredentialStore for SystemWebDavCredentialStore {
     }
 }
 
+/// 测试用 credential store：delete 始终失败，用于验证 warning 路径。
+pub struct FailingDeleteCredentialStore;
+
+impl FailingDeleteCredentialStore {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for FailingDeleteCredentialStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WebDavCredentialStore for FailingDeleteCredentialStore {
+    fn save(&self, _key: &WebDavCredentialKey, _secret: &str) -> Result<(), WebDavCredentialError> {
+        Ok(())
+    }
+
+    fn load(&self, _key: &WebDavCredentialKey) -> Result<String, WebDavCredentialError> {
+        Err(WebDavCredentialError {
+            kind: WebDavCredentialErrorKind::LoadFailed,
+            message: "FailingDeleteCredentialStore: load not implemented".to_string(),
+        })
+    }
+
+    fn delete(&self, _key: &WebDavCredentialKey) -> Result<(), WebDavCredentialError> {
+        Err(WebDavCredentialError {
+            kind: WebDavCredentialErrorKind::DeleteFailed,
+            message: "FailingDeleteCredentialStore: delete always fails".to_string(),
+        })
+    }
+}
+
 /// 传输层故障分类，用于将 `reqwest::Error` 转换为内部分类。
 ///
 /// 拆分此层使得单元测试可以直接断言映射逻辑，无需在 CI 中制造真实超时或网络故障。
@@ -2810,6 +2952,7 @@ mod tests {
             username: "user1".to_string(),
             remote_dir: "SoNotes_Backups/".to_string(),
             password_saved: false,
+            credential_key: None,
         };
 
         let json = serde_json::to_string_pretty(&config).unwrap();
@@ -2836,6 +2979,7 @@ mod tests {
             username: "user1".to_string(),
             remote_dir: "Backups/".to_string(),
             password_saved: true,
+            credential_key: None,
         };
 
         let json = serde_json::to_string_pretty(&config).unwrap();
@@ -2863,6 +3007,7 @@ mod tests {
             username: "user1".to_string(),
             remote_dir: "Backups/".to_string(),
             password_saved: false,
+            credential_key: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(
@@ -2951,8 +3096,15 @@ mod tests {
             remember_password: true,
             password: Some("secret123".to_string()),
         };
-        let err = prepare_config_save(&request).unwrap_err();
-        assert!(err.contains("系统密钥链"), "应明确拒绝: {err}");
+        let (config, _) = prepare_config_save(&request, None).unwrap();
+        assert!(
+            config.password_saved,
+            "remember_password=true 且有密码时 password_saved 应为 true"
+        );
+        assert!(
+            config.credential_key.is_some(),
+            "应生成 credential_key"
+        );
     }
 
     #[test]
@@ -2964,8 +3116,8 @@ mod tests {
             remember_password: true,
             password: None,
         };
-        let err = prepare_config_save(&request).unwrap_err();
-        assert!(err.contains("系统密钥链"), "无密码也应拒绝: {err}");
+        let err = prepare_config_save(&request, None).unwrap_err();
+        assert!(err.contains("记住密码时必须提供密码"), "无密码也应拒绝: {err}");
     }
 
     #[test]
@@ -2977,10 +3129,10 @@ mod tests {
             remember_password: false,
             password: Some("token123".to_string()),
         };
-        let config = prepare_config_save(&request).unwrap();
+        let (config, _) = prepare_config_save(&request, None).unwrap();
         assert!(
             !config.password_saved,
-            "password_saved 必须始终为 false（无密钥链）"
+            "remember_password=false 时 password_saved 必须为 false"
         );
     }
 
@@ -2993,7 +3145,7 @@ mod tests {
             remember_password: false,
             password: None,
         };
-        let config = prepare_config_save(&request).unwrap();
+        let (config, _) = prepare_config_save(&request, None).unwrap();
         assert_eq!(
             config.server_url, "https://example.com/dav",
             "server_url 应被 normalize_webdav_url 规范化"
@@ -3009,7 +3161,7 @@ mod tests {
             remember_password: false,
             password: None,
         };
-        let config = prepare_config_save(&request).unwrap();
+        let (config, _) = prepare_config_save(&request, None).unwrap();
         assert_eq!(
             config.remote_dir, "MyBackups/",
             "remote_dir 应规范化为带尾斜杠的单级目录"
@@ -3025,7 +3177,7 @@ mod tests {
             remember_password: false,
             password: None,
         };
-        let config = prepare_config_save(&request).unwrap();
+        let (config, _) = prepare_config_save(&request, None).unwrap();
         assert_eq!(config.remote_dir, "SoNotes_Backups/");
     }
 
@@ -3038,7 +3190,7 @@ mod tests {
             remember_password: false,
             password: None,
         };
-        let err = prepare_config_save(&request).unwrap_err();
+        let err = prepare_config_save(&request, None).unwrap_err();
         assert!(err.contains("HTTPS"), "应拒绝非本机 HTTP: {err}");
     }
 
@@ -3051,7 +3203,7 @@ mod tests {
             remember_password: false,
             password: None,
         };
-        let err = prepare_config_save(&request).unwrap_err();
+        let err = prepare_config_save(&request, None).unwrap_err();
         assert!(err.contains("嵌套"), "应拒绝嵌套目录: {err}");
     }
 
@@ -3064,7 +3216,7 @@ mod tests {
             remember_password: false,
             password: Some("supersecret".to_string()),
         };
-        let config = prepare_config_save(&request).unwrap();
+        let (config, _) = prepare_config_save(&request, None).unwrap();
         let json = serde_json::to_string(&config).unwrap();
         assert!(
             !json.contains("supersecret"),
@@ -3085,7 +3237,7 @@ mod tests {
             remember_password: false,
             password: None,
         };
-        let err = prepare_config_save(&request).unwrap_err();
+        let err = prepare_config_save(&request, None).unwrap_err();
         assert!(err.contains("用户名"), "应拒绝含 userinfo 的 URL: {err}");
     }
 
@@ -6822,5 +6974,258 @@ mod tests {
 
         let entry = keyring_core::Entry::new(&key.service, &key.account).unwrap();
         let _ = entry.delete_credential();
+    }
+
+    // -----------------------------------------------------------------------
+    // Commit 4: 保存/加载配置密钥链语义测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn config_save_remember_password_roundtrip() {
+        let dir = test_config_dir("remember-roundtrip");
+        let path = dir.join(CONFIG_FILENAME);
+
+        let store = MemoryWebDavCredentialStore::new();
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: true,
+            password: Some(TEST_SECRET.to_string()),
+        };
+
+        let (config, _) = prepare_config_save(&request, None).unwrap();
+        assert!(config.password_saved);
+        let cred_key = config.credential_key.clone().unwrap();
+        store
+            .save(
+                &WebDavCredentialKey {
+                    service: "SoNotes.WebDAV".to_string(),
+                    account: cred_key.clone(),
+                },
+                TEST_SECRET,
+            )
+            .unwrap();
+
+        let json = serde_json::to_string_pretty(&config).unwrap();
+        std::fs::write(&path, &json).unwrap();
+
+        let read_content = std::fs::read_to_string(&path).unwrap();
+        let read_config: WebDavConfigFile = serde_json::from_str(&read_content).unwrap();
+
+        let loaded_password_saved =
+            read_config.password_saved && read_config.credential_key.is_some();
+        assert!(loaded_password_saved, "roundtrip 后 passwordSaved 应为 true");
+
+        let loaded_secret = store
+            .load(&WebDavCredentialKey {
+                service: "SoNotes.WebDAV".to_string(),
+                account: read_config.credential_key.unwrap(),
+            })
+            .unwrap();
+        assert_eq!(loaded_secret, TEST_SECRET);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_save_no_remember_clears_credential() {
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: false,
+            password: None,
+        };
+
+        let (config, _) = prepare_config_save(&request, None).unwrap();
+        assert!(!config.password_saved);
+        assert!(config.credential_key.is_none());
+
+        let loaded_password_saved =
+            config.password_saved && config.credential_key.is_some();
+        assert!(!loaded_password_saved, "remember=false 时 passwordSaved 应为 false");
+    }
+
+    #[test]
+    fn config_save_credential_key_change_deletes_old() {
+        let store = MemoryWebDavCredentialStore::new();
+        let old_key_str = "old-key-hash-value-12345678";
+
+        store
+            .save(
+                &WebDavCredentialKey {
+                    service: "SoNotes.WebDAV".to_string(),
+                    account: old_key_str.to_string(),
+                },
+                "old-password",
+            )
+            .unwrap();
+
+        let old_config = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some(old_key_str.to_string()),
+        };
+
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://different-server.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: true,
+            password: Some("new-password".to_string()),
+        };
+
+        let (config, old_credential_key) = prepare_config_save(&request, Some(&old_config)).unwrap();
+        assert!(config.credential_key.is_some());
+        assert_ne!(config.credential_key.as_ref().unwrap(), old_key_str);
+        assert_eq!(old_credential_key.as_deref(), Some(old_key_str));
+
+        let new_key = config.credential_key.as_ref().unwrap();
+        store
+            .save(
+                &WebDavCredentialKey {
+                    service: "SoNotes.WebDAV".to_string(),
+                    account: new_key.clone(),
+                },
+                "new-password",
+            )
+            .unwrap();
+
+        let _ = store.delete(&WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: old_key_str.to_string(),
+        });
+
+        assert!(
+            store.load(&WebDavCredentialKey {
+                service: "SoNotes.WebDAV".to_string(),
+                account: old_key_str.to_string(),
+            }).is_err(),
+            "旧 secret 应已被删除"
+        );
+        assert_eq!(
+            store.load(&WebDavCredentialKey {
+                service: "SoNotes.WebDAV".to_string(),
+                account: new_key.clone(),
+            }).unwrap(),
+            "new-password"
+        );
+    }
+
+    #[test]
+    fn config_save_remember_without_password_fails() {
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: true,
+            password: None,
+        };
+
+        let err = prepare_config_save(&request, None).unwrap_err();
+        assert!(err.contains("记住密码时必须提供密码"), "应拒绝无密码的 remember: {err}");
+    }
+
+    #[test]
+    fn config_save_userinfo_url_rejected() {
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://user:pass@example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: true,
+            password: Some("secret".to_string()),
+        };
+
+        let err = prepare_config_save(&request, None).unwrap_err();
+        assert!(err.contains("用户名"), "应拒绝含 userinfo 的 URL: {err}");
+    }
+
+    #[test]
+    fn config_load_old_format_password_saved_without_key() {
+        let dir = test_config_dir("old-format");
+        let path = dir.join(CONFIG_FILENAME);
+
+        let old_config_json = serde_json::json!({
+            "server_url": "https://example.com/dav",
+            "username": "user1",
+            "remote_dir": "Backups/",
+            "password_saved": true
+        });
+
+        std::fs::write(&path, serde_json::to_string_pretty(&old_config_json).unwrap()).unwrap();
+
+        let read_content = std::fs::read_to_string(&path).unwrap();
+        let read_config: WebDavConfigFile = serde_json::from_str(&read_content).unwrap();
+
+        let loaded_password_saved =
+            read_config.password_saved && read_config.credential_key.is_some();
+        assert!(!loaded_password_saved, "旧格式 password_saved=true 但无 credential_key 时应返回 false");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_save_clear_returns_warning_on_delete_failure() {
+        let failing_store = FailingDeleteCredentialStore::new();
+
+        let old_key_str = "some-old-key";
+        let old_config = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some(old_key_str.to_string()),
+        };
+
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: false,
+            password: None,
+        };
+
+        let old_cred_key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: old_key_str.to_string(),
+        };
+        let delete_result = failing_store.delete(&old_cred_key);
+        assert!(delete_result.is_err(), "FailingDeleteCredentialStore 应始终失败");
+
+        let (config, old_credential_key) = prepare_config_save(&request, Some(&old_config)).unwrap();
+        assert!(!config.password_saved);
+        assert_eq!(old_credential_key.as_deref(), Some(old_key_str));
+    }
+
+    #[test]
+    fn credential_key_not_in_config_json() {
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: true,
+            password: Some(TEST_SECRET.to_string()),
+        };
+
+        let (config, _) = prepare_config_save(&request, None).unwrap();
+        let json = serde_json::to_string(&config).unwrap();
+
+        assert!(
+            !json.contains(TEST_SECRET),
+            "配置 JSON 中不得包含密码明文"
+        );
+        assert!(
+            !json.contains("\"password\""),
+            "配置 JSON 中不得出现 password 字段"
+        );
+
+        let cred_key = config.credential_key.as_ref().unwrap();
+        assert!(
+            !cred_key.contains(TEST_SECRET),
+            "credential_key 中不得包含密码"
+        );
     }
 }
