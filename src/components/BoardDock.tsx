@@ -150,6 +150,7 @@ export const BoardDock = () => {
   const [webdavOperation, setWebdavOperation] = useState<'idle' | 'testing' | 'saving' | 'listing' | 'creating' | 'restoring' | 'deleting'>('idle');
   const [webdavFeedback, setWebdavFeedback] = useState<{ status: 'success' | 'error' | 'info'; message: string } | null>(null);
   const [webdavBackups, setWebdavBackups] = useState<WebDavBackupService.WebDavRemoteBackup[]>([]);
+  const [webdavPasswordSaved, setWebdavPasswordSaved] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -217,6 +218,7 @@ export const BoardDock = () => {
           setWebdavOperation('idle');
           setWebdavFeedback(null);
           setWebdavBackups([]);
+          setWebdavPasswordSaved(false);
       }
   }, [showSettings]);
 
@@ -235,6 +237,7 @@ export const BoardDock = () => {
             remoteDir: result.remoteDir ?? 'SoNotes_Backups/',
             password: '',
           }));
+          setWebdavPasswordSaved(result.passwordSaved);
         }
       } catch (err) {
         if (!cancelled) {
@@ -528,6 +531,10 @@ export const BoardDock = () => {
   const onWebdavSaveConfig = async () => {
     const config = buildWebdavConfig();
     if (!config) return;
+    if (webdavDraft.rememberPassword && !webdavDraft.password.trim()) {
+      setWebdavFeedback({ status: 'error', message: '勾选"记住密码"时需要输入密码。' });
+      return;
+    }
     setWebdavFeedback(null);
     setWebdavOperation('saving');
     try {
@@ -536,7 +543,14 @@ export const BoardDock = () => {
         rememberPassword: webdavDraft.rememberPassword,
       });
       if (result.success) {
-        setWebdavFeedback({ status: 'success', message: '配置已保存。' });
+        if (result.warning) {
+          setWebdavFeedback({ status: 'info', message: result.warning });
+        } else if (webdavDraft.rememberPassword) {
+          setWebdavFeedback({ status: 'success', message: '密码已保存到系统凭据管理器。' });
+          setWebdavPasswordSaved(true);
+        } else {
+          setWebdavFeedback({ status: 'success', message: '配置已保存。' });
+        }
       } else {
         setWebdavFeedback({ status: 'error', message: `保存失败：${result.error ?? '未知错误'}` });
       }
@@ -555,6 +569,7 @@ export const BoardDock = () => {
       if (result.success) {
         setWebdavDraft({ serverUrl: '', username: '', password: '', remoteDir: 'SoNotes_Backups/', rememberPassword: false });
         setWebdavBackups([]);
+        setWebdavPasswordSaved(false);
         setWebdavFeedback({ status: 'info', message: '配置已清除。' });
       } else {
         setWebdavFeedback({ status: 'error', message: `清除失败：${result.error ?? '未知错误'}` });
@@ -1267,6 +1282,11 @@ export const BoardDock = () => {
                                 className="w-full bg-secondary-bg/50 border border-border-subtle rounded px-2 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-blue-400"
                                 data-testid="webdav-password"
                             />
+                            {webdavPasswordSaved && (
+                                <p className="text-[10px] text-green-600 dark:text-green-400 leading-tight" data-testid="webdav-password-saved-status">
+                                    密码已保存到系统凭据管理器
+                                </p>
+                            )}
                             <input
                                 type="text"
                                 placeholder="远端目录"

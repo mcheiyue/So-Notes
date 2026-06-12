@@ -31,6 +31,7 @@ export interface WebDavConfigLoadResult {
 export interface WebDavConfigSaveResult {
   readonly success: boolean;
   readonly error?: string;
+  readonly warning?: string;
 }
 
 export interface WebDavConfigClearResult {

@@ -116,6 +116,24 @@ describe('WebDavBackupService', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('密钥链');
     });
+
+    it('保存成功含 warning 时返回 warning', async () => {
+      const request = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+        rememberPassword: false,
+      };
+      const expected = {
+        success: true,
+        warning: '配置已更新，但系统凭据可能需要手动删除',
+      };
+      invokeMock.mockResolvedValueOnce(expected);
+
+      const result = await saveConfig(request);
+
+      expect(result.success).toBe(true);
+      expect(result.warning).toBe('配置已更新，但系统凭据可能需要手动删除');
+    });
   });
 
   describe('clearConfig', () => {

@@ -1987,4 +1987,106 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const feedback = container.querySelector('[data-testid="webdav-feedback"]');
     expect(feedback?.textContent).toContain('当前数据尚未成功写入磁盘');
   });
+
+  it('勾选记住密码但密码为空时不调用 saveConfig', async () => {
+    const { saveConfig, loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+
+    await openWebdavView();
+
+    const serverInput = container.querySelector('[data-testid="webdav-server-url"]') as HTMLInputElement;
+    const usernameInput = container.querySelector('[data-testid="webdav-username"]') as HTMLInputElement;
+
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(serverInput, 'https://dav.example.com');
+      serverInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(usernameInput, 'user1');
+      usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await clickElement(container.querySelector('[data-testid="webdav-remember-password"]'));
+
+    await clickElement(findButtonByText('保存配置'));
+
+    expect(saveConfig).not.toHaveBeenCalled();
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('勾选"记住密码"时需要输入密码');
+  });
+
+  it('勾选记住密码且密码非空时调用 saveConfig', async () => {
+    const { saveConfig, loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+    vi.mocked(saveConfig).mockResolvedValue({ success: true });
+
+    await openWebdavView();
+
+    const serverInput = container.querySelector('[data-testid="webdav-server-url"]') as HTMLInputElement;
+    const usernameInput = container.querySelector('[data-testid="webdav-username"]') as HTMLInputElement;
+    const passwordInput = container.querySelector('[data-testid="webdav-password"]') as HTMLInputElement;
+
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(serverInput, 'https://dav.example.com');
+      serverInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(usernameInput, 'user1');
+      usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(passwordInput, 'mypass');
+      passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await clickElement(container.querySelector('[data-testid="webdav-remember-password"]'));
+
+    await clickElement(findButtonByText('保存配置'));
+
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverUrl: 'https://dav.example.com',
+        username: 'user1',
+        rememberPassword: true,
+      }),
+    );
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('密码已保存到系统凭据管理器');
+  });
+
+  it('loadConfig 返回 passwordSaved=true 时显示已保存状态', async () => {
+    const { loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const status = container.querySelector('[data-testid="webdav-password-saved-status"]');
+    expect(status).not.toBeNull();
+    expect(status?.textContent).toContain('密码已保存到系统凭据管理器');
+
+    const passwordInput = container.querySelector('[data-testid="webdav-password"]') as HTMLInputElement;
+    expect(passwordInput.value).toBe('');
+  });
+
+  it('保存配置返回 warning 时展示 warning 文案', async () => {
+    const { saveConfig, loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+    vi.mocked(saveConfig).mockResolvedValue({ success: true, warning: '配置已更新，但系统凭据可能需要手动删除' });
+
+    await openWebdavView();
+
+    const serverInput = container.querySelector('[data-testid="webdav-server-url"]') as HTMLInputElement;
+    const usernameInput = container.querySelector('[data-testid="webdav-username"]') as HTMLInputElement;
+
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(serverInput, 'https://dav.example.com');
+      serverInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(usernameInput, 'user1');
+      usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await clickElement(findButtonByText('保存配置'));
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('配置已更新，但系统凭据可能需要手动删除');
+  });
 });
