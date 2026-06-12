@@ -2089,4 +2089,95 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const feedback = container.querySelector('[data-testid="webdav-feedback"]');
     expect(feedback?.textContent).toContain('配置已更新，但系统凭据可能需要手动删除');
   });
+
+  it('passwordSaved=true 且密码为空时测试连接可调用服务', async () => {
+    const { testConnection, loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+    vi.mocked(testConnection).mockResolvedValue({ success: true });
+
+    await openWebdavView();
+
+    const passwordInput = container.querySelector('[data-testid="webdav-password"]') as HTMLInputElement;
+    expect(passwordInput.value).toBe('');
+
+    await clickElement(findButtonByText('测试连接'));
+
+    expect(testConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ serverUrl: 'https://dav.example.com', username: 'user1' }),
+    );
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('连接测试成功');
+  });
+
+  it('passwordSaved=false 且密码为空时不调用网络服务并显示提示', async () => {
+    const { testConnection, loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+    vi.mocked(testConnection).mockResolvedValue({ success: true });
+
+    await openWebdavView();
+
+    const serverInput = container.querySelector('[data-testid="webdav-server-url"]') as HTMLInputElement;
+    const usernameInput = container.querySelector('[data-testid="webdav-username"]') as HTMLInputElement;
+
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(serverInput, 'https://dav.example.com');
+      serverInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(usernameInput, 'user1');
+      usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await clickElement(findButtonByText('测试连接'));
+
+    expect(testConnection).not.toHaveBeenCalled();
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('请先输入密码');
+  });
+
+  it('创建远端备份缺凭据时不调用 flushNow', async () => {
+    const { createRemoteBackup, loadConfig } = await import('../services/backup/WebDavBackupService');
+    const { flushNow } = await import('../services/storage/PersistenceFacade');
+    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup.zip' });
+    vi.mocked(flushNow).mockResolvedValue(true);
+
+    await openWebdavView();
+
+    const serverInput = container.querySelector('[data-testid="webdav-server-url"]') as HTMLInputElement;
+    const usernameInput = container.querySelector('[data-testid="webdav-username"]') as HTMLInputElement;
+
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(serverInput, 'https://dav.example.com');
+      serverInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(usernameInput, 'user1');
+      usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await clickElement(findButtonByText('创建远端备份'));
+
+    expect(flushNow).not.toHaveBeenCalled();
+    expect(createRemoteBackup).not.toHaveBeenCalled();
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback?.textContent).toContain('请先输入密码');
+  });
+
+  it('Rust 返回凭据错误时显示重新输入提示', async () => {
+    const { testConnection, loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+    vi.mocked(testConnection).mockResolvedValue({ success: false, error: '无法从系统凭据管理器读取密码' });
+
+    await openWebdavView();
+
+    await clickElement(findButtonByText('测试连接'));
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('请在设置中输入密码，或确认系统凭据管理器中的密码可用');
+    expect(feedback?.getAttribute('role')).toBe('alert');
+  });
 });

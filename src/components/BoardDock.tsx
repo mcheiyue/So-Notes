@@ -82,6 +82,15 @@ const formatValidationErrorMessage = (
   return `备份验证失败（${errors.length} 条错误）：\n${details}`;
 };
 
+const CREDENTIAL_ERROR_REPLACEMENT = '请在设置中输入密码，或确认系统凭据管理器中的密码可用。';
+
+const formatWebdavError = (message: string): string => {
+  if (message.includes('凭据') || message.includes('密码')) {
+    return CREDENTIAL_ERROR_REPLACEMENT;
+  }
+  return message;
+};
+
 const formatWebDavLastModified = (value?: string | null): string => {
   if (!value) return '';
   const date = new Date(value);
@@ -515,6 +524,12 @@ export const BoardDock = () => {
     }
   };
 
+  const requireWebdavCredentials = (): boolean => {
+    if (webdavDraft.password.trim() || webdavPasswordSaved) return true;
+    setWebdavFeedback({ status: 'error', message: '请先输入密码或在设置中勾选"记住密码"。' });
+    return false;
+  };
+
   const buildWebdavConfig = (): WebDavBackupService.WebDavConfig | null => {
     if (!webdavDraft.serverUrl.trim() || !webdavDraft.username.trim()) {
       setWebdavFeedback({ status: 'error', message: '请填写服务器地址和用户名。' });
@@ -584,6 +599,7 @@ export const BoardDock = () => {
   const onWebdavTestConnection = async () => {
     const config = buildWebdavConfig();
     if (!config) return;
+    if (!requireWebdavCredentials()) return;
     setWebdavFeedback(null);
     setWebdavOperation('testing');
     try {
@@ -591,10 +607,10 @@ export const BoardDock = () => {
       if (result.success) {
         setWebdavFeedback({ status: 'success', message: '连接测试成功。' });
       } else {
-        setWebdavFeedback({ status: 'error', message: `连接失败：${result.error ?? '未知错误'}` });
+        setWebdavFeedback({ status: 'error', message: `连接失败：${formatWebdavError(result.error ?? '未知错误')}` });
       }
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `连接失败：${formatUnknownError(err)}` });
+      setWebdavFeedback({ status: 'error', message: `连接失败：${formatWebdavError(formatUnknownError(err))}` });
     } finally {
       setWebdavOperation('idle');
     }
@@ -603,6 +619,7 @@ export const BoardDock = () => {
   const onWebdavListBackups = async () => {
     const config = buildWebdavConfig();
     if (!config) return;
+    if (!requireWebdavCredentials()) return;
     setWebdavFeedback(null);
     setWebdavOperation('listing');
     try {
@@ -612,7 +629,7 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'info', message: '远端无备份文件。' });
       }
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `获取备份列表失败：${formatUnknownError(err)}` });
+      setWebdavFeedback({ status: 'error', message: `获取备份列表失败：${formatWebdavError(formatUnknownError(err))}` });
     } finally {
       setWebdavOperation('idle');
     }
@@ -621,6 +638,7 @@ export const BoardDock = () => {
   const onWebdavCreateBackup = async () => {
     const config = buildWebdavConfig();
     if (!config) return;
+    if (!requireWebdavCredentials()) return;
     setWebdavFeedback(null);
     setWebdavOperation('creating');
     try {
@@ -639,10 +657,10 @@ export const BoardDock = () => {
           // list refresh failure is non-critical
         }
       } else {
-        setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${result.error ?? '未知错误'}` });
+        setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatWebdavError(result.error ?? '未知错误')}` });
       }
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatUnknownError(err)}` });
+      setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatWebdavError(formatUnknownError(err))}` });
     } finally {
       setWebdavOperation('idle');
     }
@@ -658,6 +676,7 @@ export const BoardDock = () => {
 
     const config = buildWebdavConfig();
     if (!config) return;
+    if (!requireWebdavCredentials()) return;
 
     setWebdavFeedback(null);
     setWebdavOperation('deleting');
@@ -672,10 +691,10 @@ export const BoardDock = () => {
           setWebdavBackups((items) => items.filter((item) => item.fileName !== fileName));
         }
       } else {
-        setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${result.error ?? '未知错误'}` });
+        setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${formatWebdavError(result.error ?? '未知错误')}` });
       }
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${formatUnknownError(err)}` });
+      setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${formatWebdavError(formatUnknownError(err))}` });
     } finally {
       setWebdavOperation('idle');
     }
@@ -690,6 +709,7 @@ export const BoardDock = () => {
 
     const config = buildWebdavConfig();
     if (!config) return;
+    if (!requireWebdavCredentials()) return;
 
     setWebdavFeedback(null);
     setWebdavOperation('restoring');
@@ -698,14 +718,14 @@ export const BoardDock = () => {
     try {
       const dlResult = await WebDavBackupService.downloadBackup(config, fileName);
       if (!dlResult.success || !dlResult.downloadToken) {
-        setWebdavFeedback({ status: 'error', message: `下载失败：${dlResult.error ?? '未知错误'}` });
+        setWebdavFeedback({ status: 'error', message: `下载失败：${formatWebdavError(dlResult.error ?? '未知错误')}` });
         return;
       }
       downloadToken = dlResult.downloadToken;
 
       const resolveResult = await WebDavBackupService.resolveDownloadedBackup(downloadToken);
       if (!resolveResult.success || !resolveResult.localPath) {
-        setWebdavFeedback({ status: 'error', message: `解析下载文件失败：${resolveResult.error ?? '未知错误'}` });
+        setWebdavFeedback({ status: 'error', message: `解析下载文件失败：${formatWebdavError(resolveResult.error ?? '未知错误')}` });
         return;
       }
 
@@ -737,7 +757,7 @@ export const BoardDock = () => {
 
       const result = await restoreLocalBackup(resolveResult.localPath);
       if (!result.success) {
-        setWebdavFeedback({ status: 'error', message: `恢复失败：${result.error ?? '未知错误'}` });
+        setWebdavFeedback({ status: 'error', message: `恢复失败：${formatWebdavError(result.error ?? '未知错误')}` });
         return;
       }
 
@@ -752,7 +772,7 @@ export const BoardDock = () => {
         message: `远端恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
       });
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `恢复失败：${formatUnknownError(err)}` });
+      setWebdavFeedback({ status: 'error', message: `恢复失败：${formatWebdavError(formatUnknownError(err))}` });
     } finally {
       if (downloadToken) {
         try {
