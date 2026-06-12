@@ -933,9 +933,15 @@ struct PropfindEntry {
     is_collection: bool,
 }
 
-fn parse_propfind_response(xml: &str) -> Result<Vec<PropfindEntry>, String> {
+fn parse_propfind_response(xml: &str) -> Result<Vec<PropfindEntry>, WebDavOperationError> {
     use quick_xml::events::Event;
     use quick_xml::Reader;
+
+    let invalid_propfind = || WebDavOperationError {
+        kind: WebDavErrorKind::InvalidPropfindResponse,
+        status: None,
+        retryable: false,
+    };
 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -1045,11 +1051,11 @@ fn parse_propfind_response(xml: &str) -> Result<Vec<PropfindEntry>, String> {
                     || in_resourcetype
                     || in_collection
                 {
-                    return Err("WebDAV 列表 XML 解析失败".to_string());
+                    return Err(invalid_propfind());
                 }
                 break;
             }
-            Err(_) => return Err("WebDAV 列表 XML 解析失败".to_string()),
+            Err(_) => return Err(invalid_propfind()),
             _ => {}
         }
         buf.clear();
@@ -1240,7 +1246,7 @@ async fn webdav_list_backups_with_client(
     }
 
     let xml = resp.text().await.map_err(|_| "远端备份列表读取失败".to_string())?;
-    let entries = parse_propfind_response(&xml)?;
+    let entries = parse_propfind_response(&xml).map_err(|e| webdav_error_message(&e))?;
     Ok(filter_backup_entries(entries))
 }
 
@@ -3032,6 +3038,15 @@ mod tests {
     fn parse_propfind_malformed_xml_returns_error() {
         let result = parse_propfind_response(r#"<D:multistatus><D:response>"#);
         assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.kind,
+            WebDavErrorKind::InvalidPropfindResponse,
+            "畸形 XML 应返回 InvalidPropfindResponse: {:?}",
+            err.kind
+        );
+        assert_eq!(err.status, None, "XML 解析错误不应携带 HTTP 状态码");
+        assert!(!err.retryable, "XML 解析错误不应标记为可重试");
     }
 
     #[test]
@@ -4311,9 +4326,16 @@ mod tests {
         let result = parse_propfind_response(&xml);
         assert!(result.is_err(), "畸形 XML 应返回错误");
         let err = result.unwrap_err();
-        assert!(
-            err.contains("XML 解析失败"),
-            "错误应提及 XML 解析失败: {err}"
+        assert_eq!(
+            err.kind,
+            WebDavErrorKind::InvalidPropfindResponse,
+            "畸形 XML fixture 应返回 InvalidPropfindResponse: {:?}",
+            err.kind
+        );
+        assert_eq!(
+            webdav_error_message(&err),
+            "WebDAV 列表 XML 解析失败",
+            "InvalidPropfindResponse 的用户消息应为 'WebDAV 列表 XML 解析失败'"
         );
     }
 
@@ -6103,5 +6125,113 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    #[test]
+    fn parse_propfind_truncated_eof_returns_invalid_propfind_response() {
+        let result = parse_propfind_response(r#"<D:multistatus><D:response>"#);
+        let err = result.unwrap_err();
+        assert_eq!(
+            err,
+            WebDavOperationError {
+                kind: WebDavErrorKind::InvalidPropfindResponse,
+                status: None,
+                retryable: false,
+            },
+            "未闭合 XML EOF 应精确匹配 InvalidPropfindResponse: {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_propfind_error_message_maps_to_user_visible_string() {
+        let error = WebDavOperationError {
+            kind: WebDavErrorKind::InvalidPropfindResponse,
+            status: None,
+            retryable: false,
+        };
+        let msg = webdav_error_message(&error);
+        assert_eq!(msg, "WebDAV 列表 XML 解析失败");
+        assert!(
+            !msg.contains("password") && !msg.contains("token"),
+            "错误信息不得泄漏凭据: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_propfind_fragmented_tag_returns_invalid_propfind_response() {
+        let result = parse_propfind_response(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/dav/SoNotes_Backups/"#,
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.kind,
+            WebDavErrorKind::InvalidPropfindResponse,
+            "EOF 时 in_href=true 应返回 InvalidPropfindResponse: {:?}",
+            err.kind
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_server_list_malformed_xml_returns_xml_parse_error_no_credential_leak() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let malformed_body = load_fixture("propfind_malformed.xml");
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request(
+                "HTTP/1.1 207 Multi-Status",
+                &[],
+                &malformed_body,
+            )
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("创建测试 reqwest::Client 失败");
+
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "xml_err_user",
+            Some("xml_err_secret_token".to_string()),
+        );
+
+        let result = webdav_list_backups_with_client(&client, &target).await;
+        let record = handle.join().expect("mock server 线程 panic");
+
+        assert_eq!(record.method, "PROPFIND", "请求方法应为 PROPFIND");
+        assert!(
+            record.authorization_present,
+            "请求应携带 Authorization 头"
+        );
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("XML 解析失败"),
+            "畸形 XML 应返回 XML 解析失败消息: {err}"
+        );
+        assert!(
+            err.contains("WebDAV 列表"),
+            "错误消息应包含 'WebDAV 列表': {err}"
+        );
+        assert!(
+            !err.contains("xml_err_user"),
+            "错误信息不得泄漏用户名: {err}"
+        );
+        assert!(
+            !err.contains("xml_err_secret_token"),
+            "错误信息不得泄漏密码: {err}"
+        );
+        assert!(
+            !err.contains("Authorization"),
+            "错误信息不得提及 Authorization 头: {err}"
+        );
+        assert!(
+            !err.contains("Basic"),
+            "错误信息不得提及 Basic 认证: {err}"
+        );
     }
 }
