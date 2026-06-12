@@ -1959,6 +1959,9 @@ pub enum WebDavTransportFailure {
 /// - 408/429 → Timeout（可重试）
 /// - 5xx → UnexpectedStatus（可重试）
 /// - 其他 → UnexpectedStatus（不可重试）
+///
+/// 注意：`retryable` 字段仅是分类标签，不代表所有操作都会执行重试。
+/// 每个操作的重试策略由自身逻辑独立控制，例如 upload 只重试 409/412 冲突。
 pub fn classify_webdav_status(
     _operation: WebDavOperation,
     status: reqwest::StatusCode,
@@ -2088,10 +2091,7 @@ pub fn webdav_error_message(error: &WebDavOperationError) -> String {
     match error.kind {
         WebDavErrorKind::AuthFailed => "WebDAV 鉴权失败".to_string(),
         WebDavErrorKind::Forbidden => "WebDAV 权限不足或访问被拒绝".to_string(),
-        WebDavErrorKind::NotFound => match error.status {
-            Some(404) => "远端目标不存在".to_string(),
-            _ => "远端目标不存在".to_string(),
-        },
+        WebDavErrorKind::NotFound => "远端目标不存在".to_string(),
         WebDavErrorKind::PathConflict => "远端路径冲突".to_string(),
         WebDavErrorKind::Locked => "远端资源被锁定".to_string(),
         WebDavErrorKind::InsufficientStorage => "远端存储空间不足".to_string(),
@@ -4388,7 +4388,7 @@ mod tests {
         assert_eq!(
             filtered.len(),
             2,
-            "未编码合法条目 + 解码后合法条目应保留；含编码非法字符的应被跳过"
+            "未编码合法条目 + 解码后合法条目应保留；%20 解码后含空格的条目被 validate_remote_backup_filename 过滤（非 decode_href_basename 问题）"
         );
         assert_eq!(
             filtered[0].file_name,
@@ -4401,6 +4401,27 @@ mod tests {
             "第二个合法条目应是 %5F 解码后的备份文件"
         );
         assert_eq!(filtered[1].size, Some(8192));
+    }
+
+    #[test]
+    fn fixture_namespace_variants_returns_one_backup() {
+        let xml = load_fixture("propfind_namespace_variants.xml");
+        let entries = parse_propfind_response(&xml).unwrap();
+        let filtered = filter_backup_entries(entries);
+
+        assert_eq!(filtered.len(), 1, "dc: 前缀命名空间应只保留 1 个合法备份条目");
+        assert_eq!(
+            filtered[0].file_name,
+            "SoNotes_Backup_20240301081500.zip",
+            "唯一合法条目文件名应匹配"
+        );
+        assert_eq!(filtered[0].size, Some(1048576));
+        let last_mod = filtered[0].last_modified.as_ref().expect("last_modified 应存在");
+        assert!(
+            last_mod.contains("2024"),
+            "last_modified 应包含年份 2024: {last_mod}"
+        );
+        assert!(filtered[0].readable, "合法备份条目应标记为 readable");
     }
 
     #[test]
@@ -5885,6 +5906,82 @@ mod tests {
         assert!(err.contains("锁定"), "423 应映射到锁定语义: {err}");
         assert!(
             !err.contains("lock_del_user") && !err.contains("lock_del_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_401_returns_auth_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 401 Unauthorized", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "auth_del_user",
+            Some("auth_del_pass".to_string()),
+        );
+
+        let result = webdav_delete_backup_with_client(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("鉴权失败"),
+            "401 应映射到鉴权失败语义: {err}"
+        );
+        assert!(
+            !err.contains("auth_del_user") && !err.contains("auth_del_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_403_returns_forbidden_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_one_request("HTTP/1.1 403 Forbidden", &[], "")
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "forbid_del_user",
+            Some("forbid_del_pass".to_string()),
+        );
+
+        let result = webdav_delete_backup_with_client(
+            &client,
+            &target,
+            "SoNotes_Backup_20240101120000.zip",
+        )
+        .await;
+        let _record = handle.join().expect("mock server 线程 panic");
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("权限不足") || err.contains("访问被拒绝"),
+            "403 应映射到权限不足或访问被拒绝: {err}"
+        );
+        assert!(
+            !err.contains("forbid_del_user") && !err.contains("forbid_del_pass"),
             "错误信息不得泄漏凭据: {err}"
         );
     }
