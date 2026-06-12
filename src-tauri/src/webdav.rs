@@ -1930,6 +1930,116 @@ pub struct WebDavOperationError {
     pub retryable: bool,
 }
 
+// ---------------------------------------------------------------------------
+// Credential Store 抽象
+// ---------------------------------------------------------------------------
+
+/// 密钥链 account key，用于在系统凭据管理器中定位 secret。
+///
+/// `service` 固定为 `"SoNotes.WebDAV"`；`account` 为带版本前缀的
+/// sha256 哈希，不包含 password / token / Authorization header。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebDavCredentialKey {
+    pub service: String,
+    pub account: String,
+}
+
+/// 凭据操作错误分类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebDavCredentialErrorKind {
+    /// 当前平台没有可用密钥链服务。
+    Unavailable,
+    /// 保存 secret 失败。
+    SaveFailed,
+    /// 读取 secret 失败。
+    LoadFailed,
+    /// 删除 secret 失败。
+    DeleteFailed,
+    /// 期望存在但实际无 secret。
+    MissingSecret,
+}
+
+/// 凭据操作错误。
+#[derive(Debug, Clone)]
+pub struct WebDavCredentialError {
+    pub kind: WebDavCredentialErrorKind,
+    pub message: String,
+}
+
+impl std::fmt::Display for WebDavCredentialError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}: {}", self.kind, self.message)
+    }
+}
+
+/// Credential store 边界：业务逻辑通过此 trait 与系统密钥链交互。
+///
+/// 生产环境使用 `SystemWebDavCredentialStore`（接入 keyring crate）；
+/// 测试环境使用 `MemoryWebDavCredentialStore`（内存 HashMap）。
+pub trait WebDavCredentialStore: Send + Sync {
+    fn save(&self, key: &WebDavCredentialKey, secret: &str) -> Result<(), WebDavCredentialError>;
+    fn load(&self, key: &WebDavCredentialKey) -> Result<String, WebDavCredentialError>;
+    fn delete(&self, key: &WebDavCredentialKey) -> Result<(), WebDavCredentialError>;
+}
+
+/// 内存 credential store，仅用于单元测试。
+///
+/// 使用 `Mutex<HashMap>` 实现 `Send + Sync`，不依赖系统密钥链。
+pub struct MemoryWebDavCredentialStore {
+    inner: std::sync::Mutex<HashMap<String, String>>,
+}
+
+impl MemoryWebDavCredentialStore {
+    pub fn new() -> Self {
+        Self {
+            inner: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn make_key(key: &WebDavCredentialKey) -> String {
+        format!("{}/{}", key.service, key.account)
+    }
+}
+
+impl Default for MemoryWebDavCredentialStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WebDavCredentialStore for MemoryWebDavCredentialStore {
+    fn save(&self, key: &WebDavCredentialKey, secret: &str) -> Result<(), WebDavCredentialError> {
+        let mut map = self.inner.lock().map_err(|_| WebDavCredentialError {
+            kind: WebDavCredentialErrorKind::SaveFailed,
+            message: "内存锁中毒".to_string(),
+        })?;
+        map.insert(Self::make_key(key), secret.to_string());
+        Ok(())
+    }
+
+    fn load(&self, key: &WebDavCredentialKey) -> Result<String, WebDavCredentialError> {
+        let map = self.inner.lock().map_err(|_| WebDavCredentialError {
+            kind: WebDavCredentialErrorKind::LoadFailed,
+            message: "内存锁中毒".to_string(),
+        })?;
+        map.get(&Self::make_key(key))
+            .cloned()
+            .ok_or(WebDavCredentialError {
+                kind: WebDavCredentialErrorKind::MissingSecret,
+                message: "凭据不存在".to_string(),
+            })
+    }
+
+    fn delete(&self, key: &WebDavCredentialKey) -> Result<(), WebDavCredentialError> {
+        let mut map = self.inner.lock().map_err(|_| WebDavCredentialError {
+            kind: WebDavCredentialErrorKind::DeleteFailed,
+            message: "内存锁中毒".to_string(),
+        })?;
+        map.remove(&Self::make_key(key));
+        Ok(())
+    }
+}
+
 /// 传输层故障分类，用于将 `reqwest::Error` 转换为内部分类。
 ///
 /// 拆分此层使得单元测试可以直接断言映射逻辑，无需在 CI 中制造真实超时或网络故障。
@@ -2123,6 +2233,9 @@ pub fn webdav_error_message(error: &WebDavOperationError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+        /// 测试统一凭据常量，所有凭据相关断言引用此值。
+        const TEST_SECRET: &str = "super-secret-token";
 
     #[test]
     fn webdav_config_debug_redacts_password() {
@@ -6470,6 +6583,123 @@ mod tests {
         assert!(
             !err.contains("Basic"),
             "错误信息不得提及 Basic 认证: {err}"
+        );
+    }
+
+    // ===================================================================
+    // Credential Store 测试
+    // ===================================================================
+
+    #[test]
+    fn memory_store_save_and_load() {
+        let store = MemoryWebDavCredentialStore::new();
+        let key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "test-account".to_string(),
+        };
+        store.save(&key, TEST_SECRET).expect("save 应成功");
+        let loaded = store.load(&key).expect("load 应成功");
+        assert_eq!(loaded, TEST_SECRET, "loaded secret 应与保存的一致");
+    }
+
+    #[test]
+    fn memory_store_load_missing_returns_missing_secret() {
+        let store = MemoryWebDavCredentialStore::new();
+        let key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "nonexistent".to_string(),
+        };
+        let err = store.load(&key).unwrap_err();
+        assert_eq!(err.kind, WebDavCredentialErrorKind::MissingSecret);
+    }
+
+    #[test]
+    fn memory_store_delete_then_load_returns_missing() {
+        let store = MemoryWebDavCredentialStore::new();
+        let key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "to-delete".to_string(),
+        };
+        store.save(&key, TEST_SECRET).expect("save 应成功");
+        store.delete(&key).expect("delete 应成功");
+        let err = store.load(&key).unwrap_err();
+        assert_eq!(err.kind, WebDavCredentialErrorKind::MissingSecret);
+    }
+
+    #[test]
+    fn memory_store_delete_nonexistent_succeeds() {
+        let store = MemoryWebDavCredentialStore::new();
+        let key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "never-existed".to_string(),
+        };
+        // 删除不存在的 key 不应报错（幂等）
+        store.delete(&key).expect("delete 不存在的 key 应成功");
+    }
+
+    #[test]
+    fn memory_store_overwrite_secret() {
+        let store = MemoryWebDavCredentialStore::new();
+        let key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "overwrite".to_string(),
+        };
+        store.save(&key, "first-value").expect("第一次 save 应成功");
+        store.save(&key, TEST_SECRET).expect("覆盖 save 应成功");
+        let loaded = store.load(&key).expect("load 应成功");
+        assert_eq!(loaded, TEST_SECRET, "覆盖后应返回新值");
+    }
+
+    #[test]
+    fn memory_store_different_keys_isolated() {
+        let store = MemoryWebDavCredentialStore::new();
+        let key_a = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "account-a".to_string(),
+        };
+        let key_b = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "account-b".to_string(),
+        };
+        store.save(&key_a, TEST_SECRET).expect("save a 应成功");
+        store.save(&key_b, "other-secret").expect("save b 应成功");
+        assert_eq!(store.load(&key_a).unwrap(), TEST_SECRET);
+        assert_eq!(store.load(&key_b).unwrap(), "other-secret");
+    }
+
+    #[test]
+    fn credential_error_debug_redacts_secret() {
+        let store = MemoryWebDavCredentialStore::new();
+        let key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "debug-test".to_string(),
+        };
+        store.save(&key, TEST_SECRET).expect("save 应成功");
+
+        // load 一个不同的 key，产生 MissingSecret 错误
+        let missing_key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "debug-test-missing".to_string(),
+        };
+        let err = store.load(&missing_key).unwrap_err();
+        let debug_output = format!("{err:?}");
+        assert!(
+            !debug_output.contains(TEST_SECRET),
+            "Debug 输出不得泄漏 secret: {debug_output}"
+        );
+    }
+
+    #[test]
+    fn credential_key_debug_redacts_secret() {
+        // 确保 key 本身不包含 secret
+        let key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "sha256-abc123".to_string(),
+        };
+        let debug_output = format!("{key:?}");
+        assert!(
+            !debug_output.contains(TEST_SECRET),
+            "CredentialKey Debug 不得包含 secret: {debug_output}"
         );
     }
 }
