@@ -559,11 +559,15 @@ export const BoardDock = () => {
       });
       if (result.success) {
         if (result.warning) {
+          if (!webdavDraft.rememberPassword) {
+            setWebdavPasswordSaved(false);
+          }
           setWebdavFeedback({ status: 'info', message: result.warning });
         } else if (webdavDraft.rememberPassword) {
           setWebdavFeedback({ status: 'success', message: '密码已保存到系统凭据管理器。' });
           setWebdavPasswordSaved(true);
         } else {
+          setWebdavPasswordSaved(false);
           setWebdavFeedback({ status: 'success', message: '配置已保存。' });
         }
       } else {

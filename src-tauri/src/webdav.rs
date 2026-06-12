@@ -1000,6 +1000,17 @@ fn resolve_operation_secret_core(
         }
     };
 
+    // 校验当前操作的 identity tuple 与 saved config 一致，
+    // 防止用户修改服务器地址后旧 secret 被复用到不同目标。
+    let current_url = normalize_webdav_url(&config.server_url)
+        .map_err(|_| "WebDAV 地址格式错误，请检查后重新输入。".to_string())?;
+    let current_dir = normalize_remote_dir(config.remote_dir.as_deref().unwrap_or(""))
+        .map_err(|_| "远端目录格式错误，请检查后重新输入。".to_string())?;
+    let current_key = compute_credential_key(&current_url, &config.username, &current_dir);
+    if current_key != key_str {
+        return Err("当前 WebDAV 地址、用户名或目录与已保存配置不一致，请重新输入密码。".to_string());
+    }
+
     let cred_key = WebDavCredentialKey {
         service: CREDENTIAL_SERVICE.to_string(),
         account: key_str,
@@ -7336,7 +7347,6 @@ mod tests {
 
     #[test]
     fn resolve_secret_error_does_not_leak_stored_secret() {
-        // 验证 resolve_operation_secret_core 错误消息不包含 store 中的 secret
         let store = MemoryWebDavCredentialStore::new();
         let cred_key_val = compute_credential_key(
             "https://example.com/dav",
@@ -7345,11 +7355,10 @@ mod tests {
         );
         let cred_key = WebDavCredentialKey {
             service: CREDENTIAL_SERVICE.to_string(),
-            account: cred_key_val,
+            account: cred_key_val.clone(),
         };
         store.save(&cred_key, TEST_SECRET).expect("save 应成功");
 
-        // 配置文件存在但 credential_key 不匹配，触发 load 失败
         let config = WebDavConfig {
             server_url: "https://example.com/dav".to_string(),
             username: "alice".to_string(),
@@ -7368,17 +7377,62 @@ mod tests {
             username: "alice".to_string(),
             remote_dir: "Backups/".to_string(),
             password_saved: true,
-            credential_key: Some("different-key".to_string()),
+            credential_key: Some(cred_key_val),
         };
         let json = serde_json::to_string(&config_file).unwrap();
         std::fs::write(&path, json).unwrap();
 
         let result = resolve_operation_secret_core(Some(&path), &config, &store);
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err();
+        assert!(result.is_ok(), "identity 匹配且 store 有 secret 时应成功");
+        assert_eq!(result.unwrap(), TEST_SECRET);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_secret_rejects_mismatched_identity() {
+        let store = MemoryWebDavCredentialStore::new();
+        let saved_key = compute_credential_key(
+            "https://old-server.com/dav",
+            "alice",
+            "Backups/",
+        );
+        let cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: saved_key.clone(),
+        };
+        store.save(&cred_key, TEST_SECRET).expect("save 应成功");
+
+        let dir = std::env::temp_dir().join(format!(
+            "so-notes-test-identity-mismatch-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("webdav-config.json");
+        let config_file = WebDavConfigFile {
+            server_url: "https://old-server.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some(saved_key),
+        };
+        let json = serde_json::to_string(&config_file).unwrap();
+        std::fs::write(&path, json).unwrap();
+
+        // 用户在 UI 改了服务器地址，但留空密码
+        let config = WebDavConfig {
+            server_url: "https://new-server.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            password: None,
+        };
+
+        let result = resolve_operation_secret_core(Some(&path), &config, &store);
+        assert!(result.is_err(), "identity 不匹配时应拒绝加载 secret");
+        let err = result.unwrap_err();
         assert!(
-            !err_msg.contains(TEST_SECRET),
-            "resolve 错误消息不得泄漏 secret: {err_msg}"
+            err.contains("不一致"),
+            "错误应提示 identity 不一致: {err}"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -7512,6 +7566,12 @@ mod tests {
             password: None,
         };
 
+        let real_key = compute_credential_key(
+            "https://example.com/dav",
+            "alice",
+            "Backups/",
+        );
+
         let dir = std::env::temp_dir().join(format!(
             "so-notes-test-resolve-fail-{}",
             std::process::id()
@@ -7523,7 +7583,7 @@ mod tests {
             username: "alice".to_string(),
             remote_dir: "Backups/".to_string(),
             password_saved: true,
-            credential_key: Some("nonexistent-key".to_string()),
+            credential_key: Some(real_key),
         };
         let json = serde_json::to_string(&config_file).unwrap();
         std::fs::write(&path, json).unwrap();
