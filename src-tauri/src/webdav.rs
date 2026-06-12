@@ -4334,8 +4334,11 @@ mod tests {
                 if trimmed.is_empty() {
                     break;
                 }
-                if let Some(val) = trimmed.strip_prefix("Depth:") {
-                    depth = Some(val.trim().to_string());
+                if trimmed
+                    .to_ascii_lowercase()
+                    .starts_with("depth:")
+                {
+                    depth = Some(trimmed["depth:".len()..].trim().to_string());
                 }
                 if trimmed
                     .to_ascii_lowercase()
@@ -4458,8 +4461,11 @@ mod tests {
                 if trimmed.is_empty() {
                     break;
                 }
-                if let Some(val) = trimmed.strip_prefix("Depth:") {
-                    depth = Some(val.trim().to_string());
+                if trimmed
+                    .to_ascii_lowercase()
+                    .starts_with("depth:")
+                {
+                    depth = Some(trimmed["depth:".len()..].trim().to_string());
                 }
                 if trimmed
                     .to_ascii_lowercase()
@@ -4556,8 +4562,11 @@ mod tests {
                 if trimmed.is_empty() {
                     break;
                 }
-                if let Some(val) = trimmed.strip_prefix("Depth:") {
-                    depth = Some(val.trim().to_string());
+                if trimmed
+                    .to_ascii_lowercase()
+                    .starts_with("depth:")
+                {
+                    depth = Some(trimmed["depth:".len()..].trim().to_string());
                 }
                 if trimmed
                     .to_ascii_lowercase()
