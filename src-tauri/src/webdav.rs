@@ -247,6 +247,7 @@ struct WebDavConfigFile {
 /// 输出：SHA-256 哈希的前 32 字符十六进制字符串。
 /// 不包含 password，确保配置文件中不泄露凭据。
 fn compute_credential_key(server_url: &str, username: &str, remote_dir: &str) -> String {
+    let username = username.trim();
     let input = format!("v1\n{server_url}\n{username}\n{remote_dir}");
     let hash = sha2::Sha256::digest(input.as_bytes());
     let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();

@@ -351,13 +351,9 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_positioner::init())
         .setup(|app| {
-            // 初始化 Windows 密钥链存储
-            #[cfg(target_os = "windows")]
-            {
-                let config = std::collections::HashMap::new();
-                if let Err(e) = keyring::use_windows_native_store(&config) {
-                    eprintln!("初始化 Windows 密钥链失败: {e}");
-                }
+            // 初始化系统密钥链存储（跨平台）
+            if let Err(e) = keyring::use_native_store(false) {
+                eprintln!("初始化系统密钥链失败: {e}");
             }
 
             let (queue, rx) = persistence::IntentQueue::new();
