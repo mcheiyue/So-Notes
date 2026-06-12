@@ -1456,7 +1456,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
 
   it('测试连接调用 testConnection 服务', async () => {
     const { testConnection, loadConfig } = await import('../services/backup/WebDavBackupService');
-    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+    vi.mocked(loadConfig).mockResolvedValue({ success: true, passwordSaved: true });
     vi.mocked(testConnection).mockResolvedValue({ success: true });
 
     await openWebdavView();
@@ -1488,7 +1488,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { createRemoteBackup, loadConfig, listBackups } = await import('../services/backup/WebDavBackupService');
     const { flushNow } = await import('../services/storage/PersistenceFacade');
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup-2026.zip' });
     vi.mocked(listBackups).mockResolvedValue([]);
@@ -1509,7 +1509,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { createRemoteBackup, loadConfig } = await import('../services/backup/WebDavBackupService');
     const { flushNow } = await import('../services/storage/PersistenceFacade');
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(flushNow).mockResolvedValue(false);
 
@@ -1526,7 +1526,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { createRemoteBackup, loadConfig } = await import('../services/backup/WebDavBackupService');
     const { flushNow } = await import('../services/storage/PersistenceFacade');
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(flushNow).mockResolvedValue(true);
     vi.mocked(createRemoteBackup).mockRejectedValue('远端备份上传失败，本地数据未受影响');
@@ -1542,7 +1542,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
   it('刷新远端列表后渲染备份文件信息', async () => {
     const { loadConfig, listBackups } = await import('../services/backup/WebDavBackupService');
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
@@ -1563,7 +1563,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
   it('删除远端备份取消确认时不调用删除服务', async () => {
     const { loadConfig, listBackups, deleteBackup } = await import('../services/backup/WebDavBackupService');
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'SoNotes_Backup_20260609151929.zip', size: 102400, lastModified: 'Tue, 09 Jun 2026 07:19:29 GMT', readable: true },
@@ -1580,7 +1580,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
   it('删除远端备份成功后刷新列表', async () => {
     const { loadConfig, listBackups, deleteBackup } = await import('../services/backup/WebDavBackupService');
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups)
       .mockResolvedValueOnce([
@@ -1607,7 +1607,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { loadConfig, listBackups, downloadBackup } = await import('../services/backup/WebDavBackupService');
     const { restoreLocalBackup } = await import('../services/backup/BackupService');
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
@@ -1627,7 +1627,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
   it('远端恢复初始确认不含覆盖/不可撤销措辞', async () => {
     const { loadConfig, listBackups } = await import('../services/backup/WebDavBackupService');
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
@@ -1654,7 +1654,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
@@ -1745,7 +1745,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'bad-backup.zip', size: 1024, lastModified: '2026-06-08T10:00:00Z', readable: true },
@@ -1785,7 +1785,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'multi-error.zip', size: 2048, lastModified: '2026-06-08T10:00:00Z', readable: true },
@@ -1830,7 +1830,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'good-backup.zip', size: 2048, lastModified: '2026-06-08T10:00:00Z', readable: true },
@@ -1874,7 +1874,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'corrupt.zip', size: 2048, lastModified: '2026-06-08T10:00:00Z', readable: true },
@@ -1920,7 +1920,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'io-error.zip', size: 2048, lastModified: '2026-06-08T10:00:00Z', readable: true },
@@ -1953,7 +1953,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { flushNow, pause } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(loadConfig).mockResolvedValue({
-      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: false,
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
     vi.mocked(listBackups).mockResolvedValue([
       { fileName: 'flush-fail.zip', size: 2048, lastModified: '2026-06-08T10:00:00Z', readable: true },
