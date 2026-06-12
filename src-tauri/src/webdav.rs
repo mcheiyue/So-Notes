@@ -2040,6 +2040,77 @@ impl WebDavCredentialStore for MemoryWebDavCredentialStore {
     }
 }
 
+/// 系统密钥链 credential store，通过 `keyring` crate 接入操作系统凭据管理器。
+///
+/// 每次操作按需创建 `keyring_core::Entry`，不缓存实例。
+/// Windows 平台需要在调用方初始化 `keyring::use_windows_native_store()`。
+pub struct SystemWebDavCredentialStore;
+
+impl SystemWebDavCredentialStore {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for SystemWebDavCredentialStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WebDavCredentialStore for SystemWebDavCredentialStore {
+    fn save(&self, key: &WebDavCredentialKey, secret: &str) -> Result<(), WebDavCredentialError> {
+        let entry = keyring_core::Entry::new(&key.service, &key.account).map_err(|e| {
+            WebDavCredentialError {
+                kind: WebDavCredentialErrorKind::SaveFailed,
+                message: format!("创建密钥链条目失败: {e}"),
+            }
+        })?;
+        entry.set_password(secret).map_err(|e| WebDavCredentialError {
+            kind: WebDavCredentialErrorKind::SaveFailed,
+            message: format!("保存密码到密钥链失败: {e}"),
+        })
+    }
+
+    fn load(&self, key: &WebDavCredentialKey) -> Result<String, WebDavCredentialError> {
+        let entry = keyring_core::Entry::new(&key.service, &key.account).map_err(|e| {
+            WebDavCredentialError {
+                kind: WebDavCredentialErrorKind::LoadFailed,
+                message: format!("创建密钥链条目失败: {e}"),
+            }
+        })?;
+        entry.get_password().map_err(|e| match e {
+            keyring_core::Error::NoEntry => WebDavCredentialError {
+                kind: WebDavCredentialErrorKind::MissingSecret,
+                message: "凭据不存在".to_string(),
+            },
+            other => WebDavCredentialError {
+                kind: WebDavCredentialErrorKind::LoadFailed,
+                message: format!("从密钥链读取密码失败: {other}"),
+            },
+        })
+    }
+
+    fn delete(&self, key: &WebDavCredentialKey) -> Result<(), WebDavCredentialError> {
+        let entry = keyring_core::Entry::new(&key.service, &key.account).map_err(|e| {
+            WebDavCredentialError {
+                kind: WebDavCredentialErrorKind::DeleteFailed,
+                message: format!("创建密钥链条目失败: {e}"),
+            }
+        })?;
+        entry.delete_credential().map_err(|e| match e {
+            keyring_core::Error::NoEntry => WebDavCredentialError {
+                kind: WebDavCredentialErrorKind::MissingSecret,
+                message: "凭据不存在".to_string(),
+            },
+            other => WebDavCredentialError {
+                kind: WebDavCredentialErrorKind::DeleteFailed,
+                message: format!("从密钥链删除凭据失败: {other}"),
+            },
+        })
+    }
+}
+
 /// 传输层故障分类，用于将 `reqwest::Error` 转换为内部分类。
 ///
 /// 拆分此层使得单元测试可以直接断言映射逻辑，无需在 CI 中制造真实超时或网络故障。
@@ -6701,5 +6772,55 @@ mod tests {
             !debug_output.contains(TEST_SECRET),
             "CredentialKey Debug 不得包含 secret: {debug_output}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // SystemWebDavCredentialStore 测试（需真实系统密钥链，标记 ignore）
+    // -----------------------------------------------------------------------
+
+    #[test]
+    #[ignore]
+    fn system_store_save_and_load_roundtrip() {
+        let config = std::collections::HashMap::new();
+        keyring::use_windows_native_store(&config).expect("初始化 Windows 密钥链失败");
+
+        let store = SystemWebDavCredentialStore::new();
+        let key = WebDavCredentialKey {
+            service: "so-notes-test".to_string(),
+            account: "commit3-test".to_string(),
+        };
+
+        store.save(&key, TEST_SECRET).expect("系统密钥链 save 应成功");
+        let loaded = store.load(&key).expect("系统密钥链 load 应成功");
+        assert_eq!(loaded, TEST_SECRET, "系统密钥链 roundtrip 结果应一致");
+
+        let entry = keyring_core::Entry::new(&key.service, &key.account).unwrap();
+        let _ = entry.delete_credential();
+    }
+
+    #[test]
+    #[ignore]
+    fn system_store_delete_removes_credential() {
+        let config = std::collections::HashMap::new();
+        keyring::use_windows_native_store(&config).expect("初始化 Windows 密钥链失败");
+
+        let store = SystemWebDavCredentialStore::new();
+        let key = WebDavCredentialKey {
+            service: "so-notes-test".to_string(),
+            account: "commit3-delete-test".to_string(),
+        };
+
+        store.save(&key, TEST_SECRET).expect("系统密钥链 save 应成功");
+        store.delete(&key).expect("系统密钥链 delete 应成功");
+
+        let err = store.load(&key).unwrap_err();
+        assert_eq!(
+            err.kind,
+            WebDavCredentialErrorKind::MissingSecret,
+            "删除后 load 应返回 MissingSecret"
+        );
+
+        let entry = keyring_core::Entry::new(&key.service, &key.account).unwrap();
+        let _ = entry.delete_credential();
     }
 }
