@@ -2,6 +2,41 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.5.3] - 2026-06-12
+
+本版本聚焦 WebDAV 传输层可靠性与协议边界加固，让远端备份操作在各种异常服务端响应下的错误语义更精确、更安全、更可测。
+
+### 🐛 问题修复 (Bug Fixes)
+
+* **收紧上传重试边界，仅允许同名冲突重试**
+  > 上传遇到 405 Method Not Allowed、423 Locked、507 Insufficient Storage 等非冲突状态时立即失败，不再无差别重试；仅 409 Conflict 和 412 Precondition Failed 保留重试逻辑。
+
+* **上传前置目录检查接入错误分类**
+  > PROPFIND/MKCOL 阶段的 405/409/423/507 等状态码现在返回精确错误（如"远端资源被锁定"），不再统一折叠为"远端备份上传失败"。
+
+* **PROPFIND 解析失败使用内部错误分类**
+  > XML 解析失败返回 `InvalidPropfindResponse` 分类，不再直接透传字符串；测试可断言错误类型而非脆弱的文案匹配。
+
+* **修复删除 401/403 覆盖缺口与注释精确性**
+  > 补充删除操作 401/403 mock 测试；简化 `NotFound` 冗余分支；明确 `retryable` 字段仅是分类标签而非执行策略。
+
+### 🔧 内部改进 (Internal)
+
+* **新增 WebDAV 错误分类模型**
+  > 内部新增 `WebDavErrorKind`、`WebDavOperation`、`WebDavOperationError` 类型，将 401/403/404/405/408/409/412/423/429/507/5xx 等状态码映射为结构化分类，作为后续测试与错误处理的统一锚点。
+
+* **拆分请求入口支持 mock 测试**
+  > 新增 `WebDavRequestTarget` 与 `*_with_client` 函数，移除内部 `reqwest::Client` 创建，使测试可通过 `http://127.0.0.1:PORT` 注入 mock server。
+
+* **新增 mock 测试基础设施与 fixture 覆盖**
+  > 新增 `MockWebDavServer`（单请求/单响应/记录 method/path/Depth/Authorization presence）和 8 个 PROPFIND fixture，覆盖标准 207、命名空间变体、目录自身条目、混合状态、缺失/非法 size、URL 编码文件名、畸形 XML 等边界。
+
+* **全面接入错误分类与 mock 集成测试**
+  > 连接/列表/上传/下载/删除操作全部接入错误分类模型，新增覆盖 401/403/405/423/507/500 及传输错误的 mock 集成测试（共 218 个 WebDAV 测试）。
+
+* **新增真实服务端兼容记录模板**
+  > 新增 `docs/plans/webdav-real-server-compatibility-template.md`，为后续记录不同 WebDAV 服务端的实际行为提供标准化模板。
+
 ## [v1.5.2] - 2026-06-11
 
 本版本在 v1.5.1 基础上新增备份验证与恢复摘要能力，让本地 zip 恢复和 WebDAV 远端恢复在覆盖当前数据前先验证备份包完整性并展示结构化摘要，验证失败时本地数据不受影响。本版本不改变 zip 备份格式。
