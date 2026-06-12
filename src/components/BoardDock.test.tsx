@@ -2180,4 +2180,42 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(feedback?.textContent).toContain('请在设置中输入密码，或确认系统凭据管理器中的密码可用');
     expect(feedback?.getAttribute('role')).toBe('alert');
   });
+
+  it('清除配置成功含 secretCleanupWarning 时展示 warning', async () => {
+    const { clearConfig, loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+    vi.mocked(clearConfig).mockResolvedValue({
+      success: true,
+      secretCleanupWarning: '配置文件已删除，但密钥链 secret 未清理',
+    });
+
+    await openWebdavView();
+
+    await clickElement(findButtonByText('清除配置'));
+
+    const feedback = container.querySelector('[data-testid="webdav-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('配置文件已删除，但密钥链 secret 未清理');
+  });
+
+  it('清除配置成功后 passwordSaved 状态重置', async () => {
+    const { clearConfig, loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+    vi.mocked(clearConfig).mockResolvedValue({ success: true });
+
+    await openWebdavView();
+
+    const savedStatus = container.querySelector('[data-testid="webdav-password-saved-status"]');
+    expect(savedStatus).not.toBeNull();
+    expect(savedStatus?.textContent).toContain('密码已保存');
+
+    await clickElement(findButtonByText('清除配置'));
+
+    const savedStatusAfter = container.querySelector('[data-testid="webdav-password-saved-status"]');
+    expect(savedStatusAfter).toBeNull();
+  });
 });

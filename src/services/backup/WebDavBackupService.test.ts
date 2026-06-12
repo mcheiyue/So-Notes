@@ -168,6 +168,19 @@ describe('WebDavBackupService', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('删除 WebDAV 配置文件失败');
     });
+
+    it('清除成功含 secretCleanupWarning 时返回 warning', async () => {
+      const expected = {
+        success: true,
+        secretCleanupWarning: '配置文件已删除，但密钥链 secret 未清理',
+      };
+      invokeMock.mockResolvedValueOnce(expected);
+
+      const result = await clearConfig();
+
+      expect(result.success).toBe(true);
+      expect(result.secretCleanupWarning).toBe('配置文件已删除，但密钥链 secret 未清理');
+    });
   });
 
   // -------------------------------------------------------------------------

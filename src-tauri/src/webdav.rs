@@ -176,6 +176,9 @@ pub struct WebDavConfigClearResult {
     pub success: bool,
     /// 错误信息（失败时）。
     pub error: Option<String>,
+    /// 密钥链 secret 删除失败时的警告信息。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_cleanup_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -850,14 +853,34 @@ pub async fn webdav_clear_config(app: tauri::AppHandle) -> Result<WebDavConfigCl
         return Ok(WebDavConfigClearResult {
             success: true,
             error: None,
+            secret_cleanup_warning: None,
         });
     }
 
+    // 读取旧配置以获取 credential_key（先于删除）
+    let old_credential_key = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<WebDavConfigFile>(&content).ok())
+        .and_then(|config_file| config_file.credential_key);
+
     std::fs::remove_file(&path).map_err(|e| format!("删除 WebDAV 配置文件失败: {e}"))?;
+
+    let mut secret_cleanup_warning = None;
+    if let Some(key_str) = old_credential_key {
+        let cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: key_str,
+        };
+        if let Err(e) = SystemWebDavCredentialStore::new().delete(&cred_key) {
+            secret_cleanup_warning =
+                Some(format!("配置文件已删除，但密钥链 secret 未清理: {e}"));
+        }
+    }
 
     Ok(WebDavConfigClearResult {
         success: true,
         error: None,
+        secret_cleanup_warning,
     })
 }
 
@@ -7392,5 +7415,95 @@ mod tests {
         let result = resolve_operation_secret_core(None, &config, &store);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("请提供密码"));
+    }
+
+    #[test]
+    fn clear_config_deletes_credential_key_from_store() {
+        let store = MemoryWebDavCredentialStore::new();
+        let cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: "test-key-abc123".to_string(),
+        };
+        store.save(&cred_key, "my-secret").unwrap();
+        assert!(store.load(&cred_key).is_ok());
+
+        let dir = std::env::temp_dir()
+            .join(format!("so-notes-test-clear-cred-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(CONFIG_FILENAME);
+
+        let config_file = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some("test-key-abc123".to_string()),
+        };
+        let json = serde_json::to_string(&config_file).unwrap();
+        std::fs::write(&path, json).unwrap();
+        assert!(path.exists());
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let read: WebDavConfigFile = serde_json::from_str(&content).unwrap();
+        let old_key = read.credential_key.unwrap();
+
+        std::fs::remove_file(&path).unwrap();
+        assert!(!path.exists());
+
+        let cred_key_delete = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: old_key,
+        };
+        store.delete(&cred_key_delete).unwrap();
+
+        assert!(
+            store.load(&cred_key_delete).is_err(),
+            "删除后密钥链中不应再有该 secret"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clear_config_keychain_delete_failed_returns_warning() {
+        let store = FailingDeleteCredentialStore::new();
+        let cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: "test-key-fail".to_string(),
+        };
+
+        let result = store.delete(&cred_key);
+        assert!(result.is_err(), "FailingDeleteCredentialStore 应始终失败");
+
+        let err = result.unwrap_err();
+        assert!(
+            err.kind == WebDavCredentialErrorKind::DeleteFailed,
+            "错误类型应为 DeleteFailed"
+        );
+    }
+
+    #[test]
+    fn clear_config_old_credential_key_not_reused_after_delete() {
+        let store = MemoryWebDavCredentialStore::new();
+        let cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: "old-session-key".to_string(),
+        };
+        store.save(&cred_key, "old-password").unwrap();
+
+        store.delete(&cred_key).unwrap();
+
+        let load_result = store.load(&cred_key);
+        assert!(
+            load_result.is_err(),
+            "删除后旧 key 不应能加载到 secret"
+        );
+        assert!(
+            matches!(
+                load_result.unwrap_err().kind,
+                WebDavCredentialErrorKind::MissingSecret
+            ),
+            "错误类型应为 MissingSecret"
+        );
     }
 }

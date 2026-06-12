@@ -585,7 +585,11 @@ export const BoardDock = () => {
         setWebdavDraft({ serverUrl: '', username: '', password: '', remoteDir: 'SoNotes_Backups/', rememberPassword: false });
         setWebdavBackups([]);
         setWebdavPasswordSaved(false);
-        setWebdavFeedback({ status: 'info', message: '配置已清除。' });
+        if (result.secretCleanupWarning) {
+          setWebdavFeedback({ status: 'info', message: result.secretCleanupWarning });
+        } else {
+          setWebdavFeedback({ status: 'info', message: '配置已清除。' });
+        }
       } else {
         setWebdavFeedback({ status: 'error', message: `清除失败：${result.error ?? '未知错误'}` });
       }
