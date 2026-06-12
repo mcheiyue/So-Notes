@@ -7287,6 +7287,138 @@ mod tests {
     }
 
     #[test]
+    fn credential_store_save_error_does_not_leak_secret() {
+        // 验证 save 失败时，错误消息不包含实际密码
+        let store = MemoryWebDavCredentialStore::new();
+        let key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "leak-test-save".to_string(),
+        };
+
+        // 先保存一个值，然后验证错误路径
+        store.save(&key, TEST_SECRET).expect("save 应成功");
+
+        // 验证 save 成功后 Debug 输出不含 secret
+        let loaded = store.load(&key).unwrap();
+        assert_eq!(loaded, TEST_SECRET);
+
+        // 验证 MissingSecret 错误消息不含任何 secret
+        let missing_key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "leak-test-missing".to_string(),
+        };
+        let err = store.load(&missing_key).unwrap_err();
+        let display_msg = format!("{err}");
+        assert!(
+            !display_msg.contains(TEST_SECRET),
+            "MissingSecret Display 消息不得泄漏 secret: {display_msg}"
+        );
+    }
+
+    #[test]
+    fn credential_store_delete_error_does_not_leak_secret() {
+        // 验证 delete 失败时，错误消息不包含实际密码
+        let failing_store = FailingDeleteCredentialStore::new();
+        let key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: "leak-test-delete".to_string(),
+        };
+
+        failing_store.save(&key, TEST_SECRET).expect("save 应成功");
+        let err = failing_store.delete(&key).unwrap_err();
+        let display_msg = format!("{err}");
+        assert!(
+            !display_msg.contains(TEST_SECRET),
+            "DeleteFailed Display 消息不得泄漏 secret: {display_msg}"
+        );
+    }
+
+    #[test]
+    fn resolve_secret_error_does_not_leak_stored_secret() {
+        // 验证 resolve_operation_secret_core 错误消息不包含 store 中的 secret
+        let store = MemoryWebDavCredentialStore::new();
+        let cred_key_val = compute_credential_key(
+            "https://example.com/dav",
+            "alice",
+            "Backups/",
+        );
+        let cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: cred_key_val,
+        };
+        store.save(&cred_key, TEST_SECRET).expect("save 应成功");
+
+        // 配置文件存在但 credential_key 不匹配，触发 load 失败
+        let config = WebDavConfig {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            password: None,
+        };
+
+        let dir = std::env::temp_dir().join(format!(
+            "so-notes-test-resolve-leak-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("webdav-config.json");
+        let config_file = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some("different-key".to_string()),
+        };
+        let json = serde_json::to_string(&config_file).unwrap();
+        std::fs::write(&path, json).unwrap();
+
+        let result = resolve_operation_secret_core(Some(&path), &config, &store);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(
+            !err_msg.contains(TEST_SECRET),
+            "resolve 错误消息不得泄漏 secret: {err_msg}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn webdav_error_message_never_leaks_secrets() {
+        // 验证 webdav_error_message 返回的用户可见文案不包含任何密码
+        let kinds = [
+            WebDavErrorKind::AuthFailed,
+            WebDavErrorKind::Forbidden,
+            WebDavErrorKind::NotFound,
+            WebDavErrorKind::PathConflict,
+            WebDavErrorKind::Locked,
+            WebDavErrorKind::InsufficientStorage,
+            WebDavErrorKind::MethodNotAllowed,
+            WebDavErrorKind::Timeout,
+            WebDavErrorKind::NetworkUnreachable,
+            WebDavErrorKind::RedirectRejected,
+            WebDavErrorKind::UnexpectedStatus,
+            WebDavErrorKind::InvalidPropfindResponse,
+            WebDavErrorKind::DownloadTooLarge,
+            WebDavErrorKind::InvalidRemoteFileName,
+            WebDavErrorKind::LocalTempFileError,
+        ];
+
+        for kind in kinds {
+            let error = WebDavOperationError {
+                kind,
+                status: None,
+                retryable: false,
+            };
+            let msg = webdav_error_message(&error);
+            assert!(
+                !msg.contains(TEST_SECRET),
+                "webdav_error_message 不得泄漏 secret (kind={kind:?}): {msg}"
+            );
+        }
+    }
+
+    #[test]
     fn credential_key_not_in_config_json() {
         let request = WebDavConfigSaveRequest {
             server_url: "https://example.com/dav".to_string(),
