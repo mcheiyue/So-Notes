@@ -1595,8 +1595,8 @@ async fn webdav_upload_backup_with_client(
                     _ => {
                         let op_error =
                             classify_webdav_status(WebDavOperation::UploadBackup, status);
-                        last_error = webdav_error_message(&op_error);
-                        continue;
+                        let _ = std::fs::remove_file(zip_path);
+                        return Err(webdav_error_message(&op_error));
                     }
                 }
             }
@@ -4781,11 +4781,10 @@ mod tests {
         let server = MockWebDavServer::bind();
         let base_url = server.base_url().to_string();
         let handle = std::thread::spawn(move || {
-            let mut responses = vec![("HTTP/1.1 200 OK", &[] as &[&str], "")];
-            for _ in 0..UPLOAD_RETRY_LIMIT {
-                responses.push(("HTTP/1.1 423 Locked", &[] as &[&str], ""));
-            }
-            server.accept_sequential_requests(&responses)
+            server.accept_sequential_requests(&[
+                ("HTTP/1.1 200 OK", &[] as &[&str], ""),
+                ("HTTP/1.1 423 Locked", &[] as &[&str], ""),
+            ])
         });
 
         let client = reqwest::Client::builder()
@@ -4808,7 +4807,13 @@ mod tests {
         create_test_zip(&zip_path);
 
         let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
-        let _records = handle.join().expect("mock server 线程 panic");
+        let records = handle.join().expect("mock server 线程 panic");
+
+        assert_eq!(
+            records.len(),
+            2,
+            "423 非冲突重试状态码，应仅收到 PROPFIND + 1 PUT"
+        );
 
         let err = result.unwrap_err();
         assert!(
@@ -4828,11 +4833,10 @@ mod tests {
         let server = MockWebDavServer::bind();
         let base_url = server.base_url().to_string();
         let handle = std::thread::spawn(move || {
-            let mut responses = vec![("HTTP/1.1 200 OK", &[] as &[&str], "")];
-            for _ in 0..UPLOAD_RETRY_LIMIT {
-                responses.push(("HTTP/1.1 507 Insufficient Storage", &[] as &[&str], ""));
-            }
-            server.accept_sequential_requests(&responses)
+            server.accept_sequential_requests(&[
+                ("HTTP/1.1 200 OK", &[] as &[&str], ""),
+                ("HTTP/1.1 507 Insufficient Storage", &[] as &[&str], ""),
+            ])
         });
 
         let client = reqwest::Client::builder()
@@ -4855,7 +4859,13 @@ mod tests {
         create_test_zip(&zip_path);
 
         let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
-        let _records = handle.join().expect("mock server 线程 panic");
+        let records = handle.join().expect("mock server 线程 panic");
+
+        assert_eq!(
+            records.len(),
+            2,
+            "507 非冲突重试状态码，应仅收到 PROPFIND + 1 PUT"
+        );
 
         let err = result.unwrap_err();
         assert!(
@@ -4866,6 +4876,112 @@ mod tests {
             !err.contains("space_user") && !err.contains("space_pass"),
             "错误信息不得泄漏凭据: {err}"
         );
+
+        let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    #[tokio::test]
+    async fn upload_405_returns_method_not_allowed_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_sequential_requests(&[
+                ("HTTP/1.1 200 OK", &[] as &[&str], ""),
+                ("HTTP/1.1 405 Method Not Allowed", &[] as &[&str], ""),
+            ])
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "method_user",
+            Some("method_pass".to_string()),
+        );
+
+        let zip_dir = std::env::temp_dir().join(format!(
+            "webdav-upload-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&zip_dir).unwrap();
+        let zip_path = zip_dir.join("test.zip");
+        create_test_zip(&zip_path);
+
+        let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
+        let records = handle.join().expect("mock server 线程 panic");
+
+        assert_eq!(
+            records.len(),
+            2,
+            "405 非冲突重试状态码，应仅收到 PROPFIND + 1 PUT"
+        );
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("不支持") || err.contains("方法"),
+            "405 应映射到方法不支持语义: {err}"
+        );
+        assert!(
+            !err.contains("method_user") && !err.contains("method_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+        assert!(!zip_path.exists(), "失败后临时 zip 应被清理");
+
+        let _ = std::fs::remove_dir_all(&zip_dir);
+    }
+
+    #[tokio::test]
+    async fn upload_500_returns_unexpected_status_error() {
+        let server = MockWebDavServer::bind();
+        let base_url = server.base_url().to_string();
+        let handle = std::thread::spawn(move || {
+            server.accept_sequential_requests(&[
+                ("HTTP/1.1 200 OK", &[] as &[&str], ""),
+                ("HTTP/1.1 500 Internal Server Error", &[] as &[&str], ""),
+            ])
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let target = WebDavRequestTarget::for_test_with_auth(
+            &base_url,
+            "SoNotes_Backups/",
+            "err_user",
+            Some("err_pass".to_string()),
+        );
+
+        let zip_dir = std::env::temp_dir().join(format!(
+            "webdav-upload-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&zip_dir).unwrap();
+        let zip_path = zip_dir.join("test.zip");
+        create_test_zip(&zip_path);
+
+        let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
+        let records = handle.join().expect("mock server 线程 panic");
+
+        assert_eq!(
+            records.len(),
+            2,
+            "5xx 不再通用重试，应仅收到 PROPFIND + 1 PUT"
+        );
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("500") || err.contains("异常状态码"),
+            "500 应映射到异常状态码语义: {err}"
+        );
+        assert!(
+            !err.contains("err_user") && !err.contains("err_pass"),
+            "错误信息不得泄漏凭据: {err}"
+        );
+        assert!(!zip_path.exists(), "失败后临时 zip 应被清理");
 
         let _ = std::fs::remove_dir_all(&zip_dir);
     }
