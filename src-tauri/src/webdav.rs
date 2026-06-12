@@ -937,6 +937,67 @@ pub fn build_webdav_request_target(config: &WebDavConfig) -> Result<WebDavReques
     })
 }
 
+/// 凭据解析固定 service 常量，与 `save_config` / `load_config` 保持一致。
+const CREDENTIAL_SERVICE: &str = "SoNotes.WebDAV";
+
+/// 解析远端操作所需的密码/令牌（核心逻辑，不依赖 AppHandle）。
+///
+/// 优先级：
+/// 1. `config.password` 非空 → 直接使用（前端本次传入）。
+/// 2. 读取已保存的配置文件，从中获取 `credential_key` → 从密钥链加载。
+/// 3. 都无法获取 → 返回错误提示。
+fn resolve_operation_secret_core(
+    config_path: Option<&Path>,
+    config: &WebDavConfig,
+    store: &dyn WebDavCredentialStore,
+) -> Result<String, String> {
+    if let Some(ref pw) = config.password {
+        if !pw.is_empty() {
+            return Ok(pw.clone());
+        }
+    }
+
+    let path = match config_path {
+        Some(p) if p.exists() => p,
+        _ => {
+            return Err("请提供密码或在配置中启用「记住密码」。".to_string());
+        }
+    };
+
+    let content = std::fs::read_to_string(path)
+        .map_err(|_| "读取配置文件失败，请重新输入密码或应用令牌。".to_string())?;
+    let config_file: WebDavConfigFile = serde_json::from_str(&content)
+        .map_err(|_| "解析配置文件失败，请重新输入密码或应用令牌。".to_string())?;
+
+    let key_str = match config_file.credential_key {
+        Some(k) if config_file.password_saved => k,
+        _ => {
+            return Err("请提供密码或在配置中启用「记住密码」。".to_string());
+        }
+    };
+
+    let cred_key = WebDavCredentialKey {
+        service: CREDENTIAL_SERVICE.to_string(),
+        account: key_str,
+    };
+
+    store
+        .load(&cred_key)
+        .map_err(|_| "系统凭据读取失败，请重新输入密码或应用令牌。".to_string())
+}
+
+/// 解析远端操作所需的密码/令牌。
+///
+/// 从 AppHandle 获取配置文件路径后委托给 `resolve_operation_secret_core`。
+fn resolve_webdav_operation_secret(
+    app: &tauri::AppHandle,
+    config: &WebDavConfig,
+    store: &dyn WebDavCredentialStore,
+) -> Result<String, String> {
+    let path = config_file_path(app)?;
+    resolve_operation_secret_core(Some(&path), config, store)
+}
+
 // ---------------------------------------------------------------------------
 // PROPFIND 请求
 // ---------------------------------------------------------------------------
@@ -1316,7 +1377,14 @@ async fn webdav_test_connection_with_client(
 }
 
 #[tauri::command]
-pub async fn webdav_test_connection(config: WebDavConfig) -> Result<WebDavConnectionResult, String> {
+pub async fn webdav_test_connection(
+    app: tauri::AppHandle,
+    config: WebDavConfig,
+) -> Result<WebDavConnectionResult, String> {
+    let store = SystemWebDavCredentialStore::new();
+    let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
+    let mut config = config;
+    config.password = Some(secret);
     let target = build_webdav_request_target(&config)?;
     let client = build_webdav_http_client(Duration::from_secs(15))
         .map_err(|_| "WebDAV 地址不可访问".to_string())?;
@@ -1359,8 +1427,13 @@ async fn webdav_list_backups_with_client(
 
 #[tauri::command]
 pub async fn webdav_list_backups(
+    app: tauri::AppHandle,
     config: WebDavConfig,
 ) -> Result<Vec<WebDavRemoteBackup>, String> {
+    let store = SystemWebDavCredentialStore::new();
+    let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
+    let mut config = config;
+    config.password = Some(secret);
     let target = build_webdav_request_target(&config)?;
     let client = build_webdav_http_client(Duration::from_secs(15))
         .map_err(|_| "远端备份列表读取失败".to_string())?;
@@ -1408,11 +1481,16 @@ async fn webdav_delete_backup_with_client(
 
 #[tauri::command]
 pub async fn webdav_delete_backup(
+    app: tauri::AppHandle,
     config: WebDavConfig,
     remote_file_name: String,
 ) -> Result<WebDavDeleteResult, String> {
     validate_remote_backup_filename(&remote_file_name)?;
 
+    let store = SystemWebDavCredentialStore::new();
+    let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
+    let mut config = config;
+    config.password = Some(secret);
     let target = build_webdav_request_target(&config)?;
     let client = build_webdav_http_client(Duration::from_secs(30))
         .map_err(|_| "远端备份删除失败".to_string())?;
@@ -1737,6 +1815,10 @@ pub async fn webdav_create_remote_backup(
     app: tauri::AppHandle,
     config: WebDavConfig,
 ) -> Result<WebDavUploadResult, String> {
+    let store = SystemWebDavCredentialStore::new();
+    let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
+    let mut config = config;
+    config.password = Some(secret);
     let target = build_webdav_request_target(&config)?;
 
     let pending_dir = webdav_pending_dir(&app)?;
@@ -1914,6 +1996,10 @@ pub async fn webdav_download_backup(
 ) -> Result<WebDavDownloadResult, String> {
     validate_remote_backup_filename(&remote_file_name)?;
 
+    let store = SystemWebDavCredentialStore::new();
+    let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
+    let mut config = config;
+    config.password = Some(secret);
     let target = build_webdav_request_target(&config)?;
 
     let downloads_dir = webdav_downloads_dir(&app)?;
@@ -2879,20 +2965,10 @@ mod tests {
 
     #[test]
     fn delete_backup_rejects_path_filename_before_network() {
-        let config = WebDavConfig {
-            server_url: "https://example.com".to_string(),
-            username: "user".to_string(),
-            password: None,
-            remote_dir: Some("SoNotes_Backups/".to_string()),
-        };
-
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let err = rt
-            .block_on(webdav_delete_backup(
-                config,
-                "../SoNotes_Backup_20240101120000.zip".to_string(),
-            ))
-            .unwrap_err();
+        let err = validate_remote_backup_filename(
+            "../SoNotes_Backup_20240101120000.zip",
+        )
+        .unwrap_err();
 
         assert!(err.contains("..") || err.contains("路径分隔符"));
     }
@@ -6324,20 +6400,7 @@ mod tests {
 
     #[test]
     fn delete_invalid_remote_filename_fails_before_request() {
-        let config = WebDavConfig {
-            server_url: "https://example.com".to_string(),
-            username: "user".to_string(),
-            password: Some("pass".to_string()),
-            remote_dir: Some("SoNotes_Backups/".to_string()),
-        };
-
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let err = rt
-            .block_on(webdav_delete_backup(
-                config,
-                "readme.txt".to_string(),
-            ))
-            .unwrap_err();
+        let err = validate_remote_backup_filename("readme.txt").unwrap_err();
 
         assert!(
             err.contains("文件名") || err.contains("长度") || err.contains("前缀"),
@@ -7227,5 +7290,107 @@ mod tests {
             !cred_key.contains(TEST_SECRET),
             "credential_key 中不得包含密码"
         );
+    }
+
+    #[test]
+    fn resolve_secret_prefers_input_password() {
+        let store = MemoryWebDavCredentialStore::new();
+        let config = WebDavConfig {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            password: Some("inline-token".to_string()),
+        };
+
+        let result = resolve_operation_secret_core(None, &config, &store);
+        assert_eq!(result.unwrap(), "inline-token");
+    }
+
+    #[test]
+    fn resolve_secret_reads_from_store() {
+        let store = MemoryWebDavCredentialStore::new();
+        let config = WebDavConfig {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            password: None,
+        };
+
+        let cred_key_val =
+            compute_credential_key("https://example.com/dav", "alice", "Backups/");
+        let cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: cred_key_val,
+        };
+        store.save(&cred_key, "stored-secret").unwrap();
+
+        let dir = std::env::temp_dir().join(format!(
+            "so-notes-test-resolve-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("webdav-config.json");
+        let config_file = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some(cred_key.account.clone()),
+        };
+        let json = serde_json::to_string(&config_file).unwrap();
+        std::fs::write(&path, json).unwrap();
+
+        let result = resolve_operation_secret_core(Some(&path), &config, &store);
+        assert_eq!(result.unwrap(), "stored-secret");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_secret_fails_on_store_error() {
+        let store = MemoryWebDavCredentialStore::new();
+        let config = WebDavConfig {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            password: None,
+        };
+
+        let dir = std::env::temp_dir().join(format!(
+            "so-notes-test-resolve-fail-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("webdav-config.json");
+        let config_file = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some("nonexistent-key".to_string()),
+        };
+        let json = serde_json::to_string(&config_file).unwrap();
+        std::fs::write(&path, json).unwrap();
+
+        let result = resolve_operation_secret_core(Some(&path), &config, &store);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("系统凭据读取失败"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_secret_fails_when_no_source() {
+        let store = MemoryWebDavCredentialStore::new();
+        let config = WebDavConfig {
+            server_url: "https://example.com/dav".to_string(),
+            username: "alice".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            password: None,
+        };
+
+        let result = resolve_operation_secret_core(None, &config, &store);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("请提供密码"));
     }
 }
