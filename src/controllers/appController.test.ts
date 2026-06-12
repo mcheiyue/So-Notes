@@ -29,6 +29,7 @@ vi.mock('../utils/noteElementRegistry', () => {
 import { appController } from './appController';
 import { useStore } from '../store/useStore';
 import { useUIStore, createInitialUIState } from '../store/uiStore';
+import { useViewportStore } from '../store/viewportStore';
 import { normalizeNotes } from '../store/normalization';
 import { LAYOUT } from '../constants/layout';
 import type { Note } from '../store/types';
@@ -68,6 +69,12 @@ describe('appController first-tier intents', () => {
         createNote({ id: 'n3', x: 50, y: 60, boardId: 'default' }),
       ]),
       viewport: { x: 0, y: 0, w: 320, h: 240 },
+    });
+    useUIStore.getState().replaceUIState(createInitialUIState());
+    const s = useStore.getState();
+    useViewportStore.setState({
+      viewport: { ...s.viewport },
+      shellRect: { ...s.shellRect },
     });
   });
 
@@ -120,62 +127,84 @@ describe('appController first-tier intents', () => {
 
   it('resetViewport 将视口重置到原点', () => {
     useStore.setState({ viewport: { x: 500, y: 300, w: 800, h: 600 } });
+    useViewportStore.setState({ viewport: { x: 500, y: 300, w: 800, h: 600 } });
     appController.resetViewport();
     const { viewport } = useStore.getState();
     expect(viewport.x).toBe(0);
     expect(viewport.y).toBe(0);
+    expect(useViewportStore.getState().viewport.x).toBe(0);
+    expect(useViewportStore.getState().viewport.y).toBe(0);
   });
 
   it('openSpotlight 设置 isSpotlightOpen 为 true', () => {
     useStore.setState({ isSpotlightOpen: false });
+    useUIStore.setState({ isSpotlightOpen: false });
     appController.openSpotlight();
     expect(useStore.getState().isSpotlightOpen).toBe(true);
+    expect(useUIStore.getState().isSpotlightOpen).toBe(true);
   });
 
   it('closeSpotlight 设置 isSpotlightOpen 为 false', () => {
     useStore.setState({ isSpotlightOpen: true });
+    useUIStore.setState({ isSpotlightOpen: true });
     appController.closeSpotlight();
     expect(useStore.getState().isSpotlightOpen).toBe(false);
+    expect(useUIStore.getState().isSpotlightOpen).toBe(false);
   });
 
   it('toggleSpotlight 切换 isSpotlightOpen 状态', () => {
     useStore.setState({ isSpotlightOpen: false });
+    useUIStore.setState({ isSpotlightOpen: false });
     appController.toggleSpotlight();
     expect(useStore.getState().isSpotlightOpen).toBe(true);
+    expect(useUIStore.getState().isSpotlightOpen).toBe(true);
     appController.toggleSpotlight();
     expect(useStore.getState().isSpotlightOpen).toBe(false);
+    expect(useUIStore.getState().isSpotlightOpen).toBe(false);
   });
 
   it('setViewMode 设置视图模式', () => {
     useStore.setState({ viewMode: 'BOARD' });
+    useUIStore.setState({ viewMode: 'BOARD' });
     appController.setViewMode('TRASH');
     expect(useStore.getState().viewMode).toBe('TRASH');
+    expect(useUIStore.getState().viewMode).toBe('TRASH');
     appController.setViewMode('BOARD');
     expect(useStore.getState().viewMode).toBe('BOARD');
+    expect(useUIStore.getState().viewMode).toBe('BOARD');
   });
 
   it('toggleViewMode 切换视图模式并清空选区', () => {
     useStore.setState({ viewMode: 'BOARD', selectedIds: ['n1'] });
+    useUIStore.setState({ viewMode: 'BOARD', selectedIds: ['n1'] });
     appController.toggleViewMode();
     const state = useStore.getState();
     expect(state.viewMode).toBe('TRASH');
     expect(state.selectedIds).toEqual([]);
+    expect(useUIStore.getState().viewMode).toBe('TRASH');
+    expect(useUIStore.getState().selectedIds).toEqual([]);
   });
 
   it('enterTrashMode 进入废纸篓模式', () => {
     useStore.setState({ viewMode: 'BOARD', selectedIds: ['n1'] });
+    useUIStore.setState({ viewMode: 'BOARD', selectedIds: ['n1'] });
     appController.enterTrashMode();
     const state = useStore.getState();
     expect(state.viewMode).toBe('TRASH');
     expect(state.selectedIds).toEqual([]);
+    expect(useUIStore.getState().viewMode).toBe('TRASH');
+    expect(useUIStore.getState().selectedIds).toEqual([]);
   });
 
   it('enterBoardMode 进入看板模式', () => {
     useStore.setState({ viewMode: 'TRASH', selectedIds: ['n1'] });
+    useUIStore.setState({ viewMode: 'TRASH', selectedIds: ['n1'] });
     appController.enterBoardMode();
     const state = useStore.getState();
     expect(state.viewMode).toBe('BOARD');
     expect(state.selectedIds).toEqual([]);
+    expect(useUIStore.getState().viewMode).toBe('BOARD');
+    expect(useUIStore.getState().selectedIds).toEqual([]);
   });
 
   it('switchBoard 切换看板、回到看板视图并清空选区', () => {
@@ -203,13 +232,26 @@ describe('appController first-tier intents', () => {
     expect(viewport.w).toBe(640);
     expect(viewport.h).toBe(480);
     expect(shellRect).toEqual({ left: 10, top: 20, right: 650, bottom: 500 });
+    expect(useViewportStore.getState().viewport.w).toBe(640);
+    expect(useViewportStore.getState().viewport.h).toBe(480);
+    expect(useViewportStore.getState().shellRect).toEqual({ left: 10, top: 20, right: 650, bottom: 500 });
   });
 
   it('setPinned 同步钉住状态', () => {
     appController.setPinned(true);
     expect(useStore.getState().isPinned).toBe(true);
+    expect(useUIStore.getState().isPinned).toBe(true);
     appController.setPinned(false);
     expect(useStore.getState().isPinned).toBe(false);
+    expect(useUIStore.getState().isPinned).toBe(false);
+  });
+
+  it('showBoardDock 设置 isDockVisible 为 true', () => {
+    useStore.setState({ isDockVisible: false });
+    useUIStore.setState({ isDockVisible: false });
+    appController.showBoardDock();
+    expect(useStore.getState().isDockVisible).toBe(true);
+    expect(useUIStore.getState().isDockVisible).toBe(true);
   });
 
   it('菜单意图包装可修改单个便签颜色并复制便签', () => {
