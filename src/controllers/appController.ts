@@ -1,5 +1,6 @@
 import { useStore } from '../store/useStore';
 import { useUIStore } from '../store/uiStore';
+import { useViewportStore } from '../store/viewportStore';
 import { invoke } from '@tauri-apps/api/core';
 import { LAYOUT } from '../constants/layout';
 import type { Note, ShellRectState, StickyDragStatus } from '../store/types';
@@ -16,6 +17,7 @@ type WorldPosition = {
 };
 
 const getUIState = () => useUIStore.getState();
+const getViewportState = () => useViewportStore.getState();
 
 const toggleViewMode = (): void => {
   const { viewMode, setViewMode } = getUIState();
@@ -135,13 +137,13 @@ export const appController = {
   },
 
   resetViewport: (): void => {
-    useStore.getState().setViewportPosition(0, 0);
+    getViewportState().setViewportPosition(0, 0);
   },
 
   syncShellViewport: (rect: ShellRectState & { width: number; height: number }): void => {
     const nextWidth = Math.max(0, rect.width);
     const nextHeight = Math.max(0, rect.height);
-    const { viewport, shellRect, setViewportSize, setShellRect } = useStore.getState();
+    const { viewport, shellRect, setViewportSize, setShellRect } = getViewportState();
 
     if (viewport.w !== nextWidth || viewport.h !== nextHeight) {
       setViewportSize(nextWidth, nextHeight);
