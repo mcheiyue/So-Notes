@@ -2,6 +2,47 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.5.5] - 2026-06-13
+
+本版本完成首批低风险状态迁移（UI/Viewport 入口），建立旧 useStore 依赖地图作为后续迁移基线，并修复撕下窗口"悬浮"徽章在快照更新后不消失的竞态问题。
+
+### 🐛 问题修复 (Bug Fixes)
+
+* **修复撕下窗口"悬浮"徽章在快照更新后不消失**
+  > 当第二张快照在 1600ms 窗口内到达时，React effect cleanup 会清掉隐藏定时器，导致"悬浮"永久停留。
+  - 定时器改为仅在组件卸载时清理，快照更新不再取消已有定时器
+  - 新增回归测试覆盖 1600ms 内二次快照场景
+
+### 🚀 优化 (Optimizations)
+
+* **迁移 appController UI-only 入口到 useUIStore**
+  > Spotlight、ViewMode、Dock、Pinned、QuickCapture 等 UI-only 入口从旧 useStore 迁移到 useUIStore，减少对旧 store 的直接依赖。
+  - 新增 `getUIState()` helper 统一 UI state 读取
+  - 双向同步桥保留，旧 store 订阅不受影响
+
+* **迁移 appController Viewport-only 入口到 useViewportStore**
+  > `resetViewport` 和 `syncShellViewport` 从旧 useStore 迁移到 useViewportStore。
+  - 新增 `getViewportState()` helper 统一 Viewport state 读取
+
+* **迁移 useCanvasGlobalListeners Spotlight 只读路径**
+  > Space 键处理中的 `isSpotlightOpen` 读取从旧 useStore 改为 useUIStore。
+
+### 🔧 内部改进 (Internal)
+
+* **新增旧 useStore 依赖地图**
+  > 建立生产代码与测试代码的全量依赖地图，标记迁移批次与风险等级，作为后续版本迁移执行索引。
+  - 覆盖 20 个生产模块约 54 条依赖、22 个测试文件
+  - 明确 legacyDomainBridge 删除四前提
+
+* **补充 appController 入口迁移测试**
+  > 为首批迁移入口新增新旧 Store 镜像断言，确保迁移前后行为一致。
+
+* **补充 openQuickCapture TRASH 模式用例**
+  > 锁住"先回 BOARD，再异步打开 Quick Capture"的行为路径。
+
+* **修复 v1.5.5 文档回归命令**
+  > 移除文档中不存在的 `useCanvasGlobalListeners.test.tsx` 路径，实际覆盖在 `Canvas.test.tsx`。
+
 ## [v1.5.4] - 2026-06-12
 
 本版本将 WebDAV "记住密码"从占位状态推进到系统密钥链闭环，密码不再写入配置文件，改为通过系统凭据管理器安全存储；同时补充凭据读取校验与脱敏测试，防止 secret 泄漏或被复用到不匹配的目标。
