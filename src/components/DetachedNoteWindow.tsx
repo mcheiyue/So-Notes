@@ -92,6 +92,7 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
   const maxHeightRef = useRef(computeMaxHeight());
   const [isInitialHighlight, setIsInitialHighlight] = useState(false);
   const highlightTriggeredRef = useRef(false);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const resizeWindowToNote = useCallback((entry?: ResizeObserverEntry) => {
     const el = measureRef.current;
@@ -217,9 +218,12 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
     if (!snapshot || highlightTriggeredRef.current) return;
     highlightTriggeredRef.current = true;
     setIsInitialHighlight(true);
-    const timer = setTimeout(() => setIsInitialHighlight(false), 1600);
-    return () => clearTimeout(timer);
+    hideTimerRef.current = setTimeout(() => setIsInitialHighlight(false), 1600);
   }, [snapshot]);
+
+  useEffect(() => () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  }, []);
 
   const handleLocate = useCallback(
     (e: React.MouseEvent) => {

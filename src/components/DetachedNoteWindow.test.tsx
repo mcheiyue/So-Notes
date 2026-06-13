@@ -948,6 +948,33 @@ describe('DetachedNoteWindow 瞬态视觉提示', () => {
 
     expect(container.querySelector('[data-detached-note-cue="true"]')).toBeNull();
   });
+
+  it('1600ms 窗口内收到后续快照时，"悬浮"徽章仍按时消失', async () => {
+    await renderWindow();
+    simulateSnapshot(createSnapshot());
+
+    // 首张快照后徽章存在
+    expect(container.querySelector('[data-detached-note-cue="true"]')).not.toBeNull();
+
+    // 前进 800ms，仍在 1600ms 窗口内
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    expect(container.querySelector('[data-detached-note-cue="true"]')).not.toBeNull();
+
+    // 在定时器到期前收到第二张快照
+    simulateSnapshot(createSnapshot({
+      title: '更新标题',
+      content: '更新内容',
+    }));
+
+    // 再前进 1000ms，总计 1800ms > 1600ms，徽章应当已消失
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(container.querySelector('[data-detached-note-cue="true"]')).toBeNull();
+  });
 });
 
 describe('DetachedNoteWindow 主题同步', () => {
