@@ -15,22 +15,19 @@ type WorldPosition = {
   y: number;
 };
 
+const getUIState = () => useUIStore.getState();
+
 const toggleViewMode = (): void => {
-  const { viewMode, setViewMode, clearSelection } = useStore.getState();
-  clearSelection();
+  const { viewMode, setViewMode } = getUIState();
   setViewMode(viewMode === 'TRASH' ? 'BOARD' : 'TRASH');
 };
 
 const enterTrashMode = (): void => {
-  const { setViewMode, clearSelection } = useStore.getState();
-  clearSelection();
-  setViewMode('TRASH');
+  getUIState().setViewMode('TRASH');
 };
 
 const enterBoardMode = (): void => {
-  const { setViewMode, clearSelection } = useStore.getState();
-  clearSelection();
-  setViewMode('BOARD');
+  getUIState().setViewMode('BOARD');
 };
 
 const switchBoard = (boardId: string): void => {
@@ -40,7 +37,7 @@ const switchBoard = (boardId: string): void => {
 };
 
 const runOnBoardView = (action: () => void): void => {
-  if (useStore.getState().viewMode === 'TRASH') {
+  if (getUIState().viewMode === 'TRASH') {
     enterBoardMode();
     window.setTimeout(action, 0);
     return;
@@ -126,7 +123,7 @@ export const appController = {
   },
 
   showBoardDock: (): void => {
-    useStore.getState().setDockVisible(true);
+    getUIState().setDockVisible(true);
   },
 
   exportNoteSelection: async (noteId?: string): Promise<void> => {
@@ -166,24 +163,24 @@ export const appController = {
   },
 
   setPinned: (pinned: boolean): void => {
-    useStore.getState().setPinned(pinned);
+    getUIState().setPinned(pinned);
   },
 
   openSpotlight: (): void => {
-    useStore.getState().setSpotlightOpen(true);
+    getUIState().setSpotlightOpen(true);
   },
 
   closeSpotlight: (): void => {
-    useStore.getState().setSpotlightOpen(false);
+    getUIState().setSpotlightOpen(false);
   },
 
   toggleSpotlight: (): void => {
-    const { isSpotlightOpen, setSpotlightOpen } = useStore.getState();
+    const { isSpotlightOpen, setSpotlightOpen } = getUIState();
     setSpotlightOpen(!isSpotlightOpen);
   },
 
   setViewMode: (mode: 'BOARD' | 'TRASH'): void => {
-    useStore.getState().setViewMode(mode);
+    getUIState().setViewMode(mode);
   },
 
   toggleViewMode,
@@ -196,7 +193,7 @@ export const appController = {
 
   openQuickCapture: (): void => {
     runOnBoardView(() => {
-      useStore.getState().setQuickCaptureOpen(true);
+      getUIState().setQuickCaptureOpen(true);
     });
   },
 
@@ -277,7 +274,7 @@ export const appController = {
   },
 
   detachNote: (noteId: string): void => {
-    const uiState = useUIStore.getState();
+    const uiState = getUIState();
     const alreadyDetached = uiState.detachedNotes.some((d) => d.noteId === noteId);
 
     const domainState = useStore.getState();
@@ -292,30 +289,30 @@ export const appController = {
       uiState.addDetachedNote(noteId, { x, y });
     }
 
-    const keepAlwaysOnTop = useUIStore.getState().detachedNotes.find((d) => d.noteId === noteId)?.isPinned ?? false;
+    const keepAlwaysOnTop = getUIState().detachedNotes.find((d) => d.noteId === noteId)?.isPinned ?? false;
     invoke('open_detached_note_window', { noteId, spawnX: x, spawnY: y, keepAlwaysOnTop }).catch(() => undefined);
   },
 
   closeDetachedNote: (noteId: string): void => {
-    useUIStore.getState().removeDetachedNote(noteId);
+    getUIState().removeDetachedNote(noteId);
   },
 
   showAllDetachedNotes: (): void => {
-    for (const { noteId, isPinned } of useUIStore.getState().detachedNotes) {
+    for (const { noteId, isPinned } of getUIState().detachedNotes) {
       invoke('show_detached_note_window', { noteId, keepAlwaysOnTop: isPinned }).catch(() => undefined);
     }
   },
 
   moveDetachedNote: (noteId: string, position: { x: number; y: number }): void => {
-    useUIStore.getState().updateDetachedNotePosition(noteId, position);
+    getUIState().updateDetachedNotePosition(noteId, position);
   },
 
   toggleDetachedNotePin: (noteId: string): void => {
-    useUIStore.getState().toggleDetachedNotePin(noteId);
+    getUIState().toggleDetachedNotePin(noteId);
   },
 
   focusDetachedNote: (noteId: string): void => {
-    useUIStore.getState().focusDetachedNote(noteId);
+    getUIState().focusDetachedNote(noteId);
   },
 
   /**
@@ -329,9 +326,9 @@ export const appController = {
     const note = domainState.notesById[noteId];
     if (!note || note.deletedAt) return;
 
-    if (!useUIStore.getState().detachedNotes.some((d) => d.noteId === noteId)) return;
+    if (!getUIState().detachedNotes.some((d) => d.noteId === noteId)) return;
 
-    if (domainState.viewMode === 'TRASH') {
+    if (getUIState().viewMode === 'TRASH') {
       enterBoardMode();
     }
 
@@ -357,7 +354,7 @@ export const appController = {
       const current = useStore.getState();
       const target = current.notesById[noteId];
       if (!target || target.deletedAt || target.boardId !== current.currentBoardId) return;
-      if (!useUIStore.getState().detachedNotes.some((d) => d.noteId === noteId)) return;
+      if (!getUIState().detachedNotes.some((d) => d.noteId === noteId)) return;
 
       const nWidth = LAYOUT.NOTE_WIDTH;
       const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, target.height || LAYOUT.NOTE_MIN_HEIGHT);
