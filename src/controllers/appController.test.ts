@@ -171,6 +171,29 @@ describe('appController first-tier intents', () => {
     expect(useStore.getState().isQuickCaptureOpen).toBe(true);
   });
 
+  it('openQuickCapture 在 TRASH 模式先回 BOARD 再异步打开 QuickCapture', () => {
+    vi.useFakeTimers();
+    useStore.setState({ viewMode: 'TRASH', selectedIds: ['n1'], isQuickCaptureOpen: false });
+    useUIStore.setState({ viewMode: 'TRASH', selectedIds: ['n1'], isQuickCaptureOpen: false });
+
+    appController.openQuickCapture();
+
+    // 同步：切回 BOARD，清空选区
+    expect(useUIStore.getState().viewMode).toBe('BOARD');
+    expect(useStore.getState().viewMode).toBe('BOARD');
+    expect(useUIStore.getState().selectedIds).toEqual([]);
+    expect(useStore.getState().selectedIds).toEqual([]);
+    // QuickCapture 尚未打开（异步）
+    expect(useUIStore.getState().isQuickCaptureOpen).toBe(false);
+
+    // flush setTimeout
+    vi.advanceTimersByTime(0);
+
+    expect(useUIStore.getState().isQuickCaptureOpen).toBe(true);
+    expect(useStore.getState().isQuickCaptureOpen).toBe(true);
+    vi.useRealTimers();
+  });
+
   it('setViewMode 设置视图模式', () => {
     useStore.setState({ viewMode: 'BOARD' });
     useUIStore.setState({ viewMode: 'BOARD' });
