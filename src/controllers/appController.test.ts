@@ -163,6 +163,14 @@ describe('appController first-tier intents', () => {
     expect(useUIStore.getState().isSpotlightOpen).toBe(false);
   });
 
+  it('openQuickCapture 同步更新 useUIStore 与 legacy useStore 的 isQuickCaptureOpen', () => {
+    useStore.setState({ isQuickCaptureOpen: false });
+    useUIStore.setState({ isQuickCaptureOpen: false });
+    appController.openQuickCapture();
+    expect(useUIStore.getState().isQuickCaptureOpen).toBe(true);
+    expect(useStore.getState().isQuickCaptureOpen).toBe(true);
+  });
+
   it('setViewMode 设置视图模式', () => {
     useStore.setState({ viewMode: 'BOARD' });
     useUIStore.setState({ viewMode: 'BOARD' });

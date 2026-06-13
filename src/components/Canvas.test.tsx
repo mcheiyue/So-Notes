@@ -87,6 +87,7 @@ vi.mock('../utils/imageDimensions', () => ({
 
 import { Canvas } from './Canvas';
 import { useStore } from '../store/useStore';
+import { useUIStore } from '../store/uiStore';
 import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
 import { Note } from '../store/types';
 import { LAYOUT } from '../constants/layout';
@@ -1396,6 +1397,31 @@ describe('Canvas 空白命中判定', () => {
     expect(useStore.getState().interaction.isPanMode).toBe(false);
     expect(useStore.getState().viewport.x).toBe(0);
     expect(useStore.getState().viewport.y).toBe(0);
+  });
+
+  it('Spotlight 打开时 Space 不进入平移模式且不阻止默认行为', async () => {
+    useStore.setState({
+      interaction: {
+        ...useStore.getState().interaction,
+        isPanMode: false,
+      },
+    });
+
+    await renderCanvas();
+
+    useUIStore.setState({ isSpotlightOpen: true });
+
+    const spaceEvent = new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true });
+    const preventDefaultSpy = vi.spyOn(spaceEvent, 'preventDefault');
+
+    await act(async () => {
+      window.dispatchEvent(spaceEvent);
+    });
+
+    expect(preventDefaultSpy).not.toHaveBeenCalled();
+    expect(useStore.getState().interaction.isPanMode).toBe(false);
+
+    useUIStore.setState({ isSpotlightOpen: false });
   });
 
   it('contextMenu 事件阻止默认行为并打开菜单', async () => {
