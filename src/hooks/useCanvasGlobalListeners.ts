@@ -1,6 +1,5 @@
 import { useEffect, useCallback } from "react";
-import { useStore } from "../store/useStore";
-import { useViewportStore } from "../store";
+import { useUIStore, useViewportStore } from "../store";
 import type { CanvasEngine } from "../canvas/CanvasEngine";
 
 interface UseCanvasGlobalListenersOptions {
@@ -42,7 +41,7 @@ export function useCanvasGlobalListeners({
                         active instanceof HTMLTextAreaElement ||
                         active?.getAttribute('contenteditable') === 'true';
 
-        const isSpotlightOpen = useStore.getState().isSpotlightOpen;
+        const isSpotlightOpen = useUIStore.getState().isSpotlightOpen;
 
         if (!isInput && !isSpotlightOpen) {
           event.preventDefault();
