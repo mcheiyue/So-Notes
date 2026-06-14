@@ -1056,3 +1056,39 @@ describe('DetachedNoteWindow 主题同步', () => {
     expect(localStorage.getItem('theme')).toBe('light');
   });
 });
+
+describe('DetachedNoteWindow 只读回归', () => {
+  it('DetachedNoteWindow 源码不包含 updateNote / updateTitle 等 domain 写入路径', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const sourcePath = path.resolve(__dirname, 'DetachedNoteWindow.tsx');
+    const source = fs.readFileSync(sourcePath, 'utf-8');
+
+    expect(source).not.toContain('updateNote');
+    expect(source).not.toContain('updateTitle');
+    expect(source).not.toContain('useDomainStore');
+    expect(source).not.toContain('useStore');
+  });
+
+  it('DetachedNoteWindow 只 emit READY / LOCATE 风格事件，不写入 domain', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const sourcePath = path.resolve(__dirname, 'DetachedNoteWindow.tsx');
+    const source = fs.readFileSync(sourcePath, 'utf-8');
+
+    const emitMatches = source.match(/emit\(/g) ?? [];
+    expect(emitMatches.length).toBeGreaterThan(0);
+
+    expect(source).toContain('DETACHED_NOTE_EVENTS.READY');
+    expect(source).toContain('DETACHED_NOTE_EVENTS.LOCATE');
+
+    const domainWritePatterns = [
+      'addNote', 'deleteNote', 'softDelete', 'restoreNote',
+      'moveNote', 'changeColor', 'toggleCollapse',
+      'replaceDomainState', 'hydrateFromNotes',
+    ];
+    for (const pattern of domainWritePatterns) {
+      expect(source).not.toContain(pattern);
+    }
+  });
+});

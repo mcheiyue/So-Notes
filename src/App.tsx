@@ -15,6 +15,7 @@ import { SmartPasteSplitBubble } from "./components/SmartPasteSplitBubble";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SelectionActionBar } from "./components/SelectionActionBar";
 import { PersistenceController } from "./components/PersistenceController";
+import { ScheduledRemoteBackupController } from "./components/ScheduledRemoteBackupController";
 import { WindowShell, WindowShellContentRect } from "./components/WindowShell";
 import { Z_INDEX } from "./constants/layout";
 import { useFPSMonitor } from "./utils/performance";
@@ -203,6 +204,7 @@ function App() {
       </WindowShell>
 
       <PersistenceController />
+      <ScheduledRemoteBackupController />
       <ContextMenu />
       <ShortcutsManager />
       <SmartPasteSplitBubble />

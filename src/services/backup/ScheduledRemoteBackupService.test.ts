@@ -561,6 +561,43 @@ describe('ScheduledRemoteBackupService', () => {
 
       expect(mockRunRemoteBackup).toHaveBeenCalled();
     });
+
+    it('notifyLocalChange 后即使磁盘时间戳未变也执行备份', async () => {
+      const storageData = makeStorageData({ storageUpdatedAt: 5000 });
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastSuccessfulStorageUpdatedAt: 5000 },
+      });
+      ctx.readDiskStorageData.mockResolvedValueOnce(storageData);
+      ctx.getLatestUpdateTimestamp.mockReturnValue(5000);
+
+      mockRunRemoteBackup.mockResolvedValueOnce({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      service.notifyLocalChange();
+      await service.runNow();
+
+      expect(mockRunRemoteBackup).toHaveBeenCalled();
+      const st = service.getState();
+      expect(st.hasPendingLocalChanges).toBe(false);
+    });
+
+    it('stop 后 hasPendingLocalChanges 被重置', async () => {
+      const ctx = createTestContext({ config: { enabled: false } });
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      service.notifyLocalChange();
+      expect(service.getState().hasPendingLocalChanges).toBe(true);
+
+      service.stop();
+      expect(service.getState().hasPendingLocalChanges).toBe(false);
+    });
   });
 
   // -------------------------------------------------------------------------

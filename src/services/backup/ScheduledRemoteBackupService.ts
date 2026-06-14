@@ -138,6 +138,8 @@ export interface ScheduledRemoteBackupServiceState {
   state: ScheduledRemoteBackupState;
   isRunning: boolean;
   quietPeriodTimer: number | null;
+  /** 控制器通知有本地变更，下次调度跳过"无本地变更"检测 */
+  hasPendingLocalChanges: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +159,7 @@ export function createScheduledRemoteBackupService(
     state: internalState,
     isRunning: false,
     quietPeriodTimer: null,
+    hasPendingLocalChanges: false,
   };
 
   /** 更新内部状态（immutable 风格） */
@@ -221,6 +224,7 @@ export function createScheduledRemoteBackupService(
       deps.clearTimeout(serviceState.quietPeriodTimer);
       serviceState.quietPeriodTimer = null;
     }
+    serviceState.hasPendingLocalChanges = false;
   }
 
   // -------------------------------------------------------------------------
@@ -251,8 +255,12 @@ export function createScheduledRemoteBackupService(
     }
   }
 
+  function notifyLocalChange(): void {
+    serviceState.hasPendingLocalChanges = true;
+  }
+
   // -------------------------------------------------------------------------
-  // 备份执行
+  // 无本地变更检测
   // -------------------------------------------------------------------------
 
   async function runBackup(
@@ -304,8 +312,13 @@ export function createScheduledRemoteBackupService(
       }
 
       // 4. 无本地变更检测
+      const pendingChanges = serviceState.hasPendingLocalChanges;
+      if (pendingChanges) {
+        serviceState.hasPendingLocalChanges = false;
+      }
+
       const storageData = await deps.readDiskStorageData();
-      if (storageData) {
+      if (storageData && !pendingChanges) {
         const latestUpdate = deps.getLatestUpdateTimestamp(storageData);
         if (
           latestUpdate !== null &&
@@ -429,6 +442,7 @@ export function createScheduledRemoteBackupService(
     stop: stopScheduler,
     runNow: () => runBackup('manual'),
     runBeforeExit: () => runBackup('before-exit'),
+    notifyLocalChange,
 
     updateConfig: async (newConfig: ScheduledRemoteBackupConfig) => {
       serviceState.config = { ...newConfig };
