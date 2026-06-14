@@ -126,7 +126,7 @@ function createTestContext(overrides?: {
   let nextId = 1;
 
   const clock = vi.fn(() => now);
-  const setTimeoutFn = vi.fn((fn: () => void, _ms: number) => {
+  const setTimeoutFn = vi.fn((fn: () => void) => {
     const id = nextId++;
     callbacks.set(id, fn);
     return id;

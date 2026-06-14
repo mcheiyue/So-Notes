@@ -153,7 +153,7 @@ export function createScheduledRemoteBackupService(
   let internalState: ScheduledRemoteBackupState = {
     ...DEFAULT_SCHEDULED_BACKUP_STATE,
   };
-  let serviceState: ScheduledRemoteBackupServiceState = {
+  const serviceState: ScheduledRemoteBackupServiceState = {
     timerId: null,
     config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG },
     state: internalState,
