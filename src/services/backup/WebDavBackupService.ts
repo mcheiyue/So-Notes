@@ -57,6 +57,8 @@ export interface WebDavUploadResult {
   readonly success: boolean;
   readonly remoteFileName?: string | null;
   readonly error?: string;
+  readonly errorStage?: string;
+  readonly errorCode?: string;
 }
 
 export interface WebDavDownloadResult {
@@ -116,7 +118,17 @@ export async function testConnection(
 export async function createRemoteBackup(
   config: WebDavConfig,
 ): Promise<WebDavUploadResult> {
-  return invoke<WebDavUploadResult>('webdav_create_remote_backup', { config });
+  try {
+    return await invoke<WebDavUploadResult>('webdav_create_remote_backup', { config });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      error: message,
+      errorStage: 'unknown',
+      errorCode: undefined,
+    };
+  }
 }
 
 export async function listBackups(

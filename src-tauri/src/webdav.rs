@@ -201,6 +201,10 @@ pub struct WebDavUploadResult {
     pub success: bool,
     pub remote_file_name: Option<String>,
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_stage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1769,17 +1773,23 @@ async fn webdav_upload_backup_with_client(
 ) -> Result<WebDavUploadResult, String> {
     let dir_url = build_remote_dir_url(&target.base_url, &target.remote_dir);
 
-    ensure_remote_dir_exists(
+    if let Err(op_error) = ensure_remote_dir_exists(
         client,
         &dir_url,
         &target.username,
         target.password.as_deref(),
     )
     .await
-    .map_err(|op_error| {
+    {
         let _ = std::fs::remove_file(zip_path);
-        webdav_error_message(&op_error)
-    })?;
+        return Ok(WebDavUploadResult {
+            success: false,
+            remote_file_name: None,
+            error: Some(webdav_error_message(&op_error)),
+            error_stage: Some("ensure_dir".to_string()),
+            error_code: op_error.status.map(|s| s.to_string()),
+        });
+    }
 
     let mut last_error = String::new();
 
@@ -1792,17 +1802,32 @@ async fn webdav_upload_backup_with_client(
         };
 
         let upload_url = format!("{}{}", dir_url, remote_filename);
-        let zip_len = tokio::fs::metadata(zip_path)
-            .await
-            .map_err(|_| {
+        let zip_len = match tokio::fs::metadata(zip_path).await {
+            Ok(meta) => meta.len(),
+            Err(_) => {
                 let _ = std::fs::remove_file(zip_path);
-                "远端备份上传失败，本地数据未受影响".to_string()
-            })?
-            .len();
-        let zip_file = tokio::fs::File::open(zip_path).await.map_err(|_| {
-            let _ = std::fs::remove_file(zip_path);
-            "远端备份上传失败，本地数据未受影响".to_string()
-        })?;
+                return Ok(WebDavUploadResult {
+                    success: false,
+                    remote_file_name: None,
+                    error: Some("远端备份上传失败，本地数据未受影响".to_string()),
+                    error_stage: Some("read_local_file".to_string()),
+                    error_code: None,
+                });
+            }
+        };
+        let zip_file = match tokio::fs::File::open(zip_path).await {
+            Ok(f) => f,
+            Err(_) => {
+                let _ = std::fs::remove_file(zip_path);
+                return Ok(WebDavUploadResult {
+                    success: false,
+                    remote_file_name: None,
+                    error: Some("远端备份上传失败，本地数据未受影响".to_string()),
+                    error_stage: Some("read_local_file".to_string()),
+                    error_code: None,
+                });
+            }
+        };
 
         let mut req = client
             .put(&upload_url)
@@ -1827,13 +1852,21 @@ async fn webdav_upload_backup_with_client(
                             success: true,
                             remote_file_name: Some(remote_filename),
                             error: None,
+                            error_stage: None,
+                            error_code: None,
                         });
                     }
                     401 | 403 => {
                         let _ = std::fs::remove_file(zip_path);
                         let op_error =
                             classify_webdav_status(WebDavOperation::UploadBackup, status);
-                        return Err(webdav_error_message(&op_error));
+                        return Ok(WebDavUploadResult {
+                            success: false,
+                            remote_file_name: None,
+                            error: Some(webdav_error_message(&op_error)),
+                            error_stage: Some("auth".to_string()),
+                            error_code: Some(status.as_u16().to_string()),
+                        });
                     }
                     409 | 412 => {
                         last_error = "远端已存在同名备份，请稍后重试".to_string();
@@ -1843,20 +1876,38 @@ async fn webdav_upload_backup_with_client(
                         let op_error =
                             classify_webdav_status(WebDavOperation::UploadBackup, status);
                         let _ = std::fs::remove_file(zip_path);
-                        return Err(webdav_error_message(&op_error));
+                        return Ok(WebDavUploadResult {
+                            success: false,
+                            remote_file_name: None,
+                            error: Some(webdav_error_message(&op_error)),
+                            error_stage: Some("upload".to_string()),
+                            error_code: Some(status.as_u16().to_string()),
+                        });
                     }
                 }
             }
             Err(e) => {
                 let _ = std::fs::remove_file(zip_path);
                 let op_error = classify_reqwest_error(WebDavOperation::UploadBackup, &e);
-                return Err(webdav_error_message(&op_error));
+                return Ok(WebDavUploadResult {
+                    success: false,
+                    remote_file_name: None,
+                    error: Some(webdav_error_message(&op_error)),
+                    error_stage: Some("network".to_string()),
+                    error_code: op_error.status.map(|s| s.to_string()),
+                });
             }
         }
     }
 
     let _ = std::fs::remove_file(zip_path);
-    Err(last_error)
+    Ok(WebDavUploadResult {
+        success: false,
+        remote_file_name: None,
+        error: Some(last_error),
+        error_stage: Some("upload_retry_exhausted".to_string()),
+        error_code: None,
+    })
 }
 
 #[tauri::command]
@@ -1873,6 +1924,8 @@ pub async fn webdav_create_remote_backup(
                 error: Some(
                     "webdav_backup_busy: another backup is already in progress".to_string(),
                 ),
+                error_stage: Some("lock".to_string()),
+                error_code: None,
             });
         }
     };
@@ -5331,7 +5384,9 @@ mod tests {
         let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
         let _records = handle.join().expect("mock server 线程 panic");
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "401 应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             err.contains("鉴权失败"),
             "401 应映射到鉴权失败语义: {err}"
@@ -5378,7 +5433,9 @@ mod tests {
         let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
         let _records = handle.join().expect("mock server 线程 panic");
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "403 应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             err.contains("权限不足") || err.contains("访问被拒绝"),
             "403 应映射到权限不足/访问被拒绝语义: {err}"
@@ -5431,7 +5488,9 @@ mod tests {
             "423 非冲突重试状态码，应仅收到 PROPFIND + 1 PUT"
         );
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "423 应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             err.contains("锁定"),
             "423 应映射到锁定语义: {err}"
@@ -5483,7 +5542,9 @@ mod tests {
             "507 非冲突重试状态码，应仅收到 PROPFIND + 1 PUT"
         );
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "507 应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             err.contains("空间不足"),
             "507 应映射到空间不足语义: {err}"
@@ -5535,7 +5596,9 @@ mod tests {
             "405 非冲突重试状态码，应仅收到 PROPFIND + 1 PUT"
         );
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "405 应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             err.contains("不支持") || err.contains("方法"),
             "405 应映射到方法不支持语义: {err}"
@@ -5588,7 +5651,9 @@ mod tests {
             "5xx 不再通用重试，应仅收到 PROPFIND + 1 PUT"
         );
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "500 应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             err.contains("500") || err.contains("异常状态码"),
             "500 应映射到异常状态码语义: {err}"
@@ -5643,7 +5708,9 @@ mod tests {
             UPLOAD_RETRY_LIMIT
         );
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "连续 409 达到上限后应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             err.contains("同名备份") || err.contains("冲突"),
             "连续 409 达到上限后应返回冲突相关错误: {err}"
@@ -5698,7 +5765,9 @@ mod tests {
             UPLOAD_RETRY_LIMIT
         );
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "连续 412 达到上限后应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             err.contains("同名备份") || err.contains("冲突"),
             "连续 412 达到上限后应返回冲突相关错误: {err}"
@@ -5792,7 +5861,9 @@ mod tests {
 
         assert!(records[1].authorization_present, "PUT 应携带 Authorization");
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "423 应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             !err.contains("secret_user_abc"),
             "错误信息不得泄漏用户名: {err}"
@@ -5848,7 +5919,8 @@ mod tests {
             "401/403 应立即返回，只收到 PROPFIND + 1 PUT"
         );
 
-        assert!(result.is_err(), "401 应返回错误");
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "401 应返回失败");
         assert!(!zip_path.exists(), "401 失败后临时 zip 应被清理");
 
         let _ = std::fs::remove_dir_all(&zip_dir);
@@ -5898,7 +5970,9 @@ mod tests {
         assert_eq!(records[0].method, "PROPFIND");
         assert_eq!(records[1].method, "PUT");
 
-        let err = result.expect_err("传输错误应返回 Err");
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "传输错误应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             err.contains("WebDAV"),
             "错误消息应来自 classify_reqwest_error 分类: {err}"
@@ -6514,7 +6588,9 @@ mod tests {
         let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
         let _record = handle.join().expect("mock server 线程 panic");
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "PROPFIND 405 应返回失败");
+        let err = upload_result.error.unwrap();
         // 应保留 MethodNotAllowed 语义，不应被折叠为通用上传失败
         assert!(
             err.contains("不支持") || err.contains("方法"),
@@ -6566,7 +6642,9 @@ mod tests {
         let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
         let _records = handle.join().expect("mock server 线程 panic");
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "MKCOL 423 应返回失败");
+        let err = upload_result.error.unwrap();
         // 应保留 Locked 语义，不应被折叠为通用上传失败
         assert!(
             err.contains("锁定"),
@@ -6618,7 +6696,9 @@ mod tests {
         let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
         let _records = handle.join().expect("mock server 线程 panic");
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "MKCOL 507 应返回失败");
+        let err = upload_result.error.unwrap();
         // 应保留 InsufficientStorage 语义，不应被折叠为通用上传失败
         assert!(
             err.contains("空间不足"),
@@ -6667,7 +6747,9 @@ mod tests {
         let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
         let _record = handle.join().expect("mock server 线程 panic");
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "PROPFIND 401 应返回失败");
+        let err = upload_result.error.unwrap();
         // 鉴权错误应保留现有语义
         assert!(
             err.contains("鉴权失败"),
@@ -6766,7 +6848,9 @@ mod tests {
         assert!(records[0].authorization_present, "PROPFIND 应携带 Authorization");
         assert!(records[1].authorization_present, "MKCOL 应携带 Authorization");
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "MKCOL 507 应返回失败");
+        let err = upload_result.error.unwrap();
         assert!(
             !err.contains("sensitive_user_xyz_abc"),
             "错误信息不得泄漏用户名: {err}"
@@ -6821,7 +6905,9 @@ mod tests {
         let result = webdav_upload_backup_with_client(&client, &target, &zip_path).await;
         let _records = handle.join().expect("mock server 线程 panic");
 
-        let err = result.unwrap_err();
+        let upload_result = result.unwrap();
+        assert!(!upload_result.success, "MKCOL 409 应返回失败");
+        let err = upload_result.error.unwrap();
         // 应保留 PathConflict 语义
         assert!(
             err.contains("冲突"),

@@ -11,8 +11,9 @@ import { detectMissingReferences, detectOrphanAttachments } from "../services/st
 import { saveZipDialog, openZipDialog } from "../utils/fileSystem";
 import { createLocalBackup, restoreLocalBackup, validateLocalBackup } from "../services/backup/BackupService";
 import * as WebDavBackupService from "../services/backup/WebDavBackupService";
+import { runRemoteBackup } from "../services/backup/RemoteBackupRunner";
 import * as persistenceFacade from "../services/storage/PersistenceFacade";
-import { readDiskStorageData } from "../services/storage/tauriPersistence";
+import { readDiskStorageData, getLatestUpdateTimestamp } from "../services/storage/tauriPersistence";
 import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
 import { db } from "../store/db";
 import type { Note } from "../store/types";
@@ -650,12 +651,17 @@ export const BoardDock = () => {
     setWebdavFeedback(null);
     setWebdavOperation('creating');
     try {
-      const flushed = await persistenceFacade.flushNow();
-      if (!flushed) {
-        setWebdavFeedback({ status: 'error', message: '创建远端备份失败：当前数据尚未成功写入磁盘，请稍后重试。' });
-        return;
-      }
-      const result = await WebDavBackupService.createRemoteBackup(config);
+      const result = await runRemoteBackup(
+        {
+          flushNow: persistenceFacade.flushNow.bind(persistenceFacade),
+          createRemoteBackup: WebDavBackupService.createRemoteBackup,
+          readDiskStorageData,
+          getLatestUpdateTimestamp,
+          coordinator: null,
+          now: () => Date.now(),
+        },
+        config,
+      );
       if (result.success) {
         setWebdavFeedback({ status: 'success', message: `远端备份已创建：${result.remoteFileName ?? '完成'}` });
         try {
