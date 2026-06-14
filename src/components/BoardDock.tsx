@@ -90,6 +90,9 @@ const formatWebdavError = (message: string): string => {
   if (message.includes('凭据') || message.includes('密码')) {
     return CREDENTIAL_ERROR_REPLACEMENT;
   }
+  if (message === 'Flush failed') {
+    return '当前数据尚未成功写入磁盘';
+  }
   return message;
 };
 
@@ -669,9 +672,9 @@ export const BoardDock = () => {
         {
           flushNow: persistenceFacade.flushNow.bind(persistenceFacade),
           createRemoteBackup: WebDavBackupService.createRemoteBackup,
-          readDiskStorageData,
+          readDiskStorageData: () => readDiskStorageData('data.json'),
           getLatestUpdateTimestamp,
-          coordinator: null,
+          coordinator: { tryStartBackupJob },
           now: () => Date.now(),
         },
         config,

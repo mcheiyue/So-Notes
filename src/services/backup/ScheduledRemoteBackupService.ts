@@ -1,0 +1,468 @@
+/**
+ * 定时远端备份服务。
+ *
+ * 管理定时远端备份的调度、触发和状态追踪。支持固定频率触发
+ * 和安静时段触发，使用注入的时钟/定时器实现可测试性，
+ * 并提供凭据失败追踪和无本地变更检测。
+ */
+
+import type {
+  ScheduledRemoteBackupConfig,
+  ScheduledRemoteBackupState,
+  ScheduledRemoteBackupFrequency,
+  RemoteBackupTrigger,
+  RemoteBackupStage,
+  ScheduledBackupConfigLoadResult,
+  ScheduledBackupConfigSaveResult,
+  ScheduledBackupStateLoadResult,
+  ScheduledBackupStateSaveResult,
+} from './ScheduledRemoteBackupConfigService';
+import {
+  DEFAULT_SCHEDULED_BACKUP_CONFIG,
+  DEFAULT_SCHEDULED_BACKUP_STATE,
+} from './ScheduledRemoteBackupConfigService';
+import {
+  runRemoteBackup,
+  type RemoteBackupRunnerDependencies,
+} from './RemoteBackupRunner';
+import type { BackupJobKind } from './BackupJobCoordinator';
+import type {
+  WebDavConfigLoadResult,
+} from './WebDavBackupService';
+import type { StorageData } from '../../store/types';
+
+// ---------------------------------------------------------------------------
+// 频率到毫秒映射
+// ---------------------------------------------------------------------------
+
+const FREQUENCY_MS: Record<ScheduledRemoteBackupFrequency, number> = {
+  'every-6-hours': 6 * 60 * 60 * 1000,
+  'every-12-hours': 12 * 60 * 60 * 1000,
+  daily: 24 * 60 * 60 * 1000,
+  weekly: 7 * 24 * 60 * 60 * 1000,
+};
+
+// ---------------------------------------------------------------------------
+// 凭据失败阈值
+// ---------------------------------------------------------------------------
+
+const CREDENTIAL_FAILURE_THRESHOLD = 3;
+
+// ---------------------------------------------------------------------------
+// 触发器到协调器任务类型的映射
+// ---------------------------------------------------------------------------
+
+const TRIGGER_TO_JOB_KIND: Record<RemoteBackupTrigger, BackupJobKind> = {
+  manual: 'manual-remote-backup',
+  'scheduled-interval': 'scheduled-remote-backup',
+  'quiet-period': 'scheduled-remote-backup',
+  'before-exit': 'before-exit-remote-backup',
+};
+
+// ---------------------------------------------------------------------------
+// RemoteBackupStage 类型守卫
+// ---------------------------------------------------------------------------
+
+const REMOTE_BACKUP_STAGES: ReadonlySet<string> = new Set([
+  'config',
+  'credential',
+  'single-flight',
+  'restore-blocked',
+  'flush',
+  'create-zip',
+  'upload',
+  'list-refresh',
+  'completed',
+  'unknown',
+]);
+
+function isRemoteBackupStage(value: string): value is RemoteBackupStage {
+  return REMOTE_BACKUP_STAGES.has(value);
+}
+
+// ---------------------------------------------------------------------------
+// 应用活动信号
+// ---------------------------------------------------------------------------
+
+export interface AppActivitySignals {
+  isDragging: boolean;
+  isPanMode: boolean;
+  edgePush: boolean;
+  stickyDrag: boolean;
+  hasSelection: boolean;
+  isTextEditing: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// 注入依赖（用于测试）
+// ---------------------------------------------------------------------------
+
+export interface ScheduledRemoteBackupDependencies {
+  /** 获取当前时间戳（相当于 Date.now()） */
+  clock: () => number;
+  /** 设置延迟回调，返回定时器 ID */
+  setTimeout: (fn: () => void, ms: number) => number;
+  /** 清除延迟回调 */
+  clearTimeout: (id: number) => void;
+  /** 获取应用活动信号 */
+  getAppActivity: () => AppActivitySignals;
+  /** 远端备份执行器依赖 */
+  runnerDeps: RemoteBackupRunnerDependencies;
+  /** 加载 WebDAV 配置 */
+  loadWebDavConfig: () => Promise<WebDavConfigLoadResult>;
+  /** 加载定时备份配置 */
+  loadScheduledConfig: () => Promise<ScheduledBackupConfigLoadResult>;
+  /** 保存定时备份配置 */
+  saveScheduledConfig: (
+    config: ScheduledRemoteBackupConfig,
+  ) => Promise<ScheduledBackupConfigSaveResult>;
+  /** 加载定时备份状态 */
+  loadScheduledState: () => Promise<ScheduledBackupStateLoadResult>;
+  /** 保存定时备份状态 */
+  saveScheduledState: (
+    state: ScheduledRemoteBackupState,
+  ) => Promise<ScheduledBackupStateSaveResult>;
+  /** 读取磁盘存储数据（用于无本地变更检测） */
+  readDiskStorageData: () => Promise<StorageData | null>;
+  /** 获取最近更新时间戳 */
+  getLatestUpdateTimestamp: (data: StorageData) => number | null;
+}
+
+// ---------------------------------------------------------------------------
+// 服务内部状态
+// ---------------------------------------------------------------------------
+
+export interface ScheduledRemoteBackupServiceState {
+  timerId: number | null;
+  config: ScheduledRemoteBackupConfig;
+  state: ScheduledRemoteBackupState;
+  isRunning: boolean;
+  quietPeriodTimer: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// 创建服务
+// ---------------------------------------------------------------------------
+
+export function createScheduledRemoteBackupService(
+  deps: ScheduledRemoteBackupDependencies,
+) {
+  // 可变内部状态
+  let internalState: ScheduledRemoteBackupState = {
+    ...DEFAULT_SCHEDULED_BACKUP_STATE,
+  };
+  let serviceState: ScheduledRemoteBackupServiceState = {
+    timerId: null,
+    config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG },
+    state: internalState,
+    isRunning: false,
+    quietPeriodTimer: null,
+  };
+
+  /** 更新内部状态（immutable 风格） */
+  function patchState(
+    patch: Partial<ScheduledRemoteBackupState>,
+  ): void {
+    internalState = { ...internalState, ...patch };
+    serviceState.state = internalState;
+  }
+
+  // -------------------------------------------------------------------------
+  // 初始化
+  // -------------------------------------------------------------------------
+
+  async function initialize(): Promise<void> {
+    const configResult = await deps.loadScheduledConfig();
+    if (configResult.success && configResult.config) {
+      serviceState.config = { ...configResult.config };
+    }
+
+    const stateResult = await deps.loadScheduledState();
+    if (stateResult.success && stateResult.state) {
+      internalState = { ...stateResult.state };
+      serviceState.state = internalState;
+    }
+
+    if (serviceState.config.enabled) {
+      startScheduler();
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 调度器
+  // -------------------------------------------------------------------------
+
+  function startScheduler(): void {
+    if (serviceState.timerId !== null) return;
+    if (internalState.credentialActionRequired) return;
+
+    const now = deps.clock();
+    const nextRunAt = internalState.nextRunAt;
+
+    if (nextRunAt !== null && nextRunAt <= now) {
+      scheduleImmediateRun();
+    } else {
+      const delay = nextRunAt !== null
+        ? nextRunAt - now
+        : FREQUENCY_MS[serviceState.config.frequency];
+      serviceState.timerId = deps.setTimeout(() => {
+        serviceState.timerId = null;
+        scheduleImmediateRun();
+      }, delay);
+    }
+  }
+
+  function stopScheduler(): void {
+    if (serviceState.timerId !== null) {
+      deps.clearTimeout(serviceState.timerId);
+      serviceState.timerId = null;
+    }
+    if (serviceState.quietPeriodTimer !== null) {
+      deps.clearTimeout(serviceState.quietPeriodTimer);
+      serviceState.quietPeriodTimer = null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 安静时段调度
+  // -------------------------------------------------------------------------
+
+  function scheduleImmediateRun(): void {
+    const quietMs = serviceState.config.quietPeriodMinutes * 60 * 1000;
+    const activity = deps.getAppActivity();
+
+    const isAppActive =
+      activity.isDragging ||
+      activity.isPanMode ||
+      activity.edgePush ||
+      activity.stickyDrag ||
+      activity.hasSelection ||
+      activity.isTextEditing;
+
+    if (isAppActive) {
+      // 应用活跃，延迟到安静时段后执行
+      serviceState.quietPeriodTimer = deps.setTimeout(() => {
+        serviceState.quietPeriodTimer = null;
+        runBackup('quiet-period');
+      }, quietMs);
+    } else {
+      // 应用空闲，立即执行
+      runBackup('scheduled-interval');
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 备份执行
+  // -------------------------------------------------------------------------
+
+  async function runBackup(
+    trigger: RemoteBackupTrigger,
+  ): Promise<void> {
+    if (serviceState.isRunning) return;
+    serviceState.isRunning = true;
+
+    try {
+      // 1. 加载 WebDAV 配置
+      const webdavResult = await deps.loadWebDavConfig();
+      if (!webdavResult.success || !webdavResult.serverUrl) {
+        const diskTs = await getCurrentDiskTimestamp();
+        patchState({
+          lastFinishedAt: deps.clock(),
+          lastTrigger: trigger,
+          lastFailureAt: deps.clock(),
+          lastFailureReason: '缺少 WebDAV 配置',
+          lastFailureStage: 'config',
+          lastAttemptCapturedStorageUpdatedAt: diskTs,
+        });
+        await deps.saveScheduledState(internalState);
+        return;
+      }
+
+      // 2. 检查凭据是否已保存
+      if (!webdavResult.passwordSaved) {
+        const diskTs = await getCurrentDiskTimestamp();
+        patchState({
+          lastFinishedAt: deps.clock(),
+          lastTrigger: trigger,
+          lastFailureAt: deps.clock(),
+          lastFailureReason: '未保存 WebDAV 凭据',
+          lastFailureStage: 'credential',
+          lastAttemptCapturedStorageUpdatedAt: diskTs,
+        });
+        await deps.saveScheduledState(internalState);
+        return;
+      }
+
+      // 3. 检查凭据失败阈值
+      if (
+        internalState.consecutiveCredentialFailures >=
+        CREDENTIAL_FAILURE_THRESHOLD
+      ) {
+        patchState({ credentialActionRequired: true });
+        await deps.saveScheduledState(internalState);
+        return;
+      }
+
+      // 4. 无本地变更检测
+      const storageData = await deps.readDiskStorageData();
+      if (storageData) {
+        const latestUpdate = deps.getLatestUpdateTimestamp(storageData);
+        if (
+          latestUpdate !== null &&
+          internalState.lastSuccessfulStorageUpdatedAt !== null &&
+          latestUpdate <= internalState.lastSuccessfulStorageUpdatedAt
+        ) {
+          patchState({
+            lastFinishedAt: deps.clock(),
+            lastTrigger: trigger,
+            lastAttemptCapturedStorageUpdatedAt: latestUpdate,
+          });
+          await deps.saveScheduledState(internalState);
+          return;
+        }
+      }
+
+      // 5. 执行远端备份
+      const webdavConfig = {
+        serverUrl: webdavResult.serverUrl,
+        username: webdavResult.username ?? '',
+        remoteDir: webdavResult.remoteDir ?? undefined,
+      };
+
+      const result = await runRemoteBackup(deps.runnerDeps, webdavConfig, {
+        jobKind: TRIGGER_TO_JOB_KIND[trigger],
+      });
+
+      if (result.success) {
+        // 成功
+        const now = deps.clock();
+        const isAutomatic =
+          trigger === 'scheduled-interval' ||
+          trigger === 'quiet-period' ||
+          trigger === 'before-exit';
+        const ts = storageData ? deps.getLatestUpdateTimestamp(storageData) : null;
+        const patch: Partial<ScheduledRemoteBackupState> = {
+          lastFinishedAt: now,
+          lastTrigger: trigger,
+          consecutiveCredentialFailures: 0,
+          credentialActionRequired: false,
+          lastRemoteFileName: result.remoteFileName ?? null,
+          nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
+          ...(isAutomatic
+            ? { lastAutomaticSuccessAt: now }
+            : { lastManualSuccessAt: now }),
+          ...(ts !== null ? { lastSuccessfulStorageUpdatedAt: ts } : {}),
+        };
+
+        patchState(patch);
+      } else {
+        // 失败
+        const now = deps.clock();
+        const ts = storageData ? deps.getLatestUpdateTimestamp(storageData) : null;
+        const credentialFailure = result.errorStage === 'credential';
+        const newCount = credentialFailure
+          ? internalState.consecutiveCredentialFailures + 1
+          : internalState.consecutiveCredentialFailures;
+        const rawStage = result.errorStage ?? 'unknown';
+        const failureStage: RemoteBackupStage = isRemoteBackupStage(rawStage)
+          ? rawStage
+          : 'unknown';
+        const patch: Partial<ScheduledRemoteBackupState> = {
+          lastFinishedAt: now,
+          lastTrigger: trigger,
+          lastFailureAt: now,
+          lastFailureReason: result.error ?? 'Unknown error',
+          lastFailureStage: failureStage,
+          ...(ts !== null ? { lastAttemptCapturedStorageUpdatedAt: ts } : {}),
+          ...(credentialFailure
+            ? {
+                consecutiveCredentialFailures: newCount,
+                credentialActionRequired: newCount >= CREDENTIAL_FAILURE_THRESHOLD,
+              }
+            : {}),
+        };
+
+        patchState(patch);
+      }
+
+      await deps.saveScheduledState(internalState);
+    } catch (err: unknown) {
+      // 意外错误
+      patchState({
+        lastFinishedAt: deps.clock(),
+        lastTrigger: trigger,
+        lastFailureAt: deps.clock(),
+        lastFailureReason: err instanceof Error ? err.message : String(err),
+        lastFailureStage: 'unknown',
+      });
+      await deps.saveScheduledState(internalState);
+    } finally {
+      serviceState.isRunning = false;
+
+      // 重新调度：enabled 且未触发凭据阈值暂停
+      if (
+        serviceState.config.enabled &&
+        !internalState.credentialActionRequired
+      ) {
+        startScheduler();
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 工具函数
+  // -------------------------------------------------------------------------
+
+  async function getCurrentDiskTimestamp(): Promise<number | null> {
+    const storageData = await deps.readDiskStorageData();
+    if (!storageData) return null;
+    return deps.getLatestUpdateTimestamp(storageData);
+  }
+
+  // -------------------------------------------------------------------------
+  // 公开 API
+  // -------------------------------------------------------------------------
+
+  return {
+    initialize,
+    start: startScheduler,
+    stop: stopScheduler,
+    runNow: () => runBackup('manual'),
+    runBeforeExit: () => runBackup('before-exit'),
+
+    updateConfig: async (newConfig: ScheduledRemoteBackupConfig) => {
+      serviceState.config = { ...newConfig };
+      await deps.saveScheduledConfig(newConfig);
+
+      if (newConfig.enabled) {
+        // 用户重新启用时清除凭据失败状态
+        if (
+          internalState.credentialActionRequired ||
+          internalState.consecutiveCredentialFailures > 0
+        ) {
+          patchState({
+            consecutiveCredentialFailures: 0,
+            credentialActionRequired: false,
+          });
+          await deps.saveScheduledState(internalState);
+        }
+        startScheduler();
+      } else {
+        stopScheduler();
+      }
+    },
+
+    clearCredentialFailure: async () => {
+      patchState({
+        consecutiveCredentialFailures: 0,
+        credentialActionRequired: false,
+      });
+      await deps.saveScheduledState(internalState);
+    },
+
+    getState: (): Readonly<ScheduledRemoteBackupServiceState> => ({
+      ...serviceState,
+      state: { ...internalState },
+    }),
+  };
+}
