@@ -15,6 +15,7 @@ use tokio::sync;
 mod attachments;
 pub mod backup;
 mod persistence;
+pub mod scheduled_backup;
 pub mod webdav;
 
 struct AppState {
@@ -660,6 +661,10 @@ pub fn run() {
             webdav::webdav_download_backup,
             webdav::resolve_downloaded_backup,
             webdav::cleanup_downloaded_backup,
+            scheduled_backup::scheduled_backup_load_config,
+            scheduled_backup::scheduled_backup_save_config,
+            scheduled_backup::scheduled_backup_load_state,
+            scheduled_backup::scheduled_backup_save_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
