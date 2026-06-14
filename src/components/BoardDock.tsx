@@ -12,6 +12,7 @@ import { saveZipDialog, openZipDialog } from "../utils/fileSystem";
 import { createLocalBackup, restoreLocalBackup, validateLocalBackup } from "../services/backup/BackupService";
 import * as WebDavBackupService from "../services/backup/WebDavBackupService";
 import { runRemoteBackup } from "../services/backup/RemoteBackupRunner";
+import { tryStartBackupJob, type BackupJobHandle } from "../services/backup/BackupJobCoordinator";
 import * as persistenceFacade from "../services/storage/PersistenceFacade";
 import { readDiskStorageData, getLatestUpdateTimestamp } from "../services/storage/tauriPersistence";
 import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
@@ -467,6 +468,7 @@ export const BoardDock = () => {
     setZipFeedback(null);
     setZipOperation('restoring');
     let pauseOccurred = false;
+    let restoreJobHandle: BackupJobHandle | null = null;
     try {
       const validation = await validateLocalBackup(sourceZipPath);
 
@@ -495,6 +497,12 @@ export const BoardDock = () => {
       persistenceFacade.pause();
       pauseOccurred = true;
 
+      restoreJobHandle = tryStartBackupJob('local-restore');
+      if (!restoreJobHandle) {
+        setZipFeedback({ status: 'error', message: '恢复失败：已有备份任务运行中，请稍后重试。' });
+        return;
+      }
+
       const result = await restoreLocalBackup(sourceZipPath);
       if (!result.success) {
         setZipFeedback({ status: 'error', message: `恢复失败：${result.error ?? '未知错误'}` });
@@ -507,6 +515,9 @@ export const BoardDock = () => {
         return;
       }
 
+      restoreJobHandle.release();
+      restoreJobHandle = null;
+
       setZipFeedback({
         status: 'success',
         message: `恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
@@ -514,6 +525,9 @@ export const BoardDock = () => {
     } catch (err) {
       setZipFeedback({ status: 'error', message: `恢复失败：${formatUnknownError(err)}` });
     } finally {
+      if (restoreJobHandle) {
+        restoreJobHandle.release();
+      }
       if (pauseOccurred) {
         try {
           persistenceFacade.resume();
@@ -728,6 +742,7 @@ export const BoardDock = () => {
     setWebdavFeedback(null);
     setWebdavOperation('restoring');
     let pauseOccurred = false;
+    let restoreJobHandle: BackupJobHandle | null = null;
     let downloadToken: string | null = null;
     try {
       const dlResult = await WebDavBackupService.downloadBackup(config, fileName);
@@ -769,6 +784,12 @@ export const BoardDock = () => {
       persistenceFacade.pause();
       pauseOccurred = true;
 
+      restoreJobHandle = tryStartBackupJob('remote-restore');
+      if (!restoreJobHandle) {
+        setWebdavFeedback({ status: 'error', message: '恢复失败：已有备份任务运行中，请稍后重试。' });
+        return;
+      }
+
       const result = await restoreLocalBackup(resolveResult.localPath);
       if (!result.success) {
         setWebdavFeedback({ status: 'error', message: `恢复失败：${formatWebdavError(result.error ?? '未知错误')}` });
@@ -781,6 +802,9 @@ export const BoardDock = () => {
         return;
       }
 
+      restoreJobHandle.release();
+      restoreJobHandle = null;
+
       setWebdavFeedback({
         status: 'success',
         message: `远端恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
@@ -788,6 +812,9 @@ export const BoardDock = () => {
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `恢复失败：${formatWebdavError(formatUnknownError(err))}` });
     } finally {
+      if (restoreJobHandle) {
+        restoreJobHandle.release();
+      }
       if (downloadToken) {
         try {
           await WebDavBackupService.cleanupDownloadedBackup(downloadToken);
