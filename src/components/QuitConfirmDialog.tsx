@@ -23,7 +23,7 @@ export const QuitConfirmDialog: React.FC = () => {
       if (resolvedRef.current) return;
       resolvedRef.current = true;
       resolve?.(choice);
-      if (choice !== 'cancel') {
+      if (choice !== 'backup-and-quit') {
         close();
       }
     },

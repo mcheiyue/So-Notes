@@ -23,9 +23,9 @@ export interface QuitHandlerDeps {
   loadWebDavConfig: typeof loadWebDavConfig;
   readDiskStorageData?: () => Promise<StorageData | null>;
   getLatestUpdateTimestamp?: (data: StorageData) => number | null;
+  clock?: () => number;
   invoke: typeof invoke;
   promptQuitConfirm: () => Promise<'backup-and-quit' | 'quit-now' | 'cancel'>;
-  /** 备份失败后提示用户决定：退出还是取消 */
   promptBackupFailed: (error: string) => Promise<'quit-anyway' | 'cancel'>;
   setBackingUp: (value: boolean) => void;
   closeDialog: () => void;
@@ -38,6 +38,7 @@ const DEFAULT_DEPS: QuitHandlerDeps = {
   loadWebDavConfig,
   readDiskStorageData: async () => null,
   getLatestUpdateTimestamp: () => null,
+  clock: () => Date.now(),
   invoke,
   promptQuitConfirm: async () => 'cancel',
   promptBackupFailed: async () => 'quit-anyway',
@@ -50,6 +51,8 @@ const DEFAULT_DEPS: QuitHandlerDeps = {
 // 条件判断
 // ---------------------------------------------------------------------------
 
+const EXIT_PROMPT_THRESHOLD_MS = 30 * 60 * 1000;
+
 /**
  * 判断是否需要退出前备份提示。
  *
@@ -57,15 +60,17 @@ const DEFAULT_DEPS: QuitHandlerDeps = {
  * - exitPromptEnabled === true
  * - WebDAV 已保存配置（serverUrl 非空）
  * - passwordSaved === true
- * - 本地有未备份变化
+ * - 本地有未备份变化：当前磁盘 storageUpdatedAt 晚于 lastSuccessfulStorageUpdatedAt
+ * - 距上次成功远端备份已超过阈值（30 分钟）
  */
 export async function shouldPromptExitBackup(
-  deps: Pick<QuitHandlerDeps, 'loadScheduledConfig' | 'loadWebDavConfig' | 'loadScheduledState' | 'readDiskStorageData' | 'getLatestUpdateTimestamp'> = DEFAULT_DEPS,
+  deps: Pick<QuitHandlerDeps, 'loadScheduledConfig' | 'loadWebDavConfig' | 'loadScheduledState' | 'readDiskStorageData' | 'getLatestUpdateTimestamp' | 'clock'> = DEFAULT_DEPS,
 ): Promise<boolean> {
   try {
     const loadScheduledStateFn = deps.loadScheduledState ?? loadScheduledState;
     const readDiskStorageDataFn = deps.readDiskStorageData ?? (async () => null);
     const getLatestUpdateTimestampFn = deps.getLatestUpdateTimestamp ?? (() => null);
+    const clockFn = deps.clock ?? Date.now;
 
     const [scheduledResult, webdavResult, stateResult] = await Promise.all([
       deps.loadScheduledConfig(),
@@ -93,10 +98,12 @@ export async function shouldPromptExitBackup(
       (state.lastSuccessfulStorageUpdatedAt === null ||
         diskTimestamp > state.lastSuccessfulStorageUpdatedAt);
 
-    if (hasUnsavedChanges) return true;
+    if (!hasUnsavedChanges) return false;
 
-    // 无未备份变化时，无论距上次成功多久，都不提示
-    return false;
+    const lastSuccessAt = state.lastAutomaticSuccessAt ?? state.lastManualSuccessAt ?? null;
+    if (lastSuccessAt === null) return true;
+
+    return clockFn() - lastSuccessAt >= EXIT_PROMPT_THRESHOLD_MS;
   } catch {
     return false;
   }

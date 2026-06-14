@@ -177,6 +177,7 @@ export const BoardDock = () => {
     ScheduledRemoteBackupConfigService.DEFAULT_SCHEDULED_BACKUP_STATE,
   );
   const [scheduledLoading, setScheduledLoading] = useState(false);
+  const [exitHintVisible, setExitHintVisible] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -316,6 +317,30 @@ export const BoardDock = () => {
     }, 5000);
     return () => { window.clearInterval(intervalId); };
   }, [settingsView, scheduledConfig.enabled]);
+
+  useEffect(() => {
+    if (!scheduledConfig.exitPromptEnabled || !webdavPasswordSaved) {
+      setExitHintVisible(false);
+      return;
+    }
+    const EXIT_PROMPT_THRESHOLD_MS = 30 * 60 * 1000;
+    let cancelled = false;
+    (async () => {
+      try {
+        const diskData = await readDiskStorageData('data.json');
+        const diskTs = diskData ? getLatestUpdateTimestamp(diskData) : null;
+        const lastSuccessAt = scheduledState.lastAutomaticSuccessAt ?? scheduledState.lastManualSuccessAt ?? null;
+        const hasUnsaved =
+          diskTs !== null && diskTs > 0 &&
+          (scheduledState.lastSuccessfulStorageUpdatedAt === null || diskTs > scheduledState.lastSuccessfulStorageUpdatedAt);
+        const beyondThreshold = lastSuccessAt === null || (Date.now() - lastSuccessAt >= EXIT_PROMPT_THRESHOLD_MS);
+        if (!cancelled) setExitHintVisible(hasUnsaved && beyondThreshold);
+      } catch {
+        if (!cancelled) setExitHintVisible(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [scheduledConfig.exitPromptEnabled, webdavPasswordSaved, scheduledState.lastSuccessfulStorageUpdatedAt, scheduledState.lastAutomaticSuccessAt, scheduledState.lastManualSuccessAt]);
 
   const onExportClick = async () => {
     try {
@@ -761,14 +786,16 @@ export const BoardDock = () => {
           if (stateResult.success && stateResult.state) {
             const diskData = await readDiskStorageData('data.json');
             const diskTs = diskData ? getLatestUpdateTimestamp(diskData) : null;
-            await ScheduledRemoteBackupConfigService.saveState({
+            const updated = {
               ...stateResult.state,
               lastFinishedAt: Date.now(),
-              lastTrigger: 'manual',
+              lastTrigger: 'manual' as const,
               lastManualSuccessAt: Date.now(),
               lastRemoteFileName: result.remoteFileName ?? null,
               ...(diskTs !== null ? { lastSuccessfulStorageUpdatedAt: diskTs } : {}),
-            });
+            };
+            await ScheduledRemoteBackupConfigService.saveState(updated);
+            setScheduledState(updated);
           }
         } catch {
           // state update failure is non-critical for manual backup
@@ -778,14 +805,16 @@ export const BoardDock = () => {
         try {
           const stateResult = await ScheduledRemoteBackupConfigService.loadState();
           if (stateResult.success && stateResult.state) {
-            await ScheduledRemoteBackupConfigService.saveState({
+            const updated = {
               ...stateResult.state,
               lastFinishedAt: Date.now(),
-              lastTrigger: 'manual',
+              lastTrigger: 'manual' as const,
               lastFailureAt: Date.now(),
               lastFailureReason: result.error ?? '未知错误',
               lastFailureStage: isRemoteBackupStage(result.errorStage ?? '') ? (result.errorStage as RemoteBackupStage) : 'unknown',
-            });
+            };
+            await ScheduledRemoteBackupConfigService.saveState(updated);
+            setScheduledState(updated);
           }
         } catch {
           // state update failure is non-critical
@@ -1705,17 +1734,11 @@ export const BoardDock = () => {
                                             data-testid="scheduled-backup-exit-prompt"
                                         />
                                     </label>
-                                    {scheduledConfig.exitPromptEnabled && webdavPasswordSaved && (() => {
-                                        const lastSuccessAt = scheduledState.lastAutomaticSuccessAt ?? scheduledState.lastManualSuccessAt;
-                                        const hasPending = scheduledState.lastSuccessfulStorageUpdatedAt === null
-                                            || lastSuccessAt === null;
-                                        if (!hasPending) return null;
-                                        return (
-                                            <p className="text-[10px] text-amber-600 dark:text-amber-400 leading-tight" data-testid="exit-backup-pending-hint">
-                                                退出时将提示备份
-                                            </p>
-                                        );
-                                    })()}
+                                    {exitHintVisible && (
+                                        <p className="text-[10px] text-amber-600 dark:text-amber-400 leading-tight" data-testid="exit-backup-pending-hint">
+                                            退出时将提示备份
+                                        </p>
+                                    )}
                                 </>
                             )}
 
