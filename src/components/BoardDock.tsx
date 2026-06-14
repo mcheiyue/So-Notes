@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { confirm } from "../store/confirmStore";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
-import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw, Cloud, Wifi, RefreshCw, Save } from "lucide-react";
+import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw, Cloud, Wifi, RefreshCw, Save, Clock } from "lucide-react";
 import { Z_INDEX } from "../constants/layout";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { appController } from "../controllers/appController";
@@ -13,6 +13,8 @@ import { createLocalBackup, restoreLocalBackup, validateLocalBackup } from "../s
 import * as WebDavBackupService from "../services/backup/WebDavBackupService";
 import { runRemoteBackup } from "../services/backup/RemoteBackupRunner";
 import { tryStartBackupJob, type BackupJobHandle } from "../services/backup/BackupJobCoordinator";
+import * as ScheduledRemoteBackupConfigService from "../services/backup/ScheduledRemoteBackupConfigService";
+import type { ScheduledRemoteBackupConfig, ScheduledRemoteBackupState, ScheduledRemoteBackupFrequency } from "../services/backup/ScheduledRemoteBackupConfigService";
 import * as persistenceFacade from "../services/storage/PersistenceFacade";
 import { readDiskStorageData, getLatestUpdateTimestamp } from "../services/storage/tauriPersistence";
 import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
@@ -166,6 +168,15 @@ export const BoardDock = () => {
   const [webdavBackups, setWebdavBackups] = useState<WebDavBackupService.WebDavRemoteBackup[]>([]);
   const [webdavPasswordSaved, setWebdavPasswordSaved] = useState(false);
 
+  // Scheduled remote backup state
+  const [scheduledConfig, setScheduledConfig] = useState<ScheduledRemoteBackupConfig>(
+    ScheduledRemoteBackupConfigService.DEFAULT_SCHEDULED_BACKUP_CONFIG,
+  );
+  const [scheduledState, setScheduledState] = useState<ScheduledRemoteBackupState>(
+    ScheduledRemoteBackupConfigService.DEFAULT_SCHEDULED_BACKUP_STATE,
+  );
+  const [scheduledLoading, setScheduledLoading] = useState(false);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const dockContainerRef = useRef<HTMLDivElement>(null);
@@ -257,6 +268,36 @@ export const BoardDock = () => {
         if (!cancelled) {
           setWebdavFeedback({ status: 'error', message: `加载配置失败：${formatUnknownError(err)}` });
         }
+      }
+
+      setScheduledLoading(true);
+      try {
+        const [configResult, stateResult] = await Promise.all([
+          ScheduledRemoteBackupConfigService.loadConfig(),
+          ScheduledRemoteBackupConfigService.loadState(),
+        ]);
+        if (cancelled) return;
+        if (configResult.success && configResult.config) {
+          setScheduledConfig(configResult.config);
+        }
+        if (stateResult.success && stateResult.state) {
+          setScheduledState(stateResult.state);
+        }
+        const loadError = !configResult.success
+          ? configResult.error
+          : !stateResult.success
+            ? stateResult.error
+            : null;
+        if (loadError) {
+          setWebdavFeedback({ status: 'error', message: `加载自动远端备份设置失败：${loadError}` });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('加载自动远端备份设置失败:', err);
+          setWebdavFeedback({ status: 'error', message: `加载自动远端备份设置失败：${formatUnknownError(err)}` });
+        }
+      } finally {
+        if (!cancelled) setScheduledLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -579,6 +620,12 @@ export const BoardDock = () => {
         if (result.warning) {
           if (!webdavDraft.rememberPassword) {
             setWebdavPasswordSaved(false);
+            setScheduledConfig(ScheduledRemoteBackupConfigService.DEFAULT_SCHEDULED_BACKUP_CONFIG);
+            setScheduledState(ScheduledRemoteBackupConfigService.DEFAULT_SCHEDULED_BACKUP_STATE);
+            setScheduledLoading(false);
+            if (scheduledConfig.enabled) {
+              void persistScheduledConfig({ ...scheduledConfig, enabled: false });
+            }
           }
           setWebdavFeedback({ status: 'info', message: result.warning });
         } else if (webdavDraft.rememberPassword) {
@@ -586,6 +633,9 @@ export const BoardDock = () => {
           setWebdavPasswordSaved(true);
         } else {
           setWebdavPasswordSaved(false);
+          if (scheduledConfig.enabled) {
+            void persistScheduledConfig({ ...scheduledConfig, enabled: false });
+          }
           setWebdavFeedback({ status: 'success', message: '配置已保存。' });
         }
       } else {
@@ -607,6 +657,9 @@ export const BoardDock = () => {
         setWebdavDraft({ serverUrl: '', username: '', password: '', remoteDir: 'SoNotes_Backups/', rememberPassword: false });
         setWebdavBackups([]);
         setWebdavPasswordSaved(false);
+        if (scheduledConfig.enabled) {
+          void persistScheduledConfig({ ...scheduledConfig, enabled: false });
+        }
         if (result.secretCleanupWarning) {
           setWebdavFeedback({ status: 'info', message: result.secretCleanupWarning });
         } else {
@@ -835,6 +888,50 @@ export const BoardDock = () => {
       setWebdavOperation('idle');
     }
   };
+
+  const persistScheduledConfig = async (next: ScheduledRemoteBackupConfig) => {
+    const previous = scheduledConfig;
+    setScheduledConfig(next);
+    try {
+      const result = await ScheduledRemoteBackupConfigService.saveConfig(next);
+      if (!result.success) {
+        setScheduledConfig(previous);
+        setWebdavFeedback({ status: 'error', message: `保存自动远端备份设置失败：${result.error ?? '未知错误'}` });
+        return false;
+      }
+      return true;
+    } catch (err) {
+      setScheduledConfig(previous);
+      setWebdavFeedback({ status: 'error', message: `保存自动远端备份设置失败：${formatUnknownError(err)}` });
+      return false;
+    }
+  };
+
+  const onScheduledEnabledToggle = async () => {
+    if (scheduledConfig.enabled) {
+      await persistScheduledConfig({ ...scheduledConfig, enabled: false });
+      return;
+    }
+    if (!webdavPasswordSaved) {
+      setWebdavFeedback({
+        status: 'error',
+        message: '请先保存 WebDAV 密码到系统凭据管理器，再启用自动远端备份。',
+      });
+      return;
+    }
+    await persistScheduledConfig({ ...scheduledConfig, enabled: true });
+  };
+
+  const onScheduledFrequencyChange = async (frequency: ScheduledRemoteBackupFrequency) => {
+    await persistScheduledConfig({ ...scheduledConfig, frequency });
+  };
+
+  const onExitPromptToggle = async () => {
+    await persistScheduledConfig({ ...scheduledConfig, exitPromptEnabled: !scheduledConfig.exitPromptEnabled });
+  };
+
+  const disableScheduledByCredential = !webdavPasswordSaved && scheduledConfig.enabled;
+  const scheduledEnabledEffective = scheduledConfig.enabled && webdavPasswordSaved;
 
   const importSummaryText = importFeedback?.summary && !importFeedback.rolledBack
     ? formatImportSummary(importFeedback.summary)
@@ -1471,6 +1568,128 @@ export const BoardDock = () => {
                                 ))}
                             </div>
                         )}
+
+                        <div className="mx-3 my-1.5 border-t border-border-subtle" />
+
+                        <div className="px-3 py-2 space-y-2" data-testid="scheduled-backup-section">
+                            <div className="flex items-center justify-between gap-2">
+                                <label
+                                    htmlFor="scheduled-backup-enabled"
+                                    className="text-xs text-text-primary font-medium"
+                                >
+                                    自动远端备份
+                                </label>
+                                <button
+                                    id="scheduled-backup-enabled"
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={scheduledEnabledEffective}
+                                    onClick={onScheduledEnabledToggle}
+                                    disabled={scheduledLoading || (!webdavPasswordSaved && !scheduledConfig.enabled)}
+                                    className={cn(
+                                        "relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50",
+                                        scheduledEnabledEffective
+                                            ? "bg-blue-500"
+                                            : "bg-gray-300 dark:bg-gray-600",
+                                    )}
+                                    data-testid="scheduled-backup-toggle"
+                                >
+                                    <span
+                                        className={cn(
+                                            "inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform shadow-sm",
+                                            scheduledEnabledEffective ? "translate-x-[18px]" : "translate-x-0.5",
+                                        )}
+                                    />
+                                </button>
+                            </div>
+
+                            {!webdavPasswordSaved && (
+                                <p
+                                    className="text-[10px] text-amber-600 dark:text-amber-400 leading-tight"
+                                    data-testid="scheduled-backup-credential-warning"
+                                >
+                                    请先保存 WebDAV 密码到系统凭据管理器，再启用自动远端备份。
+                                </p>
+                            )}
+
+                            {disableScheduledByCredential && (
+                                <p
+                                    className="text-[10px] text-red-600 dark:text-red-400 leading-tight"
+                                    data-testid="scheduled-backup-credential-disabled"
+                                >
+                                    自动备份已暂停：无法读取已保存的 WebDAV 密码，请重新保存密码后再启用。
+                                </p>
+                            )}
+
+                            {scheduledEnabledEffective && (
+                                <>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <label
+                                            htmlFor="scheduled-backup-frequency"
+                                            className="text-xs text-text-secondary"
+                                        >
+                                            备份频率
+                                        </label>
+                                        <select
+                                            id="scheduled-backup-frequency"
+                                            value={scheduledConfig.frequency}
+                                            onChange={(e) => onScheduledFrequencyChange(e.target.value as ScheduledRemoteBackupFrequency)}
+                                            disabled={scheduledLoading}
+                                            className="bg-secondary-bg/50 border border-border-subtle rounded px-1.5 py-1 text-xs text-text-primary outline-none focus:border-blue-400 disabled:opacity-50"
+                                            data-testid="scheduled-backup-frequency"
+                                        >
+                                            <option value="every-6-hours">每 6 小时</option>
+                                            <option value="every-12-hours">每 12 小时</option>
+                                            <option value="daily">每天</option>
+                                            <option value="weekly">每周</option>
+                                        </select>
+                                    </div>
+
+                                    <label className="flex items-center justify-between gap-2 text-xs text-text-secondary cursor-pointer">
+                                        <span>退出前提醒备份</span>
+                                        <input
+                                            type="checkbox"
+                                            checked={scheduledConfig.exitPromptEnabled}
+                                            onChange={onExitPromptToggle}
+                                            disabled={scheduledLoading}
+                                            className="rounded disabled:opacity-50"
+                                            data-testid="scheduled-backup-exit-prompt"
+                                        />
+                                    </label>
+                                </>
+                            )}
+
+                            {(scheduledState.lastAutomaticSuccessAt != null || scheduledState.lastFailureAt != null || scheduledState.nextRunAt != null) && (
+                                <div
+                                    className="rounded border border-border-subtle bg-secondary-bg/30 px-2 py-1.5 space-y-0.5 text-[11px] leading-4"
+                                    data-testid="scheduled-backup-status"
+                                >
+                                    {scheduledState.lastAutomaticSuccessAt != null && (
+                                        <p className="text-text-secondary">
+                                            <Clock className="w-3 h-3 inline-block mr-1 align-text-bottom text-text-tertiary" />
+                                            最近自动备份：{new Date(scheduledState.lastAutomaticSuccessAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}
+                                            {scheduledState.lastRemoteFileName ? ` (${scheduledState.lastRemoteFileName})` : ''}
+                                        </p>
+                                    )}
+                                    {scheduledState.lastFailureAt != null && scheduledState.lastFailureReason && (
+                                        <p className="text-red-500 dark:text-red-400">
+                                            最近失败：{scheduledState.lastFailureReason}
+                                        </p>
+                                    )}
+                                    {scheduledState.nextRunAt != null && scheduledEnabledEffective && (
+                                        <p className="text-text-tertiary">
+                                            下次尝试：{new Date(scheduledState.nextRunAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            {!scheduledConfig.enabled && webdavPasswordSaved && !scheduledLoading && (
+                                <p className="text-[10px] text-text-tertiary leading-tight" data-testid="scheduled-backup-disabled-hint">
+                                    自动远端备份已关闭
+                                </p>
+                            )}
+                        </div>
 
                         {webdavFeedback && (
                             <div

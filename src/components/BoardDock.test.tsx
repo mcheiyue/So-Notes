@@ -114,6 +114,53 @@ vi.mock('../services/backup/BackupJobCoordinator', () => {
   };
 });
 
+const { DEFAULT_SCHEDULED_BACKUP_CONFIG, DEFAULT_SCHEDULED_BACKUP_STATE, mockScheduledConfigRef, mockScheduledStateRef } = vi.hoisted(() => {
+  const config = {
+    enabled: false,
+    frequency: 'daily' as const,
+    quietPeriodMinutes: 5,
+    exitPromptEnabled: true,
+  };
+  const state = {
+    lastStartedAt: null as number | null,
+    lastFinishedAt: null as number | null,
+    lastTrigger: null as string | null,
+    lastAutomaticSuccessAt: null as number | null,
+    lastManualSuccessAt: null as number | null,
+    lastFailureAt: null as number | null,
+    lastFailureReason: null as string | null,
+    lastFailureStage: null as string | null,
+    lastRemoteFileName: null as string | null,
+    nextRunAt: null as number | null,
+    lastSuccessfulStorageUpdatedAt: null as number | null,
+    lastAttemptCapturedStorageUpdatedAt: null as number | null,
+    consecutiveCredentialFailures: 0,
+    credentialActionRequired: false,
+  };
+  return {
+    DEFAULT_SCHEDULED_BACKUP_CONFIG: config,
+    DEFAULT_SCHEDULED_BACKUP_STATE: state,
+    mockScheduledConfigRef: { current: { ...config } },
+    mockScheduledStateRef: { current: { ...state } },
+  };
+});
+
+const resetMockScheduled = () => {
+  mockScheduledConfigRef.current = { ...DEFAULT_SCHEDULED_BACKUP_CONFIG };
+  mockScheduledStateRef.current = { ...DEFAULT_SCHEDULED_BACKUP_STATE };
+};
+
+vi.mock('../services/backup/ScheduledRemoteBackupConfigService', () => ({
+  DEFAULT_SCHEDULED_BACKUP_CONFIG,
+  DEFAULT_SCHEDULED_BACKUP_STATE,
+  loadConfig: vi.fn(async () => ({ success: true, config: mockScheduledConfigRef.current, error: null })),
+  loadState: vi.fn(async () => ({ success: true, state: mockScheduledStateRef.current, error: null })),
+  saveConfig: vi.fn(async () => ({ success: true, error: null })),
+  saveState: vi.fn(async () => ({ success: true, error: null })),
+  isValidFrequency: vi.fn((f: string) => ['every-6-hours', 'every-12-hours', 'daily', 'weekly'].includes(f)),
+  redactStateBeforeSave: vi.fn((s) => s),
+}));
+
 import { BoardDock } from './BoardDock';
 import { confirm } from '../store/confirmStore';
 import { Z_INDEX } from '../constants/layout';
@@ -1382,6 +1429,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     _resetCoordinatorForTesting();
+    resetMockScheduled();
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
       ...createEmptyNormalizedNotesState(),
@@ -2283,6 +2331,7 @@ describe('BoardDock 恢复流程与 BackupJobCoordinator 集成', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     _resetCoordinatorForTesting();
+    resetMockScheduled();
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
       ...createEmptyNormalizedNotesState(),
@@ -2594,5 +2643,382 @@ describe('BoardDock 恢复流程与 BackupJobCoordinator 集成', () => {
     const feedback = container.querySelector('[data-testid="webdav-feedback"]');
     expect(feedback).not.toBeNull();
     expect(feedback?.textContent).toContain('远端恢复成功');
+  });
+});
+
+describe('BoardDock 定时远端备份 UI', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const clickElement = async (element: Element | null) => {
+    expect(element).not.toBeNull();
+    await act(async () => {
+      element?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+  };
+
+  const findButtonByText = (text: string) => Array.from(container.querySelectorAll('button')).find(
+    (button) => button.textContent?.includes(text),
+  ) ?? null;
+
+  const getSettingsButton = () => container.querySelector('button[aria-label="打开设置"]');
+
+  const renderBoardDock = async () => {
+    await act(async () => {
+      root.render(<BoardDock />);
+    });
+  };
+
+  const openDataSettings = async () => {
+    await renderBoardDock();
+    await clickElement(getSettingsButton());
+    await clickElement(findButtonByText('数据管理'));
+  };
+
+  const openWebdavView = async () => {
+    await openDataSettings();
+    await clickElement(findButtonByText('远端备份/恢复'));
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    _resetCoordinatorForTesting();
+    resetMockScheduled();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } },
+      ],
+      currentBoardId: 'default',
+      isDockVisible: true,
+      viewMode: 'BOARD',
+      config: { ...useStore.getState().config, themeMode: 'system' },
+      saveStatus: 'idle',
+      saveError: null,
+      isSaving: false,
+      lastSavedAt: null,
+      switchBoard: vi.fn(),
+      createBoard: vi.fn(),
+      deleteBoard: vi.fn(),
+      updateBoard: vi.fn(),
+      reorderBoard: vi.fn(),
+      setDockVisible: vi.fn(),
+      setViewMode: vi.fn(),
+      clearSelection: vi.fn(),
+      exportAll: vi.fn(async () => undefined),
+      importFromFile: vi.fn(async () => ({ status: 'cancelled' as const })),
+      exportCurrentBoard: vi.fn(async () => undefined),
+      setThemeMode: vi.fn(),
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('默认关闭自动远端备份', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: DEFAULT_SCHEDULED_BACKUP_CONFIG, error: null,
+    });
+
+    await openWebdavView();
+
+    const toggle = container.querySelector('[data-testid="scheduled-backup-toggle"]');
+    expect(toggle).not.toBeNull();
+    expect(toggle?.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('显式启用自动远端备份后持久化配置', async () => {
+    const { loadConfig, saveConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: DEFAULT_SCHEDULED_BACKUP_CONFIG, error: null,
+    });
+    vi.mocked(saveConfig).mockResolvedValue({ success: true, error: null });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const toggle = container.querySelector('[data-testid="scheduled-backup-toggle"]');
+    await clickElement(toggle);
+
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true }),
+    );
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('passwordSaved=false 时自动备份开关 disabled', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: DEFAULT_SCHEDULED_BACKUP_CONFIG, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: false, passwordSaved: false,
+    });
+
+    await openWebdavView();
+
+    const toggle = container.querySelector('[data-testid="scheduled-backup-toggle"]') as HTMLButtonElement;
+    expect(toggle).not.toBeNull();
+    expect(toggle.disabled).toBe(true);
+
+    const warning = container.querySelector('[data-testid="scheduled-backup-credential-warning"]');
+    expect(warning).not.toBeNull();
+    expect(warning?.textContent).toContain('请先保存 WebDAV 密码到系统凭据管理器');
+  });
+
+  it('passwordSaved=false 时点击开关不调用 saveConfig', async () => {
+    const { loadConfig, saveConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: DEFAULT_SCHEDULED_BACKUP_CONFIG, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: false, passwordSaved: false,
+    });
+
+    await openWebdavView();
+
+    const toggle = container.querySelector('[data-testid="scheduled-backup-toggle"]');
+    await clickElement(toggle);
+
+    expect(saveConfig).not.toHaveBeenCalled();
+  });
+
+  it('频率选择变更后持久化', async () => {
+    const { loadConfig, saveConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true }, error: null,
+    });
+    vi.mocked(saveConfig).mockResolvedValue({ success: true, error: null });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const frequencySelect = container.querySelector('[data-testid="scheduled-backup-frequency"]') as HTMLSelectElement;
+    expect(frequencySelect).not.toBeNull();
+
+    await act(async () => {
+      frequencySelect.value = 'every-6-hours';
+      frequencySelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ frequency: 'every-6-hours' }),
+    );
+  });
+
+  it('退出前提醒开关变更后持久化', async () => {
+    const { loadConfig, saveConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true }, error: null,
+    });
+    vi.mocked(saveConfig).mockResolvedValue({ success: true, error: null });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const exitPrompt = container.querySelector('[data-testid="scheduled-backup-exit-prompt"]') as HTMLInputElement;
+    expect(exitPrompt).not.toBeNull();
+    expect(exitPrompt.checked).toBe(true);
+
+    await clickElement(exitPrompt);
+
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ exitPromptEnabled: false }),
+    );
+  });
+
+  it('最近自动备份成功后显示状态', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    mockScheduledStateRef.current = {
+      ...DEFAULT_SCHEDULED_BACKUP_STATE,
+      lastAutomaticSuccessAt: new Date('2026-06-14T10:30:00').getTime(),
+      lastRemoteFileName: 'SoNotes_Backup_20260614103000.zip',
+      nextRunAt: new Date('2026-06-14T22:30:00').getTime(),
+    };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true }, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const status = container.querySelector('[data-testid="scheduled-backup-status"]');
+    expect(status).not.toBeNull();
+    expect(status?.textContent).toContain('最近自动备份');
+    expect(status?.textContent).toContain('SoNotes_Backup_20260614103000.zip');
+    expect(status?.textContent).toContain('下次尝试');
+  });
+
+  it('最近失败原因显示在状态区', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    mockScheduledStateRef.current = {
+      ...DEFAULT_SCHEDULED_BACKUP_STATE,
+      lastFailureAt: new Date('2026-06-14T08:00:00').getTime(),
+      lastFailureReason: '网络连接失败',
+    };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true }, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const status = container.querySelector('[data-testid="scheduled-backup-status"]');
+    expect(status).not.toBeNull();
+    expect(status?.textContent).toContain('最近失败');
+    expect(status?.textContent).toContain('网络连接失败');
+  });
+
+  it('自动备份区域不含"同步"文案', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    mockScheduledStateRef.current = {
+      ...DEFAULT_SCHEDULED_BACKUP_STATE,
+      lastAutomaticSuccessAt: Date.now(),
+      lastFailureReason: '凭据错误',
+      nextRunAt: Date.now() + 3600000,
+    };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true }, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const section = container.querySelector('[data-testid="scheduled-backup-section"]');
+    expect(section).not.toBeNull();
+    expect(section?.textContent).not.toContain('同步');
+  });
+
+  it('关闭自动备份后不显示频率和退出提示控件', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: DEFAULT_SCHEDULED_BACKUP_CONFIG, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    expect(container.querySelector('[data-testid="scheduled-backup-frequency"]')).toBeNull();
+    expect(container.querySelector('[data-testid="scheduled-backup-exit-prompt"]')).toBeNull();
+    expect(container.querySelector('[data-testid="scheduled-backup-disabled-hint"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="scheduled-backup-disabled-hint"]')?.textContent).toContain('自动远端备份已关闭');
+  });
+
+  it('清除 WebDAV 配置后自动关闭定时备份', async () => {
+    const { loadConfig, saveConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig, clearConfig } = await import('../services/backup/WebDavBackupService');
+    mockScheduledConfigRef.current = { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: mockScheduledConfigRef.current, error: null,
+    });
+    vi.mocked(saveConfig).mockResolvedValue({ success: true, error: null });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+    vi.mocked(clearConfig).mockResolvedValue({ success: true });
+
+    await openWebdavView();
+
+    await clickElement(findButtonByText('清除配置'));
+
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false }),
+    );
+  });
+
+  it('WebDAV 设置区不引入水平溢出的固定宽度', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true }, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const scheduledSection = container.querySelector('[data-testid="scheduled-backup-section"]');
+    expect(scheduledSection).not.toBeNull();
+    const html = scheduledSection!.innerHTML;
+    expect(html).not.toContain('width:');
+    expect(html).not.toContain('min-width:');
+  });
+
+  it('密码保存后开启自动备份显示成功且不显示凭据警告', async () => {
+    const { loadConfig, saveConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig, saveConfig: webdavSaveConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: DEFAULT_SCHEDULED_BACKUP_CONFIG, error: null,
+    });
+    vi.mocked(saveConfig).mockResolvedValue({ success: true, error: null });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: false, passwordSaved: false,
+    });
+    vi.mocked(webdavSaveConfig).mockResolvedValue({ success: true });
+
+    await openWebdavView();
+
+    expect(container.querySelector('[data-testid="scheduled-backup-credential-warning"]')).not.toBeNull();
+
+    const serverInput = container.querySelector('[data-testid="webdav-server-url"]') as HTMLInputElement;
+    const usernameInput = container.querySelector('[data-testid="webdav-username"]') as HTMLInputElement;
+    const passwordInput = container.querySelector('[data-testid="webdav-password"]') as HTMLInputElement;
+
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(serverInput, 'https://dav.example.com');
+      serverInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(usernameInput, 'user1');
+      usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(passwordInput, 'mypass');
+      passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await clickElement(container.querySelector('[data-testid="webdav-remember-password"]'));
+    await clickElement(findButtonByText('保存配置'));
+
+    const toggle = container.querySelector('[data-testid="scheduled-backup-toggle"]') as HTMLButtonElement;
+    expect(toggle.disabled).toBe(false);
+
+    await clickElement(toggle);
+
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true }),
+    );
+    expect(container.querySelector('[data-testid="scheduled-backup-credential-warning"]')).toBeNull();
   });
 });
