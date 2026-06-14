@@ -17,6 +17,20 @@ use tauri::Manager;
 use url::{Host, Url};
 
 // ---------------------------------------------------------------------------
+// 单次执行锁（single-flight guard）
+// ---------------------------------------------------------------------------
+
+/// 全局互斥锁，确保同一时间只有一个任务进入 create-zip + upload 流程。
+///
+/// 锁的持有范围覆盖 `create_local_backup`（含 blocking 线程内的 zip 创建）
+/// 和 `webdav_upload_backup_with_client`（含 409/412 重试循环）。
+/// 使用 `tokio::sync::Mutex` 因为调用方是 async 上下文。
+fn webdav_create_backup_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+// ---------------------------------------------------------------------------
 // 常量
 // ---------------------------------------------------------------------------
 
@@ -1850,6 +1864,19 @@ pub async fn webdav_create_remote_backup(
     app: tauri::AppHandle,
     config: WebDavConfig,
 ) -> Result<WebDavUploadResult, String> {
+    let _guard = match webdav_create_backup_lock().try_lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return Ok(WebDavUploadResult {
+                success: false,
+                remote_file_name: None,
+                error: Some(
+                    "webdav_backup_busy: another backup is already in progress".to_string(),
+                ),
+            });
+        }
+    };
+
     let store = SystemWebDavCredentialStore::new();
     let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
     let mut config = config;
