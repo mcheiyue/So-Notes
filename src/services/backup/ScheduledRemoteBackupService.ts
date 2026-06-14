@@ -105,7 +105,7 @@ const REMOTE_BACKUP_STAGES: ReadonlySet<string> = new Set([
   'unknown',
 ]);
 
-function isRemoteBackupStage(value: string): value is RemoteBackupStage {
+export function isRemoteBackupStage(value: string): value is RemoteBackupStage {
   return REMOTE_BACKUP_STAGES.has(value);
 }
 

@@ -13,6 +13,8 @@ export const QuitConfirmDialog: React.FC = () => {
   const resolve = useQuitConfirmStore((s) => s.resolve);
   const close = useQuitConfirmStore((s) => s.close);
   const isBackingUp = useQuitConfirmStore((s) => s.isBackingUp);
+  const backupError = useQuitConfirmStore((s) => s.backupError);
+  const resolveBackupFailed = useQuitConfirmStore((s) => s.resolveBackupFailed);
 
   const resolvedRef = useRef(false);
 
@@ -34,6 +36,14 @@ export const QuitConfirmDialog: React.FC = () => {
       resolvedRef.current = false;
     }
   }, [isOpen]);
+
+  const handleBackupFailedChoice = useCallback(
+    (choice: 'quit-anyway' | 'cancel') => {
+      resolveBackupFailed?.(choice);
+      close();
+    },
+    [resolveBackupFailed, close],
+  );
 
   // Escape 键关闭（等同取消）
   useEffect(() => {
@@ -75,37 +85,61 @@ export const QuitConfirmDialog: React.FC = () => {
         </div>
 
         <div className="px-5 py-4 text-sm text-text-primary whitespace-pre-line leading-relaxed">
-          {isBackingUp
-            ? '正在创建远端备份，请稍候…'
-            : '检测到远端备份已启用。是否在退出前先创建一次远端备份？'}
+          {backupError
+            ? `备份失败：${backupError}\n是否仍然退出？`
+            : isBackingUp
+              ? '正在创建远端备份，请稍候…'
+              : '检测到远端备份已启用。是否在退出前先创建一次远端备份？'}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-border-subtle px-5 py-3">
-          <button
-            type="button"
-            className="rounded-lg px-4 py-2 text-sm text-text-secondary hover:bg-primary-bg transition-colors"
-            onClick={() => handleChoice('cancel')}
-            disabled={isBackingUp}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            className="rounded-lg px-4 py-2 text-sm text-text-secondary hover:bg-primary-bg transition-colors"
-            onClick={() => handleChoice('quit-now')}
-            disabled={isBackingUp}
-          >
-            直接退出
-          </button>
-          <button
-            type="button"
-            className="rounded-lg px-4 py-2 text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-50"
-            onClick={() => handleChoice('backup-and-quit')}
-            disabled={isBackingUp}
-            autoFocus
-          >
-            {isBackingUp ? '备份中…' : '先备份再退出'}
-          </button>
+          {backupError ? (
+            <>
+              <button
+                type="button"
+                className="rounded-lg px-4 py-2 text-sm text-text-secondary hover:bg-primary-bg transition-colors"
+                onClick={() => handleBackupFailedChoice('cancel')}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-4 py-2 text-sm font-medium bg-red-500 text-white hover:bg-red-600 transition-colors"
+                onClick={() => handleBackupFailedChoice('quit-anyway')}
+                autoFocus
+              >
+                仍然退出
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="rounded-lg px-4 py-2 text-sm text-text-secondary hover:bg-primary-bg transition-colors"
+                onClick={() => handleChoice('cancel')}
+                disabled={isBackingUp}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-4 py-2 text-sm text-text-secondary hover:bg-primary-bg transition-colors"
+                onClick={() => handleChoice('quit-now')}
+                disabled={isBackingUp}
+              >
+                直接退出
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-4 py-2 text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-50"
+                onClick={() => handleChoice('backup-and-quit')}
+                disabled={isBackingUp}
+                autoFocus
+              >
+                {isBackingUp ? '备份中…' : '先备份再退出'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

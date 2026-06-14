@@ -88,11 +88,11 @@ function makeDeps(overrides?: Partial<QuitHandlerDeps>): QuitHandlerDeps {
     loadScheduledConfig: vi.fn().mockResolvedValue(makeScheduledConfigResult()),
     loadScheduledState: vi.fn().mockResolvedValue(makeScheduledStateResult()),
     loadWebDavConfig: vi.fn().mockResolvedValue(makeWebDavConfigResult()),
-    readDiskStorageData: vi.fn().mockResolvedValue(null),
-    getLatestUpdateTimestamp: vi.fn().mockReturnValue(null),
-    clock: vi.fn().mockReturnValue(0),
+    readDiskStorageData: vi.fn().mockResolvedValue(makeStorageData({ storageUpdatedAt: 2000 })),
+    getLatestUpdateTimestamp: vi.fn().mockReturnValue(2000),
     invoke: vi.fn().mockResolvedValue(undefined),
     promptQuitConfirm: vi.fn().mockResolvedValue('cancel' as const),
+    promptBackupFailed: vi.fn().mockResolvedValue('quit-anyway' as const),
     setBackingUp: vi.fn(),
     closeDialog: vi.fn(),
     runBeforeExit: vi.fn().mockResolvedValue(undefined),
@@ -197,7 +197,6 @@ describe('shouldPromptExitBackup', () => {
       ),
       readDiskStorageData: vi.fn().mockResolvedValue(diskData),
       getLatestUpdateTimestamp: vi.fn().mockReturnValue(1000),
-      clock: vi.fn().mockReturnValue(1000 + 10 * 60 * 1000),
     });
     const result = await shouldPromptExitBackup(deps);
     expect(result).toBe(false);
@@ -214,13 +213,12 @@ describe('shouldPromptExitBackup', () => {
       ),
       readDiskStorageData: vi.fn().mockResolvedValue(diskData),
       getLatestUpdateTimestamp: vi.fn().mockReturnValue(2000),
-      clock: vi.fn().mockReturnValue(1000 + 10 * 60 * 1000),
     });
     const result = await shouldPromptExitBackup(deps);
     expect(result).toBe(true);
   });
 
-  it('距上次成功超过阈值 → 提示', async () => {
+  it('无未备份变化但距上次成功超过阈值 → 不提示', async () => {
     const diskData = makeStorageData({ storageUpdatedAt: 1000 });
     const deps = makeDeps({
       loadScheduledState: vi.fn().mockResolvedValue(
@@ -231,10 +229,9 @@ describe('shouldPromptExitBackup', () => {
       ),
       readDiskStorageData: vi.fn().mockResolvedValue(diskData),
       getLatestUpdateTimestamp: vi.fn().mockReturnValue(1000),
-      clock: vi.fn().mockReturnValue(1000 + 31 * 60 * 1000),
     });
     const result = await shouldPromptExitBackup(deps);
-    expect(result).toBe(true);
+    expect(result).toBe(false);
   });
 
   it('从未备份过但有数据 → 提示', async () => {
@@ -249,7 +246,6 @@ describe('shouldPromptExitBackup', () => {
       ),
       readDiskStorageData: vi.fn().mockResolvedValue(diskData),
       getLatestUpdateTimestamp: vi.fn().mockReturnValue(5000),
-      clock: vi.fn().mockReturnValue(10000),
     });
     const result = await shouldPromptExitBackup(deps);
     expect(result).toBe(true);
@@ -336,9 +332,11 @@ describe('handleQuitRequest', () => {
       expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
     });
 
-    it('备份失败后不自动静默退出，而是关闭对话框并退出', async () => {
+    it('备份失败后提示用户决定是否退出', async () => {
+      const promptBackupFailed = vi.fn().mockResolvedValue('cancel' as const);
       const deps = makeDeps({
         promptQuitConfirm: vi.fn().mockResolvedValue('backup-and-quit' as const),
+        promptBackupFailed,
       });
       const runBeforeExit = vi.fn().mockRejectedValue(new Error('WebDAV 连接超时'));
 
@@ -346,7 +344,25 @@ describe('handleQuitRequest', () => {
 
       expect(deps.setBackingUp).toHaveBeenCalledWith(true);
       expect(runBeforeExit).toHaveBeenCalledOnce();
-      // 即使失败，也关闭对话框并退出（用户已在确认时同意了备份+退出）
+      expect(promptBackupFailed).toHaveBeenCalledWith('WebDAV 连接超时');
+      // 用户选择取消 → 不退出
+      expect(deps.closeDialog).not.toHaveBeenCalled();
+      expect(deps.invoke).not.toHaveBeenCalledWith('confirm_app_quit');
+    });
+
+    it('备份失败后用户选择"仍然退出" → 关闭对话框并退出', async () => {
+      const promptBackupFailed = vi.fn().mockResolvedValue('quit-anyway' as const);
+      const deps = makeDeps({
+        promptQuitConfirm: vi.fn().mockResolvedValue('backup-and-quit' as const),
+        promptBackupFailed,
+      });
+      const runBeforeExit = vi.fn().mockRejectedValue(new Error('超时'));
+
+      await handleQuitRequest(runBeforeExit, deps);
+
+      expect(deps.setBackingUp).toHaveBeenCalledWith(true);
+      expect(deps.setBackingUp).toHaveBeenCalledWith(false);
+      expect(promptBackupFailed).toHaveBeenCalledWith('超时');
       expect(deps.closeDialog).toHaveBeenCalled();
       expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
     });

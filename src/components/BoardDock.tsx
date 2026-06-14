@@ -14,8 +14,8 @@ import * as WebDavBackupService from "../services/backup/WebDavBackupService";
 import { runRemoteBackup } from "../services/backup/RemoteBackupRunner";
 import { tryStartBackupJob, type BackupJobHandle } from "../services/backup/BackupJobCoordinator";
 import * as ScheduledRemoteBackupConfigService from "../services/backup/ScheduledRemoteBackupConfigService";
-import type { ScheduledRemoteBackupConfig, ScheduledRemoteBackupState, ScheduledRemoteBackupFrequency } from "../services/backup/ScheduledRemoteBackupConfigService";
-import { getSchedulerService } from "../services/backup/ScheduledRemoteBackupService";
+import type { ScheduledRemoteBackupConfig, ScheduledRemoteBackupState, ScheduledRemoteBackupFrequency, RemoteBackupStage } from "../services/backup/ScheduledRemoteBackupConfigService";
+import { getSchedulerService, isRemoteBackupStage } from "../services/backup/ScheduledRemoteBackupService";
 import * as persistenceFacade from "../services/storage/PersistenceFacade";
 import { readDiskStorageData, getLatestUpdateTimestamp } from "../services/storage/tauriPersistence";
 import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
@@ -775,6 +775,21 @@ export const BoardDock = () => {
         }
       } else {
         setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatWebdavError(result.error ?? '未知错误')}` });
+        try {
+          const stateResult = await ScheduledRemoteBackupConfigService.loadState();
+          if (stateResult.success && stateResult.state) {
+            await ScheduledRemoteBackupConfigService.saveState({
+              ...stateResult.state,
+              lastFinishedAt: Date.now(),
+              lastTrigger: 'manual',
+              lastFailureAt: Date.now(),
+              lastFailureReason: result.error ?? '未知错误',
+              lastFailureStage: isRemoteBackupStage(result.errorStage ?? '') ? (result.errorStage as RemoteBackupStage) : 'unknown',
+            });
+          }
+        } catch {
+          // state update failure is non-critical
+        }
       }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatWebdavError(formatUnknownError(err))}` });
@@ -1690,6 +1705,17 @@ export const BoardDock = () => {
                                             data-testid="scheduled-backup-exit-prompt"
                                         />
                                     </label>
+                                    {scheduledConfig.exitPromptEnabled && webdavPasswordSaved && (() => {
+                                        const lastSuccessAt = scheduledState.lastAutomaticSuccessAt ?? scheduledState.lastManualSuccessAt;
+                                        const hasPending = scheduledState.lastSuccessfulStorageUpdatedAt === null
+                                            || lastSuccessAt === null;
+                                        if (!hasPending) return null;
+                                        return (
+                                            <p className="text-[10px] text-amber-600 dark:text-amber-400 leading-tight" data-testid="exit-backup-pending-hint">
+                                                退出时将提示备份
+                                            </p>
+                                        );
+                                    })()}
                                 </>
                             )}
 

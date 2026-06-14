@@ -14,7 +14,7 @@ import { readDiskStorageData, getLatestUpdateTimestamp } from '../services/stora
 import { tryStartBackupJob } from '../services/backup/BackupJobCoordinator';
 import { handleQuitRequest } from '../services/backup/quitHandler';
 import { useQuitConfirmStore } from '../store/quitConfirmStore';
-import { promptQuitConfirm } from '../store/quitConfirmStore';
+import { promptQuitConfirm, promptBackupFailed } from '../store/quitConfirmStore';
 
 const STORAGE_FILENAME = 'data.json';
 
@@ -114,8 +114,11 @@ export const ScheduledRemoteBackupController = () => {
       await handleQuitRequest(runBeforeExit, {
         loadScheduledConfig,
         loadWebDavConfig,
+        readDiskStorageData: () => readDiskStorageData(STORAGE_FILENAME),
+        getLatestUpdateTimestamp,
         invoke,
         promptQuitConfirm,
+        promptBackupFailed,
         setBackingUp: (value) => useQuitConfirmStore.getState().setBackingUp(value),
         closeDialog: () => useQuitConfirmStore.getState().close(),
         runBeforeExit,

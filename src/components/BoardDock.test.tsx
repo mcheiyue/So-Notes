@@ -3021,4 +3021,46 @@ describe('BoardDock 定时远端备份 UI', () => {
     );
     expect(container.querySelector('[data-testid="scheduled-backup-credential-warning"]')).toBeNull();
   });
+
+  it('从未备份过时显示退出提示', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    mockScheduledStateRef.current = {
+      ...DEFAULT_SCHEDULED_BACKUP_STATE,
+      lastSuccessfulStorageUpdatedAt: null,
+      lastAutomaticSuccessAt: null,
+    };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true, exitPromptEnabled: true }, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const hint = container.querySelector('[data-testid="exit-backup-pending-hint"]');
+    expect(hint).not.toBeNull();
+  });
+
+  it('手动备份失败时非枚举 errorStage 归一化为 unknown', async () => {
+    const { saveState } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig, createRemoteBackup } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+    vi.mocked(createRemoteBackup).mockResolvedValue({
+      success: false,
+      error: '认证失败',
+      errorStage: 'auth',
+    });
+    vi.mocked(saveState).mockResolvedValue({ success: true, error: null });
+
+    await openWebdavView();
+    await clickElement(findButtonByText('创建远端备份'));
+
+    expect(saveState).toHaveBeenCalledWith(
+      expect.objectContaining({ lastFailureStage: 'unknown' }),
+    );
+  });
 });
