@@ -1,0 +1,228 @@
+import { describe, it, expect, vi } from 'vitest';
+import {
+  shouldPromptExitBackup,
+  handleQuitRequest,
+  type QuitHandlerDeps,
+} from './quitHandler';
+import type {
+  ScheduledBackupConfigLoadResult,
+} from './ScheduledRemoteBackupConfigService';
+import type { WebDavConfigLoadResult } from './WebDavBackupService';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeScheduledConfigResult(
+  overrides?: Partial<ScheduledBackupConfigLoadResult>,
+): ScheduledBackupConfigLoadResult {
+  return {
+    success: true,
+    config: {
+      enabled: true,
+      frequency: 'daily',
+      quietPeriodMinutes: 5,
+      exitPromptEnabled: true,
+    },
+    error: null,
+    ...overrides,
+  };
+}
+
+function makeWebDavConfigResult(
+  overrides?: Partial<WebDavConfigLoadResult>,
+): WebDavConfigLoadResult {
+  return {
+    success: true,
+    serverUrl: 'https://example.com/dav',
+    username: 'user',
+    remoteDir: 'SoNotes_Backups/',
+    passwordSaved: true,
+    ...overrides,
+  };
+}
+
+function makeDeps(overrides?: Partial<QuitHandlerDeps>): QuitHandlerDeps {
+  return {
+    loadScheduledConfig: vi.fn().mockResolvedValue(makeScheduledConfigResult()),
+    loadWebDavConfig: vi.fn().mockResolvedValue(makeWebDavConfigResult()),
+    invoke: vi.fn().mockResolvedValue(undefined),
+    promptQuitConfirm: vi.fn().mockResolvedValue('cancel' as const),
+    setBackingUp: vi.fn(),
+    closeDialog: vi.fn(),
+    runBeforeExit: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// shouldPromptExitBackup
+// ---------------------------------------------------------------------------
+
+describe('shouldPromptExitBackup', () => {
+  it('所有条件满足时返回 true', async () => {
+    const deps = makeDeps();
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(true);
+  });
+
+  it('exitPromptEnabled 为 false 时返回 false', async () => {
+    const deps = makeDeps({
+      loadScheduledConfig: vi.fn().mockResolvedValue(
+        makeScheduledConfigResult({
+          config: {
+            enabled: true,
+            frequency: 'daily',
+            quietPeriodMinutes: 5,
+            exitPromptEnabled: false,
+          },
+        }),
+      ),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+
+  it('WebDAV 未配置（serverUrl 为空）时返回 false', async () => {
+    const deps = makeDeps({
+      loadWebDavConfig: vi.fn().mockResolvedValue(
+        makeWebDavConfigResult({ serverUrl: '' }),
+      ),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+
+  it('passwordSaved 为 false 时返回 false', async () => {
+    const deps = makeDeps({
+      loadWebDavConfig: vi.fn().mockResolvedValue(
+        makeWebDavConfigResult({ passwordSaved: false }),
+      ),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+
+  it('scheduled config 加载失败时返回 false', async () => {
+    const deps = makeDeps({
+      loadScheduledConfig: vi.fn().mockResolvedValue(
+        makeScheduledConfigResult({ success: false, config: null, error: '读取失败' }),
+      ),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+
+  it('WebDAV config 加载失败时返回 false', async () => {
+    const deps = makeDeps({
+      loadWebDavConfig: vi.fn().mockResolvedValue(
+        makeWebDavConfigResult({ success: false, passwordSaved: false }),
+      ),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+
+  it('配置加载抛出异常时返回 false', async () => {
+    const deps = makeDeps({
+      loadScheduledConfig: vi.fn().mockRejectedValue(new Error('网络错误')),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+
+  it('serverUrl 只有空白字符时返回 false', async () => {
+    const deps = makeDeps({
+      loadWebDavConfig: vi.fn().mockResolvedValue(
+        makeWebDavConfigResult({ serverUrl: '   ' }),
+      ),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleQuitRequest
+// ---------------------------------------------------------------------------
+
+describe('handleQuitRequest', () => {
+  describe('不需要退出前备份 → 直接退出', () => {
+    it('条件不满足时直接调用 confirm_app_quit', async () => {
+      const deps = makeDeps({
+        loadScheduledConfig: vi.fn().mockResolvedValue(
+          makeScheduledConfigResult({
+            config: {
+              enabled: true,
+              frequency: 'daily',
+              quietPeriodMinutes: 5,
+              exitPromptEnabled: false,
+            },
+          }),
+        ),
+      });
+      const runBeforeExit = vi.fn();
+
+      await handleQuitRequest(runBeforeExit, deps);
+
+      expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
+      expect(deps.promptQuitConfirm).not.toHaveBeenCalled();
+      expect(runBeforeExit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('需要退出前备份 → 弹出确认', () => {
+    it('用户选择"取消" → 不退出', async () => {
+      const deps = makeDeps({
+        promptQuitConfirm: vi.fn().mockResolvedValue('cancel' as const),
+      });
+      const runBeforeExit = vi.fn();
+
+      await handleQuitRequest(runBeforeExit, deps);
+
+      expect(deps.invoke).not.toHaveBeenCalled();
+      expect(runBeforeExit).not.toHaveBeenCalled();
+    });
+
+    it('用户选择"直接退出" → 调用 confirm_app_quit', async () => {
+      const deps = makeDeps({
+        promptQuitConfirm: vi.fn().mockResolvedValue('quit-now' as const),
+      });
+      const runBeforeExit = vi.fn();
+
+      await handleQuitRequest(runBeforeExit, deps);
+
+      expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
+      expect(runBeforeExit).not.toHaveBeenCalled();
+    });
+
+    it('用户选择"先备份再退出" → 执行备份后退出', async () => {
+      const deps = makeDeps({
+        promptQuitConfirm: vi.fn().mockResolvedValue('backup-and-quit' as const),
+      });
+      const runBeforeExit = vi.fn().mockResolvedValue(undefined);
+
+      await handleQuitRequest(runBeforeExit, deps);
+
+      expect(deps.setBackingUp).toHaveBeenCalledWith(true);
+      expect(runBeforeExit).toHaveBeenCalledOnce();
+      expect(deps.closeDialog).toHaveBeenCalled();
+      expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
+    });
+
+    it('备份失败后不自动静默退出，而是关闭对话框并退出', async () => {
+      const deps = makeDeps({
+        promptQuitConfirm: vi.fn().mockResolvedValue('backup-and-quit' as const),
+      });
+      const runBeforeExit = vi.fn().mockRejectedValue(new Error('WebDAV 连接超时'));
+
+      await handleQuitRequest(runBeforeExit, deps);
+
+      expect(deps.setBackingUp).toHaveBeenCalledWith(true);
+      expect(runBeforeExit).toHaveBeenCalledOnce();
+      // 即使失败，也关闭对话框并退出（用户已在确认时同意了备份+退出）
+      expect(deps.closeDialog).toHaveBeenCalled();
+      expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
+    });
+  });
+});

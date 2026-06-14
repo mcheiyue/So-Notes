@@ -13,6 +13,7 @@ import { Spotlight } from "./components/Spotlight";
 import { QuickCaptureOverlay } from "./components/QuickCaptureOverlay";
 import { SmartPasteSplitBubble } from "./components/SmartPasteSplitBubble";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { QuitConfirmDialog } from "./components/QuitConfirmDialog";
 import { SelectionActionBar } from "./components/SelectionActionBar";
 import { PersistenceController } from "./components/PersistenceController";
 import { ScheduledRemoteBackupController } from "./components/ScheduledRemoteBackupController";
@@ -210,6 +211,7 @@ function App() {
       <SmartPasteSplitBubble />
       <SelectionActionBar />
       <ConfirmDialog />
+      <QuitConfirmDialog />
       {globalShortcutError && (
         <div
           className="fixed left-1/2 top-4 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-xl"

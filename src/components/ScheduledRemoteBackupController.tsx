@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { useDomainStore } from '../store/domainStore';
 import { useViewportStore } from '../store/viewportStore';
 import { useUIStore } from '../store/uiStore';
@@ -9,6 +11,9 @@ import { loadConfig as loadWebDavConfig, createRemoteBackup } from '../services/
 import { flushNow } from '../services/storage/PersistenceFacade';
 import { readDiskStorageData, getLatestUpdateTimestamp } from '../services/storage/tauriPersistence';
 import { tryStartBackupJob } from '../services/backup/BackupJobCoordinator';
+import { handleQuitRequest } from '../services/backup/quitHandler';
+import { useQuitConfirmStore } from '../store/quitConfirmStore';
+import { promptQuitConfirm } from '../store/quitConfirmStore';
 
 const STORAGE_FILENAME = 'data.json';
 
@@ -92,6 +97,29 @@ export const ScheduledRemoteBackupController = () => {
       unsubscribe();
       serviceRef.current?.stop();
       serviceRef.current = null;
+    };
+  }, []);
+
+  // 退出前备份提示监听
+  useEffect(() => {
+    const unlisten = listen('remote-backup-before-quit-requested', async () => {
+      const runBeforeExit = async () => {
+        await serviceRef.current?.runBeforeExit();
+      };
+
+      await handleQuitRequest(runBeforeExit, {
+        loadScheduledConfig,
+        loadWebDavConfig,
+        invoke,
+        promptQuitConfirm,
+        setBackingUp: (value) => useQuitConfirmStore.getState().setBackingUp(value),
+        closeDialog: () => useQuitConfirmStore.getState().close(),
+        runBeforeExit,
+      });
+    });
+
+    return () => {
+      unlisten.then((f) => f());
     };
   }, []);
 

@@ -65,6 +65,26 @@ vi.mock('../services/backup/BackupJobCoordinator', () => ({
   tryStartBackupJob: mockTryStartBackupJob,
 }));
 
+const {
+  mockListen,
+  mockInvoke,
+} = vi.hoisted(() => ({
+  mockListen: vi.fn().mockResolvedValue(vi.fn()),
+  mockInvoke: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: (...args: unknown[]) => mockListen(...args),
+}));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}));
+
+vi.mock('../services/backup/quitHandler', () => ({
+  handleQuitRequest: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { ScheduledRemoteBackupController } from './ScheduledRemoteBackupController';
 import type { AppActivitySignals } from '../services/backup/ScheduledRemoteBackupService';
 import { useDomainStore } from '../store/domainStore';
@@ -111,6 +131,10 @@ describe('ScheduledRemoteBackupController', () => {
     mockGetLatestUpdateTimestamp.mockReset();
     mockTryStartBackupJob.mockReset();
     mockCreateRemoteBackup.mockReset();
+    mockListen.mockReset();
+    mockListen.mockResolvedValue(vi.fn());
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
 
     mockCreateService.mockReturnValue(stubService());
     mockLoadScheduledConfig.mockResolvedValue({
@@ -293,6 +317,10 @@ describe('ScheduledRemoteBackupController getAppActivity', () => {
     mockGetLatestUpdateTimestamp.mockReset();
     mockTryStartBackupJob.mockReset();
     mockCreateRemoteBackup.mockReset();
+    mockListen.mockReset();
+    mockListen.mockResolvedValue(vi.fn());
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
 
     capturedGetAppActivity = undefined;
     mockCreateService.mockImplementation((deps: Record<string, unknown>) => {

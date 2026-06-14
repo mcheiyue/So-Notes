@@ -125,6 +125,11 @@ fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn confirm_app_quit(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
@@ -471,7 +476,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
-                        "quit" => app.exit(0),
+                        "quit" => emit_main_window(app, "remote-backup-before-quit-requested"),
                         "pin" => {
                             let state = app.state::<AppState>();
                             let is_pinned = {
@@ -632,6 +637,7 @@ pub fn run() {
             get_global_shortcut_error,
             set_tray_tooltip,
             show_main_window,
+            confirm_app_quit,
             save_content,
             load_content,
             check_hide_on_leave,
