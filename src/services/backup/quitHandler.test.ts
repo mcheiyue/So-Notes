@@ -6,8 +6,11 @@ import {
 } from './quitHandler';
 import type {
   ScheduledBackupConfigLoadResult,
+  ScheduledBackupStateLoadResult,
+  ScheduledRemoteBackupState,
 } from './ScheduledRemoteBackupConfigService';
 import type { WebDavConfigLoadResult } from './WebDavBackupService';
+import type { StorageData } from '../../store/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -42,10 +45,52 @@ function makeWebDavConfigResult(
   };
 }
 
+function makeScheduledStateResult(
+  overrides?: Partial<ScheduledRemoteBackupState>,
+): ScheduledBackupStateLoadResult {
+  return {
+    success: true,
+    state: {
+      lastStartedAt: null,
+      lastFinishedAt: null,
+      lastTrigger: null,
+      lastAutomaticSuccessAt: null,
+      lastManualSuccessAt: null,
+      lastFailureAt: null,
+      lastFailureReason: null,
+      lastFailureStage: null,
+      lastRemoteFileName: null,
+      nextRunAt: null,
+      lastSuccessfulStorageUpdatedAt: null,
+      lastAttemptCapturedStorageUpdatedAt: null,
+      consecutiveCredentialFailures: 0,
+      credentialActionRequired: false,
+      ...overrides,
+    },
+    error: null,
+  };
+}
+
+function makeStorageData(overrides?: Partial<StorageData>): StorageData {
+  return {
+    schemaVersion: 2,
+    storageUpdatedAt: 1000,
+    notes: [],
+    boards: [],
+    currentBoardId: 'default',
+    config: { version: 2, maxZ: 1, themeMode: 'system' },
+    ...overrides,
+  };
+}
+
 function makeDeps(overrides?: Partial<QuitHandlerDeps>): QuitHandlerDeps {
   return {
     loadScheduledConfig: vi.fn().mockResolvedValue(makeScheduledConfigResult()),
+    loadScheduledState: vi.fn().mockResolvedValue(makeScheduledStateResult()),
     loadWebDavConfig: vi.fn().mockResolvedValue(makeWebDavConfigResult()),
+    readDiskStorageData: vi.fn().mockResolvedValue(null),
+    getLatestUpdateTimestamp: vi.fn().mockReturnValue(null),
+    clock: vi.fn().mockReturnValue(0),
     invoke: vi.fn().mockResolvedValue(undefined),
     promptQuitConfirm: vi.fn().mockResolvedValue('cancel' as const),
     setBackingUp: vi.fn(),
@@ -139,6 +184,87 @@ describe('shouldPromptExitBackup', () => {
     });
     const result = await shouldPromptExitBackup(deps);
     expect(result).toBe(false);
+  });
+
+  it('无本地变化且刚备份完 → 不提示', async () => {
+    const diskData = makeStorageData({ storageUpdatedAt: 1000 });
+    const deps = makeDeps({
+      loadScheduledState: vi.fn().mockResolvedValue(
+        makeScheduledStateResult({
+          lastSuccessfulStorageUpdatedAt: 1000,
+          lastAutomaticSuccessAt: 1000,
+        }),
+      ),
+      readDiskStorageData: vi.fn().mockResolvedValue(diskData),
+      getLatestUpdateTimestamp: vi.fn().mockReturnValue(1000),
+      clock: vi.fn().mockReturnValue(1000 + 10 * 60 * 1000),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+
+  it('有本地未备份变化 → 提示', async () => {
+    const diskData = makeStorageData({ storageUpdatedAt: 2000 });
+    const deps = makeDeps({
+      loadScheduledState: vi.fn().mockResolvedValue(
+        makeScheduledStateResult({
+          lastSuccessfulStorageUpdatedAt: 1000,
+          lastAutomaticSuccessAt: 1000,
+        }),
+      ),
+      readDiskStorageData: vi.fn().mockResolvedValue(diskData),
+      getLatestUpdateTimestamp: vi.fn().mockReturnValue(2000),
+      clock: vi.fn().mockReturnValue(1000 + 10 * 60 * 1000),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(true);
+  });
+
+  it('距上次成功超过阈值 → 提示', async () => {
+    const diskData = makeStorageData({ storageUpdatedAt: 1000 });
+    const deps = makeDeps({
+      loadScheduledState: vi.fn().mockResolvedValue(
+        makeScheduledStateResult({
+          lastSuccessfulStorageUpdatedAt: 1000,
+          lastAutomaticSuccessAt: 1000,
+        }),
+      ),
+      readDiskStorageData: vi.fn().mockResolvedValue(diskData),
+      getLatestUpdateTimestamp: vi.fn().mockReturnValue(1000),
+      clock: vi.fn().mockReturnValue(1000 + 31 * 60 * 1000),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(true);
+  });
+
+  it('从未备份过但有数据 → 提示', async () => {
+    const diskData = makeStorageData({ storageUpdatedAt: 5000 });
+    const deps = makeDeps({
+      loadScheduledState: vi.fn().mockResolvedValue(
+        makeScheduledStateResult({
+          lastSuccessfulStorageUpdatedAt: null,
+          lastAutomaticSuccessAt: null,
+          lastManualSuccessAt: null,
+        }),
+      ),
+      readDiskStorageData: vi.fn().mockResolvedValue(diskData),
+      getLatestUpdateTimestamp: vi.fn().mockReturnValue(5000),
+      clock: vi.fn().mockReturnValue(10000),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(true);
+  });
+
+  it('state 加载失败 → 提示（保守策略）', async () => {
+    const deps = makeDeps({
+      loadScheduledState: vi.fn().mockResolvedValue({
+        success: false,
+        state: null,
+        error: '读取失败',
+      }),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(true);
   });
 });
 

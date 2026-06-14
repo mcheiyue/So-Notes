@@ -5,8 +5,15 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { loadConfig as loadScheduledConfig } from './ScheduledRemoteBackupConfigService';
+import {
+  loadConfig as loadScheduledConfig,
+  loadState as loadScheduledState,
+  type ScheduledBackupStateLoadResult,
+} from './ScheduledRemoteBackupConfigService';
 import { loadConfig as loadWebDavConfig } from './WebDavBackupService';
+import type { StorageData } from '../../store/types';
+
+const EXIT_PROMPT_THRESHOLD_MS = 30 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // 依赖注入接口
@@ -14,7 +21,11 @@ import { loadConfig as loadWebDavConfig } from './WebDavBackupService';
 
 export interface QuitHandlerDeps {
   loadScheduledConfig: typeof loadScheduledConfig;
+  loadScheduledState?: () => Promise<ScheduledBackupStateLoadResult>;
   loadWebDavConfig: typeof loadWebDavConfig;
+  readDiskStorageData?: () => Promise<StorageData | null>;
+  getLatestUpdateTimestamp?: (data: StorageData) => number | null;
+  clock?: () => number;
   invoke: typeof invoke;
   promptQuitConfirm: () => Promise<'backup-and-quit' | 'quit-now' | 'cancel'>;
   setBackingUp: (value: boolean) => void;
@@ -24,7 +35,11 @@ export interface QuitHandlerDeps {
 
 const DEFAULT_DEPS: QuitHandlerDeps = {
   loadScheduledConfig,
+  loadScheduledState,
   loadWebDavConfig,
+  readDiskStorageData: async () => null,
+  getLatestUpdateTimestamp: () => null,
+  clock: () => Date.now(),
   invoke,
   promptQuitConfirm: async () => 'cancel',
   setBackingUp: () => {},
@@ -43,14 +58,21 @@ const DEFAULT_DEPS: QuitHandlerDeps = {
  * - exitPromptEnabled === true
  * - WebDAV 已保存配置（serverUrl 非空）
  * - passwordSaved === true
+ * - 本地有未备份变化 OR 距上次成功超过阈值
  */
 export async function shouldPromptExitBackup(
-  deps: Pick<QuitHandlerDeps, 'loadScheduledConfig' | 'loadWebDavConfig'> = DEFAULT_DEPS,
+  deps: Pick<QuitHandlerDeps, 'loadScheduledConfig' | 'loadWebDavConfig' | 'loadScheduledState' | 'readDiskStorageData' | 'getLatestUpdateTimestamp' | 'clock'> = DEFAULT_DEPS,
 ): Promise<boolean> {
   try {
-    const [scheduledResult, webdavResult] = await Promise.all([
+    const loadScheduledStateFn = deps.loadScheduledState ?? loadScheduledState;
+    const readDiskStorageDataFn = deps.readDiskStorageData ?? (async () => null);
+    const getLatestUpdateTimestampFn = deps.getLatestUpdateTimestamp ?? (() => null);
+    const clockFn = deps.clock ?? (() => Date.now());
+
+    const [scheduledResult, webdavResult, stateResult] = await Promise.all([
       deps.loadScheduledConfig(),
       deps.loadWebDavConfig(),
+      loadScheduledStateFn(),
     ]);
 
     if (!scheduledResult.success || !scheduledResult.config) return false;
@@ -60,7 +82,26 @@ export async function shouldPromptExitBackup(
     const hasServerUrl = Boolean(webdavResult.serverUrl?.trim());
     const { passwordSaved } = webdavResult;
 
-    return exitPromptEnabled && hasServerUrl && passwordSaved;
+    if (!exitPromptEnabled || !hasServerUrl || !passwordSaved) return false;
+
+    const state = stateResult.success ? stateResult.state : null;
+    if (!state) return true;
+
+    const diskData = await readDiskStorageDataFn();
+    const diskTimestamp = diskData ? getLatestUpdateTimestampFn(diskData) : null;
+    const hasUnsavedChanges =
+      diskTimestamp !== null &&
+      diskTimestamp > 0 &&
+      (state.lastSuccessfulStorageUpdatedAt === null ||
+        diskTimestamp > state.lastSuccessfulStorageUpdatedAt);
+
+    if (hasUnsavedChanges) return true;
+
+    const lastSuccessAt =
+      state.lastAutomaticSuccessAt ?? state.lastManualSuccessAt;
+    if (lastSuccessAt === null) return true;
+
+    return clockFn() - lastSuccessAt > EXIT_PROMPT_THRESHOLD_MS;
   } catch {
     return false;
   }

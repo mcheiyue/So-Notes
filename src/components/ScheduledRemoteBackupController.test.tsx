@@ -38,6 +38,8 @@ const {
 
 vi.mock('../services/backup/ScheduledRemoteBackupService', () => ({
   createScheduledRemoteBackupService: mockCreateService,
+  registerSchedulerService: vi.fn(),
+  unregisterSchedulerService: vi.fn(),
 }));
 
 vi.mock('../services/backup/ScheduledRemoteBackupConfigService', () => ({

@@ -59,6 +59,8 @@ export interface WebDavUploadResult {
   readonly error?: string;
   readonly errorStage?: string;
   readonly errorCode?: string;
+  /** flushNow 成功后从磁盘重新读取的 storageUpdatedAt 时间戳。 */
+  readonly capturedStorageUpdatedAt?: number | null;
 }
 
 export interface WebDavDownloadResult {
@@ -122,10 +124,17 @@ export async function createRemoteBackup(
     return await invoke<WebDavUploadResult>('webdav_create_remote_backup', { config });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    const lower = message.toLowerCase();
+    const isCredentialError =
+      lower.includes('credential') ||
+      lower.includes('keyring') ||
+      lower.includes('password') ||
+      lower.includes('密码') ||
+      lower.includes('凭据');
     return {
       success: false,
       error: message,
-      errorStage: 'unknown',
+      errorStage: isCredentialError ? 'credential' : 'unknown',
       errorCode: undefined,
     };
   }

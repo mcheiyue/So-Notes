@@ -32,6 +32,35 @@ import type {
 import type { StorageData } from '../../store/types';
 
 // ---------------------------------------------------------------------------
+// 模块级服务实例 accessor
+// ---------------------------------------------------------------------------
+
+/**
+ * 模块级服务实例引用。
+ *
+ * ScheduledRemoteBackupController 在挂载时注册，卸载时注销。
+ * BoardDock 等外部组件通过 getSchedulerService() 获取实例，
+ * 用于在配置变更后调用 updateConfig() 即时生效。
+ */
+let _schedulerService: ReturnType<typeof createScheduledRemoteBackupService> | null = null;
+
+export function registerSchedulerService(
+  service: ReturnType<typeof createScheduledRemoteBackupService>,
+): void {
+  _schedulerService = service;
+}
+
+export function unregisterSchedulerService(): void {
+  _schedulerService = null;
+}
+
+export function getSchedulerService():
+  | ReturnType<typeof createScheduledRemoteBackupService>
+  | null {
+  return _schedulerService;
+}
+
+// ---------------------------------------------------------------------------
 // 频率到毫秒映射
 // ---------------------------------------------------------------------------
 
@@ -247,6 +276,8 @@ export function createScheduledRemoteBackupService(
       // 应用活跃，延迟到安静时段后执行
       serviceState.quietPeriodTimer = deps.setTimeout(() => {
         serviceState.quietPeriodTimer = null;
+        // quiet period 已耗尽，重新检查活跃状态
+        // 若仍活跃也执行，因为空 quiet period 已等待过了，不应无限延迟
         runBackup('quiet-period');
       }, quietMs);
     } else {
@@ -353,7 +384,9 @@ export function createScheduledRemoteBackupService(
           trigger === 'scheduled-interval' ||
           trigger === 'quiet-period' ||
           trigger === 'before-exit';
-        const ts = storageData ? deps.getLatestUpdateTimestamp(storageData) : null;
+        const runnerTs = result.capturedStorageUpdatedAt;
+        const fallbackTs = storageData ? deps.getLatestUpdateTimestamp(storageData) : null;
+        const ts = runnerTs ?? fallbackTs;
         const patch: Partial<ScheduledRemoteBackupState> = {
           lastFinishedAt: now,
           lastTrigger: trigger,

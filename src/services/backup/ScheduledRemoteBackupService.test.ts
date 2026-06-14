@@ -626,6 +626,72 @@ describe('ScheduledRemoteBackupService', () => {
 
       service.stop();
     });
+
+    it('quiet timer 到期后仍活跃时仍执行备份（不无限延迟）', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 5 },
+        state: { nextRunAt: 1000000000000 - 1000 },
+      });
+
+      ctx.getAppActivity.mockReturnValue(ACTIVE_ACTIVITY);
+      mockRunRemoteBackup.mockResolvedValue({ success: true, remoteFileName: 'b.zip' });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      // 获取 quiet timer 回调
+      const quietCallback = ctx.timers.setTimeout.mock.calls.find(
+        (call: unknown[]) => {
+          const delay = call[1];
+          return typeof delay === 'number' && delay === 5 * 60 * 1000;
+        },
+      )?.[0] as (() => void) | undefined;
+      expect(quietCallback).toBeDefined();
+
+      // quiet timer 到期时仍活跃
+      ctx.getAppActivity.mockReturnValue(ACTIVE_ACTIVITY);
+
+      // 触发 quiet timer 回调
+      quietCallback!();
+      await vi.advanceTimersByTimeAsync(0);
+
+      // 应执行备份，不无限延迟
+      expect(mockRunRemoteBackup).toHaveBeenCalled();
+
+      service.stop();
+    });
+
+    it('quiet timer 到期时空闲时执行备份', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 5 },
+        state: { nextRunAt: 1000000000000 - 1000 },
+      });
+
+      ctx.getAppActivity.mockReturnValue(ACTIVE_ACTIVITY);
+      mockRunRemoteBackup.mockResolvedValue({ success: true, remoteFileName: 'b.zip' });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      // 获取 quiet timer 回调
+      const quietCallback = ctx.timers.setTimeout.mock.calls.find(
+        (call: unknown[]) => {
+          const delay = call[1];
+          return typeof delay === 'number' && delay === 5 * 60 * 1000;
+        },
+      )?.[0] as (() => void) | undefined;
+      expect(quietCallback).toBeDefined();
+
+      // quiet timer 到期时空闲
+      ctx.getAppActivity.mockReturnValue(INACTIVE_ACTIVITY);
+
+      quietCallback!();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockRunRemoteBackup).toHaveBeenCalled();
+
+      service.stop();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -706,6 +772,56 @@ describe('ScheduledRemoteBackupService', () => {
       expect(savedState!.lastRemoteFileName).toBe('SoNotes_Backup_20260101.zip');
       expect(savedState!.consecutiveCredentialFailures).toBe(0);
       expect(savedState!.credentialActionRequired).toBe(false);
+    });
+
+    it('使用 runner 返回的 capturedStorageUpdatedAt 而非 runner 前读取的时间戳', async () => {
+      const preFlushData = makeStorageData({ storageUpdatedAt: 5000 });
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastSuccessfulStorageUpdatedAt: null },
+      });
+      ctx.readDiskStorageData.mockResolvedValueOnce(preFlushData);
+      ctx.getLatestUpdateTimestamp.mockReturnValue(5000);
+      mockRunRemoteBackup.mockResolvedValueOnce({
+        success: true,
+        remoteFileName: 'backup.zip',
+        capturedStorageUpdatedAt: 8000,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastSuccessfulStorageUpdatedAt).toBe(8000);
+    });
+
+    it('capturedStorageUpdatedAt 为 null 时回退到 runner 前读取的时间戳', async () => {
+      const storageData = makeStorageData({ storageUpdatedAt: 6000 });
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastSuccessfulStorageUpdatedAt: null },
+      });
+      ctx.readDiskStorageData.mockResolvedValueOnce(storageData);
+      ctx.getLatestUpdateTimestamp.mockReturnValue(6000);
+      mockRunRemoteBackup.mockResolvedValueOnce({
+        success: true,
+        remoteFileName: 'backup.zip',
+        capturedStorageUpdatedAt: null,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastSuccessfulStorageUpdatedAt).toBe(6000);
     });
   });
 

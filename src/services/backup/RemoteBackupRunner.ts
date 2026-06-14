@@ -115,9 +115,20 @@ export async function runRemoteBackup(
       };
     }
 
-    // 2. 调用 Rust 侧执行远端备份上传
+    // 2. flushNow 成功后重新读盘，捕获最新 storageUpdatedAt
+    let capturedStorageUpdatedAt: number | null = null;
+    try {
+      const postFlushData = await deps.readDiskStorageData();
+      if (postFlushData) {
+        capturedStorageUpdatedAt = deps.getLatestUpdateTimestamp(postFlushData);
+      }
+    } catch {
+      // 读盘失败不阻塞备份流程
+    }
+
+    // 3. 调用 Rust 侧执行远端备份上传
     const result = await deps.createRemoteBackup(config);
-    return result;
+    return { ...result, capturedStorageUpdatedAt };
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : String(err);

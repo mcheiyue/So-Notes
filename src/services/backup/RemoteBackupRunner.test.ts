@@ -9,6 +9,7 @@ import type {
   BackupJobCoordinator,
 } from './RemoteBackupRunner';
 import type { WebDavConfig } from './WebDavBackupService';
+import type { StorageData } from '../../store/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -268,6 +269,63 @@ describe('RemoteBackupRunner', () => {
 
       expect(deps.flushNow).not.toHaveBeenCalled();
       expect(deps.createRemoteBackup).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Captured storage timestamp after flush
+  // -------------------------------------------------------------------------
+
+  describe('capturedStorageUpdatedAt', () => {
+    it('flushNow 成功后从磁盘读取 storageUpdatedAt 并放入返回结果', async () => {
+      const mockData = { storageUpdatedAt: 9999 } as StorageData;
+      const deps = makeDeps({
+        readDiskStorageData: vi.fn(async () => mockData),
+        getLatestUpdateTimestamp: vi.fn(() => 9999),
+      });
+
+      const result = await runRemoteBackup(deps, makeConfig());
+
+      expect(result.success).toBe(true);
+      expect(result.capturedStorageUpdatedAt).toBe(9999);
+      expect(deps.readDiskStorageData).toHaveBeenCalledOnce();
+    });
+
+    it('flushNow 成功但读盘返回 null 时 capturedStorageUpdatedAt 为 null', async () => {
+      const deps = makeDeps({
+        readDiskStorageData: vi.fn(async () => null),
+      });
+
+      const result = await runRemoteBackup(deps, makeConfig());
+
+      expect(result.success).toBe(true);
+      expect(result.capturedStorageUpdatedAt).toBeNull();
+    });
+
+    it('flushNow 成功但读盘抛出异常时 capturedStorageUpdatedAt 为 null 且不阻塞备份', async () => {
+      const deps = makeDeps({
+        readDiskStorageData: vi.fn(async () => {
+          throw new Error('disk read error');
+        }),
+      });
+
+      const result = await runRemoteBackup(deps, makeConfig());
+
+      expect(result.success).toBe(true);
+      expect(result.capturedStorageUpdatedAt).toBeNull();
+      expect(deps.createRemoteBackup).toHaveBeenCalled();
+    });
+
+    it('flushNow 失败时不读盘', async () => {
+      const deps = makeDeps({
+        flushNow: vi.fn(async () => false),
+      });
+
+      const result = await runRemoteBackup(deps, makeConfig());
+
+      expect(result.success).toBe(false);
+      expect(result.capturedStorageUpdatedAt).toBeUndefined();
+      expect(deps.readDiskStorageData).not.toHaveBeenCalled();
     });
   });
 

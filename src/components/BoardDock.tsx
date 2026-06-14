@@ -15,6 +15,7 @@ import { runRemoteBackup } from "../services/backup/RemoteBackupRunner";
 import { tryStartBackupJob, type BackupJobHandle } from "../services/backup/BackupJobCoordinator";
 import * as ScheduledRemoteBackupConfigService from "../services/backup/ScheduledRemoteBackupConfigService";
 import type { ScheduledRemoteBackupConfig, ScheduledRemoteBackupState, ScheduledRemoteBackupFrequency } from "../services/backup/ScheduledRemoteBackupConfigService";
+import { getSchedulerService } from "../services/backup/ScheduledRemoteBackupService";
 import * as persistenceFacade from "../services/storage/PersistenceFacade";
 import { readDiskStorageData, getLatestUpdateTimestamp } from "../services/storage/tauriPersistence";
 import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
@@ -740,6 +741,25 @@ export const BoardDock = () => {
         } catch {
           // list refresh failure is non-critical
         }
+
+        // 更新定时备份状态：手动成功也覆盖快照字段
+        try {
+          const stateResult = await ScheduledRemoteBackupConfigService.loadState();
+          if (stateResult.success && stateResult.state) {
+            const diskData = await readDiskStorageData('data.json');
+            const diskTs = diskData ? getLatestUpdateTimestamp(diskData) : null;
+            await ScheduledRemoteBackupConfigService.saveState({
+              ...stateResult.state,
+              lastFinishedAt: Date.now(),
+              lastTrigger: 'manual',
+              lastManualSuccessAt: Date.now(),
+              lastRemoteFileName: result.remoteFileName ?? null,
+              ...(diskTs !== null ? { lastSuccessfulStorageUpdatedAt: diskTs } : {}),
+            });
+          }
+        } catch {
+          // state update failure is non-critical for manual backup
+        }
       } else {
         setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatWebdavError(result.error ?? '未知错误')}` });
       }
@@ -899,6 +919,7 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'error', message: `保存自动远端备份设置失败：${result.error ?? '未知错误'}` });
         return false;
       }
+      getSchedulerService()?.updateConfig(next);
       return true;
     } catch (err) {
       setScheduledConfig(previous);

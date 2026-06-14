@@ -285,6 +285,84 @@ describe('WebDavBackupService', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('上传失败');
     });
+
+    it('凭据相关错误消息映射为 credential 阶段 (keyring)', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockRejectedValueOnce(new Error('Failed to read from keyring'));
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('credential');
+    });
+
+    it('凭据相关错误消息映射为 credential 阶段 (password)', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockRejectedValueOnce(new Error('Invalid password provided'));
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('credential');
+    });
+
+    it('凭据相关错误消息映射为 credential 阶段 (凭据)', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockRejectedValueOnce(new Error('系统凭据读取失败'));
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('credential');
+    });
+
+    it('凭据相关错误消息映射为 credential 阶段 (密码)', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockRejectedValueOnce(new Error('密码存储服务不可用'));
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('credential');
+    });
+
+    it('凭据相关错误消息映射为 credential 阶段 (credential)', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockRejectedValueOnce(new Error('Credential store access denied'));
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('credential');
+    });
+
+    it('非凭据错误映射为 unknown 阶段', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockRejectedValueOnce(new Error('Network timeout'));
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('unknown');
+    });
   });
 
   describe('listBackups', () => {

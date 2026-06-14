@@ -6,6 +6,7 @@ import { useViewportStore } from '../store/viewportStore';
 import { useUIStore } from '../store/uiStore';
 import { createScheduledRemoteBackupService } from '../services/backup/ScheduledRemoteBackupService';
 import type { AppActivitySignals } from '../services/backup/ScheduledRemoteBackupService';
+import { registerSchedulerService, unregisterSchedulerService } from '../services/backup/ScheduledRemoteBackupService';
 import { loadConfig as loadScheduledConfig, saveConfig as saveScheduledConfig, loadState as loadScheduledState, saveState as saveScheduledState } from '../services/backup/ScheduledRemoteBackupConfigService';
 import { loadConfig as loadWebDavConfig, createRemoteBackup } from '../services/backup/WebDavBackupService';
 import { flushNow } from '../services/storage/PersistenceFacade';
@@ -73,10 +74,12 @@ export const ScheduledRemoteBackupController = () => {
       if (cancelled) return;
 
       serviceRef.current = service;
+      registerSchedulerService(service);
       await service.initialize();
 
       if (cancelled) {
         service.stop();
+        unregisterSchedulerService();
         serviceRef.current = null;
         return;
       }
@@ -96,6 +99,7 @@ export const ScheduledRemoteBackupController = () => {
       cancelled = true;
       unsubscribe();
       serviceRef.current?.stop();
+      unregisterSchedulerService();
       serviceRef.current = null;
     };
   }, []);
