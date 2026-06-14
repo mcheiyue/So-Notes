@@ -304,6 +304,19 @@ export const BoardDock = () => {
     return () => { cancelled = true; };
   }, [settingsView]);
 
+  useEffect(() => {
+    if (settingsView !== 'WEBDAV' || !scheduledConfig.enabled) return;
+    const intervalId = window.setInterval(async () => {
+      try {
+        const stateResult = await ScheduledRemoteBackupConfigService.loadState();
+        if (stateResult.success && stateResult.state) {
+          setScheduledState(stateResult.state);
+        }
+      } catch { /* 轮询失败静默忽略 */ }
+    }, 5000);
+    return () => { window.clearInterval(intervalId); };
+  }, [settingsView, scheduledConfig.enabled]);
+
   const onExportClick = async () => {
     try {
       setExportStatus('正在导出…');
@@ -1680,7 +1693,7 @@ export const BoardDock = () => {
                                 </>
                             )}
 
-                            {(scheduledState.lastAutomaticSuccessAt != null || scheduledState.lastFailureAt != null || scheduledState.nextRunAt != null) && (
+                            {(scheduledState.lastAutomaticSuccessAt != null || scheduledState.lastManualSuccessAt != null || scheduledState.lastFailureAt != null || scheduledState.nextRunAt != null) && (
                                 <div
                                     className="rounded border border-border-subtle bg-secondary-bg/30 px-2 py-1.5 space-y-0.5 text-[11px] leading-4"
                                     data-testid="scheduled-backup-status"
@@ -1692,9 +1705,26 @@ export const BoardDock = () => {
                                             {scheduledState.lastRemoteFileName ? ` (${scheduledState.lastRemoteFileName})` : ''}
                                         </p>
                                     )}
+                                    {scheduledState.lastManualSuccessAt != null && (
+                                        <p className="text-text-secondary">
+                                            <Clock className="w-3 h-3 inline-block mr-1 align-text-bottom text-text-tertiary" />
+                                            最近手动备份：{new Date(scheduledState.lastManualSuccessAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}
+                                        </p>
+                                    )}
                                     {scheduledState.lastFailureAt != null && scheduledState.lastFailureReason && (
+                                        scheduledState.lastFinishedAt == null || scheduledState.lastFailureAt >= scheduledState.lastFinishedAt
+                                    ) && (
                                         <p className="text-red-500 dark:text-red-400">
                                             最近失败：{scheduledState.lastFailureReason}
+                                        </p>
+                                    )}
+                                    {scheduledState.lastFinishedAt != null && scheduledState.lastTrigger && (
+                                        scheduledState.lastFailureAt == null || scheduledState.lastFailureAt < scheduledState.lastFinishedAt
+                                    ) && (
+                                        <p className="text-text-tertiary">
+                                            最近完成：{scheduledState.lastTrigger === 'manual' ? '手动触发' : scheduledState.lastTrigger === 'scheduled-interval' ? '定时触发' : scheduledState.lastTrigger === 'quiet-period' ? '静默期触发' : '退出前触发'}
+                                            {' · '}
+                                            {new Date(scheduledState.lastFinishedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}
                                         </p>
                                     )}
                                     {scheduledState.nextRunAt != null && scheduledEnabledEffective && (
