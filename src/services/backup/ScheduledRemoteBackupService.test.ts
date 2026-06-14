@@ -333,7 +333,7 @@ describe('ScheduledRemoteBackupService', () => {
 
       expect(mockRunRemoteBackup).not.toHaveBeenCalled();
 
-      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+      const savedState = ctx.saveScheduledState.mock.calls[ctx.saveScheduledState.mock.calls.length - 1]?.[0] as
         | ScheduledRemoteBackupState
         | undefined;
       expect(savedState).toBeDefined();
@@ -447,7 +447,7 @@ describe('ScheduledRemoteBackupService', () => {
       // finally 中因 credentialActionRequired=true 不应调用 startScheduler
       expect(ctx.timers.setTimeout).not.toHaveBeenCalled();
 
-      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+      const savedState = ctx.saveScheduledState.mock.calls[ctx.saveScheduledState.mock.calls.length - 1]?.[0] as
         | ScheduledRemoteBackupState
         | undefined;
       expect(savedState!.credentialActionRequired).toBe(true);
@@ -539,6 +539,8 @@ describe('ScheduledRemoteBackupService', () => {
       // 不应修改成功字段
       expect(savedState!.lastAutomaticSuccessAt).toBeNull();
       expect(savedState!.lastManualSuccessAt).toBeNull();
+      // 跳过时应推进 nextRunAt，防止快速重试循环
+      expect(savedState!.nextRunAt).toBe(ctx.now + 24 * 60 * 60 * 1000);
     });
 
     it('latestUpdate > lastSuccessfulStorageUpdatedAt 时执行备份', async () => {

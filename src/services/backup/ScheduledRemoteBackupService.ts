@@ -237,6 +237,12 @@ export function createScheduledRemoteBackupService(
       const delay = nextRunAt !== null
         ? nextRunAt - now
         : FREQUENCY_MS[serviceState.config.frequency];
+
+      if (nextRunAt === null) {
+        patchState({ nextRunAt: now + delay });
+        deps.saveScheduledState(internalState);
+      }
+
       serviceState.timerId = deps.setTimeout(() => {
         serviceState.timerId = null;
         scheduleImmediateRun();
@@ -305,13 +311,15 @@ export function createScheduledRemoteBackupService(
       const webdavResult = await deps.loadWebDavConfig();
       if (!webdavResult.success || !webdavResult.serverUrl) {
         const diskTs = await getCurrentDiskTimestamp();
+        const now = deps.clock();
         patchState({
-          lastFinishedAt: deps.clock(),
+          lastFinishedAt: now,
           lastTrigger: trigger,
-          lastFailureAt: deps.clock(),
+          lastFailureAt: now,
           lastFailureReason: '缺少 WebDAV 配置',
           lastFailureStage: 'config',
           lastAttemptCapturedStorageUpdatedAt: diskTs,
+          nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
         await deps.saveScheduledState(internalState);
         return;
@@ -320,13 +328,15 @@ export function createScheduledRemoteBackupService(
       // 2. 检查凭据是否已保存
       if (!webdavResult.passwordSaved) {
         const diskTs = await getCurrentDiskTimestamp();
+        const now = deps.clock();
         patchState({
-          lastFinishedAt: deps.clock(),
+          lastFinishedAt: now,
           lastTrigger: trigger,
-          lastFailureAt: deps.clock(),
+          lastFailureAt: now,
           lastFailureReason: '未保存 WebDAV 凭据',
           lastFailureStage: 'credential',
           lastAttemptCapturedStorageUpdatedAt: diskTs,
+          nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
         await deps.saveScheduledState(internalState);
         return;
@@ -337,7 +347,11 @@ export function createScheduledRemoteBackupService(
         internalState.consecutiveCredentialFailures >=
         CREDENTIAL_FAILURE_THRESHOLD
       ) {
-        patchState({ credentialActionRequired: true });
+        const now = deps.clock();
+        patchState({
+          credentialActionRequired: true,
+          nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
+        });
         await deps.saveScheduledState(internalState);
         return;
       }
@@ -356,10 +370,12 @@ export function createScheduledRemoteBackupService(
           internalState.lastSuccessfulStorageUpdatedAt !== null &&
           latestUpdate <= internalState.lastSuccessfulStorageUpdatedAt
         ) {
+          const now = deps.clock();
           patchState({
-            lastFinishedAt: deps.clock(),
+            lastFinishedAt: now,
             lastTrigger: trigger,
             lastAttemptCapturedStorageUpdatedAt: latestUpdate,
+            nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
           });
           await deps.saveScheduledState(internalState);
           return;
@@ -419,6 +435,7 @@ export function createScheduledRemoteBackupService(
           lastFailureAt: now,
           lastFailureReason: result.error ?? 'Unknown error',
           lastFailureStage: failureStage,
+          nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
           ...(ts !== null ? { lastAttemptCapturedStorageUpdatedAt: ts } : {}),
           ...(credentialFailure
             ? {
@@ -434,12 +451,14 @@ export function createScheduledRemoteBackupService(
       await deps.saveScheduledState(internalState);
     } catch (err: unknown) {
       // 意外错误
+      const now = deps.clock();
       patchState({
-        lastFinishedAt: deps.clock(),
+        lastFinishedAt: now,
         lastTrigger: trigger,
-        lastFailureAt: deps.clock(),
+        lastFailureAt: now,
         lastFailureReason: err instanceof Error ? err.message : String(err),
         lastFailureStage: 'unknown',
+        nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
       });
       await deps.saveScheduledState(internalState);
     } finally {
