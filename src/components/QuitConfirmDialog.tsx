@@ -52,13 +52,17 @@ export const QuitConfirmDialog: React.FC = () => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !event.isComposing) {
         event.preventDefault();
-        handleChoice('cancel');
+        if (backupError) {
+          handleBackupFailedChoice('cancel');
+        } else {
+          handleChoice('cancel');
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, handleChoice]);
+  }, [isOpen, handleChoice, backupError, handleBackupFailedChoice]);
 
   if (!isOpen) return null;
 

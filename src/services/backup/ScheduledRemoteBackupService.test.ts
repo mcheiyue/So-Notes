@@ -564,14 +564,14 @@ describe('ScheduledRemoteBackupService', () => {
       expect(mockRunRemoteBackup).toHaveBeenCalled();
     });
 
-    it('notifyLocalChange 后即使磁盘时间戳未变也执行备份', async () => {
-      const storageData = makeStorageData({ storageUpdatedAt: 5000 });
+    it('notifyLocalChange 后先 flush 再检查时间戳', async () => {
+      const storageDataAfterFlush = makeStorageData({ storageUpdatedAt: 6000 });
       const ctx = createTestContext({
         config: { enabled: false },
         state: { lastSuccessfulStorageUpdatedAt: 5000 },
       });
-      ctx.readDiskStorageData.mockResolvedValueOnce(storageData);
-      ctx.getLatestUpdateTimestamp.mockReturnValue(5000);
+      ctx.readDiskStorageData.mockResolvedValueOnce(storageDataAfterFlush);
+      ctx.getLatestUpdateTimestamp.mockReturnValue(6000);
 
       mockRunRemoteBackup.mockResolvedValueOnce({
         success: true,
@@ -584,6 +584,7 @@ describe('ScheduledRemoteBackupService', () => {
       service.notifyLocalChange();
       await service.runNow();
 
+      expect(ctx.runnerDeps.flushNow).toHaveBeenCalled();
       expect(mockRunRemoteBackup).toHaveBeenCalled();
       const st = service.getState();
       expect(st.hasPendingLocalChanges).toBe(false);

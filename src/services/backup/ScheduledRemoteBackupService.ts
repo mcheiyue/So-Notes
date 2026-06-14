@@ -360,10 +360,24 @@ export function createScheduledRemoteBackupService(
       const pendingChanges = serviceState.hasPendingLocalChanges;
       if (pendingChanges) {
         serviceState.hasPendingLocalChanges = false;
+        const flushed = await deps.runnerDeps.flushNow();
+        if (!flushed) {
+          const now = deps.clock();
+          patchState({
+            lastFinishedAt: now,
+            lastTrigger: trigger,
+            lastFailureAt: now,
+            lastFailureReason: '当前数据尚未成功写入磁盘',
+            lastFailureStage: 'flush',
+            nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
+          });
+          await deps.saveScheduledState(internalState);
+          return;
+        }
       }
 
       const storageData = await deps.readDiskStorageData();
-      if (storageData && !pendingChanges) {
+      if (storageData) {
         const latestUpdate = deps.getLatestUpdateTimestamp(storageData);
         if (
           latestUpdate !== null &&
@@ -446,6 +460,11 @@ export function createScheduledRemoteBackupService(
         };
 
         patchState(patch);
+      }
+
+      // before-exit 失败时抛出，让 handleQuitRequest 进入失败二次确认
+      if (!result.success && trigger === 'before-exit') {
+        throw new Error(result.error ?? '退出前备份失败');
       }
 
       await deps.saveScheduledState(internalState);
