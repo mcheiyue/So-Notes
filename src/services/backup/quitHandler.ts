@@ -24,7 +24,6 @@ export interface QuitHandlerDeps {
   loadWebDavConfig: typeof loadWebDavConfig;
   readDiskStorageData?: () => Promise<StorageData | null>;
   getLatestUpdateTimestamp?: (data: StorageData) => number | null;
-  clock?: () => number;
   /** 读盘前先 flush debounce 缓冲区，确保磁盘时间戳反映最新编辑 */
   flushNow?: () => Promise<boolean>;
   invoke: typeof invoke;
@@ -41,7 +40,6 @@ const DEFAULT_DEPS: QuitHandlerDeps = {
   loadWebDavConfig,
   readDiskStorageData: async () => null,
   getLatestUpdateTimestamp: () => null,
-  clock: () => Date.now(),
   invoke,
   promptQuitConfirm: async () => 'cancel',
   promptBackupFailed: async () => 'quit-anyway',
@@ -53,8 +51,6 @@ const DEFAULT_DEPS: QuitHandlerDeps = {
 // ---------------------------------------------------------------------------
 // 条件判断
 // ---------------------------------------------------------------------------
-
-const EXIT_PROMPT_THRESHOLD_MS = 30 * 60 * 1000;
 
 /**
  * 返回最近一次成功远端备份的时间戳。
@@ -82,16 +78,14 @@ export function getLatestBackupSuccessAt(
  * - WebDAV 已保存配置（serverUrl 非空）
  * - passwordSaved === true
  * - 本地有未备份变化：当前磁盘 storageUpdatedAt 晚于 lastSuccessfulStorageUpdatedAt
- * - 距上次成功远端备份已超过阈值（30 分钟）
  */
 export async function shouldPromptExitBackup(
-  deps: Pick<QuitHandlerDeps, 'loadScheduledConfig' | 'loadWebDavConfig' | 'loadScheduledState' | 'readDiskStorageData' | 'getLatestUpdateTimestamp' | 'clock' | 'flushNow'> = DEFAULT_DEPS,
+  deps: Pick<QuitHandlerDeps, 'loadScheduledConfig' | 'loadWebDavConfig' | 'loadScheduledState' | 'readDiskStorageData' | 'getLatestUpdateTimestamp' | 'flushNow'> = DEFAULT_DEPS,
 ): Promise<boolean> {
   try {
     const loadScheduledStateFn = deps.loadScheduledState ?? loadScheduledState;
     const readDiskStorageDataFn = deps.readDiskStorageData ?? (async () => null);
     const getLatestUpdateTimestampFn = deps.getLatestUpdateTimestamp ?? (() => null);
-    const clockFn = deps.clock ?? Date.now;
 
     const [scheduledResult, webdavResult, stateResult] = await Promise.all([
       deps.loadScheduledConfig(),
@@ -124,10 +118,7 @@ export async function shouldPromptExitBackup(
 
     if (!hasUnsavedChanges) return false;
 
-    const lastSuccessAt = getLatestBackupSuccessAt(state);
-    if (lastSuccessAt === null) return true;
-
-    return clockFn() - lastSuccessAt >= EXIT_PROMPT_THRESHOLD_MS;
+    return true;
   } catch {
     return false;
   }

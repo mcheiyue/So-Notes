@@ -400,7 +400,7 @@ describe('WebDavBackupService', () => {
       expect(result.errorStage).toBe('create-zip');
     });
 
-    it('Rust 返回 Ok{success:false, errorStage:"ensure_dir"} 时映射为 upload', async () => {
+    it('Rust 返回 Ok{success:false, errorStage:"ensure_dir", errorCode:"401"} 时映射为 credential', async () => {
       const config = {
         serverUrl: 'https://example.com',
         username: 'user',
@@ -409,6 +409,25 @@ describe('WebDavBackupService', () => {
         success: false,
         error: 'Failed to ensure remote directory',
         errorStage: 'ensure_dir',
+        errorCode: '401',
+      });
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('credential');
+    });
+
+    it('Rust 返回 Ok{success:false, errorStage:"ensure_dir", errorCode:"500"} 时映射为 upload', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockResolvedValueOnce({
+        success: false,
+        error: 'Failed to ensure remote directory',
+        errorStage: 'ensure_dir',
+        errorCode: '500',
       });
 
       const result = await createRemoteBackup(config);
@@ -451,7 +470,7 @@ describe('WebDavBackupService', () => {
       expect(result.errorStage).toBe('upload');
     });
 
-    it('Rust 返回 Ok{success:false, errorStage:"lock"} 时映射为 upload', async () => {
+    it('Rust 返回 Ok{success:false, errorStage:"lock"} 时映射为 single-flight', async () => {
       const config = {
         serverUrl: 'https://example.com',
         username: 'user',
@@ -465,7 +484,7 @@ describe('WebDavBackupService', () => {
       const result = await createRemoteBackup(config);
 
       expect(result.success).toBe(false);
-      expect(result.errorStage).toBe('upload');
+      expect(result.errorStage).toBe('single-flight');
     });
 
     it('Rust 返回未知 errorStage 时映射为 unknown', async () => {
@@ -515,7 +534,13 @@ describe('WebDavBackupService', () => {
       expect(normalizeErrorStage('read_local_file')).toBe('create-zip');
     });
 
-    it('ensure_dir 映射为 upload', () => {
+    it('ensure_dir 401/403 映射为 credential', () => {
+      expect(normalizeErrorStage('ensure_dir', '401')).toBe('credential');
+      expect(normalizeErrorStage('ensure_dir', '403')).toBe('credential');
+    });
+
+    it('ensure_dir 非 401/403 映射为 upload', () => {
+      expect(normalizeErrorStage('ensure_dir', '500')).toBe('upload');
       expect(normalizeErrorStage('ensure_dir')).toBe('upload');
     });
 
@@ -527,8 +552,8 @@ describe('WebDavBackupService', () => {
       expect(normalizeErrorStage('upload_retry_exhausted')).toBe('upload');
     });
 
-    it('lock 映射为 upload', () => {
-      expect(normalizeErrorStage('lock')).toBe('upload');
+    it('lock 映射为 single-flight', () => {
+      expect(normalizeErrorStage('lock')).toBe('single-flight');
     });
 
     it('未知值映射为 unknown', () => {

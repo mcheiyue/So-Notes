@@ -134,6 +134,7 @@ export const ScheduledRemoteBackupController = () => {
       await handleQuitRequest(runBeforeExit, {
         loadScheduledConfig,
         loadWebDavConfig,
+        flushNow: flushNow,
         readDiskStorageData: () => readDiskStorageData(STORAGE_FILENAME),
         getLatestUpdateTimestamp,
         invoke,

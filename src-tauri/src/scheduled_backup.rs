@@ -288,8 +288,12 @@ fn temp_file_path(path: &Path) -> Result<PathBuf, String> {
     )))
 }
 
-/// 原子写入文件：写临时文件 → sync → rename。
 fn write_atomic(path: &Path, content: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "配置文件路径缺少父目录".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
+
     let tmp_path = temp_file_path(path)?;
     let mut guard = TempFileGuard::new(tmp_path.clone());
 
@@ -304,9 +308,22 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), String> {
         .map_err(|e| format!("同步临时文件失败: {e}"))?;
     drop(file);
 
-    std::fs::rename(&tmp_path, path).map_err(|e| format!("替换配置文件失败: {e}"))?;
+    replace_file(&tmp_path, path).map_err(|e| format!("替换配置文件失败: {e}"))?;
     guard.disarm();
     Ok(())
+}
+
+#[cfg(windows)]
+fn replace_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    std::fs::rename(tmp_path, path)
+}
+
+#[cfg(not(windows))]
+fn replace_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
+    std::fs::rename(tmp_path, path)
 }
 
 fn parse_config_content(content: &str) -> ScheduledBackupConfigLoadResult {
@@ -791,5 +808,34 @@ mod tests {
         let tmp = temp_file_path(path).unwrap();
         let tmp_str = tmp.to_str().unwrap();
         assert!(tmp_str.contains(".webdav-scheduled-backup-config.json.tmp-"));
+    }
+
+    #[test]
+    fn write_atomic_creates_parent_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "sonotes-scheduled-backup-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        let path = dir.join("nested").join(CONFIG_FILENAME);
+
+        write_atomic(&path, "first").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn write_atomic_replaces_existing_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "sonotes-scheduled-backup-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        let path = dir.join(CONFIG_FILENAME);
+
+        write_atomic(&path, "first").unwrap();
+        write_atomic(&path, "second").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "second");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

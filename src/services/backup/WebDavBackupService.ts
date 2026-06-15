@@ -23,10 +23,9 @@ export type RemoteBackupStage =
 const ERROR_STAGE_MAP: Record<string, RemoteBackupStage> = {
   auth: 'credential',
   read_local_file: 'create-zip',
-  ensure_dir: 'upload',
   network: 'upload',
   upload_retry_exhausted: 'upload',
-  lock: 'upload',
+  lock: 'single-flight',
 };
 
 /**
@@ -38,8 +37,12 @@ const ERROR_STAGE_MAP: Record<string, RemoteBackupStage> = {
  */
 export function normalizeErrorStage(
   rawStage: string | undefined,
+  errorCode?: string | null,
 ): RemoteBackupStage {
   if (rawStage === undefined) return 'unknown';
+  if (rawStage === 'ensure_dir') {
+    return errorCode === '401' || errorCode === '403' ? 'credential' : 'upload';
+  }
   return ERROR_STAGE_MAP[rawStage] ?? 'unknown';
 }
 
@@ -165,7 +168,7 @@ export async function createRemoteBackup(
 ): Promise<WebDavUploadResult> {
   try {
     const raw = await invoke<WebDavUploadResult>('webdav_create_remote_backup', { config });
-    return { ...raw, errorStage: normalizeErrorStage(raw.errorStage) };
+    return { ...raw, errorStage: normalizeErrorStage(raw.errorStage, raw.errorCode) };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     const lower = message.toLowerCase();

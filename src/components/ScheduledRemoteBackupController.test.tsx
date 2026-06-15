@@ -321,7 +321,9 @@ describe('ScheduledRemoteBackupController', () => {
 
     const { calls: quitCalls } = vi.mocked(handleQuitRequest).mock;
     const passedRunBeforeExit = quitCalls[quitCalls.length - 1]?.[0];
+    const passedDeps = quitCalls[quitCalls.length - 1]?.[1];
     expect(passedRunBeforeExit).toBeDefined();
+    expect(passedDeps?.flushNow).toBe(mockFlushNow);
 
     await passedRunBeforeExit!();
 

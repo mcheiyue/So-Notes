@@ -264,7 +264,7 @@ describe('shouldPromptExitBackup', () => {
     expect(result).toBe(true);
   });
 
-  it('自动成功时间较旧、手动成功时间较新且在阈值内 → 不提示', async () => {
+  it('自动成功时间较旧、手动成功时间较新但磁盘快照更新 → 提示', async () => {
     const now = Date.now();
     const oneMinuteAgo = now - 60 * 1000;
     const twoHoursAgo = now - 2 * 60 * 60 * 1000;
@@ -273,13 +273,14 @@ describe('shouldPromptExitBackup', () => {
         makeScheduledStateResult({
           lastAutomaticSuccessAt: twoHoursAgo,
           lastManualSuccessAt: oneMinuteAgo,
-          lastSuccessfulStorageUpdatedAt: twoHoursAgo,
+          lastSuccessfulStorageUpdatedAt: 1000,
         }),
       ),
-      clock: vi.fn().mockReturnValue(now),
+      readDiskStorageData: vi.fn().mockResolvedValue(makeStorageData({ storageUpdatedAt: 2000 })),
+      getLatestUpdateTimestamp: vi.fn().mockReturnValue(2000),
     });
     const result = await shouldPromptExitBackup(deps);
-    expect(result).toBe(false);
+    expect(result).toBe(true);
   });
 
   it('读盘前调用 flushNow 确保 debounce 数据已持久化', async () => {
