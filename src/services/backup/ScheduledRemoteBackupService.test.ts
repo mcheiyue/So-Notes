@@ -1669,4 +1669,123 @@ describe('ScheduledRemoteBackupService', () => {
       service.stop();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // 23. lastStartedAt 在备份开始时被设置
+  // -------------------------------------------------------------------------
+
+  describe('lastStartedAt 在备份开始时被设置', () => {
+    it('runBackup 开头设置 lastStartedAt 为当前时间', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastStartedAt: null },
+      });
+      mockRunRemoteBackup.mockResolvedValueOnce({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastStartedAt).toBe(ctx.now);
+    });
+
+    it('每次 runBackup 都更新 lastStartedAt', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastStartedAt: null },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      await service.runNow();
+      const firstSavedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(firstSavedState!.lastStartedAt).toBe(ctx.now);
+
+      await service.runNow();
+      const secondSavedState = ctx.saveScheduledState.mock.calls[1]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(secondSavedState!.lastStartedAt).toBe(ctx.now);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 24. 成功后清空失败信息
+  // -------------------------------------------------------------------------
+
+  describe('成功后清空失败信息', () => {
+    it('备份成功后清空 lastFailureReason、lastFailureAt 和 lastFailureStage', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: {
+          lastFailureReason: '之前的错误',
+          lastFailureAt: 999999999999,
+          lastFailureStage: 'upload',
+        },
+      });
+      mockRunRemoteBackup.mockResolvedValueOnce({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastFailureReason).toBeNull();
+      expect(savedState!.lastFailureAt).toBeNull();
+      expect(savedState!.lastFailureStage).toBeNull();
+    });
+
+    it('备份成功后保留其他成功字段', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: {
+          lastFailureReason: '之前的错误',
+          lastFailureAt: 999999999999,
+          lastFailureStage: 'upload',
+          lastSuccessfulStorageUpdatedAt: 5000,
+        },
+      });
+      ctx.readDiskStorageData.mockResolvedValueOnce(makeStorageData({ storageUpdatedAt: 7000 }));
+      ctx.getLatestUpdateTimestamp.mockReturnValue(7000);
+      mockRunRemoteBackup.mockResolvedValueOnce({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastFailureReason).toBeNull();
+      expect(savedState!.lastFailureAt).toBeNull();
+      expect(savedState!.lastFailureStage).toBeNull();
+      expect(savedState!.lastManualSuccessAt).toBe(ctx.now);
+      expect(savedState!.lastSuccessfulStorageUpdatedAt).toBe(7000);
+      expect(savedState!.lastRemoteFileName).toBe('backup.zip');
+    });
+  });
 });

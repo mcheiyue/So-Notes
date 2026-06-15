@@ -319,6 +319,8 @@ export function createScheduledRemoteBackupService(
       return;
     }
     serviceState.isRunning = true;
+    const startNow = deps.clock();
+    patchState({ lastStartedAt: startNow });
 
     let beforeExitError: Error | null = null;
 
@@ -456,6 +458,9 @@ export function createScheduledRemoteBackupService(
             ? { lastAutomaticSuccessAt: now }
             : { lastManualSuccessAt: now }),
           ...(ts !== null ? { lastSuccessfulStorageUpdatedAt: ts } : {}),
+          lastFailureReason: null,
+          lastFailureAt: null,
+          lastFailureStage: null,
         };
 
         patchState(patch);
