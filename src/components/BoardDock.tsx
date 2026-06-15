@@ -16,6 +16,7 @@ import { tryStartBackupJob, type BackupJobHandle } from "../services/backup/Back
 import * as ScheduledRemoteBackupConfigService from "../services/backup/ScheduledRemoteBackupConfigService";
 import type { ScheduledRemoteBackupConfig, ScheduledRemoteBackupState, ScheduledRemoteBackupFrequency, RemoteBackupStage } from "../services/backup/ScheduledRemoteBackupConfigService";
 import { getSchedulerService, isRemoteBackupStage } from "../services/backup/ScheduledRemoteBackupService";
+import { getLatestBackupSuccessAt } from "../services/backup/quitHandler";
 import * as persistenceFacade from "../services/storage/PersistenceFacade";
 import { readDiskStorageData, getLatestUpdateTimestamp } from "../services/storage/tauriPersistence";
 import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
@@ -329,7 +330,7 @@ export const BoardDock = () => {
       try {
         const diskData = await readDiskStorageData('data.json');
         const diskTs = diskData ? getLatestUpdateTimestamp(diskData) : null;
-        const lastSuccessAt = scheduledState.lastAutomaticSuccessAt ?? scheduledState.lastManualSuccessAt ?? null;
+        const lastSuccessAt = getLatestBackupSuccessAt(scheduledState);
         const hasUnsaved =
           diskTs !== null && diskTs > 0 &&
           (scheduledState.lastSuccessfulStorageUpdatedAt === null || diskTs > scheduledState.lastSuccessfulStorageUpdatedAt);

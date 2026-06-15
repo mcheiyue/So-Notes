@@ -304,6 +304,15 @@ export function createScheduledRemoteBackupService(
     trigger: RemoteBackupTrigger,
   ): Promise<void> {
     if (serviceState.isRunning) {
+      const now = deps.clock();
+      patchState({
+        lastTrigger: trigger,
+        lastFinishedAt: now,
+        lastFailureAt: now,
+        lastFailureReason: '备份任务正在运行中',
+        lastFailureStage: 'single-flight',
+      });
+      await deps.saveScheduledState(internalState);
       if (trigger === 'before-exit') {
         throw new Error('备份任务正在运行中，请稍候再试');
       }

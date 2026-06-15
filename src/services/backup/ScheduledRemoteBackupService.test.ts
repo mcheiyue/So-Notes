@@ -1143,6 +1143,122 @@ describe('ScheduledRemoteBackupService', () => {
       await firstRun;
       service.stop();
     });
+
+    it('manual 触发 busy 时记录 single-flight 状态后静默返回', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+
+      let resolveFirst: (() => void) | undefined;
+      mockRunRemoteBackup.mockImplementation(
+        () =>
+          new Promise<{ success: boolean; remoteFileName: string }>((resolve) => {
+            resolveFirst = () => resolve({ success: true, remoteFileName: 'b.zip' });
+          }),
+      );
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const firstRun = service.runNow();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await service.runNow();
+
+      const calls = ctx.saveScheduledState.mock.calls;
+      const savedState = calls[calls.length - 1]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastTrigger).toBe('manual');
+      expect(savedState!.lastFinishedAt).toBe(ctx.now);
+      expect(savedState!.lastFailureAt).toBe(ctx.now);
+      expect(savedState!.lastFailureReason).toBe('备份任务正在运行中');
+      expect(savedState!.lastFailureStage).toBe('single-flight');
+
+      expect(mockRunRemoteBackup).toHaveBeenCalledTimes(1);
+
+      resolveFirst!();
+      await firstRun;
+      service.stop();
+    });
+
+    it('scheduled-interval 触发 busy 时记录 single-flight 状态后静默返回', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 5 },
+        state: { nextRunAt: 1000000000000 - 1000 },
+      });
+      ctx.getAppActivity.mockReturnValue(INACTIVE_ACTIVITY);
+
+      let resolveFirst: (() => void) | undefined;
+      mockRunRemoteBackup.mockImplementation(
+        () =>
+          new Promise<{ success: boolean; remoteFileName: string }>((resolve) => {
+            resolveFirst = () => resolve({ success: true, remoteFileName: 'b.zip' });
+          }),
+      );
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      await vi.advanceTimersByTimeAsync(0);
+
+      await service.runNow();
+
+      const calls = ctx.saveScheduledState.mock.calls;
+      const savedState = calls[calls.length - 1]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastTrigger).toBe('manual');
+      expect(savedState!.lastFinishedAt).toBe(ctx.now);
+      expect(savedState!.lastFailureAt).toBe(ctx.now);
+      expect(savedState!.lastFailureReason).toBe('备份任务正在运行中');
+      expect(savedState!.lastFailureStage).toBe('single-flight');
+
+      resolveFirst!();
+      await vi.advanceTimersByTimeAsync(0);
+      service.stop();
+    });
+
+    it('before-exit 触发 busy 时记录 single-flight 状态并仍 reject', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+
+      let resolveFirst: (() => void) | undefined;
+      mockRunRemoteBackup.mockImplementation(
+        () =>
+          new Promise<{ success: boolean; remoteFileName: string }>((resolve) => {
+            resolveFirst = () => resolve({ success: true, remoteFileName: 'b.zip' });
+          }),
+      );
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const firstRun = service.runNow();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(service.runBeforeExit()).rejects.toThrow(
+        '备份任务正在运行中，请稍候再试',
+      );
+
+      const calls = ctx.saveScheduledState.mock.calls;
+      const savedState = calls[calls.length - 1]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastTrigger).toBe('before-exit');
+      expect(savedState!.lastFinishedAt).toBe(ctx.now);
+      expect(savedState!.lastFailureAt).toBe(ctx.now);
+      expect(savedState!.lastFailureReason).toBe('备份任务正在运行中');
+      expect(savedState!.lastFailureStage).toBe('single-flight');
+
+      resolveFirst!();
+      await firstRun;
+      service.stop();
+    });
   });
 
   // -------------------------------------------------------------------------

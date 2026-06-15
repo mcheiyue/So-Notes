@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   shouldPromptExitBackup,
   handleQuitRequest,
+  getLatestBackupSuccessAt,
   type QuitHandlerDeps,
 } from './quitHandler';
 import type {
@@ -261,6 +262,50 @@ describe('shouldPromptExitBackup', () => {
     });
     const result = await shouldPromptExitBackup(deps);
     expect(result).toBe(true);
+  });
+
+  it('自动成功时间较旧、手动成功时间较新且在阈值内 → 不提示', async () => {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60 * 1000;
+    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+    const deps = makeDeps({
+      loadScheduledState: vi.fn().mockResolvedValue(
+        makeScheduledStateResult({
+          lastAutomaticSuccessAt: twoHoursAgo,
+          lastManualSuccessAt: oneMinuteAgo,
+          lastSuccessfulStorageUpdatedAt: twoHoursAgo,
+        }),
+      ),
+      clock: vi.fn().mockReturnValue(now),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getLatestBackupSuccessAt
+// ---------------------------------------------------------------------------
+
+describe('getLatestBackupSuccessAt', () => {
+  it('两者均为 null → null', () => {
+    expect(getLatestBackupSuccessAt({ lastAutomaticSuccessAt: null, lastManualSuccessAt: null })).toBeNull();
+  });
+
+  it('仅自动成功 → 返回自动', () => {
+    expect(getLatestBackupSuccessAt({ lastAutomaticSuccessAt: 100, lastManualSuccessAt: null })).toBe(100);
+  });
+
+  it('仅手动成功 → 返回手动', () => {
+    expect(getLatestBackupSuccessAt({ lastAutomaticSuccessAt: null, lastManualSuccessAt: 200 })).toBe(200);
+  });
+
+  it('自动较新 → 返回自动', () => {
+    expect(getLatestBackupSuccessAt({ lastAutomaticSuccessAt: 300, lastManualSuccessAt: 100 })).toBe(300);
+  });
+
+  it('手动较新 → 返回手动', () => {
+    expect(getLatestBackupSuccessAt({ lastAutomaticSuccessAt: 100, lastManualSuccessAt: 300 })).toBe(300);
   });
 });
 

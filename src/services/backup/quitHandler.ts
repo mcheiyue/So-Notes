@@ -9,6 +9,7 @@ import {
   loadConfig as loadScheduledConfig,
   loadState as loadScheduledState,
   type ScheduledBackupStateLoadResult,
+  type ScheduledRemoteBackupState,
 } from './ScheduledRemoteBackupConfigService';
 import { loadConfig as loadWebDavConfig } from './WebDavBackupService';
 import type { StorageData } from '../../store/types';
@@ -52,6 +53,24 @@ const DEFAULT_DEPS: QuitHandlerDeps = {
 // ---------------------------------------------------------------------------
 
 const EXIT_PROMPT_THRESHOLD_MS = 30 * 60 * 1000;
+
+/**
+ * 返回最近一次成功远端备份的时间戳。
+ *
+ * 同时考虑自动备份与手动备份的完成时间，取两者中较新的一个。
+ * 如果两者均为 null，则返回 null。
+ */
+export function getLatestBackupSuccessAt(
+  state: Pick<ScheduledRemoteBackupState, 'lastAutomaticSuccessAt' | 'lastManualSuccessAt'>,
+): number | null {
+  const { lastAutomaticSuccessAt, lastManualSuccessAt } = state;
+  if (lastAutomaticSuccessAt === null && lastManualSuccessAt === null) return null;
+  if (lastAutomaticSuccessAt === null) return lastManualSuccessAt;
+  if (lastManualSuccessAt === null) return lastAutomaticSuccessAt;
+  return lastAutomaticSuccessAt > lastManualSuccessAt
+    ? lastAutomaticSuccessAt
+    : lastManualSuccessAt;
+}
 
 /**
  * 判断是否需要退出前备份提示。
@@ -100,7 +119,7 @@ export async function shouldPromptExitBackup(
 
     if (!hasUnsavedChanges) return false;
 
-    const lastSuccessAt = state.lastAutomaticSuccessAt ?? state.lastManualSuccessAt ?? null;
+    const lastSuccessAt = getLatestBackupSuccessAt(state);
     if (lastSuccessAt === null) return true;
 
     return clockFn() - lastSuccessAt >= EXIT_PROMPT_THRESHOLD_MS;

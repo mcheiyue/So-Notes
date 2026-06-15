@@ -3049,6 +3049,36 @@ describe('BoardDock 定时远端备份 UI', () => {
     });
   });
 
+  it('自动成功时间较旧、手动成功时间较新且在阈值内 → 不显示退出提示', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    const { readDiskStorageData, getLatestUpdateTimestamp } = await import('../services/storage/tauriPersistence');
+    const now = Date.now();
+    const oneMinuteAgo = now - 60 * 1000;
+    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+    mockScheduledStateRef.current = {
+      ...DEFAULT_SCHEDULED_BACKUP_STATE,
+      lastSuccessfulStorageUpdatedAt: twoHoursAgo,
+      lastAutomaticSuccessAt: twoHoursAgo,
+      lastManualSuccessAt: oneMinuteAgo,
+    };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true, exitPromptEnabled: true }, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+    vi.mocked(readDiskStorageData).mockResolvedValue({
+      boards: {}, notes: {}, trashedNotes: {}, storageUpdatedAt: now,
+    } as never);
+    vi.mocked(getLatestUpdateTimestamp).mockReturnValue(now);
+
+    await openWebdavView();
+    await new Promise(r => setTimeout(r, 50));
+    const hint = container.querySelector('[data-testid="exit-backup-pending-hint"]');
+    expect(hint).toBeNull();
+  });
+
   it('手动备份失败时非枚举 errorStage 归一化为 unknown', async () => {
     const { saveState } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const { loadConfig: webdavLoadConfig, createRemoteBackup } = await import('../services/backup/WebDavBackupService');
