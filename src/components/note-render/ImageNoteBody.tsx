@@ -2,11 +2,12 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ImageIcon } from "lucide-react";
 import type { AttachmentRef } from "../../store/types";
-import { getCachedAttachmentAssetUrl } from "../../services/storage/attachmentPersistence";
+import { getCachedAttachmentAssetUrl, resolveAttachmentAssetUrlCached } from "../../services/storage/attachmentPersistence";
 import { cn } from "../../utils/cn";
 import { Z_INDEX } from "../../constants/layout";
 
 type ImageBodyState =
+  | { status: "loading" }
   | { status: "ready"; assetUrl: string }
   | { status: "missing" };
 
@@ -16,13 +17,51 @@ interface ImageNoteBodyProps {
   isFocused?: boolean;
 }
 
+const getInitialState = (attachment?: AttachmentRef): ImageBodyState => {
+  if (!attachment) return { status: "missing" };
+  const cachedAssetUrl = getCachedAttachmentAssetUrl(attachment.relativePath);
+  return cachedAssetUrl
+    ? { status: "ready", assetUrl: cachedAssetUrl }
+    : { status: "loading" };
+};
+
 export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, isFocused = false }) => {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [state, setState] = useState<ImageBodyState>(() => getInitialState(attachment));
   const pointerDownStartedFocusedRef = useRef<boolean | null>(null);
-  const cachedAssetUrl = attachment ? getCachedAttachmentAssetUrl(attachment.relativePath) : undefined;
-  const state: ImageBodyState = cachedAssetUrl
-    ? { status: "ready", assetUrl: cachedAssetUrl }
-    : { status: "missing" };
+  const relativePath = attachment?.relativePath;
+
+  useEffect(() => {
+    if (!relativePath) {
+      setIsPreviewOpen(false);
+      setState({ status: "missing" });
+      return;
+    }
+
+    const cachedAssetUrl = getCachedAttachmentAssetUrl(relativePath);
+    if (cachedAssetUrl) {
+      setState({ status: "ready", assetUrl: cachedAssetUrl });
+      return;
+    }
+
+    let cancelled = false;
+    setState({ status: "loading" });
+
+    resolveAttachmentAssetUrlCached(relativePath)
+      .then((assetUrl) => {
+        if (!cancelled) setState({ status: "ready", assetUrl });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setIsPreviewOpen(false);
+          setState({ status: "missing" });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [relativePath]);
 
   useEffect(() => {
     if (!isPreviewOpen) return;
@@ -93,6 +132,12 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, i
               document.body,
             )}
         </>
+      )}
+
+      {state.status === "loading" && (
+        <div className="flex h-full min-h-40 w-full items-center justify-center rounded-lg border border-border-subtle bg-black/5 text-text-tertiary dark:bg-white/5">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-text-tertiary/30 border-t-text-secondary" />
+        </div>
       )}
 
       {state.status === "missing" && (

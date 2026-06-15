@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
-const { getCachedAttachmentAssetUrlMock } = vi.hoisted(() => ({
+const { getCachedAttachmentAssetUrlMock, resolveAttachmentAssetUrlCachedMock } = vi.hoisted(() => ({
   getCachedAttachmentAssetUrlMock: vi.fn(),
+  resolveAttachmentAssetUrlCachedMock: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -12,6 +13,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('../../services/storage/attachmentPersistence', () => ({
   getCachedAttachmentAssetUrl: getCachedAttachmentAssetUrlMock,
+  resolveAttachmentAssetUrlCached: resolveAttachmentAssetUrlCachedMock,
 }));
 
 import { ImageNoteBody } from './ImageNoteBody';
@@ -35,6 +37,8 @@ describe('ImageNoteBody', () => {
   beforeEach(() => {
     getCachedAttachmentAssetUrlMock.mockReset();
     getCachedAttachmentAssetUrlMock.mockReturnValue('asset://localhost/abs/attachments/photo.png');
+    resolveAttachmentAssetUrlCachedMock.mockReset();
+    resolveAttachmentAssetUrlCachedMock.mockResolvedValue('asset://localhost/abs/attachments/resolved.png');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -226,18 +230,51 @@ describe('ImageNoteBody', () => {
     expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
     expect(container.querySelector('img')?.getAttribute('src')).toBe('asset://localhost/abs/attachments/cached.png');
     expect(getCachedAttachmentAssetUrlMock).toHaveBeenCalledWith(attachment.relativePath);
+    expect(resolveAttachmentAssetUrlCachedMock).not.toHaveBeenCalled();
   });
 
-  it('缓存未命中时不触发异步解析并显示占位', async () => {
+  it('缓存未命中时异步解析并渲染图片', async () => {
     const attachment = createAttachment();
     getCachedAttachmentAssetUrlMock.mockReturnValue(undefined);
+    let resolveAssetUrl: ((assetUrl: string) => void) | undefined;
+    resolveAttachmentAssetUrlCachedMock.mockReturnValue(new Promise<string>((resolve) => {
+      resolveAssetUrl = resolve;
+    }));
 
     await act(async () => {
       root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
     });
 
-    expect(container.querySelector('.animate-spin')).toBeNull();
-    expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).toBeNull();
+    expect(container.querySelector('.animate-spin')).not.toBeNull();
+
+    await act(async () => {
+      resolveAssetUrl?.('asset://localhost/abs/attachments/resolved.png');
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    expect(resolveAttachmentAssetUrlCachedMock).toHaveBeenCalledWith(attachment.relativePath);
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('asset://localhost/abs/attachments/resolved.png');
+    expect(container.textContent).not.toContain('图片不可用');
+  });
+
+  it('异步解析失败时显示占位', async () => {
+    const attachment = createAttachment();
+    getCachedAttachmentAssetUrlMock.mockReturnValue(undefined);
+    resolveAttachmentAssetUrlCachedMock.mockRejectedValue(new Error('not found'));
+
+    await act(async () => {
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).toBeNull();
+      expect(container.textContent).toContain('图片不可用');
+    });
+
+    expect(resolveAttachmentAssetUrlCachedMock).toHaveBeenCalledWith(attachment.relativePath);
     expect(container.textContent).toContain('图片不可用');
   });
 });

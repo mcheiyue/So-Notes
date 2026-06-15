@@ -10,6 +10,7 @@ const {
   setSizeMock,
   convertFileSrcMock,
   resolveAttachmentPathMock,
+  resolveAttachmentAssetUrlCachedMock,
   getCachedAttachmentAssetUrlMock,
 } = vi.hoisted(() => ({
   emitMock: vi.fn(),
@@ -19,6 +20,7 @@ const {
   setSizeMock: vi.fn().mockResolvedValue(undefined),
   convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
   resolveAttachmentPathMock: vi.fn(async (path: string) => `/abs/${path}`),
+  resolveAttachmentAssetUrlCachedMock: vi.fn(async (path: string) => `asset://localhost//abs/${path}`),
   getCachedAttachmentAssetUrlMock: vi.fn((path: string) => `asset://localhost//abs/${path}`),
 }));
 
@@ -34,6 +36,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('../services/storage/attachmentPersistence', () => ({
   resolveAttachmentPath: resolveAttachmentPathMock,
+  resolveAttachmentAssetUrlCached: resolveAttachmentAssetUrlCachedMock,
   getCachedAttachmentAssetUrl: getCachedAttachmentAssetUrlMock,
 }));
 
@@ -136,6 +139,8 @@ describe('DetachedNoteWindow 按钮行为', () => {
     convertFileSrcMock.mockClear();
     resolveAttachmentPathMock.mockClear();
     resolveAttachmentPathMock.mockImplementation(async (path: string) => `/abs/${path}`);
+    resolveAttachmentAssetUrlCachedMock.mockClear();
+    resolveAttachmentAssetUrlCachedMock.mockImplementation(async (path: string) => `asset://localhost//abs/${path}`);
     getCachedAttachmentAssetUrlMock.mockClear();
     getCachedAttachmentAssetUrlMock.mockImplementation((path: string) => `asset://localhost//abs/${path}`);
     resizeCallback = null;
@@ -268,6 +273,23 @@ describe('DetachedNoteWindow 按钮行为', () => {
     });
 
     expect(container.querySelector('[data-testid="note-attachments"]')).toBeNull();
+  });
+
+  it('图片撕下窗口缓存未命中时仍异步解析并渲染图片', async () => {
+    const attachment = createAttachment();
+    getCachedAttachmentAssetUrlMock.mockReturnValue(undefined);
+    resolveAttachmentAssetUrlCachedMock.mockResolvedValue('asset://localhost//abs/attachments/photo.png');
+
+    await renderWindow();
+    simulateSnapshot(createSnapshot({ kind: 'image', attachments: [attachment] }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="image-note-preview-trigger"]')).not.toBeNull();
+    });
+
+    expect(resolveAttachmentAssetUrlCachedMock).toHaveBeenCalledWith(attachment.relativePath);
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('asset://localhost//abs/attachments/photo.png');
+    expect(container.textContent).not.toContain('图片不可用');
   });
 
   it('点击定位按钮向主窗口发送 locate 事件', async () => {
