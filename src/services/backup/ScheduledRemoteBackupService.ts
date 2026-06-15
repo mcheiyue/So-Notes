@@ -569,6 +569,7 @@ export function createScheduledRemoteBackupService(
         }
 
         if (frequencyChanged || justEnabled) {
+          stopScheduler();
           const now = deps.clock();
           patchState({
             nextRunAt: now + FREQUENCY_MS[newConfig.frequency],

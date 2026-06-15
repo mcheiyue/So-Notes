@@ -593,6 +593,33 @@ describe('ScheduledRemoteBackupService', () => {
       service.stop();
     });
 
+    it('频率变更时先清旧 timer 再注册新 timer', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily' },
+        state: { nextRunAt: 1000000000000 + 24 * 60 * 60 * 1000 },
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const oldTimerId = ctx.timers.setTimeout.mock.results[0]?.value;
+      expect(oldTimerId).toBeDefined();
+
+      ctx.timers.setTimeout.mockClear();
+      ctx.timers.clearTimeout.mockClear();
+
+      await service.updateConfig({
+        ...DEFAULT_SCHEDULED_BACKUP_CONFIG,
+        enabled: true,
+        frequency: 'weekly',
+      });
+
+      expect(ctx.timers.clearTimeout).toHaveBeenCalledWith(oldTimerId);
+      expect(ctx.timers.setTimeout).toHaveBeenCalledTimes(1);
+
+      service.stop();
+    });
+
     it('未改变频率时不重算 nextRunAt', async () => {
       const ctx = createTestContext({
         config: { enabled: true, frequency: 'daily' },

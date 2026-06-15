@@ -88,6 +88,7 @@ export const ScheduledRemoteBackupController = () => {
     bootstrap().catch((error: unknown) => {
       console.warn('初始化定时远端备份调度失败:', error);
       serviceRef.current?.stop();
+      unregisterSchedulerService();
       serviceRef.current = null;
     });
 
@@ -106,7 +107,9 @@ export const ScheduledRemoteBackupController = () => {
 
   // 退出前备份提示监听
   useEffect(() => {
+    let active = true;
     const unlisten = listen('remote-backup-before-quit-requested', async () => {
+      if (!active) return;
       const runBeforeExit = async () => {
         const service = serviceRef.current;
         if (!service) {
@@ -130,6 +133,7 @@ export const ScheduledRemoteBackupController = () => {
     });
 
     return () => {
+      active = false;
       unlisten.then((f) => f());
     };
   }, []);
