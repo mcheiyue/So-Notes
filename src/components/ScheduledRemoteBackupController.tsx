@@ -108,7 +108,11 @@ export const ScheduledRemoteBackupController = () => {
   useEffect(() => {
     const unlisten = listen('remote-backup-before-quit-requested', async () => {
       const runBeforeExit = async () => {
-        await serviceRef.current?.runBeforeExit();
+        const service = serviceRef.current;
+        if (!service) {
+          throw new Error('退出前备份服务尚未就绪，请稍后重试');
+        }
+        await service.runBeforeExit();
       };
 
       await handleQuitRequest(runBeforeExit, {

@@ -977,7 +977,13 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'error', message: `保存自动远端备份设置失败：${result.error ?? '未知错误'}` });
         return false;
       }
-      getSchedulerService()?.updateConfig(next);
+      await getSchedulerService()?.updateConfig(next);
+      try {
+        const stateResult = await ScheduledRemoteBackupConfigService.loadState();
+        if (stateResult.success && stateResult.state) {
+          setScheduledState(stateResult.state);
+        }
+      } catch { /* 状态刷新失败静默忽略 */ }
       return true;
     } catch (err) {
       setScheduledConfig(previous);

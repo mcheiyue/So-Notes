@@ -547,8 +547,13 @@ export function createScheduledRemoteBackupService(
     notifyLocalChange,
 
     updateConfig: async (newConfig: ScheduledRemoteBackupConfig) => {
+      const oldConfig = serviceState.config;
       serviceState.config = { ...newConfig };
       await deps.saveScheduledConfig(newConfig);
+
+      const frequencyChanged = oldConfig.frequency !== newConfig.frequency;
+      const justEnabled = !oldConfig.enabled && newConfig.enabled;
+      let needsStateSave = false;
 
       if (newConfig.enabled) {
         // 用户重新启用时清除凭据失败状态
@@ -560,6 +565,18 @@ export function createScheduledRemoteBackupService(
             consecutiveCredentialFailures: 0,
             credentialActionRequired: false,
           });
+          needsStateSave = true;
+        }
+
+        if (frequencyChanged || justEnabled) {
+          const now = deps.clock();
+          patchState({
+            nextRunAt: now + FREQUENCY_MS[newConfig.frequency],
+          });
+          needsStateSave = true;
+        }
+
+        if (needsStateSave) {
           await deps.saveScheduledState(internalState);
         }
         startScheduler();

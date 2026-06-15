@@ -510,6 +510,139 @@ describe('ScheduledRemoteBackupService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // 7.1 updateConfig 频率变更重算 nextRunAt
+  // -------------------------------------------------------------------------
+
+  describe('updateConfig 频率变更重算 nextRunAt', () => {
+    it('频率从 daily 改为 weekly 时重算 nextRunAt', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily' },
+        state: { nextRunAt: 1000000000000 + 24 * 60 * 60 * 1000 },
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const oldNextRunAt = service.getState().state.nextRunAt;
+
+      service.stop();
+      ctx.timers.setTimeout.mockClear();
+
+      await service.updateConfig({
+        ...DEFAULT_SCHEDULED_BACKUP_CONFIG,
+        enabled: true,
+        frequency: 'weekly',
+      });
+
+      const newState = service.getState().state;
+      const weeklyMs = 7 * 24 * 60 * 60 * 1000;
+      expect(newState.nextRunAt).toBe(ctx.now + weeklyMs);
+      expect(newState.nextRunAt).not.toBe(oldNextRunAt);
+
+      const savedState = ctx.saveScheduledState.mock.calls[
+        ctx.saveScheduledState.mock.calls.length - 1
+      ]?.[0] as ScheduledRemoteBackupState | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.nextRunAt).toBe(ctx.now + weeklyMs);
+
+      service.stop();
+    });
+
+    it('从 disabled 切换到 enabled 时重算 nextRunAt', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { nextRunAt: 999 },
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      await service.updateConfig({
+        ...DEFAULT_SCHEDULED_BACKUP_CONFIG,
+        enabled: true,
+        frequency: 'every-6-hours',
+      });
+
+      const sixHoursMs = 6 * 60 * 60 * 1000;
+      expect(service.getState().state.nextRunAt).toBe(ctx.now + sixHoursMs);
+
+      service.stop();
+    });
+
+    it('已启用状态仅改频率时重算 nextRunAt', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'every-6-hours' },
+        state: { nextRunAt: null },
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      service.stop();
+      ctx.timers.setTimeout.mockClear();
+
+      await service.updateConfig({
+        ...DEFAULT_SCHEDULED_BACKUP_CONFIG,
+        enabled: true,
+        frequency: 'every-12-hours',
+      });
+
+      const twelveHoursMs = 12 * 60 * 60 * 1000;
+      expect(service.getState().state.nextRunAt).toBe(ctx.now + twelveHoursMs);
+
+      service.stop();
+    });
+
+    it('未改变频率时不重算 nextRunAt', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily' },
+        state: { nextRunAt: null },
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const nextRunAtAfterInit = service.getState().state.nextRunAt;
+
+      service.stop();
+      ctx.timers.setTimeout.mockClear();
+      ctx.saveScheduledState.mockClear();
+
+      await service.updateConfig({
+        ...DEFAULT_SCHEDULED_BACKUP_CONFIG,
+        enabled: true,
+        frequency: 'daily',
+      });
+
+      expect(service.getState().state.nextRunAt).toBe(nextRunAtAfterInit);
+
+      service.stop();
+    });
+
+    it('禁用时不保存 nextRunAt', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily' },
+        state: { nextRunAt: 1000000000000 + 24 * 60 * 60 * 1000 },
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      ctx.saveScheduledState.mockClear();
+
+      await service.updateConfig({
+        ...DEFAULT_SCHEDULED_BACKUP_CONFIG,
+        enabled: false,
+        frequency: 'daily',
+      });
+
+      expect(ctx.saveScheduledState).not.toHaveBeenCalled();
+
+      service.stop();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // 8. 无本地变更
   // -------------------------------------------------------------------------
 
@@ -1183,7 +1316,7 @@ describe('ScheduledRemoteBackupService', () => {
       service.stop();
     });
 
-    it('scheduled-interval 触发 busy 时记录 single-flight 状态后静默返回', async () => {
+    it('定时备份运行中手动触发时记录 manual single-flight 状态', async () => {
       const ctx = createTestContext({
         config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 5 },
         state: { nextRunAt: 1000000000000 - 1000 },

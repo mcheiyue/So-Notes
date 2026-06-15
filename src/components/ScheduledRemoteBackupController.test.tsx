@@ -90,6 +90,7 @@ vi.mock('../services/backup/quitHandler', () => ({
 import { ScheduledRemoteBackupController } from './ScheduledRemoteBackupController';
 import type { AppActivitySignals } from '../services/backup/ScheduledRemoteBackupService';
 import { useDomainStore } from '../store/domainStore';
+import { handleQuitRequest } from '../services/backup/quitHandler';
 
 function stubService() {
   return {
@@ -294,6 +295,69 @@ describe('ScheduledRemoteBackupController', () => {
     });
 
     expect(mockNotifyLocalChange).not.toHaveBeenCalled();
+  });
+
+  it('退出前事件传入的 runBeforeExit 调用当前调度服务', async () => {
+    const runBeforeExit = vi.fn().mockResolvedValue(undefined);
+    const serviceInstance = {
+      ...stubService(),
+      runBeforeExit,
+    };
+    mockCreateService.mockReturnValue(serviceInstance);
+
+    await act(async () => {
+      root.render(<ScheduledRemoteBackupController />);
+    });
+
+    const listener = mockListen.mock.calls.find(
+      ([event]) => event === 'remote-backup-before-quit-requested',
+    )?.[1] as (() => Promise<void>) | undefined;
+
+    expect(listener).toBeDefined();
+
+    await act(async () => {
+      await listener!();
+    });
+
+    const { calls: quitCalls } = vi.mocked(handleQuitRequest).mock;
+    const passedRunBeforeExit = quitCalls[quitCalls.length - 1]?.[0];
+    expect(passedRunBeforeExit).toBeDefined();
+
+    await passedRunBeforeExit!();
+
+    expect(runBeforeExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('退出前调度服务不可用时 runBeforeExit reject，避免未备份就退出', async () => {
+    const serviceInstance = {
+      ...stubService(),
+      initialize: vi.fn().mockRejectedValue(new Error('初始化失败')),
+    };
+    mockCreateService.mockReturnValue(serviceInstance);
+
+    await act(async () => {
+      root.render(<ScheduledRemoteBackupController />);
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const listener = mockListen.mock.calls.find(
+      ([event]) => event === 'remote-backup-before-quit-requested',
+    )?.[1] as (() => Promise<void>) | undefined;
+
+    expect(listener).toBeDefined();
+
+    await act(async () => {
+      await listener!();
+    });
+
+    const { calls: quitCallsRetry } = vi.mocked(handleQuitRequest).mock;
+    const passedRunBeforeExit = quitCallsRetry[quitCallsRetry.length - 1]?.[0];
+    expect(passedRunBeforeExit).toBeDefined();
+
+    await expect(passedRunBeforeExit!()).rejects.toThrow('退出前备份服务尚未就绪');
   });
 });
 

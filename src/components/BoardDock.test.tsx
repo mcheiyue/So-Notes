@@ -2824,6 +2824,47 @@ describe('BoardDock 定时远端备份 UI', () => {
     );
   });
 
+  it('频率变更后立即刷新显示的下次尝试时间', async () => {
+    const { loadConfig, loadState, saveConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+
+    const dailyNextRun = new Date('2026-06-14T22:30:00').getTime();
+    const weeklyNextRun = new Date('2026-06-21T10:30:00').getTime();
+
+    mockScheduledStateRef.current = {
+      ...DEFAULT_SCHEDULED_BACKUP_STATE,
+      nextRunAt: dailyNextRun,
+    };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true }, error: null,
+    });
+    vi.mocked(saveConfig).mockResolvedValue({ success: true, error: null });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    const updatedState = {
+      ...DEFAULT_SCHEDULED_BACKUP_STATE,
+      nextRunAt: weeklyNextRun,
+    };
+    vi.mocked(loadState)
+      .mockResolvedValueOnce({ success: true, state: mockScheduledStateRef.current, error: null })
+      .mockResolvedValueOnce({ success: true, state: updatedState, error: null });
+
+    await openWebdavView();
+
+    const frequencySelect = container.querySelector('[data-testid="scheduled-backup-frequency"]') as HTMLSelectElement;
+    expect(frequencySelect).not.toBeNull();
+
+    await act(async () => {
+      frequencySelect.value = 'weekly';
+      frequencySelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const nextRunText = container.querySelector('[data-testid="scheduled-backup-status"]');
+    expect(nextRunText?.textContent).toContain('下次尝试');
+  });
+
   it('退出前提醒开关变更后持久化', async () => {
     const { loadConfig, saveConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
