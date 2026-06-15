@@ -303,7 +303,12 @@ export function createScheduledRemoteBackupService(
   async function runBackup(
     trigger: RemoteBackupTrigger,
   ): Promise<void> {
-    if (serviceState.isRunning) return;
+    if (serviceState.isRunning) {
+      if (trigger === 'before-exit') {
+        throw new Error('备份任务正在运行中，请稍候再试');
+      }
+      return;
+    }
     serviceState.isRunning = true;
 
     let beforeExitError: Error | null = null;

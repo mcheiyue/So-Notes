@@ -1115,6 +1115,34 @@ describe('ScheduledRemoteBackupService', () => {
 
       service.stop();
     });
+
+    it('runNow 进行中时 runBeforeExit reject', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+
+      let resolveFirst: (() => void) | undefined;
+      mockRunRemoteBackup.mockImplementation(
+        () =>
+          new Promise<{ success: boolean; remoteFileName: string }>((resolve) => {
+            resolveFirst = () => resolve({ success: true, remoteFileName: 'b.zip' });
+          }),
+      );
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const firstRun = service.runNow();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(service.runBeforeExit()).rejects.toThrow(
+        '备份任务正在运行中，请稍候再试',
+      );
+
+      resolveFirst!();
+      await firstRun;
+      service.stop();
+    });
   });
 
   // -------------------------------------------------------------------------
