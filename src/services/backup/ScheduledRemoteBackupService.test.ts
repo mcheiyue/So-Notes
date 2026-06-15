@@ -454,6 +454,75 @@ describe('ScheduledRemoteBackupService', () => {
 
       service.stop();
     });
+
+    it('Rust auth 阶段（归一化为 credential）触发连续失败计数', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { consecutiveCredentialFailures: 0 },
+      });
+      mockRunRemoteBackup.mockResolvedValueOnce({
+        success: false,
+        error: '401 Unauthorized',
+        errorStage: 'credential',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.consecutiveCredentialFailures).toBe(1);
+      expect(savedState!.credentialActionRequired).toBe(false);
+    });
+
+    it('连续 3 次 auth 归一化为 credential 后触发 credentialActionRequired', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { consecutiveCredentialFailures: 2 },
+      });
+      mockRunRemoteBackup.mockResolvedValueOnce({
+        success: false,
+        error: '401 Unauthorized',
+        errorStage: 'credential',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.consecutiveCredentialFailures).toBe(3);
+      expect(savedState!.credentialActionRequired).toBe(true);
+    });
+
+    it('非 credential 失败不增加连续凭据失败计数', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { consecutiveCredentialFailures: 2 },
+      });
+      mockRunRemoteBackup.mockResolvedValueOnce({
+        success: false,
+        error: 'Upload failed',
+        errorStage: 'upload',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.consecutiveCredentialFailures).toBe(2);
+      expect(savedState!.credentialActionRequired).toBe(false);
+    });
   });
 
   // -------------------------------------------------------------------------

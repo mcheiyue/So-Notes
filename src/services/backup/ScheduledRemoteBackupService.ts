@@ -467,10 +467,7 @@ export function createScheduledRemoteBackupService(
         const newCount = credentialFailure
           ? internalState.consecutiveCredentialFailures + 1
           : internalState.consecutiveCredentialFailures;
-        const rawStage = result.errorStage ?? 'unknown';
-        const failureStage: RemoteBackupStage = isRemoteBackupStage(rawStage)
-          ? rawStage
-          : 'unknown';
+        const failureStage: RemoteBackupStage = (result.errorStage ?? 'unknown') as RemoteBackupStage;
         const patch: Partial<ScheduledRemoteBackupState> = {
           lastFinishedAt: now,
           lastTrigger: trigger,

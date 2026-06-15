@@ -1,6 +1,49 @@
 import { invoke } from '@tauri-apps/api/core';
 
 // ---------------------------------------------------------------------------
+// 远端备份阶段类型（与 ScheduledRemoteBackupConfigService.RemoteBackupStage 对齐）
+// ---------------------------------------------------------------------------
+
+export type RemoteBackupStage =
+  | 'config'
+  | 'credential'
+  | 'single-flight'
+  | 'restore-blocked'
+  | 'flush'
+  | 'create-zip'
+  | 'upload'
+  | 'list-refresh'
+  | 'completed'
+  | 'unknown';
+
+// ---------------------------------------------------------------------------
+// Rust errorStage → 前端 RemoteBackupStage 映射
+// ---------------------------------------------------------------------------
+
+const ERROR_STAGE_MAP: Record<string, RemoteBackupStage> = {
+  auth: 'credential',
+  read_local_file: 'create-zip',
+  ensure_dir: 'upload',
+  network: 'upload',
+  upload_retry_exhausted: 'upload',
+  lock: 'upload',
+};
+
+/**
+ * 将 Rust 返回的原始 errorStage 归一化为前端使用的 RemoteBackupStage 窄集合。
+ *
+ * Rust 侧可能返回 auth / ensure_dir / read_local_file / network /
+ * upload_retry_exhausted / lock 等值，前端只需 credential / create-zip /
+ * upload / unknown 四种分类。已知映射外的值统一降级为 unknown。
+ */
+export function normalizeErrorStage(
+  rawStage: string | undefined,
+): RemoteBackupStage {
+  if (rawStage === undefined) return 'unknown';
+  return ERROR_STAGE_MAP[rawStage] ?? 'unknown';
+}
+
+// ---------------------------------------------------------------------------
 // 类型定义（与 Rust serde camelCase 序列化对齐）
 // ---------------------------------------------------------------------------
 
@@ -121,7 +164,8 @@ export async function createRemoteBackup(
   config: WebDavConfig,
 ): Promise<WebDavUploadResult> {
   try {
-    return await invoke<WebDavUploadResult>('webdav_create_remote_backup', { config });
+    const raw = await invoke<WebDavUploadResult>('webdav_create_remote_backup', { config });
+    return { ...raw, errorStage: normalizeErrorStage(raw.errorStage) };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     const lower = message.toLowerCase();

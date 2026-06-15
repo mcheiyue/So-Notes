@@ -25,6 +25,8 @@ export interface QuitHandlerDeps {
   readDiskStorageData?: () => Promise<StorageData | null>;
   getLatestUpdateTimestamp?: (data: StorageData) => number | null;
   clock?: () => number;
+  /** 读盘前先 flush debounce 缓冲区，确保磁盘时间戳反映最新编辑 */
+  flushNow?: () => Promise<boolean>;
   invoke: typeof invoke;
   promptQuitConfirm: () => Promise<'backup-and-quit' | 'quit-now' | 'cancel'>;
   promptBackupFailed: (error: string) => Promise<'quit-anyway' | 'cancel'>;
@@ -83,7 +85,7 @@ export function getLatestBackupSuccessAt(
  * - 距上次成功远端备份已超过阈值（30 分钟）
  */
 export async function shouldPromptExitBackup(
-  deps: Pick<QuitHandlerDeps, 'loadScheduledConfig' | 'loadWebDavConfig' | 'loadScheduledState' | 'readDiskStorageData' | 'getLatestUpdateTimestamp' | 'clock'> = DEFAULT_DEPS,
+  deps: Pick<QuitHandlerDeps, 'loadScheduledConfig' | 'loadWebDavConfig' | 'loadScheduledState' | 'readDiskStorageData' | 'getLatestUpdateTimestamp' | 'clock' | 'flushNow'> = DEFAULT_DEPS,
 ): Promise<boolean> {
   try {
     const loadScheduledStateFn = deps.loadScheduledState ?? loadScheduledState;
@@ -108,6 +110,9 @@ export async function shouldPromptExitBackup(
 
     const state = stateResult.success ? stateResult.state : null;
     if (!state) return true;
+
+    // 读盘前先 flush debounce 缓冲区，避免漏掉刚编辑但尚未持久化的数据
+    await (deps.flushNow?.() ?? Promise.resolve());
 
     const diskData = await readDiskStorageDataFn();
     const diskTimestamp = diskData ? getLatestUpdateTimestampFn(diskData) : null;

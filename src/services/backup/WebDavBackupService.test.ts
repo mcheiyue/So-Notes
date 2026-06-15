@@ -19,6 +19,7 @@ import {
   deleteBackup,
   resolveDownloadedBackup,
   cleanupDownloadedBackup,
+  normalizeErrorStage,
 } from './WebDavBackupService';
 
 describe('WebDavBackupService', () => {
@@ -257,6 +258,7 @@ describe('WebDavBackupService', () => {
       const expected = {
         success: true,
         remoteFileName: 'SoNotes_Backup_20240101120000.zip',
+        errorStage: 'unknown',
       };
       invokeMock.mockResolvedValueOnce(expected);
 
@@ -362,6 +364,183 @@ describe('WebDavBackupService', () => {
 
       expect(result.success).toBe(false);
       expect(result.errorStage).toBe('unknown');
+    });
+
+    it('Rust 返回 Ok{success:false, errorStage:"auth"} 时映射为 credential', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockResolvedValueOnce({
+        success: false,
+        error: 'Authentication failed',
+        errorStage: 'auth',
+      });
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('credential');
+    });
+
+    it('Rust 返回 Ok{success:false, errorStage:"read_local_file"} 时映射为 create-zip', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockResolvedValueOnce({
+        success: false,
+        error: 'Failed to read local file',
+        errorStage: 'read_local_file',
+      });
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('create-zip');
+    });
+
+    it('Rust 返回 Ok{success:false, errorStage:"ensure_dir"} 时映射为 upload', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockResolvedValueOnce({
+        success: false,
+        error: 'Failed to ensure remote directory',
+        errorStage: 'ensure_dir',
+      });
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('upload');
+    });
+
+    it('Rust 返回 Ok{success:false, errorStage:"network"} 时映射为 upload', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockResolvedValueOnce({
+        success: false,
+        error: 'Network error',
+        errorStage: 'network',
+      });
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('upload');
+    });
+
+    it('Rust 返回 Ok{success:false, errorStage:"upload_retry_exhausted"} 时映射为 upload', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockResolvedValueOnce({
+        success: false,
+        error: 'Upload retries exhausted',
+        errorStage: 'upload_retry_exhausted',
+      });
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('upload');
+    });
+
+    it('Rust 返回 Ok{success:false, errorStage:"lock"} 时映射为 upload', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockResolvedValueOnce({
+        success: false,
+        error: 'File lock error',
+        errorStage: 'lock',
+      });
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('upload');
+    });
+
+    it('Rust 返回未知 errorStage 时映射为 unknown', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockResolvedValueOnce({
+        success: false,
+        error: 'Some error',
+        errorStage: 'some_future_stage',
+      });
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('unknown');
+    });
+
+    it('Rust 返回 undefined errorStage 时映射为 unknown', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      invokeMock.mockResolvedValueOnce({
+        success: false,
+        error: 'Some error',
+      });
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.errorStage).toBe('unknown');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // normalizeErrorStage
+  // -------------------------------------------------------------------------
+
+  describe('normalizeErrorStage', () => {
+    it('auth 映射为 credential', () => {
+      expect(normalizeErrorStage('auth')).toBe('credential');
+    });
+
+    it('read_local_file 映射为 create-zip', () => {
+      expect(normalizeErrorStage('read_local_file')).toBe('create-zip');
+    });
+
+    it('ensure_dir 映射为 upload', () => {
+      expect(normalizeErrorStage('ensure_dir')).toBe('upload');
+    });
+
+    it('network 映射为 upload', () => {
+      expect(normalizeErrorStage('network')).toBe('upload');
+    });
+
+    it('upload_retry_exhausted 映射为 upload', () => {
+      expect(normalizeErrorStage('upload_retry_exhausted')).toBe('upload');
+    });
+
+    it('lock 映射为 upload', () => {
+      expect(normalizeErrorStage('lock')).toBe('upload');
+    });
+
+    it('未知值映射为 unknown', () => {
+      expect(normalizeErrorStage('some_future_stage')).toBe('unknown');
+    });
+
+    it('undefined 映射为 unknown', () => {
+      expect(normalizeErrorStage(undefined)).toBe('unknown');
+    });
+
+    it('空字符串映射为 unknown', () => {
+      expect(normalizeErrorStage('')).toBe('unknown');
     });
   });
 

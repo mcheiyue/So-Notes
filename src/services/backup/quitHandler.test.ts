@@ -281,6 +281,19 @@ describe('shouldPromptExitBackup', () => {
     const result = await shouldPromptExitBackup(deps);
     expect(result).toBe(false);
   });
+
+  it('读盘前调用 flushNow 确保 debounce 数据已持久化', async () => {
+    const flushNow = vi.fn().mockResolvedValue(true);
+    const deps = makeDeps({ flushNow });
+    await shouldPromptExitBackup(deps);
+    expect(flushNow).toHaveBeenCalledOnce();
+  });
+
+  it('flushNow 未提供时正常执行（不抛异常）', async () => {
+    const deps = makeDeps({ flushNow: undefined });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

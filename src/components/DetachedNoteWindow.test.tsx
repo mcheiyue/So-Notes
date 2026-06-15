@@ -21,7 +21,7 @@ const {
   convertFileSrcMock: vi.fn((path: string) => `asset://localhost/${path}`),
   resolveAttachmentPathMock: vi.fn(async (path: string) => `/abs/${path}`),
   resolveAttachmentAssetUrlCachedMock: vi.fn(async (path: string) => `asset://localhost//abs/${path}`),
-  getCachedAttachmentAssetUrlMock: vi.fn((path: string) => `asset://localhost//abs/${path}`),
+  getCachedAttachmentAssetUrlMock: vi.fn((path: string): string | undefined => `asset://localhost//abs/${path}`),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
