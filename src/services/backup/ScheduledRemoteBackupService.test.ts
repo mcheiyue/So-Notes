@@ -938,6 +938,69 @@ describe('ScheduledRemoteBackupService', () => {
       expect(savedState!.lastFailureReason).toBe('上传失败');
       expect(savedState!.lastFailureStage).toBe('upload');
     });
+
+    it('缺少 WebDAV 配置时 runBeforeExit reject', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastSuccessfulStorageUpdatedAt: null },
+      });
+      ctx.loadWebDavConfig.mockResolvedValue({
+        success: false,
+        error: 'no config',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await expect(service.runBeforeExit()).rejects.toThrow('缺少 WebDAV 配置');
+    });
+
+    it('未保存凭据时 runBeforeExit reject', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastSuccessfulStorageUpdatedAt: null },
+      });
+      ctx.loadWebDavConfig.mockResolvedValue({
+        success: true,
+        serverUrl: 'https://dav.example.com',
+        username: 'user',
+        passwordSaved: false,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await expect(service.runBeforeExit()).rejects.toThrow('未保存 WebDAV 凭据');
+    });
+
+    it('flush 失败时 runBeforeExit reject', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastSuccessfulStorageUpdatedAt: null },
+      });
+      ctx.runnerDeps.flushNow.mockResolvedValue(false);
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      service.notifyLocalChange();
+      await expect(service.runBeforeExit()).rejects.toThrow(
+        '当前数据尚未成功写入磁盘',
+      );
+    });
+
+    it('凭据失败阈值时 runBeforeExit reject', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: {
+          lastSuccessfulStorageUpdatedAt: null,
+          consecutiveCredentialFailures: 3,
+        },
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await expect(service.runBeforeExit()).rejects.toThrow(
+        '凭据失败次数过多，请重新保存密码',
+      );
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -324,6 +324,9 @@ export function createScheduledRemoteBackupService(
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
         await deps.saveScheduledState(internalState);
+        if (trigger === 'before-exit') {
+          beforeExitError = new Error('缺少 WebDAV 配置');
+        }
         return;
       }
 
@@ -341,6 +344,9 @@ export function createScheduledRemoteBackupService(
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
         await deps.saveScheduledState(internalState);
+        if (trigger === 'before-exit') {
+          beforeExitError = new Error('未保存 WebDAV 凭据');
+        }
         return;
       }
 
@@ -355,6 +361,9 @@ export function createScheduledRemoteBackupService(
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
         await deps.saveScheduledState(internalState);
+        if (trigger === 'before-exit') {
+          beforeExitError = new Error('凭据失败次数过多，请重新保存密码');
+        }
         return;
       }
 
@@ -374,6 +383,9 @@ export function createScheduledRemoteBackupService(
             nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
           });
           await deps.saveScheduledState(internalState);
+          if (trigger === 'before-exit') {
+            beforeExitError = new Error('当前数据尚未成功写入磁盘');
+          }
           return;
         }
       }
@@ -481,6 +493,9 @@ export function createScheduledRemoteBackupService(
         nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
       });
       await deps.saveScheduledState(internalState);
+      if (trigger === 'before-exit') {
+        beforeExitError = err instanceof Error ? err : new Error(String(err));
+      }
     } finally {
       serviceState.isRunning = false;
 
@@ -490,9 +505,9 @@ export function createScheduledRemoteBackupService(
       ) {
         startScheduler();
       }
-    }
 
-    if (beforeExitError) throw beforeExitError;
+      if (beforeExitError) throw beforeExitError;
+    }
   }
 
   // -------------------------------------------------------------------------
