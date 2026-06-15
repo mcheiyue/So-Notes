@@ -306,6 +306,8 @@ export function createScheduledRemoteBackupService(
     if (serviceState.isRunning) return;
     serviceState.isRunning = true;
 
+    let beforeExitError: Error | null = null;
+
     try {
       // 1. 加载 WebDAV 配置
       const webdavResult = await deps.loadWebDavConfig();
@@ -462,14 +464,13 @@ export function createScheduledRemoteBackupService(
         patchState(patch);
       }
 
-      // before-exit 失败时抛出，让 handleQuitRequest 进入失败二次确认
+      // before-exit 失败时保存错误，finally 后抛出让 handleQuitRequest 捕获
       if (!result.success && trigger === 'before-exit') {
-        throw new Error(result.error ?? '退出前备份失败');
+        beforeExitError = new Error(result.error ?? '退出前备份失败');
       }
 
       await deps.saveScheduledState(internalState);
     } catch (err: unknown) {
-      // 意外错误
       const now = deps.clock();
       patchState({
         lastFinishedAt: now,
@@ -483,7 +484,6 @@ export function createScheduledRemoteBackupService(
     } finally {
       serviceState.isRunning = false;
 
-      // 重新调度：enabled 且未触发凭据阈值暂停
       if (
         serviceState.config.enabled &&
         !internalState.credentialActionRequired
@@ -491,6 +491,8 @@ export function createScheduledRemoteBackupService(
         startScheduler();
       }
     }
+
+    if (beforeExitError) throw beforeExitError;
   }
 
   // -------------------------------------------------------------------------

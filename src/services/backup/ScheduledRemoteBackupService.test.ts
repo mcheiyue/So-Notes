@@ -913,6 +913,31 @@ describe('ScheduledRemoteBackupService', () => {
       expect(savedState!.lastManualSuccessAt).toBeNull();
       expect(savedState!.lastTrigger).toBe('before-exit');
     });
+
+    it('runner 返回 success:false 时 runBeforeExit reject', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastSuccessfulStorageUpdatedAt: null },
+      });
+      mockRunRemoteBackup.mockResolvedValueOnce({
+        success: false,
+        error: '上传失败',
+        errorStage: 'upload',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await expect(service.runBeforeExit()).rejects.toThrow('上传失败');
+
+      const calls = ctx.saveScheduledState.mock.calls;
+      const savedState = calls[calls.length - 1]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastFailureAt).toBe(ctx.now);
+      expect(savedState!.lastFailureReason).toBe('上传失败');
+      expect(savedState!.lastFailureStage).toBe('upload');
+    });
   });
 
   // -------------------------------------------------------------------------
