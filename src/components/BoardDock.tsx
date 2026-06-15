@@ -1696,7 +1696,7 @@ export const BoardDock = () => {
                                     role="switch"
                                     aria-checked={scheduledEnabledEffective}
                                     onClick={onScheduledEnabledToggle}
-                                    disabled={scheduledLoading || (!webdavPasswordSaved && !scheduledConfig.enabled)}
+                                    disabled={scheduledLoading || (!webdavPasswordSaved && !scheduledConfig.enabled) || webdavOperation !== 'idle' || zipOperation !== 'idle'}
                                     className={cn(
                                         "relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50",
                                         scheduledEnabledEffective
@@ -1745,7 +1745,7 @@ export const BoardDock = () => {
                                             id="scheduled-backup-frequency"
                                             value={scheduledConfig.frequency}
                                             onChange={(e) => onScheduledFrequencyChange(e.target.value as ScheduledRemoteBackupFrequency)}
-                                            disabled={scheduledLoading}
+                                            disabled={scheduledLoading || webdavOperation !== 'idle' || zipOperation !== 'idle'}
                                             className="bg-secondary-bg/50 border border-border-subtle rounded px-1.5 py-1 text-xs text-text-primary outline-none focus:border-blue-400 disabled:opacity-50"
                                             data-testid="scheduled-backup-frequency"
                                         >
@@ -1762,7 +1762,7 @@ export const BoardDock = () => {
                                             type="checkbox"
                                             checked={scheduledConfig.exitPromptEnabled}
                                             onChange={onExitPromptToggle}
-                                            disabled={scheduledLoading}
+                                            disabled={scheduledLoading || webdavOperation !== 'idle' || zipOperation !== 'idle'}
                                             className="rounded disabled:opacity-50"
                                             data-testid="scheduled-backup-exit-prompt"
                                         />
