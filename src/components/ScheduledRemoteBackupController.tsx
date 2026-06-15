@@ -46,14 +46,14 @@ const getAppActivity = (): AppActivitySignals => {
 export const ScheduledRemoteBackupController = () => {
   const serviceRef = useRef<ReturnType<typeof createScheduledRemoteBackupService> | null>(null);
 
-  const runnerDeps = {
+  const runnerDepsRef = useRef({
     flushNow,
     createRemoteBackup,
     readDiskStorageData: () => readDiskStorageData(STORAGE_FILENAME),
     getLatestUpdateTimestamp,
     coordinator: { tryStartBackupJob },
     now: () => Date.now(),
-  };
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -64,7 +64,7 @@ export const ScheduledRemoteBackupController = () => {
         setTimeout: (fn, ms) => window.setTimeout(fn, ms),
         clearTimeout: (id) => window.clearTimeout(id),
         getAppActivity,
-        runnerDeps,
+        runnerDeps: runnerDepsRef.current,
         loadWebDavConfig,
         loadScheduledConfig,
         saveScheduledConfig,
@@ -122,7 +122,7 @@ export const ScheduledRemoteBackupController = () => {
             throw new Error('退出前备份服务尚未就绪，请稍后重试');
           }
           const webdavConfig = { serverUrl: config.serverUrl, username: config.username, remoteDir: config.remoteDir ?? undefined };
-          const result = await runRemoteBackup(runnerDeps, webdavConfig, { jobKind: 'before-exit-remote-backup' });
+          const result = await runRemoteBackup(runnerDepsRef.current, webdavConfig, { jobKind: 'before-exit-remote-backup' });
           if (!result.success) {
             throw new Error(result.error ?? '退出前备份失败');
           }

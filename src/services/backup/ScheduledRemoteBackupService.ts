@@ -520,13 +520,17 @@ export function createScheduledRemoteBackupService(
         startScheduler();
       }
 
-      if (beforeExitError) throw beforeExitError;
+      throwBeforeExitErrorIfNeeded(beforeExitError);
     }
   }
 
   // -------------------------------------------------------------------------
   // 工具函数
   // -------------------------------------------------------------------------
+
+  function throwBeforeExitErrorIfNeeded(err: Error | null): void {
+    if (err) throw err;
+  }
 
   async function getCurrentDiskTimestamp(): Promise<number | null> {
     const storageData = await deps.readDiskStorageData();
