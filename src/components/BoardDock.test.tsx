@@ -1579,6 +1579,35 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(feedback?.textContent).toContain('远端备份已创建');
   });
 
+  it('手动远端备份成功后使用 runner 捕获的 flush 后时间戳更新最近成功快照', async () => {
+    const { createRemoteBackup, loadConfig, listBackups } = await import('../services/backup/WebDavBackupService');
+    const { flushNow } = await import('../services/storage/PersistenceFacade');
+    const { readDiskStorageData, getLatestUpdateTimestamp } = await import('../services/storage/tauriPersistence');
+    const { saveState } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup-2026.zip' });
+    vi.mocked(listBackups).mockResolvedValue([]);
+    vi.mocked(flushNow).mockResolvedValue(true);
+    vi.mocked(readDiskStorageData).mockResolvedValue({
+      boards: {}, notes: {}, trashedNotes: {}, storageUpdatedAt: 1000,
+    } as never);
+    vi.mocked(getLatestUpdateTimestamp).mockReturnValue(1000);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('创建远端备份'));
+
+    expect(saveState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastTrigger: 'manual',
+        lastManualSuccessAt: expect.any(Number),
+        lastSuccessfulStorageUpdatedAt: 1000,
+        lastRemoteFileName: 'backup-2026.zip',
+      }),
+    );
+  });
+
   it('flushNow 失败时不调用 createRemoteBackup', async () => {
     const { createRemoteBackup, loadConfig } = await import('../services/backup/WebDavBackupService');
     const { flushNow } = await import('../services/storage/PersistenceFacade');
@@ -3127,7 +3156,7 @@ describe('BoardDock 定时远端备份 UI', () => {
     });
   });
 
-  it('自动成功时间较旧、手动成功时间较新且在阈值内 → 不显示退出提示', async () => {
+  it('最近成功时间仍在 30 分钟内但磁盘快照更新 → 显示退出提示', async () => {
     const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
     const { readDiskStorageData, getLatestUpdateTimestamp } = await import('../services/storage/tauriPersistence');
@@ -3152,9 +3181,10 @@ describe('BoardDock 定时远端备份 UI', () => {
     vi.mocked(getLatestUpdateTimestamp).mockReturnValue(now);
 
     await openWebdavView();
-    await new Promise(r => setTimeout(r, 50));
-    const hint = container.querySelector('[data-testid="exit-backup-pending-hint"]');
-    expect(hint).toBeNull();
+    await vi.waitFor(() => {
+      const hint = container.querySelector('[data-testid="exit-backup-pending-hint"]');
+      expect(hint).not.toBeNull();
+    });
   });
 
   it('手动备份失败时非枚举 errorStage 归一化为 unknown', async () => {

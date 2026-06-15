@@ -16,7 +16,6 @@ import { tryStartBackupJob, type BackupJobHandle } from "../services/backup/Back
 import * as ScheduledRemoteBackupConfigService from "../services/backup/ScheduledRemoteBackupConfigService";
 import type { ScheduledRemoteBackupConfig, ScheduledRemoteBackupState, ScheduledRemoteBackupFrequency, RemoteBackupStage } from "../services/backup/ScheduledRemoteBackupConfigService";
 import { getSchedulerService, isRemoteBackupStage } from "../services/backup/ScheduledRemoteBackupService";
-import { getLatestBackupSuccessAt } from "../services/backup/quitHandler";
 import * as persistenceFacade from "../services/storage/PersistenceFacade";
 import { readDiskStorageData, getLatestUpdateTimestamp } from "../services/storage/tauriPersistence";
 import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
@@ -332,18 +331,15 @@ export const BoardDock = () => {
       setExitHintVisible(false);
       return;
     }
-    const EXIT_PROMPT_THRESHOLD_MS = 30 * 60 * 1000;
     let cancelled = false;
     (async () => {
       try {
         const diskData = await readDiskStorageData('data.json');
         const diskTs = diskData ? getLatestUpdateTimestamp(diskData) : null;
-        const lastSuccessAt = getLatestBackupSuccessAt(scheduledState);
         const hasUnsaved =
           diskTs !== null && diskTs > 0 &&
           (scheduledState.lastSuccessfulStorageUpdatedAt === null || diskTs > scheduledState.lastSuccessfulStorageUpdatedAt);
-        const beyondThreshold = lastSuccessAt === null || (Date.now() - lastSuccessAt >= EXIT_PROMPT_THRESHOLD_MS);
-        if (!cancelled) setExitHintVisible(hasUnsaved && beyondThreshold);
+        if (!cancelled) setExitHintVisible(hasUnsaved);
       } catch {
         if (!cancelled) setExitHintVisible(false);
       }
@@ -793,15 +789,15 @@ export const BoardDock = () => {
         try {
           const stateResult = await ScheduledRemoteBackupConfigService.loadState();
           if (stateResult.success && stateResult.state) {
-            const diskData = await readDiskStorageData('data.json');
-            const diskTs = diskData ? getLatestUpdateTimestamp(diskData) : null;
             const updated = {
               ...stateResult.state,
               lastFinishedAt: Date.now(),
               lastTrigger: 'manual' as const,
               lastManualSuccessAt: Date.now(),
               lastRemoteFileName: result.remoteFileName ?? null,
-              ...(diskTs !== null ? { lastSuccessfulStorageUpdatedAt: diskTs } : {}),
+              ...(result.capturedStorageUpdatedAt !== undefined && result.capturedStorageUpdatedAt !== null
+                ? { lastSuccessfulStorageUpdatedAt: result.capturedStorageUpdatedAt }
+                : {}),
             };
             await ScheduledRemoteBackupConfigService.saveState(updated);
             setScheduledState(updated);

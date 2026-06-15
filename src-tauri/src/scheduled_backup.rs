@@ -315,10 +315,43 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), String> {
 
 #[cfg(windows)]
 fn replace_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
-    if path.exists() {
-        std::fs::remove_file(path)?;
+    if !path.exists() {
+        return std::fs::rename(tmp_path, path);
     }
-    std::fs::rename(tmp_path, path)
+
+    let backup_path = backup_file_path(path)?;
+    std::fs::rename(path, &backup_path)?;
+
+    match std::fs::rename(tmp_path, path) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&backup_path);
+            Ok(())
+        }
+        Err(rename_err) => {
+            let restore_result = std::fs::rename(&backup_path, path);
+            if let Err(restore_err) = restore_result {
+                return Err(std::io::Error::new(
+                    rename_err.kind(),
+                    format!("替换失败且恢复原文件失败: {rename_err}; restore: {restore_err}"),
+                ));
+            }
+            Err(rename_err)
+        }
+    }
+}
+
+#[cfg(windows)]
+fn backup_file_path(path: &Path) -> std::io::Result<PathBuf> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "配置文件路径缺少父目录")
+    })?;
+    let file_name = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "配置文件名无效")
+    })?;
+    Ok(parent.join(format!(
+        ".{file_name}.bak-{:016x}",
+        rand::random::<u64>()
+    )))
 }
 
 #[cfg(not(windows))]
