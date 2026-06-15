@@ -24,6 +24,14 @@ import { db } from "../store/db";
 import type { Note } from "../store/types";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
+
+const FREQUENCY_MS: Record<string, number> = {
+  'every-6-hours': 6 * 60 * 60 * 1000,
+  'every-12-hours': 12 * 60 * 60 * 1000,
+  'daily': 24 * 60 * 60 * 1000,
+  'weekly': 7 * 24 * 60 * 60 * 1000,
+};
+
 type StoreState = ReturnType<typeof useStore.getState>;
 type ImportFeedback = Awaited<ReturnType<StoreState['importFromFile']>>;
 
@@ -977,13 +985,31 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'error', message: `保存自动远端备份设置失败：${result.error ?? '未知错误'}` });
         return false;
       }
-      await getSchedulerService()?.updateConfig(next);
-      try {
-        const stateResult = await ScheduledRemoteBackupConfigService.loadState();
-        if (stateResult.success && stateResult.state) {
-          setScheduledState(stateResult.state);
+      const scheduler = getSchedulerService();
+      await scheduler?.updateConfig(next);
+      if (!scheduler && next.enabled) {
+        const nextRunAt = Date.now() + (FREQUENCY_MS[next.frequency] ?? FREQUENCY_MS['daily']);
+        const loaded = await ScheduledRemoteBackupConfigService.loadState();
+        if (loaded.success && loaded.state) {
+          const updated = { ...loaded.state, nextRunAt };
+          await ScheduledRemoteBackupConfigService.saveState(updated);
+          setScheduledState(updated);
         }
-      } catch { /* 状态刷新失败静默忽略 */ }
+      } else if (!scheduler && !next.enabled) {
+        const loaded = await ScheduledRemoteBackupConfigService.loadState();
+        if (loaded.success && loaded.state) {
+          const updated = { ...loaded.state, nextRunAt: null };
+          await ScheduledRemoteBackupConfigService.saveState(updated);
+          setScheduledState(updated);
+        }
+      } else {
+        try {
+          const stateResult = await ScheduledRemoteBackupConfigService.loadState();
+          if (stateResult.success && stateResult.state) {
+            setScheduledState(stateResult.state);
+          }
+        } catch { /* 状态刷新失败静默忽略 */ }
+      }
       return true;
     } catch (err) {
       setScheduledConfig(previous);

@@ -124,12 +124,12 @@ const { DEFAULT_SCHEDULED_BACKUP_CONFIG, DEFAULT_SCHEDULED_BACKUP_STATE, mockSch
   const state = {
     lastStartedAt: null as number | null,
     lastFinishedAt: null as number | null,
-    lastTrigger: null as string | null,
+    lastTrigger: null as 'manual' | 'scheduled-interval' | 'quiet-period' | 'before-exit' | null,
     lastAutomaticSuccessAt: null as number | null,
     lastManualSuccessAt: null as number | null,
     lastFailureAt: null as number | null,
     lastFailureReason: null as string | null,
-    lastFailureStage: null as string | null,
+    lastFailureStage: null as 'config' | 'credential' | 'single-flight' | 'restore-blocked' | 'flush' | 'create-zip' | 'upload' | 'list-refresh' | 'completed' | 'unknown' | null,
     lastRemoteFileName: null as string | null,
     nextRunAt: null as number | null,
     lastSuccessfulStorageUpdatedAt: null as number | null,
@@ -2825,11 +2825,11 @@ describe('BoardDock 定时远端备份 UI', () => {
   });
 
   it('频率变更后立即刷新显示的下次尝试时间', async () => {
-    const { loadConfig, loadState, saveConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig, saveConfig, saveState } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
 
     const dailyNextRun = new Date('2026-06-14T22:30:00').getTime();
-    const weeklyNextRun = new Date('2026-06-21T10:30:00').getTime();
+    const weeklyNextRun = Date.now() + 7 * 24 * 60 * 60 * 1000;
 
     mockScheduledStateRef.current = {
       ...DEFAULT_SCHEDULED_BACKUP_STATE,
@@ -2839,17 +2839,10 @@ describe('BoardDock 定时远端备份 UI', () => {
       success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true }, error: null,
     });
     vi.mocked(saveConfig).mockResolvedValue({ success: true, error: null });
+    vi.mocked(saveState).mockResolvedValue({ success: true, error: null });
     vi.mocked(webdavLoadConfig).mockResolvedValue({
       success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
-
-    const updatedState = {
-      ...DEFAULT_SCHEDULED_BACKUP_STATE,
-      nextRunAt: weeklyNextRun,
-    };
-    vi.mocked(loadState)
-      .mockResolvedValueOnce({ success: true, state: mockScheduledStateRef.current, error: null })
-      .mockResolvedValueOnce({ success: true, state: updatedState, error: null });
 
     await openWebdavView();
 
@@ -2862,7 +2855,51 @@ describe('BoardDock 定时远端备份 UI', () => {
     });
 
     const nextRunText = container.querySelector('[data-testid="scheduled-backup-status"]');
+    const expectedFormatted = new Date(weeklyNextRun).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
     expect(nextRunText?.textContent).toContain('下次尝试');
+    expect(nextRunText?.textContent).toContain(expectedFormatted);
+    expect(nextRunText?.textContent).not.toContain('06/14 22:30');
+  });
+
+  it('scheduler 为 null 时频率变更仍更新下次尝试时间', async () => {
+    const { loadConfig, loadState, saveConfig, saveState } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+
+    mockScheduledStateRef.current = {
+      ...DEFAULT_SCHEDULED_BACKUP_STATE,
+      nextRunAt: null,
+    };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true }, error: null,
+    });
+    vi.mocked(saveConfig).mockResolvedValue({ success: true, error: null });
+    vi.mocked(saveState).mockResolvedValue({ success: true, error: null });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const frequencySelect = container.querySelector('[data-testid="scheduled-backup-frequency"]') as HTMLSelectElement;
+    expect(frequencySelect).not.toBeNull();
+
+    const beforeChange = Date.now();
+    await act(async () => {
+      frequencySelect.value = 'daily';
+      frequencySelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(loadState).toHaveBeenCalled();
+    const savedArg = vi.mocked(saveState).mock.calls[0]?.[0] as unknown as Record<string, unknown> | undefined;
+    expect(savedArg).toBeDefined();
+    expect(typeof savedArg!.nextRunAt).toBe('number');
+    expect((savedArg!.nextRunAt as number) - beforeChange).toBeGreaterThanOrEqual(24 * 60 * 60 * 1000 - 1000);
+    expect((savedArg!.nextRunAt as number) - beforeChange).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 1000);
+
+    const expectedFormatted = new Date(savedArg!.nextRunAt as number).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    const nextRunText = container.querySelector('[data-testid="scheduled-backup-status"]');
+    expect(nextRunText?.textContent).toContain('下次尝试');
+    expect(nextRunText?.textContent).toContain(expectedFormatted);
   });
 
   it('退出前提醒开关变更后持久化', async () => {

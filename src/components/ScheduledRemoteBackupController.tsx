@@ -9,6 +9,7 @@ import type { AppActivitySignals } from '../services/backup/ScheduledRemoteBacku
 import { registerSchedulerService, unregisterSchedulerService } from '../services/backup/ScheduledRemoteBackupService';
 import { loadConfig as loadScheduledConfig, saveConfig as saveScheduledConfig, loadState as loadScheduledState, saveState as saveScheduledState } from '../services/backup/ScheduledRemoteBackupConfigService';
 import { loadConfig as loadWebDavConfig, createRemoteBackup } from '../services/backup/WebDavBackupService';
+import { runRemoteBackup } from '../services/backup/RemoteBackupRunner';
 import { flushNow } from '../services/storage/PersistenceFacade';
 import { readDiskStorageData, getLatestUpdateTimestamp } from '../services/storage/tauriPersistence';
 import { tryStartBackupJob } from '../services/backup/BackupJobCoordinator';
@@ -45,6 +46,15 @@ const getAppActivity = (): AppActivitySignals => {
 export const ScheduledRemoteBackupController = () => {
   const serviceRef = useRef<ReturnType<typeof createScheduledRemoteBackupService> | null>(null);
 
+  const runnerDeps = {
+    flushNow,
+    createRemoteBackup,
+    readDiskStorageData: () => readDiskStorageData(STORAGE_FILENAME),
+    getLatestUpdateTimestamp,
+    coordinator: { tryStartBackupJob },
+    now: () => Date.now(),
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -54,14 +64,7 @@ export const ScheduledRemoteBackupController = () => {
         setTimeout: (fn, ms) => window.setTimeout(fn, ms),
         clearTimeout: (id) => window.clearTimeout(id),
         getAppActivity,
-        runnerDeps: {
-          flushNow,
-          createRemoteBackup,
-          readDiskStorageData: () => readDiskStorageData(STORAGE_FILENAME),
-          getLatestUpdateTimestamp,
-          coordinator: { tryStartBackupJob },
-          now: () => Date.now(),
-        },
+        runnerDeps,
         loadWebDavConfig,
         loadScheduledConfig,
         saveScheduledConfig,
@@ -108,12 +111,22 @@ export const ScheduledRemoteBackupController = () => {
   // 退出前备份提示监听
   useEffect(() => {
     let active = true;
+
     const unlisten = listen('remote-backup-before-quit-requested', async () => {
       if (!active) return;
       const runBeforeExit = async () => {
         const service = serviceRef.current;
         if (!service) {
-          throw new Error('退出前备份服务尚未就绪，请稍后重试');
+          const config = await loadWebDavConfig();
+          if (!config.success || !config.passwordSaved || !config.serverUrl || !config.username) {
+            throw new Error('退出前备份服务尚未就绪，请稍后重试');
+          }
+          const webdavConfig = { serverUrl: config.serverUrl, username: config.username, remoteDir: config.remoteDir ?? undefined };
+          const result = await runRemoteBackup(runnerDeps, webdavConfig, { jobKind: 'before-exit-remote-backup' });
+          if (!result.success) {
+            throw new Error(result.error ?? '退出前备份失败');
+          }
+          return;
         }
         await service.runBeforeExit();
       };
