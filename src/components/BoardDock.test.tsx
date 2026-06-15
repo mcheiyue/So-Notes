@@ -1600,10 +1600,15 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
 
     expect(saveState).toHaveBeenCalledWith(
       expect.objectContaining({
+        lastStartedAt: expect.any(Number),
         lastTrigger: 'manual',
         lastManualSuccessAt: expect.any(Number),
         lastSuccessfulStorageUpdatedAt: 1000,
+        lastAttemptCapturedStorageUpdatedAt: 1000,
         lastRemoteFileName: 'backup-2026.zip',
+        lastFailureAt: null,
+        lastFailureReason: null,
+        lastFailureStage: null,
       }),
     );
   });

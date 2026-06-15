@@ -8,7 +8,7 @@
 //! - 状态文件：`webdav-scheduled-backup-state.json`
 
 use serde::{Deserialize, Serialize};
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
@@ -313,6 +313,43 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn recover_orphaned_backup_if_missing(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        return Ok(());
+    }
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| "配置文件路径缺少父目录".to_string())?;
+    if !parent.exists() {
+        return Ok(());
+    }
+
+    let prefix = backup_file_name_prefix(path).map_err(|e| format!("配置备份文件名无效: {e}"))?;
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(parent).map_err(|e| format!("读取配置目录失败: {e}"))? {
+        let entry = entry.map_err(|e| format!("读取配置目录项失败: {e}"))?;
+        let file_name = entry.file_name();
+        if file_name.to_string_lossy().starts_with(&prefix) {
+            candidates.push(entry.path());
+        }
+    }
+
+    if candidates.is_empty() {
+        return Ok(());
+    }
+
+    candidates.sort_by_key(|candidate| {
+        fs::metadata(candidate)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+    });
+    let backup_path = candidates
+        .pop()
+        .ok_or_else(|| "未找到可恢复的配置备份文件".to_string())?;
+    fs::rename(&backup_path, path).map_err(|e| format!("恢复配置备份文件失败: {e}"))
+}
+
 #[cfg(windows)]
 fn replace_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
     if !path.exists() {
@@ -345,13 +382,15 @@ fn backup_file_path(path: &Path) -> std::io::Result<PathBuf> {
     let parent = path.parent().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "配置文件路径缺少父目录")
     })?;
+    let prefix = backup_file_name_prefix(path)?;
+    Ok(parent.join(format!("{prefix}{:016x}", rand::random::<u64>())))
+}
+
+fn backup_file_name_prefix(path: &Path) -> std::io::Result<String> {
     let file_name = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "配置文件名无效")
     })?;
-    Ok(parent.join(format!(
-        ".{file_name}.bak-{:016x}",
-        rand::random::<u64>()
-    )))
+    Ok(format!(".{file_name}.bak-"))
 }
 
 #[cfg(not(windows))]
@@ -402,6 +441,8 @@ pub async fn scheduled_backup_load_config(
     app: tauri::AppHandle,
 ) -> Result<ScheduledBackupConfigLoadResult, String> {
     let path = config_file_path(&app)?;
+
+    recover_orphaned_backup_if_missing(&path)?;
 
     if !path.exists() {
         return Ok(ScheduledBackupConfigLoadResult {
@@ -455,6 +496,8 @@ pub async fn scheduled_backup_load_state(
     app: tauri::AppHandle,
 ) -> Result<ScheduledBackupStateLoadResult, String> {
     let path = state_file_path(&app)?;
+
+    recover_orphaned_backup_if_missing(&path)?;
 
     if !path.exists() {
         return Ok(ScheduledBackupStateLoadResult {
@@ -869,6 +912,24 @@ mod tests {
         write_atomic(&path, "second").unwrap();
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "second");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn recover_orphaned_backup_if_missing_restores_backup_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "sonotes-scheduled-backup-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(CONFIG_FILENAME);
+        let backup_path = dir.join(format!(".{}.bak-0000000000000001", CONFIG_FILENAME));
+        std::fs::write(&backup_path, "backup").unwrap();
+
+        recover_orphaned_backup_if_missing(&path).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "backup");
+        assert!(!backup_path.exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

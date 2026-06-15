@@ -764,6 +764,7 @@ export const BoardDock = () => {
     if (!requireWebdavCredentials()) return;
     setWebdavFeedback(null);
     setWebdavOperation('creating');
+    const manualStartedAt = Date.now();
     try {
       const result = await runRemoteBackup(
         {
@@ -789,14 +790,23 @@ export const BoardDock = () => {
         try {
           const stateResult = await ScheduledRemoteBackupConfigService.loadState();
           if (stateResult.success && stateResult.state) {
+            const finishedAt = Date.now();
+            const capturedStorageUpdatedAt = result.capturedStorageUpdatedAt ?? null;
             const updated = {
               ...stateResult.state,
-              lastFinishedAt: Date.now(),
+              lastStartedAt: manualStartedAt,
+              lastFinishedAt: finishedAt,
               lastTrigger: 'manual' as const,
-              lastManualSuccessAt: Date.now(),
+              lastManualSuccessAt: finishedAt,
               lastRemoteFileName: result.remoteFileName ?? null,
-              ...(result.capturedStorageUpdatedAt !== undefined && result.capturedStorageUpdatedAt !== null
-                ? { lastSuccessfulStorageUpdatedAt: result.capturedStorageUpdatedAt }
+              lastFailureAt: null,
+              lastFailureReason: null,
+              lastFailureStage: null,
+              ...(capturedStorageUpdatedAt !== null
+                ? {
+                    lastSuccessfulStorageUpdatedAt: capturedStorageUpdatedAt,
+                    lastAttemptCapturedStorageUpdatedAt: capturedStorageUpdatedAt,
+                  }
                 : {}),
             };
             await ScheduledRemoteBackupConfigService.saveState(updated);
