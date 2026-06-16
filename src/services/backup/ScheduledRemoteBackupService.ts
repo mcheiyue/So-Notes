@@ -389,6 +389,8 @@ export function createScheduledRemoteBackupService(
         serviceState.hasPendingLocalChanges = false;
         const flushed = await deps.runnerDeps.flushNow();
         if (!flushed) {
+          // flush 失败时恢复 pending 标记，确保下一轮仍会尝试备份
+          serviceState.hasPendingLocalChanges = true;
           const now = deps.clock();
           patchState({
             lastFinishedAt: now,

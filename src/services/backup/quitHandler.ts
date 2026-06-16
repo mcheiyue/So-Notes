@@ -149,7 +149,19 @@ export async function handleQuitRequest(
   runBeforeExit: () => Promise<void>,
   deps: QuitHandlerDeps = DEFAULT_DEPS,
 ): Promise<void> {
-  const needsBackup = await shouldPromptExitBackup(deps);
+  let needsBackup: boolean;
+  try {
+    needsBackup = await shouldPromptExitBackup(deps);
+  } catch (error) {
+    // flush 失败等异常：进入备份失败确认流程，让用户决定是否仍要退出
+    console.warn('退出前备份判断失败:', error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const choice = await deps.promptBackupFailed(errorMsg);
+    if (choice === 'quit-anyway') {
+      deps.invoke('confirm_app_quit');
+    }
+    return;
+  }
 
   if (!needsBackup) {
     deps.invoke('confirm_app_quit');

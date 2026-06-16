@@ -819,6 +819,37 @@ describe('ScheduledRemoteBackupService', () => {
       expect(st.hasPendingLocalChanges).toBe(false);
     });
 
+    it('flush 失败后 hasPendingLocalChanges 保留为 true，下一轮仍会尝试', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 0 },
+      });
+      ctx.runnerDeps.flushNow.mockResolvedValue(false);
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      service.notifyLocalChange();
+      expect(service.getState().hasPendingLocalChanges).toBe(true);
+
+      await service.runNow();
+
+      expect(service.getState().state.lastFailureStage).toBe('flush');
+      expect(service.getState().hasPendingLocalChanges).toBe(true);
+
+      ctx.runnerDeps.flushNow.mockResolvedValue(true);
+      ctx.readDiskStorageData.mockResolvedValue({
+        boards: {},
+        notes: {},
+        trashedNotes: {},
+        storageUpdatedAt: 999999,
+      } as never);
+
+      await service.runNow();
+
+      expect(mockRunRemoteBackup).toHaveBeenCalled();
+      expect(service.getState().hasPendingLocalChanges).toBe(false);
+    });
+
     it('stop 后 hasPendingLocalChanges 被重置', async () => {
       const ctx = createTestContext({ config: { enabled: false } });
       const service = createScheduledRemoteBackupService(ctx.deps);

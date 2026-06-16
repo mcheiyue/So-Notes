@@ -449,5 +449,31 @@ describe('handleQuitRequest', () => {
       expect(deps.closeDialog).toHaveBeenCalled();
       expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
     });
+
+    it('shouldPromptExitBackup 抛出异常（flush 失败）→ 进入备份失败确认流程', async () => {
+      const promptBackupFailed = vi.fn().mockResolvedValue('cancel' as const);
+      const deps = makeDeps({
+        flushNow: vi.fn().mockResolvedValue(false),
+        promptBackupFailed,
+      });
+
+      await handleQuitRequest(vi.fn(), deps);
+
+      expect(promptBackupFailed).toHaveBeenCalledWith('flush 失败，无法确认磁盘数据完整性');
+      expect(deps.invoke).not.toHaveBeenCalledWith('confirm_app_quit');
+    });
+
+    it('shouldPromptExitBackup 抛出异常后用户选择"仍然退出" → 退出', async () => {
+      const promptBackupFailed = vi.fn().mockResolvedValue('quit-anyway' as const);
+      const deps = makeDeps({
+        flushNow: vi.fn().mockResolvedValue(false),
+        promptBackupFailed,
+      });
+
+      await handleQuitRequest(vi.fn(), deps);
+
+      expect(promptBackupFailed).toHaveBeenCalled();
+      expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
+    });
   });
 });
