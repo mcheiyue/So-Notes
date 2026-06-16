@@ -23,6 +23,7 @@ export type RemoteBackupStage =
 const ERROR_STAGE_MAP: Record<string, RemoteBackupStage> = {
   auth: 'credential',
   read_local_file: 'create-zip',
+  upload: 'upload',
   network: 'upload',
   upload_retry_exhausted: 'upload',
   lock: 'single-flight',

@@ -1931,29 +1931,83 @@ pub async fn webdav_create_remote_backup(
     };
 
     let store = SystemWebDavCredentialStore::new();
-    let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
+    let secret = match resolve_webdav_operation_secret(&app, &config, &store) {
+        Ok(s) => s,
+        Err(e) => {
+            return Ok(WebDavUploadResult {
+                success: false,
+                remote_file_name: None,
+                error: Some(e),
+                error_stage: Some("credential".to_string()),
+                error_code: None,
+            });
+        }
+    };
     let mut config = config;
     config.password = Some(secret);
-    let target = build_webdav_request_target(&config)?;
+    let target = match build_webdav_request_target(&config) {
+        Ok(t) => t,
+        Err(e) => {
+            return Ok(WebDavUploadResult {
+                success: false,
+                remote_file_name: None,
+                error: Some(e),
+                error_stage: Some("config".to_string()),
+                error_code: None,
+            });
+        }
+    };
 
-    let pending_dir = webdav_pending_dir(&app)?;
-    std::fs::create_dir_all(&pending_dir)
-        .map_err(|_| "远端备份上传失败，本地数据未受影响".to_string())?;
+    let pending_dir = match webdav_pending_dir(&app) {
+        Ok(d) => d,
+        Err(e) => {
+            return Ok(WebDavUploadResult {
+                success: false,
+                remote_file_name: None,
+                error: Some(e),
+                error_stage: Some("create-zip".to_string()),
+                error_code: None,
+            });
+        }
+    };
+    if let Err(e) = std::fs::create_dir_all(&pending_dir) {
+        return Ok(WebDavUploadResult {
+            success: false,
+            remote_file_name: None,
+            error: Some(format!("创建本地临时目录失败: {e}")),
+            error_stage: Some("create-zip".to_string()),
+            error_code: None,
+        });
+    }
 
     let temp_id: u64 = rand::random();
     let temp_zip_name = format!("webdav-pending-{temp_id:016x}.zip");
     let temp_zip_path = pending_dir.join(&temp_zip_name);
     let temp_zip_path_str = temp_zip_path.to_string_lossy().to_string();
 
-    let backup_result = backup::create_local_backup(app.clone(), temp_zip_path_str).await?;
+    let backup_result = match backup::create_local_backup(app.clone(), temp_zip_path_str).await {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_zip_path);
+            return Ok(WebDavUploadResult {
+                success: false,
+                remote_file_name: None,
+                error: Some(e),
+                error_stage: Some("create-zip".to_string()),
+                error_code: None,
+            });
+        }
+    };
 
     if !backup_result.success {
         let _ = std::fs::remove_file(&temp_zip_path);
-        return Err(
-            backup_result
-                .error
-                .unwrap_or_else(|| "远端备份上传失败，本地数据未受影响".to_string()),
-        );
+        return Ok(WebDavUploadResult {
+            success: false,
+            remote_file_name: None,
+            error: Some(backup_result.error.unwrap_or_else(|| "创建备份文件失败".to_string())),
+            error_stage: Some("create-zip".to_string()),
+            error_code: None,
+        });
     }
 
     let actual_zip_path = backup_result
@@ -1967,11 +2021,31 @@ pub async fn webdav_create_remote_backup(
         if actual_zip_path != temp_zip_path {
             let _ = std::fs::remove_file(&temp_zip_path);
         }
-        return Err("远端备份上传失败，本地数据未受影响".to_string());
+        return Ok(WebDavUploadResult {
+            success: false,
+            remote_file_name: None,
+            error: Some("备份文件路径校验失败".to_string()),
+            error_stage: Some("create-zip".to_string()),
+            error_code: None,
+        });
     }
 
-    let client = build_webdav_http_client(Duration::from_secs(60))
-        .map_err(|_| "远端备份上传失败，本地数据未受影响".to_string())?;
+    let client = match build_webdav_http_client(Duration::from_secs(60)) {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = std::fs::remove_file(&actual_zip_path);
+            if actual_zip_path != temp_zip_path {
+                let _ = std::fs::remove_file(&temp_zip_path);
+            }
+            return Ok(WebDavUploadResult {
+                success: false,
+                remote_file_name: None,
+                error: Some(format!("构建 HTTP 客户端失败: {e}")),
+                error_stage: Some("upload".to_string()),
+                error_code: None,
+            });
+        }
+    };
 
     let result = webdav_upload_backup_with_client(&client, &target, &actual_zip_path).await;
 

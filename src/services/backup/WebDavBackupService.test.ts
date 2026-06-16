@@ -548,6 +548,10 @@ describe('WebDavBackupService', () => {
       expect(normalizeErrorStage('network')).toBe('upload');
     });
 
+    it('upload 映射为 upload', () => {
+      expect(normalizeErrorStage('upload')).toBe('upload');
+    });
+
     it('upload_retry_exhausted 映射为 upload', () => {
       expect(normalizeErrorStage('upload_retry_exhausted')).toBe('upload');
     });

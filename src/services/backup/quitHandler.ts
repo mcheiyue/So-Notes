@@ -94,6 +94,7 @@ export async function shouldPromptExitBackup(
     ]);
 
     if (!scheduledResult.success || !scheduledResult.config) return false;
+    if (!scheduledResult.config.enabled) return false;
     if (!webdavResult.success) return false;
 
     const { exitPromptEnabled } = scheduledResult.config;
@@ -106,7 +107,8 @@ export async function shouldPromptExitBackup(
     if (!state) return true;
 
     // 读盘前先 flush debounce 缓冲区，避免漏掉刚编辑但尚未持久化的数据
-    await (deps.flushNow?.() ?? Promise.resolve());
+    const flushOk = await (deps.flushNow?.() ?? Promise.resolve());
+    if (flushOk === false) return false;
 
     const diskData = await readDiskStorageDataFn();
     const diskTimestamp = diskData ? getLatestUpdateTimestampFn(diskData) : null;

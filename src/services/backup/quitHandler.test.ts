@@ -112,6 +112,31 @@ describe('shouldPromptExitBackup', () => {
     expect(result).toBe(true);
   });
 
+  it('自动备份关闭（enabled=false）时返回 false，即使 exitPromptEnabled=true', async () => {
+    const deps = makeDeps({
+      loadScheduledConfig: vi.fn().mockResolvedValue(
+        makeScheduledConfigResult({
+          config: {
+            enabled: false,
+            frequency: 'daily',
+            quietPeriodMinutes: 5,
+            exitPromptEnabled: true,
+          },
+        }),
+      ),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+
+  it('flushNow 返回 false 时返回 false，不误判为无未备份变化', async () => {
+    const deps = makeDeps({
+      flushNow: vi.fn().mockResolvedValue(false),
+    });
+    const result = await shouldPromptExitBackup(deps);
+    expect(result).toBe(false);
+  });
+
   it('exitPromptEnabled 为 false 时返回 false', async () => {
     const deps = makeDeps({
       loadScheduledConfig: vi.fn().mockResolvedValue(
