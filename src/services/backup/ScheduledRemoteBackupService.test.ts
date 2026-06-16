@@ -850,6 +850,24 @@ describe('ScheduledRemoteBackupService', () => {
       expect(service.getState().hasPendingLocalChanges).toBe(false);
     });
 
+    it('flushNow reject 后 hasPendingLocalChanges 保留为 true', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 0 },
+      });
+      ctx.runnerDeps.flushNow.mockRejectedValue(new Error('无活跃句柄'));
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      service.notifyLocalChange();
+      expect(service.getState().hasPendingLocalChanges).toBe(true);
+
+      await service.runNow();
+
+      expect(service.getState().state.lastFailureStage).toBe('flush');
+      expect(service.getState().hasPendingLocalChanges).toBe(true);
+    });
+
     it('stop 后 hasPendingLocalChanges 被重置', async () => {
       const ctx = createTestContext({ config: { enabled: false } });
       const service = createScheduledRemoteBackupService(ctx.deps);
