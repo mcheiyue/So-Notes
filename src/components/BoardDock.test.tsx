@@ -3192,12 +3192,15 @@ describe('BoardDock 定时远端备份 UI', () => {
     });
   });
 
-  it('手动备份失败时非枚举 errorStage 归一化为 unknown', async () => {
+  it('手动备份失败时非枚举 errorStage 归一化为 unknown 且写入 capturedStorageUpdatedAt', async () => {
     const { saveState } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const { loadConfig: webdavLoadConfig, createRemoteBackup } = await import('../services/backup/WebDavBackupService');
+    const { readDiskStorageData, getLatestUpdateTimestamp } = await import('../services/storage/tauriPersistence');
     vi.mocked(webdavLoadConfig).mockResolvedValue({
       success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
+    vi.mocked(readDiskStorageData).mockResolvedValue({ boards: {}, notes: {}, trashedNotes: {}, storageUpdatedAt: 1234 } as never);
+    vi.mocked(getLatestUpdateTimestamp).mockReturnValue(1234);
     vi.mocked(createRemoteBackup).mockResolvedValue({
       success: false,
       error: '认证失败',
@@ -3209,7 +3212,11 @@ describe('BoardDock 定时远端备份 UI', () => {
     await clickElement(findButtonByText('创建远端备份'));
 
     expect(saveState).toHaveBeenCalledWith(
-      expect.objectContaining({ lastFailureStage: 'unknown' }),
+      expect.objectContaining({
+        lastStartedAt: expect.any(Number),
+        lastAttemptCapturedStorageUpdatedAt: 1234,
+        lastFailureStage: 'unknown',
+      }),
     );
   });
 });

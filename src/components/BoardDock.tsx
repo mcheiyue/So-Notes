@@ -820,13 +820,19 @@ export const BoardDock = () => {
         try {
           const stateResult = await ScheduledRemoteBackupConfigService.loadState();
           if (stateResult.success && stateResult.state) {
+            const finishedAt = Date.now();
+            const capturedStorageUpdatedAt = result.capturedStorageUpdatedAt ?? null;
             const updated = {
               ...stateResult.state,
-              lastFinishedAt: Date.now(),
+              lastStartedAt: manualStartedAt,
+              lastFinishedAt: finishedAt,
               lastTrigger: 'manual' as const,
-              lastFailureAt: Date.now(),
+              lastFailureAt: finishedAt,
               lastFailureReason: result.error ?? '未知错误',
               lastFailureStage: isRemoteBackupStage(result.errorStage ?? '') ? (result.errorStage as RemoteBackupStage) : 'unknown',
+              ...(capturedStorageUpdatedAt !== null
+                ? { lastAttemptCapturedStorageUpdatedAt: capturedStorageUpdatedAt }
+                : {}),
             };
             await ScheduledRemoteBackupConfigService.saveState(updated);
             setScheduledState(updated);
