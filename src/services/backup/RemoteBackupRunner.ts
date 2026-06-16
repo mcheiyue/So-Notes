@@ -59,13 +59,12 @@ export interface RunRemoteBackupOptions {
 }
 
 // ---------------------------------------------------------------------------
-// 错误阶段常量
+// 错误阶段常量（与 RemoteBackupStage 联合类型对齐）
 // ---------------------------------------------------------------------------
 
-/**
- * 远端备份失败阶段标识，用于前端展示分类错误信息。
- */
-export const RemoteBackupErrorStage = {
+import type { RemoteBackupStage } from './ScheduledRemoteBackupConfigService';
+
+export const RemoteBackupErrorStage: Record<string, RemoteBackupStage> = {
   Flush: 'flush',
   SingleFlight: 'single-flight',
   Unknown: 'unknown',

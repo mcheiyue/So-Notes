@@ -3204,7 +3204,7 @@ describe('BoardDock 定时远端备份 UI', () => {
     vi.mocked(createRemoteBackup).mockResolvedValue({
       success: false,
       error: '认证失败',
-      errorStage: 'auth',
+      errorStage: 'credential',
     });
     vi.mocked(saveState).mockResolvedValue({ success: true, error: null });
 
@@ -3215,7 +3215,7 @@ describe('BoardDock 定时远端备份 UI', () => {
       expect.objectContaining({
         lastStartedAt: expect.any(Number),
         lastAttemptCapturedStorageUpdatedAt: 1234,
-        lastFailureStage: 'unknown',
+        lastFailureStage: 'credential',
       }),
     );
   });

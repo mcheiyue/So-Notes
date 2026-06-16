@@ -353,7 +353,7 @@ describe('RemoteBackupRunner', () => {
         createRemoteBackup: vi.fn(async () => ({
           success: false,
           error: 'WebDAV 鉴权失败',
-          errorStage: 'auth',
+          errorStage: 'credential' as const,
           errorCode: '401',
         })),
       });
@@ -362,7 +362,7 @@ describe('RemoteBackupRunner', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('WebDAV 鉴权失败');
-      expect(result.errorStage).toBe('auth');
+      expect(result.errorStage).toBe('credential');
       expect(result.errorCode).toBe('401');
     });
 

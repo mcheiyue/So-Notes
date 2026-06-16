@@ -1,20 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-
-// ---------------------------------------------------------------------------
-// 远端备份阶段类型（与 ScheduledRemoteBackupConfigService.RemoteBackupStage 对齐）
-// ---------------------------------------------------------------------------
-
-export type RemoteBackupStage =
-  | 'config'
-  | 'credential'
-  | 'single-flight'
-  | 'restore-blocked'
-  | 'flush'
-  | 'create-zip'
-  | 'upload'
-  | 'list-refresh'
-  | 'completed'
-  | 'unknown';
+import type { RemoteBackupStage } from './ScheduledRemoteBackupConfigService';
 
 // ---------------------------------------------------------------------------
 // Rust errorStage → 前端 RemoteBackupStage 映射
@@ -107,7 +92,7 @@ export interface WebDavUploadResult {
   readonly success: boolean;
   readonly remoteFileName?: string | null;
   readonly error?: string;
-  readonly errorStage?: string;
+  readonly errorStage?: RemoteBackupStage;
   readonly errorCode?: string;
   /** flushNow 成功后从磁盘重新读取的 storageUpdatedAt 时间戳。 */
   readonly capturedStorageUpdatedAt?: number | null;
