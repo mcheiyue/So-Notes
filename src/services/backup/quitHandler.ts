@@ -82,6 +82,14 @@ export function getLatestBackupSuccessAt(
 export async function shouldPromptExitBackup(
   deps: Pick<QuitHandlerDeps, 'loadScheduledConfig' | 'loadWebDavConfig' | 'loadScheduledState' | 'readDiskStorageData' | 'getLatestUpdateTimestamp' | 'flushNow'> = DEFAULT_DEPS,
 ): Promise<boolean> {
+  // 读盘前先 flush debounce 缓冲区，避免漏掉刚编辑但尚未持久化的数据。
+  // flush 失败必须向外传播，让 handleQuitRequest 进入备份失败确认流程；
+  // 因此放在 try-catch 之外，不被下面的 catch 吞掉。
+  const flushOk = await (deps.flushNow?.() ?? Promise.resolve());
+  if (flushOk === false) {
+    throw new Error('flush 失败，无法确认磁盘数据完整性');
+  }
+
   try {
     const loadScheduledStateFn = deps.loadScheduledState ?? loadScheduledState;
     const readDiskStorageDataFn = deps.readDiskStorageData ?? (async () => null);
@@ -105,12 +113,6 @@ export async function shouldPromptExitBackup(
 
     const state = stateResult.success ? stateResult.state : null;
     if (!state) return true;
-
-    // 读盘前先 flush debounce 缓冲区，避免漏掉刚编辑但尚未持久化的数据
-    const flushOk = await (deps.flushNow?.() ?? Promise.resolve());
-    if (flushOk === false) {
-      throw new Error('flush 失败，无法确认磁盘数据完整性');
-    }
 
     const diskData = await readDiskStorageDataFn();
     const diskTimestamp = diskData ? getLatestUpdateTimestampFn(diskData) : null;

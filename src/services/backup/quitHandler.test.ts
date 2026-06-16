@@ -129,12 +129,11 @@ describe('shouldPromptExitBackup', () => {
     expect(result).toBe(false);
   });
 
-  it('flushNow 返回 false 时返回 false，不误判为无未备份变化', async () => {
+  it('flushNow 返回 false 时抛出异常，让 handleQuitRequest 进入备份失败流程', async () => {
     const deps = makeDeps({
       flushNow: vi.fn().mockResolvedValue(false),
     });
-    const result = await shouldPromptExitBackup(deps);
-    expect(result).toBe(false);
+    await expect(shouldPromptExitBackup(deps)).rejects.toThrow('flush 失败');
   });
 
   it('exitPromptEnabled 为 false 时返回 false', async () => {
