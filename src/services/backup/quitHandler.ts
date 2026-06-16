@@ -94,7 +94,6 @@ export async function shouldPromptExitBackup(
     ]);
 
     if (!scheduledResult.success || !scheduledResult.config) return false;
-    if (!scheduledResult.config.enabled) return false;
     if (!webdavResult.success) return false;
 
     const { exitPromptEnabled } = scheduledResult.config;

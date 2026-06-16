@@ -610,5 +610,13 @@ export function createScheduledRemoteBackupService(
       ...serviceState,
       state: { ...internalState },
     }),
+
+    reloadState: async () => {
+      const result = await deps.loadScheduledState();
+      if (result.success && result.state) {
+        internalState = { ...result.state };
+        serviceState.state = internalState;
+      }
+    },
   };
 }

@@ -112,7 +112,7 @@ describe('shouldPromptExitBackup', () => {
     expect(result).toBe(true);
   });
 
-  it('自动备份关闭（enabled=false）时返回 false，即使 exitPromptEnabled=true', async () => {
+  it('自动备份关闭（enabled=false）时不阻止退出提示，仍检查 exitPromptEnabled 和凭据', async () => {
     const deps = makeDeps({
       loadScheduledConfig: vi.fn().mockResolvedValue(
         makeScheduledConfigResult({
@@ -126,7 +126,7 @@ describe('shouldPromptExitBackup', () => {
       ),
     });
     const result = await shouldPromptExitBackup(deps);
-    expect(result).toBe(false);
+    expect(result).toBe(true);
   });
 
   it('flushNow 返回 false 时抛出异常，让 handleQuitRequest 进入备份失败流程', async () => {

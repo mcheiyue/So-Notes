@@ -423,6 +423,12 @@ export const BoardDock = () => {
     const targetPath = await saveZipDialog(defaultName);
     if (!targetPath) return;
 
+    const localJobHandle = tryStartBackupJob('manual-local-backup');
+    if (!localJobHandle) {
+      setZipFeedback({ status: 'error', message: '备份失败：已有备份任务正在运行，请稍后重试。' });
+      return;
+    }
+
     setZipFeedback(null);
     setZipOperation('backing-up');
     try {
@@ -443,6 +449,7 @@ export const BoardDock = () => {
     } catch (err) {
       setZipFeedback({ status: 'error', message: `备份失败：${formatUnknownError(err)}` });
     } finally {
+      localJobHandle.release();
       setZipOperation('idle');
     }
   };
@@ -811,6 +818,7 @@ export const BoardDock = () => {
             };
             await ScheduledRemoteBackupConfigService.saveState(updated);
             setScheduledState(updated);
+            await getSchedulerService()?.reloadState();
           }
         } catch {
           // state update failure is non-critical for manual backup
@@ -836,6 +844,7 @@ export const BoardDock = () => {
             };
             await ScheduledRemoteBackupConfigService.saveState(updated);
             setScheduledState(updated);
+            await getSchedulerService()?.reloadState();
           }
         } catch {
           // state update failure is non-critical
