@@ -15,6 +15,8 @@ export interface ScheduledRemoteBackupConfig {
   readonly frequency: ScheduledRemoteBackupFrequency;
   readonly quietPeriodMinutes: number;
   readonly exitPromptEnabled: boolean;
+  readonly retentionEnabled: boolean;
+  readonly retentionCount: number | null;
 }
 
 export type RemoteBackupTrigger =
@@ -50,6 +52,10 @@ export interface ScheduledRemoteBackupState {
   readonly lastAttemptCapturedStorageUpdatedAt: number | null;
   readonly consecutiveCredentialFailures: number;
   readonly credentialActionRequired: boolean;
+  readonly cliffDropDetectedAt: number | null;
+  readonly baselineConfirmedRemoteCount: number | null;
+  readonly cliffDropDeferred: boolean;
+  readonly pendingCleanupTargetCount: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +104,8 @@ export const DEFAULT_SCHEDULED_BACKUP_CONFIG: Readonly<ScheduledRemoteBackupConf
   frequency: 'daily',
   quietPeriodMinutes: 5,
   exitPromptEnabled: true,
+  retentionEnabled: false,
+  retentionCount: null,
 } as const;
 
 export const DEFAULT_SCHEDULED_BACKUP_STATE: Readonly<ScheduledRemoteBackupState> = {
@@ -115,6 +123,10 @@ export const DEFAULT_SCHEDULED_BACKUP_STATE: Readonly<ScheduledRemoteBackupState
   lastAttemptCapturedStorageUpdatedAt: null,
   consecutiveCredentialFailures: 0,
   credentialActionRequired: false,
+  cliffDropDetectedAt: null,
+  baselineConfirmedRemoteCount: null,
+  cliffDropDeferred: false,
+  pendingCleanupTargetCount: null,
 } as const;
 
 // ---------------------------------------------------------------------------

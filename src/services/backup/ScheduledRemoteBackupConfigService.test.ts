@@ -124,6 +124,8 @@ describe('ScheduledRemoteBackupConfigService', () => {
         frequency: 'every-6-hours',
         quietPeriodMinutes: 10,
         exitPromptEnabled: false,
+        retentionEnabled: false,
+        retentionCount: null,
       };
       const expected = {
         success: true,
@@ -165,6 +167,8 @@ describe('ScheduledRemoteBackupConfigService', () => {
         frequency: 'daily',
         quietPeriodMinutes: 5,
         exitPromptEnabled: true,
+        retentionEnabled: false,
+        retentionCount: null,
       };
       const expected = { success: true, error: null };
       invokeMock.mockResolvedValueOnce(expected);

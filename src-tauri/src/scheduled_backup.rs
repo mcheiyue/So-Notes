@@ -76,6 +76,10 @@ pub struct ScheduledRemoteBackupConfig {
     pub quiet_period_minutes: u32,
     /// 是否在退出前提示备份。
     pub exit_prompt_enabled: bool,
+    /// 是否启用备份保留策略。
+    pub retention_enabled: bool,
+    /// 保留备份数量上限；None 表示无限保留。
+    pub retention_count: Option<u32>,
 }
 
 impl Default for ScheduledRemoteBackupConfig {
@@ -85,6 +89,8 @@ impl Default for ScheduledRemoteBackupConfig {
             frequency: ScheduledRemoteBackupFrequency::Daily,
             quiet_period_minutes: 5,
             exit_prompt_enabled: true,
+            retention_enabled: false,
+            retention_count: None,
         }
     }
 }
@@ -97,6 +103,10 @@ struct ScheduledRemoteBackupConfigFile {
     frequency: ScheduledRemoteBackupFrequency,
     quiet_period_minutes: u32,
     exit_prompt_enabled: bool,
+    #[serde(default)]
+    retention_enabled: bool,
+    #[serde(default)]
+    retention_count: Option<u32>,
 }
 
 impl From<ScheduledRemoteBackupConfigFile> for ScheduledRemoteBackupConfig {
@@ -106,6 +116,8 @@ impl From<ScheduledRemoteBackupConfigFile> for ScheduledRemoteBackupConfig {
             frequency: f.frequency,
             quiet_period_minutes: f.quiet_period_minutes,
             exit_prompt_enabled: f.exit_prompt_enabled,
+            retention_enabled: f.retention_enabled,
+            retention_count: f.retention_count,
         }
     }
 }
@@ -162,6 +174,14 @@ pub struct ScheduledRemoteBackupState {
     pub last_attempt_captured_storage_updated_at: Option<u64>,
     pub consecutive_credential_failures: u32,
     pub credential_action_required: bool,
+    /// 断崖式远端文件数骤降首次检测时间。
+    pub cliff_drop_detected_at: Option<u64>,
+    /// 断崖式检测确认时远端文件基准数量。
+    pub baseline_confirmed_remote_count: Option<u32>,
+    /// 断崖式骤降已触发延迟处理。
+    pub cliff_drop_deferred: bool,
+    /// 等待清理的目标保留数量。
+    pub pending_cleanup_target_count: Option<u32>,
 }
 
 impl Default for ScheduledRemoteBackupState {
@@ -181,6 +201,10 @@ impl Default for ScheduledRemoteBackupState {
             last_attempt_captured_storage_updated_at: None,
             consecutive_credential_failures: 0,
             credential_action_required: false,
+            cliff_drop_detected_at: None,
+            baseline_confirmed_remote_count: None,
+            cliff_drop_deferred: false,
+            pending_cleanup_target_count: None,
         }
     }
 }
@@ -474,6 +498,8 @@ pub async fn scheduled_backup_save_config(
         frequency: config.frequency,
         quiet_period_minutes: config.quiet_period_minutes,
         exit_prompt_enabled: config.exit_prompt_enabled,
+        retention_enabled: config.retention_enabled,
+        retention_count: config.retention_count,
     };
 
     let content = serde_json::to_string_pretty(&file_config)
@@ -616,6 +642,8 @@ mod tests {
         assert_eq!(config.frequency, ScheduledRemoteBackupFrequency::Daily);
         assert_eq!(config.quiet_period_minutes, 5);
         assert!(config.exit_prompt_enabled);
+        assert!(!config.retention_enabled);
+        assert!(config.retention_count.is_none());
     }
 
     #[test]
@@ -648,6 +676,10 @@ mod tests {
         assert!(state.last_attempt_captured_storage_updated_at.is_none());
         assert_eq!(state.consecutive_credential_failures, 0);
         assert!(!state.credential_action_required);
+        assert!(state.cliff_drop_detected_at.is_none());
+        assert!(state.baseline_confirmed_remote_count.is_none());
+        assert!(!state.cliff_drop_deferred);
+        assert!(state.pending_cleanup_target_count.is_none());
     }
 
     #[test]
@@ -670,6 +702,8 @@ mod tests {
             frequency: ScheduledRemoteBackupFrequency::Every12Hours,
             quiet_period_minutes: 10,
             exit_prompt_enabled: false,
+            retention_enabled: true,
+            retention_count: Some(5),
         };
 
         let json = serde_json::to_string(&config).unwrap();
@@ -682,6 +716,8 @@ mod tests {
         );
         assert_eq!(deserialized.quiet_period_minutes, 10);
         assert!(!deserialized.exit_prompt_enabled);
+        assert!(deserialized.retention_enabled);
+        assert_eq!(deserialized.retention_count, Some(5));
     }
 
     #[test]
@@ -691,6 +727,8 @@ mod tests {
             frequency: ScheduledRemoteBackupFrequency::Weekly,
             quiet_period_minutes: 15,
             exit_prompt_enabled: true,
+            retention_enabled: true,
+            retention_count: Some(10),
         };
 
         let json = serde_json::to_string(&file_config).unwrap();
@@ -702,6 +740,8 @@ mod tests {
         assert_eq!(config.frequency, ScheduledRemoteBackupFrequency::Weekly);
         assert_eq!(config.quiet_period_minutes, 15);
         assert!(config.exit_prompt_enabled);
+        assert!(config.retention_enabled);
+        assert_eq!(config.retention_count, Some(10));
     }
 
     #[test]
@@ -717,6 +757,18 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("解析定时备份配置文件失败"));
+    }
+
+    #[test]
+    fn parse_config_content_backward_compat_without_retention_fields() {
+        let result = parse_config_content(
+            r#"{"enabled":true,"frequency":"daily","quietPeriodMinutes":5,"exitPromptEnabled":true}"#,
+        );
+
+        assert!(result.success);
+        let config = result.config.unwrap();
+        assert!(!config.retention_enabled);
+        assert!(config.retention_count.is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -740,6 +792,10 @@ mod tests {
             last_attempt_captured_storage_updated_at: Some(1700000050000),
             consecutive_credential_failures: 0,
             credential_action_required: false,
+            cliff_drop_detected_at: Some(1700001000000),
+            baseline_confirmed_remote_count: Some(20),
+            cliff_drop_deferred: true,
+            pending_cleanup_target_count: Some(15),
         };
 
         let json = serde_json::to_string(&state).unwrap();
@@ -756,6 +812,10 @@ mod tests {
         );
         assert_eq!(deserialized.consecutive_credential_failures, 0);
         assert!(!deserialized.credential_action_required);
+        assert_eq!(deserialized.cliff_drop_detected_at, Some(1700001000000));
+        assert_eq!(deserialized.baseline_confirmed_remote_count, Some(20));
+        assert!(deserialized.cliff_drop_deferred);
+        assert_eq!(deserialized.pending_cleanup_target_count, Some(15));
     }
 
     #[test]
@@ -791,6 +851,10 @@ mod tests {
         assert!(json.contains("lastAttemptCapturedStorageUpdatedAt"));
         assert!(json.contains("consecutiveCredentialFailures"));
         assert!(json.contains("credentialActionRequired"));
+        assert!(json.contains("cliffDropDetectedAt"));
+        assert!(json.contains("baselineConfirmedRemoteCount"));
+        assert!(json.contains("cliffDropDeferred"));
+        assert!(json.contains("pendingCleanupTargetCount"));
     }
 
     // -----------------------------------------------------------------------

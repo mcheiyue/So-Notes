@@ -62,7 +62,7 @@ vi.mock('../services/backup/WebDavBackupService', () => ({
   saveConfig: vi.fn(async () => ({ success: true })),
   clearConfig: vi.fn(async () => ({ success: true })),
   testConnection: vi.fn(async () => ({ success: true })),
-  createRemoteBackup: vi.fn(async () => ({ success: true, remoteFileName: 'backup.zip' })),
+  createRemoteBackup: vi.fn(async () => ({ success: true, remoteFileName: 'backup.zip', summary: null, zipSizeBytes: null })),
   listBackups: vi.fn(async () => []),
   deleteBackup: vi.fn(async () => ({ success: true })),
   downloadBackup: vi.fn(async () => ({ success: true, downloadToken: 'tok-1' })),
@@ -120,6 +120,8 @@ const { DEFAULT_SCHEDULED_BACKUP_CONFIG, DEFAULT_SCHEDULED_BACKUP_STATE, mockSch
     frequency: 'daily' as const,
     quietPeriodMinutes: 5,
     exitPromptEnabled: true,
+    retentionEnabled: false,
+    retentionCount: null as number | null,
   };
   const state = {
     lastStartedAt: null as number | null,
@@ -136,6 +138,10 @@ const { DEFAULT_SCHEDULED_BACKUP_CONFIG, DEFAULT_SCHEDULED_BACKUP_STATE, mockSch
     lastAttemptCapturedStorageUpdatedAt: null as number | null,
     consecutiveCredentialFailures: 0,
     credentialActionRequired: false,
+    cliffDropDetectedAt: null as number | null,
+    baselineConfirmedRemoteCount: null as number | null,
+    cliffDropDeferred: false,
+    pendingCleanupTargetCount: null as number | null,
   };
   return {
     DEFAULT_SCHEDULED_BACKUP_CONFIG: config,
@@ -635,7 +641,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     vi.mocked(saveZipDialog).mockResolvedValue('/backups/test.zip');
     vi.mocked(createLocalBackup).mockResolvedValue({
-      success: true, backupPath: '/backups/test.zip', noteCount: 5, boardCount: 2, attachmentCount: 3,
+      success: true, backupPath: '/backups/test.zip', noteCount: 5, boardCount: 2, attachmentCount: 3, summary: null, zipSizeBytes: null,
     });
 
     await openDataSettings();
@@ -670,7 +676,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     vi.mocked(saveZipDialog).mockResolvedValue('/backups/test.zip');
     vi.mocked(createLocalBackup).mockResolvedValue({
-      success: false, noteCount: 0, boardCount: 0, attachmentCount: 0, error: '磁盘空间不足',
+      success: false, noteCount: 0, boardCount: 0, attachmentCount: 0, error: '磁盘空间不足', summary: null, zipSizeBytes: null,
     });
 
     await openDataSettings();
@@ -861,7 +867,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     vi.mocked(saveZipDialog).mockResolvedValue('/backups/test.zip');
     vi.mocked(createLocalBackup).mockResolvedValue({
-      success: true, noteCount: 1, boardCount: 1, attachmentCount: 0,
+      success: true, noteCount: 1, boardCount: 1, attachmentCount: 0, summary: null, zipSizeBytes: null,
     });
 
     await openDataSettings();
@@ -879,7 +885,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     vi.mocked(saveZipDialog).mockResolvedValue('/backups/trash-test.zip');
     vi.mocked(createLocalBackup).mockResolvedValue({
-      success: true, backupPath: '/backups/trash-test.zip', noteCount: 3, boardCount: 1, attachmentCount: 1,
+      success: true, backupPath: '/backups/trash-test.zip', noteCount: 3, boardCount: 1, attachmentCount: 1, summary: null, zipSizeBytes: null,
     });
     vi.mocked(flushNow).mockResolvedValue(true);
 
@@ -1564,7 +1570,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     vi.mocked(loadConfig).mockResolvedValue({
       success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
-    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup-2026.zip' });
+    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup-2026.zip', summary: null, zipSizeBytes: null });
     vi.mocked(listBackups).mockResolvedValue([]);
     vi.mocked(flushNow).mockResolvedValue(true);
 
@@ -1587,7 +1593,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     vi.mocked(loadConfig).mockResolvedValue({
       success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
-    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup-2026.zip' });
+    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup-2026.zip', summary: null, zipSizeBytes: null });
     vi.mocked(listBackups).mockResolvedValue([]);
     vi.mocked(flushNow).mockResolvedValue(true);
     vi.mocked(readDiskStorageData).mockResolvedValue({
@@ -2248,7 +2254,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { createRemoteBackup, loadConfig } = await import('../services/backup/WebDavBackupService');
     const { flushNow } = await import('../services/storage/PersistenceFacade');
     vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
-    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup.zip' });
+    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup.zip', summary: null, zipSizeBytes: null });
     vi.mocked(flushNow).mockResolvedValue(true);
 
     await openWebdavView();
@@ -2478,7 +2484,7 @@ describe('BoardDock 恢复流程与 BackupJobCoordinator 集成', () => {
     vi.mocked(loadConfig).mockResolvedValue({
       success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
     });
-    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup.zip' });
+    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup.zip', summary: null, zipSizeBytes: null });
     vi.mocked(flushNow).mockResolvedValue(true);
 
     const restoreHandle = tryStartBackupJob('local-restore');
@@ -3205,6 +3211,8 @@ describe('BoardDock 定时远端备份 UI', () => {
       success: false,
       error: '认证失败',
       errorStage: 'credential',
+      summary: null,
+      zipSizeBytes: null,
     });
     vi.mocked(saveState).mockResolvedValue({ success: true, error: null });
 

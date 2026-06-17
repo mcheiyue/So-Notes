@@ -141,6 +141,8 @@ function createTestContext(overrides?: {
     createRemoteBackup: vi.fn(async () => ({
       success: true,
       remoteFileName: 'SoNotes_Backup_20260101.zip',
+      summary: null,
+      zipSizeBytes: null,
     })),
     readDiskStorageData: vi.fn(async () => null),
     getLatestUpdateTimestamp: vi.fn(() => 0),
