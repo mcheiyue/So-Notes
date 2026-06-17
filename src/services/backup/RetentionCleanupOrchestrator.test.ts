@@ -288,16 +288,16 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(result).toHaveProperty('pendingCleanupTargetCount');
     });
 
-    it('uploadResult.summary 为 null → 跳过断崖检测，直接执行清理', async () => {
-      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 8 });
-      await orchestratePostBackupRetentionCleanup(
+    it('uploadResult.summary 为 null → 跳过断崖检测和清理，返回空 patch', async () => {
+      const result = await orchestratePostBackupRetentionCleanup(
         makeInput({
           state: { baselineConfirmedRemoteCount: 10 },
           uploadResult: makeUploadResult({ summary: null }),
         }),
       );
       expect(detectBackupCliffDropMock).not.toHaveBeenCalled();
-      expect(executeRetentionCleanupMock).toHaveBeenCalled();
+      expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
+      expect(result).toEqual({});
     });
   });
 
@@ -394,13 +394,15 @@ describe('RetentionCleanupOrchestrator', () => {
       );
     });
 
-    it('清理失败不影响备份成功状态 — 异常被 catch', async () => {
+    it('清理失败不影响备份成功状态 — 异常被 catch，返回基线更新和错误信息', async () => {
       detectBackupCliffDropMock.mockReturnValue(null);
       executeRetentionCleanupMock.mockRejectedValue(new Error('network timeout'));
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({ state: { baselineConfirmedRemoteCount: 10 } }),
       );
-      expect(result).toEqual({});
+      expect(result).toHaveProperty('baselineConfirmedRemoteCount', 10);
+      expect(result).toHaveProperty('lastRetentionCleanupError', 'network timeout');
+      expect(result).toHaveProperty('lastRetentionCleanupAt');
     });
 
     it('清理返回 success=false 但仍返回 retainedCount', async () => {

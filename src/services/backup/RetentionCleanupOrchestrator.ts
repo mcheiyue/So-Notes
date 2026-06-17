@@ -158,19 +158,25 @@ export async function orchestratePostBackupRetentionCleanup(
   // -----------------------------------------------------------------------
   // 4. 执行清理
   // -----------------------------------------------------------------------
-  try {
-    // 断崖检测通过，更新基线为当前健康备份
-    const baselineUpdate: Partial<ScheduledRemoteBackupState> = {
-      baselineConfirmedRemoteCount: latestSummary?.noteCount ?? state.baselineConfirmedRemoteCount,
-      baselineConfirmedBoardCount: latestSummary?.boardCount ?? state.baselineConfirmedBoardCount,
-      baselineConfirmedImageNoteCount: latestSummary?.imageNoteCount ?? state.baselineConfirmedImageNoteCount,
-      baselineConfirmedImageFileCount: latestSummary?.imageFileCount ?? state.baselineConfirmedImageFileCount,
-      baselineConfirmedImageFileTotalBytes: latestSummary?.imageFileTotalBytes ?? state.baselineConfirmedImageFileTotalBytes,
-      baselineConfirmedRemoteFileName: uploadResult.remoteFileName ?? null,
-      baselineConfirmedConfirmedAt: clock(),
-      baselineConfirmedZipSizeBytes: uploadResult.zipSizeBytes ?? null,
-    };
 
+  // 无摘要时无法验证健康状态，跳过清理和基线更新（plan 3.8）
+  if (latestSummary === null) {
+    return {};
+  }
+
+  // 断崖检测通过，更新基线为当前健康备份（plan 3.7：先更新基线再清理）
+  const baselineUpdate: Partial<ScheduledRemoteBackupState> = {
+    baselineConfirmedRemoteCount: latestSummary.noteCount,
+    baselineConfirmedBoardCount: latestSummary.boardCount,
+    baselineConfirmedImageNoteCount: latestSummary.imageNoteCount,
+    baselineConfirmedImageFileCount: latestSummary.imageFileCount,
+    baselineConfirmedImageFileTotalBytes: latestSummary.imageFileTotalBytes,
+    baselineConfirmedRemoteFileName: uploadResult.remoteFileName ?? null,
+    baselineConfirmedConfirmedAt: clock(),
+    baselineConfirmedZipSizeBytes: uploadResult.zipSizeBytes ?? null,
+  };
+
+  try {
     const cleanupResult = await executeRetentionCleanup({
       config: webdavConfig,
       retentionCount: config.retentionCount,
@@ -192,8 +198,13 @@ export async function orchestratePostBackupRetentionCleanup(
       lastRetentionCleanupError: cleanupResult.error,
       lastRetentionCleanupAt: clock(),
     };
-  } catch {
-    // 清理异常：不改变备份成功状态，仅返回空 patch
-    return {};
+  } catch (error) {
+    // 清理异常：仍返回基线更新（plan 3.7：健康基线确认不应被清理失败回滚），
+    // 同时记录 retention 失败状态（plan 4.5）
+    return {
+      ...baselineUpdate,
+      lastRetentionCleanupError: error instanceof Error ? error.message : String(error),
+      lastRetentionCleanupAt: clock(),
+    };
   }
 }

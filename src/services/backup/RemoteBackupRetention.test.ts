@@ -578,9 +578,18 @@ describe('detectBackupCliffDrop', () => {
     expect(result).toBeNull();
   });
 
-  it('note < 5 时仍检查 board 维度 — baselineNotes=2 且 board 触发 → 异常', () => {
+  it('note < 5 时 board 不独立触发 — baselineNotes=4 且 note>0 时不触发', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(2, { boardCount: 0 }),
+      baselineSummary: makeSummary(4, { boardCount: 3 }),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('note < 5 时 board 触发 — note=0 且 board 也异常接近空', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(0, { boardCount: 0 }),
       baselineSummary: makeSummary(4, { boardCount: 3 }),
     });
 

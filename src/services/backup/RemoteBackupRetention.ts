@@ -254,14 +254,20 @@ export function detectBackupCliffDrop(input: {
   }
   // baselineNotes < 5 → 跳过 note 维度检测，但继续检查 board 维度
 
-  // ---- board 维度（baselineNotes < 5 时也检查） ----
+  // ---- board 维度 ----
   const baselineBoard = baselineSummary.boardCount;
   const currentBoard = latestSummary.boardCount;
-  if (baselineBoard >= CLIFF_DROP_BOARD_MEDIUM_BASELINE_MIN) {
-    if (currentBoard < baselineBoard * 0.5) {
+  // plan 3.3：小样本（note<5）时 board 不独立触发，需同时 note=0
+  if (baselineNotes >= CLIFF_DROP_MEDIUM_BASELINE_MIN) {
+    if (baselineBoard >= CLIFF_DROP_BOARD_MEDIUM_BASELINE_MIN) {
+      if (currentBoard < baselineBoard * 0.5) {
+        anomalyCodes.push('CLIFF_DROP_BOARD_COUNT');
+      }
+    } else if (baselineBoard >= CLIFF_DROP_BOARD_ZERO_TRIGGER_MIN && currentBoard === 0) {
       anomalyCodes.push('CLIFF_DROP_BOARD_COUNT');
     }
-  } else if (baselineBoard >= CLIFF_DROP_BOARD_ZERO_TRIGGER_MIN && currentBoard === 0) {
+  } else if (currentNotes === 0 && baselineBoard >= CLIFF_DROP_BOARD_MEDIUM_BASELINE_MIN && currentBoard === 0) {
+    // plan 3.3：note<5 时，只在 note=0 且 board 也异常接近空时触发
     anomalyCodes.push('CLIFF_DROP_BOARD_COUNT');
   }
 
