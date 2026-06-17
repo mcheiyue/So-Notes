@@ -285,6 +285,22 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
     if (snapshot.kind === 'image') {
       return (
         <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            data-note-title-region="true"
+            data-tauri-drag-region
+            onMouseDown={handleDragStart}
+            className={cn("px-4 pt-3 pb-1", "min-h-9 pr-24")}
+          >
+            <div
+              className={cn(
+                "w-full truncate",
+                "text-text-primary font-bold text-[16px]",
+                snapshot.title ? "block" : "hidden",
+              )}
+            >
+              {snapshot.title}
+            </div>
+          </div>
           <ImageNoteBody
             attachment={snapshot.attachments?.[0]}
             alt={snapshot.title || snapshot.attachments?.[0]?.filename || '图片便签'}
@@ -303,6 +319,8 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
       <>
         <div
           data-note-title-region="true"
+          data-tauri-drag-region
+          onMouseDown={handleDragStart}
           className={cn("px-4 pt-3 pb-1", "min-h-9 pr-24")}
         >
           <div
@@ -349,8 +367,6 @@ export const DetachedNoteWindow: React.FC<{ noteId: string }> = ({ noteId }) => 
         className={cn(
           "pointer-events-auto",
         )}
-        data-tauri-drag-region
-        onMouseDown={handleDragStart}
       >
         <NoteVisuals
           title={snapshot.title}

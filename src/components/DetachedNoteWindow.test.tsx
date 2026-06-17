@@ -227,13 +227,13 @@ describe('DetachedNoteWindow 按钮行为', () => {
     expect(container.querySelector('[data-tauri-drag-region]')).not.toBeNull();
   });
 
-  it('按下便签表面时启动 Tauri 窗口拖拽', async () => {
+  it('按下标题区域时启动 Tauri 窗口拖拽', async () => {
     await renderWindow();
     simulateSnapshot(createSnapshot());
 
-    const noteEl = container.querySelector('[data-note-visuals="true"]') as HTMLElement;
+    const titleRegion = container.querySelector('[data-note-title-region="true"]') as HTMLElement;
     await act(async () => {
-      noteEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      titleRegion.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     });
 
     expect(startDraggingMock).toHaveBeenCalledTimes(1);
