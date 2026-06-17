@@ -178,11 +178,50 @@ pub struct ScheduledRemoteBackupState {
     pub cliff_drop_detected_at: Option<u64>,
     /// 断崖式检测确认时远端文件基准数量。
     pub baseline_confirmed_remote_count: Option<u32>,
+    /// 断崖式检测确认时的基准看板数量。
+    #[serde(default)]
+    pub baseline_confirmed_board_count: Option<u32>,
+    /// 断崖式检测确认时的基准图片便签数量。
+    #[serde(default)]
+    pub baseline_confirmed_image_note_count: Option<u32>,
+    /// 断崖式检测确认时的基准图片文件数量。
+    #[serde(default)]
+    pub baseline_confirmed_image_file_count: Option<u32>,
+    /// 断崖式检测确认时的基准图片文件总字节数。
+    #[serde(default)]
+    pub baseline_confirmed_image_file_total_bytes: Option<u64>,
     /// 断崖式骤降已触发延迟处理。
     #[serde(default)]
     pub cliff_drop_deferred: bool,
+    /// 断崖式骤降检测时最新摘要的便签数量快照。
+    #[serde(default)]
+    pub cliff_drop_latest_summary_note_count: Option<u32>,
+    /// 断崖式骤降检测时最新摘要的看板数量快照。
+    #[serde(default)]
+    pub cliff_drop_latest_summary_board_count: Option<u32>,
+    /// 断崖式骤降检测时最新摘要的图片便签数量快照。
+    #[serde(default)]
+    pub cliff_drop_latest_summary_image_note_count: Option<u32>,
+    /// 断崖式骤降检测时最新摘要的图片文件数量快照。
+    #[serde(default)]
+    pub cliff_drop_latest_summary_image_file_count: Option<u32>,
+    /// 断崖式骤降检测时最新摘要的图片文件总字节数快照。
+    #[serde(default)]
+    pub cliff_drop_latest_summary_image_file_total_bytes: Option<u64>,
     /// 等待清理的目标保留数量。
     pub pending_cleanup_target_count: Option<u32>,
+    /// 上次清理实际删除的文件数。
+    #[serde(default)]
+    pub last_retention_cleanup_deleted_count: Option<u32>,
+    /// 上次清理失败的文件名。
+    #[serde(default)]
+    pub last_retention_cleanup_failed_file_name: Option<String>,
+    /// 上次清理失败的错误信息。
+    #[serde(default)]
+    pub last_retention_cleanup_error: Option<String>,
+    /// 上次清理执行时间戳。
+    #[serde(default)]
+    pub last_retention_cleanup_at: Option<u64>,
 }
 
 impl Default for ScheduledRemoteBackupState {
@@ -204,8 +243,21 @@ impl Default for ScheduledRemoteBackupState {
             credential_action_required: false,
             cliff_drop_detected_at: None,
             baseline_confirmed_remote_count: None,
+            baseline_confirmed_board_count: None,
+            baseline_confirmed_image_note_count: None,
+            baseline_confirmed_image_file_count: None,
+            baseline_confirmed_image_file_total_bytes: None,
             cliff_drop_deferred: false,
+            cliff_drop_latest_summary_note_count: None,
+            cliff_drop_latest_summary_board_count: None,
+            cliff_drop_latest_summary_image_note_count: None,
+            cliff_drop_latest_summary_image_file_count: None,
+            cliff_drop_latest_summary_image_file_total_bytes: None,
             pending_cleanup_target_count: None,
+            last_retention_cleanup_deleted_count: None,
+            last_retention_cleanup_failed_file_name: None,
+            last_retention_cleanup_error: None,
+            last_retention_cleanup_at: None,
         }
     }
 }

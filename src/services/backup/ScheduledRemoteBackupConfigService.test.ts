@@ -72,6 +72,23 @@ describe('ScheduledRemoteBackupConfigService', () => {
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.credentialActionRequired).toBe(
         false,
       );
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropDetectedAt).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.baselineConfirmedRemoteCount).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.baselineConfirmedBoardCount).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.baselineConfirmedImageNoteCount).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.baselineConfirmedImageFileCount).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.baselineConfirmedImageFileTotalBytes).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropDeferred).toBe(false);
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropLatestSummaryNoteCount).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropLatestSummaryBoardCount).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropLatestSummaryImageNoteCount).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropLatestSummaryImageFileCount).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropLatestSummaryImageFileTotalBytes).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.pendingCleanupTargetCount).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupDeletedCount).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupFailedFileName).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupError).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupAt).toBeNull();
     });
   });
 

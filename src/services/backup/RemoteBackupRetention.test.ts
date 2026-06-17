@@ -231,8 +231,8 @@ describe('proposeRetentionCleanup', () => {
       makeBackup('SoNotes_Backup_20250614120000.zip'),
     ];
 
-    // 保护最旧的两个，retentionCount=3 → 总共 5 个，3 个不受保护
-    // 不受保护的 3 个 ≤ 3 → 不删除
+    // retentionCount=3 → 最近 3 个 (12,13,14) 保留
+    // 保护最旧的 2 个 → 并入 keep，总共 5 个保留，无候选
     const result = proposeRetentionCleanup({
       files,
       retentionCount: 3,
@@ -256,7 +256,8 @@ describe('proposeRetentionCleanup', () => {
       makeBackup('SoNotes_Backup_20250614120000.zip'),
     ];
 
-    // retentionCount=2，保护最旧的 3 个 → 不受保护的只有 2 个 → 不删除
+    // retentionCount=2 → 最近 2 个 (13,14) 保留
+    // 保护最旧的 3 个 → 并入 keep，总共 5 个保留
     const result = proposeRetentionCleanup({
       files,
       retentionCount: 2,
@@ -270,6 +271,31 @@ describe('proposeRetentionCleanup', () => {
     expect(result.candidates).toHaveLength(0);
     expect(result.keep).toHaveLength(5);
     expect(result.protectedCount).toBe(3);
+  });
+
+  it('保护对象落在最旧 N 个区间时仍被保留', () => {
+    const files: WebDavRemoteBackup[] = [
+      makeBackup('SoNotes_Backup_20250610120000.zip'),
+      makeBackup('SoNotes_Backup_20250611120000.zip'),
+      makeBackup('SoNotes_Backup_20250612120000.zip'),
+      makeBackup('SoNotes_Backup_20250613120000.zip'),
+      makeBackup('SoNotes_Backup_20250614120000.zip'),
+    ];
+
+    // retentionCount=3 → 最近 3 个 (12,13,14) 保留，候选 (10,11)
+    // 保护 10 → 并入 keep，候选只剩 11
+    const result = proposeRetentionCleanup({
+      files,
+      retentionCount: 3,
+      protectedFileNames: new Set([
+        'SoNotes_Backup_20250610120000.zip',
+      ]),
+    });
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.keep).toHaveLength(4);
+    expect(result.candidates[0]!.fileName).toBe('SoNotes_Backup_20250611120000.zip');
+    expect(result.protectedCount).toBe(1);
   });
 
   it('混合严格和非严格命名文件，只处理严格命名', () => {
@@ -345,7 +371,7 @@ describe('proposeRetentionCleanup', () => {
 // ---------------------------------------------------------------------------
 
 describe('detectBackupCliffDrop', () => {
-  it('baselineNotes < 3 → 跳过检测，返回 null', () => {
+  it('baselineNotes < 5 → 跳过检测，返回 null', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(0),
       baselineSummary: makeSummary(2),
@@ -363,32 +389,47 @@ describe('detectBackupCliffDrop', () => {
     expect(result).toBeNull();
   });
 
-  it('baselineNotes ≤ 5 使用绝对阈值 — dropPct ≥ 0.5 触发', () => {
-    // baselineNotes=4, currentNotes=1, dropPct = (4-1)/4 = 0.75 ≥ 0.5
+  it('baselineNotes=4 < 5 → 跳过检测，返回 null', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(1),
-      baselineSummary: makeSummary(4),
-    });
-
-    expect(result).not.toBeNull();
-    expect(result!.baselineNotes).toBe(4);
-    expect(result!.currentNotes).toBe(1);
-    expect(result!.threshold).toBe(0.5);
-    expect(result!.anomalyCodes).toContain('CLIFF_DROP_ABSOLUTE');
-  });
-
-  it('baselineNotes ≤ 5 — dropPct < 0.5 不触发', () => {
-    // baselineNotes=4, currentNotes=3, dropPct = (4-3)/4 = 0.25 < 0.5
-    const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(3),
       baselineSummary: makeSummary(4),
     });
 
     expect(result).toBeNull();
   });
 
-  it('baselineNotes > 5 使用相对阈值 — dropPct ≥ 0.3 触发', () => {
-    // baselineNotes=10, currentNotes=5, dropPct = (10-5)/10 = 0.5 ≥ 0.3
+  it('baselineNotes 5-9：currentNotes ≤ 1 触发 CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(1),
+      baselineSummary: makeSummary(5),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.baselineNotes).toBe(5);
+    expect(result!.currentNotes).toBe(1);
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL');
+  });
+
+  it('baselineNotes 5-9：currentNotes=2 不触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(2),
+      baselineSummary: makeSummary(5),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('baselineNotes 5-9：currentNotes=0 触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(0),
+      baselineSummary: makeSummary(8),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL');
+  });
+
+  it('baselineNotes ≥ 10 使用相对阈值 — dropPct ≥ 0.3 触发', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(5),
       baselineSummary: makeSummary(10),
@@ -401,8 +442,7 @@ describe('detectBackupCliffDrop', () => {
     expect(result!.anomalyCodes).toContain('CLIFF_DROP_RELATIVE');
   });
 
-  it('baselineNotes > 5 — dropPct < 0.3 不触发', () => {
-    // baselineNotes=10, currentNotes=8, dropPct = (10-8)/10 = 0.2 < 0.3
+  it('baselineNotes ≥ 10 — dropPct < 0.3 不触发', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(8),
       baselineSummary: makeSummary(10),
@@ -421,7 +461,6 @@ describe('detectBackupCliffDrop', () => {
   });
 
   it('恰好达到相对阈值边界 — dropPct = 0.3 触发', () => {
-    // baselineNotes=10, currentNotes=7, dropPct = (10-7)/10 = 0.3
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(7),
       baselineSummary: makeSummary(10),
@@ -429,17 +468,6 @@ describe('detectBackupCliffDrop', () => {
 
     expect(result).not.toBeNull();
     expect(result!.dropPct).toBeCloseTo(0.3);
-  });
-
-  it('恰好达到绝对阈值边界 — dropPct = 0.5 触发', () => {
-    // baselineNotes=4, currentNotes=2, dropPct = (4-2)/4 = 0.5
-    const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(2),
-      baselineSummary: makeSummary(4),
-    });
-
-    expect(result).not.toBeNull();
-    expect(result!.dropPct).toBeCloseTo(0.5);
   });
 
   it('currentNotes > baselineNotes → 负 dropPct，不触发', () => {
@@ -451,38 +479,31 @@ describe('detectBackupCliffDrop', () => {
     expect(result).toBeNull();
   });
 
-  it('baselineNotes=3 使用绝对阈值（≤5）', () => {
-    // baselineNotes=3, currentNotes=1, dropPct = (3-1)/3 ≈ 0.667 ≥ 0.5
+  it('baselineNotes=3 < 5 → 跳过检测', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(1),
       baselineSummary: makeSummary(3),
     });
 
-    expect(result).not.toBeNull();
-    expect(result!.threshold).toBe(0.5);
-    expect(result!.anomalyCodes).toContain('CLIFF_DROP_ABSOLUTE');
+    expect(result).toBeNull();
   });
 
-  it('baselineNotes=5 使用绝对阈值（≤5），currentNotes=2 触发', () => {
-    // dropPct = (5-2)/5 = 0.6 ≥ 0.5
+  it('baselineNotes=5 且 currentNotes=3 不触发（>1）', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(2),
+      latestSummary: makeSummary(3),
       baselineSummary: makeSummary(5),
     });
 
-    expect(result).not.toBeNull();
-    expect(result!.threshold).toBe(0.5);
+    expect(result).toBeNull();
   });
 
-  it('baselineNotes=6 使用相对阈值（>5），currentNotes=4 不触发', () => {
-    // dropPct = (6-4)/6 ≈ 0.333 ≥ 0.3 → 触发
+  it('baselineNotes=6 使用相对阈值（≥5 但 <10），currentNotes=4 不触发 noteCount', () => {
+    // noteCount 在 [5,9) 范围用绝对值判断（≤1），currentNotes=4 > 1 → 不触发
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(4),
       baselineSummary: makeSummary(6),
     });
 
-    expect(result).not.toBeNull();
-    expect(result!.threshold).toBe(0.3);
-    expect(result!.anomalyCodes).toContain('CLIFF_DROP_RELATIVE');
+    expect(result).toBeNull();
   });
 });

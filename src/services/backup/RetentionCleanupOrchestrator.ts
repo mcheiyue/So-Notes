@@ -93,9 +93,21 @@ export async function orchestratePostBackupRetentionCleanup(
     if (latestSummary !== null) {
       return {
         baselineConfirmedRemoteCount: latestSummary.noteCount,
+        baselineConfirmedBoardCount: latestSummary.boardCount,
+        baselineConfirmedImageNoteCount: latestSummary.imageNoteCount,
+        baselineConfirmedImageFileCount: latestSummary.imageFileCount,
+        baselineConfirmedImageFileTotalBytes: latestSummary.imageFileTotalBytes,
       };
     }
     // 无摘要且无基线，无法建立基线，跳过
+    return {};
+  }
+
+  // -----------------------------------------------------------------------
+  // 2.5 检查是否已有断崖延迟标记
+  // -----------------------------------------------------------------------
+  if (state.cliffDropDeferred) {
+    // 已有断崖延迟标记，跳过本次清理
     return {};
   }
 
@@ -109,12 +121,12 @@ export async function orchestratePostBackupRetentionCleanup(
       formatVersion: 1,
       appVersion: '0.0.0',
       createdAt: 0,
-      boardCount: 0,
+      boardCount: state.baselineConfirmedBoardCount ?? 0,
       textNoteCount: 0,
-      imageNoteCount: 0,
+      imageNoteCount: state.baselineConfirmedImageNoteCount ?? 0,
       trashNoteCount: 0,
-      imageFileCount: 0,
-      imageFileTotalBytes: 0,
+      imageFileCount: state.baselineConfirmedImageFileCount ?? 0,
+      imageFileTotalBytes: state.baselineConfirmedImageFileTotalBytes ?? 0,
     };
 
     const cliffDrop = detectBackupCliffDrop({
@@ -123,10 +135,15 @@ export async function orchestratePostBackupRetentionCleanup(
     });
 
     if (cliffDrop !== null) {
-      // 检测到断崖式骤降：保存警告，跳过清理
+      // 检测到断崖式骤降：保存警告和最新摘要快照，跳过清理
       return {
         cliffDropDetectedAt: clock(),
         cliffDropDeferred: true,
+        cliffDropLatestSummaryNoteCount: latestSummary.noteCount,
+        cliffDropLatestSummaryBoardCount: latestSummary.boardCount,
+        cliffDropLatestSummaryImageNoteCount: latestSummary.imageNoteCount,
+        cliffDropLatestSummaryImageFileCount: latestSummary.imageFileCount,
+        cliffDropLatestSummaryImageFileTotalBytes: latestSummary.imageFileTotalBytes,
       };
     }
   }
@@ -138,12 +155,18 @@ export async function orchestratePostBackupRetentionCleanup(
     const cleanupResult = await executeRetentionCleanup({
       config: webdavConfig,
       retentionCount: config.retentionCount,
-      protectedFileNames: new Set(),
+      protectedFileNames: new Set(
+        [uploadResult.remoteFileName].filter((f): f is string => f != null && f !== ''),
+      ),
     });
 
     // 返回清理结果到 state（清理失败不改变备份成功状态，仅记录信息）
     return {
       pendingCleanupTargetCount: cleanupResult.retainedCount,
+      lastRetentionCleanupDeletedCount: cleanupResult.deletedCount,
+      lastRetentionCleanupFailedFileName: cleanupResult.failedFileName,
+      lastRetentionCleanupError: cleanupResult.error,
+      lastRetentionCleanupAt: clock(),
     };
   } catch {
     // 清理异常：不改变备份成功状态，仅返回空 patch

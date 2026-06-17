@@ -1091,7 +1091,7 @@ export const BoardDock = () => {
       const result = await previewRetentionCleanup({
         config,
         retentionCount: scheduledConfig.retentionCount ?? 5,
-        protectedFileNames: new Set(),
+        protectedFileNames: new Set(scheduledState.lastRemoteFileName ? [scheduledState.lastRemoteFileName] : []),
       });
       setRetentionPreview(result);
     } catch (err) {
@@ -1125,7 +1125,7 @@ export const BoardDock = () => {
       const result = await executeRetentionCleanup({
         config,
         retentionCount: scheduledConfig.retentionCount ?? 5,
-        protectedFileNames: new Set(),
+        protectedFileNames: new Set(scheduledState.lastRemoteFileName ? [scheduledState.lastRemoteFileName] : []),
       });
       if (result.success) {
         setRetentionFeedback({
@@ -1157,6 +1157,16 @@ export const BoardDock = () => {
       ...scheduledState,
       cliffDropDeferred: false,
       cliffDropDetectedAt: null,
+      baselineConfirmedRemoteCount: scheduledState.cliffDropLatestSummaryNoteCount ?? scheduledState.baselineConfirmedRemoteCount,
+      baselineConfirmedBoardCount: scheduledState.cliffDropLatestSummaryBoardCount ?? scheduledState.baselineConfirmedBoardCount,
+      baselineConfirmedImageNoteCount: scheduledState.cliffDropLatestSummaryImageNoteCount ?? scheduledState.baselineConfirmedImageNoteCount,
+      baselineConfirmedImageFileCount: scheduledState.cliffDropLatestSummaryImageFileCount ?? scheduledState.baselineConfirmedImageFileCount,
+      baselineConfirmedImageFileTotalBytes: scheduledState.cliffDropLatestSummaryImageFileTotalBytes ?? scheduledState.baselineConfirmedImageFileTotalBytes,
+      cliffDropLatestSummaryNoteCount: null,
+      cliffDropLatestSummaryBoardCount: null,
+      cliffDropLatestSummaryImageNoteCount: null,
+      cliffDropLatestSummaryImageFileCount: null,
+      cliffDropLatestSummaryImageFileTotalBytes: null,
     };
     setScheduledState(updated);
     try {

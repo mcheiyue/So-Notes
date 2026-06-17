@@ -15,17 +15,17 @@ import type { BackupSummary } from './BackupService';
 /** 严格文件名正则：SoNotes_Backup_YYYYMMDDHHMMSS.zip */
 const BACKUP_FILE_NAME_RE = /^SoNotes_Backup_(\d{14})\.zip$/;
 
-/** 断崖检测：基线便签数 < 此值时跳过检测 */
-const CLIFF_DROP_MIN_BASELINE_NOTES = 3;
+/** 断崖检测：基线 < 此值时跳过所有维度检测 */
+const CLIFF_DROP_MEDIUM_BASELINE_MIN = 5;
 
-/** 断崖检测：小样本（≤5）使用绝对阈值 */
-const CLIFF_DROP_ABSOLUTE_THRESHOLD = 0.5;
+/** 断崖检测：基线 ≥ 此值时使用 30% 相对阈值 */
+const CLIFF_DROP_LARGE_BASELINE_MIN = 10;
+
+/** 断崖检测：中等基线（5-9）时 noteCount 降至 ≤ 此值才触发 */
+const CLIFF_DROP_MEDIUM_CRITICAL_COUNT = 1;
 
 /** 断崖检测：常规样本使用相对阈值 */
 const CLIFF_DROP_RELATIVE_THRESHOLD = 0.3;
-
-/** 小样本分界线 */
-const SMALL_SAMPLE_SIZE = 5;
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -50,7 +50,11 @@ export interface RetentionPreview {
 
 export type RemoteRetentionAnomalyCode =
   | 'CLIFF_DROP_RELATIVE'
-  | 'CLIFF_DROP_ABSOLUTE';
+  | 'CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL'
+  | 'CLIFF_DROP_BOARD_COUNT'
+  | 'CLIFF_DROP_IMAGE_NOTE_COUNT'
+  | 'CLIFF_DROP_IMAGE_FILE_COUNT'
+  | 'CLIFF_DROP_ZIP_SIZE_BYTES';
 
 export interface RemoteRetentionAnomaly {
   readonly code: RemoteRetentionAnomalyCode;
@@ -129,9 +133,9 @@ export function parseRemoteBackupFileName(
  * 逻辑：
  * 1. 过滤出严格命名文件并解析
  * 2. 按 sortTime 升序排列（最早 = 最旧在前）
- * 3. 过滤掉 protectedFileNames 中的文件
- * 4. 剩余数 ≤ retentionCount → 无需删除
- * 5. 剩余数 > retentionCount → 删除最旧的 (N - retentionCount) 个
+ * 3. 取最近 N 个作为初始 keep（排序后的后 N 个）
+ * 4. 把保护对象并入 keep set（保护对象不参与 N 的计数）
+ * 5. 剩余的作为 candidates（将被删除）
  */
 export function proposeRetentionCleanup(input: {
   readonly files: readonly WebDavRemoteBackup[];
@@ -165,27 +169,26 @@ export function proposeRetentionCleanup(input: {
     }
   }
 
-  // 4. 过滤掉受保护文件
-  const unprotected = parsedNames.filter(
-    (p) => !protectedFileNames.has(p.fileName),
-  );
+  // 4. 取最近 N 个作为初始 keep（升序排列后的后 N 个）
+  const initialKeepCount = Math.min(retentionCount, parsedNames.length);
+  const initialKeep = parsedNames.slice(parsedNames.length - initialKeepCount);
+  const initialKeepSet = new Set(initialKeep.map((p) => p.fileName));
 
-  // 5. 计算候选和保留
-  let candidates: readonly RemoteBackupParsedName[];
-  let keep: readonly RemoteBackupParsedName[];
+  // 5. 把保护对象并入 keep set
+  for (const name of protectedFileNames) {
+    initialKeepSet.add(name);
+  }
 
-  if (unprotected.length <= retentionCount) {
-    // 无需删除
-    candidates = [];
-    keep = parsedNames; // 保留所有已解析文件
-  } else {
-    // 删除最旧的 (N - retentionCount) 个
-    const deleteCount = unprotected.length - retentionCount;
-    const deleteSet = new Set(
-      unprotected.slice(0, deleteCount).map((p) => p.fileName),
-    );
-    candidates = parsedNames.filter((p) => deleteSet.has(p.fileName));
-    keep = parsedNames.filter((p) => !deleteSet.has(p.fileName));
+  // 6. 剩余的作为 candidates
+  const candidates: RemoteBackupParsedName[] = [];
+  const keep: RemoteBackupParsedName[] = [];
+
+  for (const p of parsedNames) {
+    if (initialKeepSet.has(p.fileName)) {
+      keep.push(p);
+    } else {
+      candidates.push(p);
+    }
   }
 
   return {
@@ -201,12 +204,13 @@ export function proposeRetentionCleanup(input: {
 // ---------------------------------------------------------------------------
 
 /**
- * 断崖式骤降检测：比较最新备份摘要与健康基线。
+ * 断崖式骤降检测：比较最新备份摘要与健康基线（多维度）。
  *
- * 规则：
- * - baselineNotes < CLIFF_DROP_MIN_BASELINE_NOTES → 跳过检测，返回 null
- * - baselineNotes ≤ SMALL_SAMPLE_SIZE → 使用绝对阈值 (dropPct ≥ 0.5)
- * - baselineNotes > SMALL_SAMPLE_SIZE → 使用相对阈值 (dropPct ≥ 0.3)
+ * 规则（三段式）：
+ * - baselineNotes < 5：跳过所有维度检测。
+ * - baselineNotes 5–9：noteCount 降至 ≤ 1 时触发（CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL），
+ *   其他维度（board/image/zip）仍用 30% 相对阈值。
+ * - baselineNotes ≥ 10：所有维度统一用 30% 相对阈值。
  *
  * @returns 触发异常时返回比较结果，否则返回 null
  */
@@ -219,32 +223,66 @@ export function detectBackupCliffDrop(input: {
   const baselineNotes = baselineSummary.noteCount;
   const currentNotes = latestSummary.noteCount;
 
-  // 基线不足时跳过检测
-  if (baselineNotes < CLIFF_DROP_MIN_BASELINE_NOTES) {
+  // 基线不足时跳过所有维度检测
+  if (baselineNotes < CLIFF_DROP_MEDIUM_BASELINE_MIN) {
     return null;
   }
 
-  const dropPct = (baselineNotes - currentNotes) / baselineNotes;
+  const isMediumBaseline =
+    baselineNotes >= CLIFF_DROP_MEDIUM_BASELINE_MIN &&
+    baselineNotes < CLIFF_DROP_LARGE_BASELINE_MIN;
 
-  // 根据样本大小选择阈值
-  const useAbsoluteThreshold = baselineNotes <= SMALL_SAMPLE_SIZE;
-  const threshold = useAbsoluteThreshold
-    ? CLIFF_DROP_ABSOLUTE_THRESHOLD
-    : CLIFF_DROP_RELATIVE_THRESHOLD;
+  const anomalyCodes: RemoteRetentionAnomalyCode[] = [];
 
-  if (dropPct < threshold) {
+  // noteCount 维度：中等基线段用绝对值判断
+  if (isMediumBaseline) {
+    if (currentNotes <= CLIFF_DROP_MEDIUM_CRITICAL_COUNT) {
+      anomalyCodes.push('CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL');
+    }
+  } else {
+    // ≥ 10：用相对阈值
+    const dropPct = baselineNotes > 0
+      ? (baselineNotes - currentNotes) / baselineNotes
+      : 0;
+    if (dropPct >= CLIFF_DROP_RELATIVE_THRESHOLD) {
+      anomalyCodes.push('CLIFF_DROP_RELATIVE');
+    }
+  }
+
+  // 其他维度（board/image/zip）统一用相对阈值
+  const otherDimensions: Array<{
+    baseline: number;
+    current: number;
+    code: RemoteRetentionAnomalyCode;
+  }> = [
+    { baseline: baselineSummary.boardCount, current: latestSummary.boardCount, code: 'CLIFF_DROP_BOARD_COUNT' },
+    { baseline: baselineSummary.imageNoteCount, current: latestSummary.imageNoteCount, code: 'CLIFF_DROP_IMAGE_NOTE_COUNT' },
+    { baseline: baselineSummary.imageFileCount, current: latestSummary.imageFileCount, code: 'CLIFF_DROP_IMAGE_FILE_COUNT' },
+    { baseline: baselineSummary.imageFileTotalBytes, current: latestSummary.imageFileTotalBytes, code: 'CLIFF_DROP_ZIP_SIZE_BYTES' },
+  ];
+
+  for (const dim of otherDimensions) {
+    if (dim.baseline <= 0) continue;
+
+    const dropPct = (dim.baseline - dim.current) / dim.baseline;
+    if (dropPct >= CLIFF_DROP_RELATIVE_THRESHOLD) {
+      anomalyCodes.push(dim.code);
+    }
+  }
+
+  if (anomalyCodes.length === 0) {
     return null;
   }
 
-  const anomalyCodes: RemoteRetentionAnomalyCode[] = useAbsoluteThreshold
-    ? ['CLIFF_DROP_ABSOLUTE']
-    : ['CLIFF_DROP_RELATIVE'];
+  const dropPct = baselineNotes > 0
+    ? (baselineNotes - currentNotes) / baselineNotes
+    : 0;
 
   return {
     baselineNotes,
     currentNotes,
     dropPct,
-    threshold,
+    threshold: CLIFF_DROP_RELATIVE_THRESHOLD,
     anomalyCodes,
   };
 }

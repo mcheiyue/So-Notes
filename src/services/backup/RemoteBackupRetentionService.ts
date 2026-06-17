@@ -46,14 +46,13 @@ export interface RemoteRetentionCleanupResult {
 /**
  * 判断删除结果中的错误是否为幂等成功（文件不存在）。
  *
- * 404 / "not found" / 400 / "Not Found" 视为幂等成功，不中断流程。
+ * 404 / "not found" / "Not Found" 视为幂等成功，不中断流程。
+ * 400 不视为幂等成功，属于请求/协议问题。
  */
 function isIdempotentSuccessError(error: string): boolean {
   const lower = error.toLowerCase();
   return (
     lower.includes('404') ||
-    lower.includes('not found') ||
-    lower.includes('400') ||
     lower.includes('not found')
   );
 }

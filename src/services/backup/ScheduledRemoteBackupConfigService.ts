@@ -54,8 +54,21 @@ export interface ScheduledRemoteBackupState {
   readonly credentialActionRequired: boolean;
   readonly cliffDropDetectedAt: number | null;
   readonly baselineConfirmedRemoteCount: number | null;
+  readonly baselineConfirmedBoardCount: number | null;
+  readonly baselineConfirmedImageNoteCount: number | null;
+  readonly baselineConfirmedImageFileCount: number | null;
+  readonly baselineConfirmedImageFileTotalBytes: number | null;
   readonly cliffDropDeferred: boolean;
+  readonly cliffDropLatestSummaryNoteCount: number | null;
+  readonly cliffDropLatestSummaryBoardCount: number | null;
+  readonly cliffDropLatestSummaryImageNoteCount: number | null;
+  readonly cliffDropLatestSummaryImageFileCount: number | null;
+  readonly cliffDropLatestSummaryImageFileTotalBytes: number | null;
   readonly pendingCleanupTargetCount: number | null;
+  readonly lastRetentionCleanupDeletedCount: number | null;
+  readonly lastRetentionCleanupFailedFileName: string | null;
+  readonly lastRetentionCleanupError: string | null;
+  readonly lastRetentionCleanupAt: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,8 +138,21 @@ export const DEFAULT_SCHEDULED_BACKUP_STATE: Readonly<ScheduledRemoteBackupState
   credentialActionRequired: false,
   cliffDropDetectedAt: null,
   baselineConfirmedRemoteCount: null,
+  baselineConfirmedBoardCount: null,
+  baselineConfirmedImageNoteCount: null,
+  baselineConfirmedImageFileCount: null,
+  baselineConfirmedImageFileTotalBytes: null,
   cliffDropDeferred: false,
+  cliffDropLatestSummaryNoteCount: null,
+  cliffDropLatestSummaryBoardCount: null,
+  cliffDropLatestSummaryImageNoteCount: null,
+  cliffDropLatestSummaryImageFileCount: null,
+  cliffDropLatestSummaryImageFileTotalBytes: null,
   pendingCleanupTargetCount: null,
+  lastRetentionCleanupDeletedCount: null,
+  lastRetentionCleanupFailedFileName: null,
+  lastRetentionCleanupError: null,
+  lastRetentionCleanupAt: null,
 } as const;
 
 // ---------------------------------------------------------------------------

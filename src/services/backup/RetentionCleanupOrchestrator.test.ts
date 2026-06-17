@@ -55,8 +55,21 @@ const DEFAULT_STATE: ScheduledRemoteBackupState = {
   credentialActionRequired: false,
   cliffDropDetectedAt: null,
   baselineConfirmedRemoteCount: null,
+  baselineConfirmedBoardCount: null,
+  baselineConfirmedImageNoteCount: null,
+  baselineConfirmedImageFileCount: null,
+  baselineConfirmedImageFileTotalBytes: null,
   cliffDropDeferred: false,
+  cliffDropLatestSummaryNoteCount: null,
+  cliffDropLatestSummaryBoardCount: null,
+  cliffDropLatestSummaryImageNoteCount: null,
+  cliffDropLatestSummaryImageFileCount: null,
+  cliffDropLatestSummaryImageFileTotalBytes: null,
   pendingCleanupTargetCount: null,
+  lastRetentionCleanupDeletedCount: null,
+  lastRetentionCleanupFailedFileName: null,
+  lastRetentionCleanupError: null,
+  lastRetentionCleanupAt: null,
 };
 
 function makeUploadResult(overrides?: Partial<WebDavUploadResult>): WebDavUploadResult {
@@ -199,7 +212,13 @@ describe('RetentionCleanupOrchestrator', () => {
           }),
         }),
       );
-      expect(result).toEqual({ baselineConfirmedRemoteCount: 15 });
+      expect(result).toEqual({
+        baselineConfirmedRemoteCount: 15,
+        baselineConfirmedBoardCount: 2,
+        baselineConfirmedImageNoteCount: 0,
+        baselineConfirmedImageFileCount: 0,
+        baselineConfirmedImageFileTotalBytes: 0,
+      });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
       expect(detectBackupCliffDropMock).not.toHaveBeenCalled();
     });
@@ -217,6 +236,15 @@ describe('RetentionCleanupOrchestrator', () => {
   });
 
   describe('断崖检测', () => {
+    it('cliffDropDeferred=true → 跳过清理，返回空 patch', async () => {
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({ state: { baselineConfirmedRemoteCount: 10, cliffDropDeferred: true } }),
+      );
+      expect(result).toEqual({});
+      expect(detectBackupCliffDropMock).not.toHaveBeenCalled();
+      expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
+    });
+
     it('断崖检测异常 → 保存警告，跳过清理', async () => {
       detectBackupCliffDropMock.mockReturnValue({
         baselineNotes: 10,
@@ -231,6 +259,11 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(result).toEqual({
         cliffDropDetectedAt: 1700000000000,
         cliffDropDeferred: true,
+        cliffDropLatestSummaryNoteCount: 10,
+        cliffDropLatestSummaryBoardCount: 1,
+        cliffDropLatestSummaryImageNoteCount: 0,
+        cliffDropLatestSummaryImageFileCount: 0,
+        cliffDropLatestSummaryImageFileTotalBytes: 0,
       });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
@@ -261,7 +294,12 @@ describe('RetentionCleanupOrchestrator', () => {
   describe('清理执行', () => {
     it('正常情况 → 执行清理并返回 retainedCount', async () => {
       detectBackupCliffDropMock.mockReturnValue(null);
-      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 7 });
+      executeRetentionCleanupMock.mockResolvedValue({
+        retainedCount: 7,
+        deletedCount: 0,
+        failedFileName: null,
+        error: null,
+      });
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({ state: { baselineConfirmedRemoteCount: 10 } }),
       );
@@ -270,7 +308,13 @@ describe('RetentionCleanupOrchestrator', () => {
         retentionCount: 10,
         protectedFileNames: new Set(),
       });
-      expect(result).toEqual({ pendingCleanupTargetCount: 7 });
+      expect(result).toEqual({
+        pendingCleanupTargetCount: 7,
+        lastRetentionCleanupDeletedCount: 0,
+        lastRetentionCleanupFailedFileName: null,
+        lastRetentionCleanupError: null,
+        lastRetentionCleanupAt: 1700000000000,
+      });
     });
 
     it('清理失败不影响备份成功状态 — 异常被 catch', async () => {
@@ -289,11 +333,18 @@ describe('RetentionCleanupOrchestrator', () => {
         retainedCount: 5,
         deletedCount: 0,
         error: '401 Unauthorized',
+        failedFileName: 'SoNotes_Backup_20250610120000.zip',
       });
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({ state: { baselineConfirmedRemoteCount: 10 } }),
       );
-      expect(result).toEqual({ pendingCleanupTargetCount: 5 });
+      expect(result).toEqual({
+        pendingCleanupTargetCount: 5,
+        lastRetentionCleanupDeletedCount: 0,
+        lastRetentionCleanupFailedFileName: 'SoNotes_Backup_20250610120000.zip',
+        lastRetentionCleanupError: '401 Unauthorized',
+        lastRetentionCleanupAt: 1700000000000,
+      });
     });
   });
 
@@ -348,7 +399,12 @@ describe('RetentionCleanupOrchestrator', () => {
 
     it('完整流程：scheduled-interval + 有基线 + 无断崖 → 执行清理', async () => {
       detectBackupCliffDropMock.mockReturnValue(null);
-      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 10 });
+      executeRetentionCleanupMock.mockResolvedValue({
+        retainedCount: 10,
+        deletedCount: 0,
+        failedFileName: null,
+        error: null,
+      });
       const state: ScheduledRemoteBackupState = {
         ...DEFAULT_STATE,
         baselineConfirmedRemoteCount: 12,
@@ -361,7 +417,13 @@ describe('RetentionCleanupOrchestrator', () => {
         baselineSummary: expect.objectContaining({ noteCount: 12 }),
       });
       expect(executeRetentionCleanupMock).toHaveBeenCalled();
-      expect(result).toEqual({ pendingCleanupTargetCount: 10 });
+      expect(result).toEqual({
+        pendingCleanupTargetCount: 10,
+        lastRetentionCleanupDeletedCount: 0,
+        lastRetentionCleanupFailedFileName: null,
+        lastRetentionCleanupError: null,
+        lastRetentionCleanupAt: 1700000000000,
+      });
     });
   });
 });
