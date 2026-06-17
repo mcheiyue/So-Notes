@@ -26,6 +26,14 @@ import type { RetentionPreview } from "../services/backup/RemoteBackupRetention"
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 
+const setsEqual = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean => {
+  if (a.size !== b.size) return false;
+  for (const item of a) {
+    if (!b.has(item)) return false;
+  }
+  return true;
+};
+
 const FREQUENCY_MS: Record<string, number> = {
   'every-6-hours': 6 * 60 * 60 * 1000,
   'every-12-hours': 12 * 60 * 60 * 1000,
@@ -191,6 +199,7 @@ export const BoardDock = () => {
 
   // 保留策略相关
   const [retentionPreview, setRetentionPreview] = useState<RetentionPreview | null>(null);
+  const [retentionProtectedSnapshot, setRetentionProtectedSnapshot] = useState<ReadonlySet<string> | null>(null);
   const [retentionBusy, setRetentionBusy] = useState<'idle' | 'previewing' | 'cleaning'>('idle');
   const [retentionFeedback, setRetentionFeedback] = useState<{ status: 'success' | 'error' | 'info'; message: string } | null>(null);
 
@@ -261,7 +270,8 @@ export const BoardDock = () => {
           setWebdavFeedback(null);
           setWebdavBackups([]);
           setWebdavPasswordSaved(false);
-          setRetentionPreview(null);
+      setRetentionPreview(null);
+      setRetentionProtectedSnapshot(null);
           setRetentionBusy('idle');
           setRetentionFeedback(null);
       }
@@ -1079,6 +1089,7 @@ export const BoardDock = () => {
   const onRetentionCountChange = async (count: number) => {
     await persistScheduledConfig({ ...scheduledConfig, retentionCount: count });
     setRetentionPreview(null);
+    setRetentionProtectedSnapshot(null);
     setRetentionFeedback({ status: 'info', message: `新策略将在下次自动备份成功后生效，保留最近 ${count} 个备份。` });
   };
 
@@ -1099,6 +1110,7 @@ export const BoardDock = () => {
         protectedFileNames: protectedNames,
       });
       setRetentionPreview(result);
+      setRetentionProtectedSnapshot(protectedNames);
     } catch (err) {
       setRetentionFeedback({ status: 'error', message: `预览失败：${formatUnknownError(err)}` });
     } finally {
@@ -1117,6 +1129,19 @@ export const BoardDock = () => {
       return;
     }
 
+    // 校验预览与当前保护集合是否一致（防竞态）
+    const currentProtectedNames = new Set<string>();
+    if (scheduledState.lastRemoteFileName) currentProtectedNames.add(scheduledState.lastRemoteFileName);
+    if (scheduledState.baselineConfirmedRemoteFileName) currentProtectedNames.add(scheduledState.baselineConfirmedRemoteFileName);
+    if (scheduledState.cliffDropLatestRemoteFileName) currentProtectedNames.add(scheduledState.cliffDropLatestRemoteFileName);
+    const snapshot = retentionProtectedSnapshot;
+    if (snapshot && !setsEqual(snapshot, currentProtectedNames)) {
+      setRetentionPreview(null);
+      setRetentionProtectedSnapshot(null);
+      setRetentionFeedback({ status: 'error', message: '备份状态已变化，请重新预览后再执行清理。' });
+      return;
+    }
+
     const confirmed = await confirm({
       title: '确认清理备份',
       message: `即将永久删除 ${deleteCount} 个远端备份文件，保留最近 ${preview?.keep.length ?? 0} 个。此操作不可撤销，是否继续？`,
@@ -1127,14 +1152,10 @@ export const BoardDock = () => {
     setRetentionFeedback(null);
     setRetentionBusy('cleaning');
     try {
-      const protectedNames = new Set<string>();
-      if (scheduledState.lastRemoteFileName) protectedNames.add(scheduledState.lastRemoteFileName);
-      if (scheduledState.baselineConfirmedRemoteFileName) protectedNames.add(scheduledState.baselineConfirmedRemoteFileName);
-      if (scheduledState.cliffDropLatestRemoteFileName) protectedNames.add(scheduledState.cliffDropLatestRemoteFileName);
       const result = await executeRetentionCleanup({
         config,
         retentionCount: scheduledConfig.retentionCount ?? 5,
-        protectedFileNames: protectedNames,
+        protectedFileNames: currentProtectedNames,
       });
       if (result.success) {
         setRetentionFeedback({

@@ -266,8 +266,8 @@ export function detectBackupCliffDrop(input: {
     } else if (baselineBoard >= CLIFF_DROP_BOARD_ZERO_TRIGGER_MIN && currentBoard === 0) {
       anomalyCodes.push('CLIFF_DROP_BOARD_COUNT');
     }
-  } else if (currentNotes === 0 && baselineBoard >= CLIFF_DROP_BOARD_MEDIUM_BASELINE_MIN && currentBoard === 0) {
-    // plan 3.3：note<5 时，只在 note=0 且 board 也异常接近空时触发
+  } else if (currentNotes === 0 && baselineBoard >= CLIFF_DROP_BOARD_ZERO_TRIGGER_MIN && currentBoard === 0) {
+    // plan 3.3：note<5 时，只在 note=0 且 board 也异常接近空时触发（baselineBoard >= 2）
     anomalyCodes.push('CLIFF_DROP_BOARD_COUNT');
   }
 
