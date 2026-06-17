@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { confirm } from "../store/confirmStore";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
-import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw, Cloud, Wifi, RefreshCw, Save, Clock } from "lucide-react";
+import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw, Cloud, Wifi, RefreshCw, Save, Clock, Shield, Eye, AlertTriangle } from "lucide-react";
 import { Z_INDEX } from "../constants/layout";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { appController } from "../controllers/appController";
@@ -21,6 +21,8 @@ import { readDiskStorageData, getLatestUpdateTimestamp } from "../services/stora
 import { normalizeNotes, createLayoutNotesById, sanitizeNoteAttachments } from "../store/normalization";
 import { db } from "../store/db";
 import type { Note } from "../store/types";
+import { previewRetentionCleanup, executeRetentionCleanup } from "../services/backup/RemoteBackupRetentionService";
+import type { RetentionPreview } from "../services/backup/RemoteBackupRetention";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 
@@ -187,6 +189,11 @@ export const BoardDock = () => {
   const [scheduledLoading, setScheduledLoading] = useState(false);
   const [exitHintVisible, setExitHintVisible] = useState(false);
 
+  // 保留策略相关
+  const [retentionPreview, setRetentionPreview] = useState<RetentionPreview | null>(null);
+  const [retentionBusy, setRetentionBusy] = useState<'idle' | 'previewing' | 'cleaning'>('idle');
+  const [retentionFeedback, setRetentionFeedback] = useState<{ status: 'success' | 'error' | 'info'; message: string } | null>(null);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const dockContainerRef = useRef<HTMLDivElement>(null);
@@ -254,6 +261,9 @@ export const BoardDock = () => {
           setWebdavFeedback(null);
           setWebdavBackups([]);
           setWebdavPasswordSaved(false);
+          setRetentionPreview(null);
+          setRetentionBusy('idle');
+          setRetentionFeedback(null);
       }
   }, [showSettings]);
 
@@ -1062,6 +1072,100 @@ export const BoardDock = () => {
     await persistScheduledConfig({ ...scheduledConfig, exitPromptEnabled: !scheduledConfig.exitPromptEnabled });
   };
 
+  const onRetentionToggle = async () => {
+    await persistScheduledConfig({ ...scheduledConfig, retentionEnabled: !scheduledConfig.retentionEnabled });
+  };
+
+  const onRetentionCountChange = async (count: number) => {
+    await persistScheduledConfig({ ...scheduledConfig, retentionCount: count });
+    setRetentionFeedback({ status: 'info', message: `新策略将在下次自动备份成功后生效，保留最近 ${count} 个备份。` });
+  };
+
+  const onPreviewCleanup = async () => {
+    const config = buildWebdavConfig();
+    if (!config) return;
+    setRetentionFeedback(null);
+    setRetentionPreview(null);
+    setRetentionBusy('previewing');
+    try {
+      const result = await previewRetentionCleanup({
+        config,
+        retentionCount: scheduledConfig.retentionCount ?? 5,
+        protectedFileNames: new Set(),
+      });
+      setRetentionPreview(result);
+    } catch (err) {
+      setRetentionFeedback({ status: 'error', message: `预览失败：${formatUnknownError(err)}` });
+    } finally {
+      setRetentionBusy('idle');
+    }
+  };
+
+  const onExecuteCleanup = async () => {
+    const config = buildWebdavConfig();
+    if (!config) return;
+
+    const preview = retentionPreview;
+    const deleteCount = preview?.candidates.length ?? 0;
+    if (deleteCount === 0) {
+      setRetentionFeedback({ status: 'info', message: '无需清理的备份文件。' });
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: '确认清理备份',
+      message: `即将永久删除 ${deleteCount} 个远端备份文件，保留最近 ${preview?.keep.length ?? 0} 个。此操作不可撤销，是否继续？`,
+      kind: 'danger',
+    });
+    if (!confirmed) return;
+
+    setRetentionFeedback(null);
+    setRetentionBusy('cleaning');
+    try {
+      const result = await executeRetentionCleanup({
+        config,
+        retentionCount: scheduledConfig.retentionCount ?? 5,
+        protectedFileNames: new Set(),
+      });
+      if (result.success) {
+        setRetentionFeedback({
+          status: 'success',
+          message: `清理完成：已删除 ${result.deletedCount} 个备份，保留 ${result.retainedCount} 个。${result.missingCount > 0 ? `（${result.missingCount} 个已不存在）` : ''}`,
+        });
+      } else {
+        setRetentionFeedback({
+          status: 'error',
+          message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个。${result.failedFileName ? `删除 ${result.failedFileName} 时失败：${result.error ?? '未知错误'}` : ''}`,
+        });
+      }
+      setRetentionPreview(null);
+    } catch (err) {
+      setRetentionFeedback({ status: 'error', message: `清理失败：${formatUnknownError(err)}` });
+    } finally {
+      setRetentionBusy('idle');
+    }
+  };
+
+  const onConfirmBaseline = async () => {
+    const confirmed = await confirm({
+      title: '确认健康基线',
+      message: '确认当前远端备份数据为健康状态？这将清除断崖骤降警告，并以当前远端文件数作为新基线。',
+    });
+    if (!confirmed) return;
+
+    const updated: ScheduledRemoteBackupState = {
+      ...scheduledState,
+      cliffDropDeferred: false,
+      cliffDropDetectedAt: null,
+    };
+    setScheduledState(updated);
+    try {
+      await ScheduledRemoteBackupConfigService.saveState(updated);
+    } catch (err) {
+      setRetentionFeedback({ status: 'error', message: `保存基线确认失败：${formatUnknownError(err)}` });
+    }
+  };
+
   const disableScheduledByCredential = !webdavPasswordSaved && scheduledConfig.enabled;
   const scheduledEnabledEffective = scheduledConfig.enabled && webdavPasswordSaved;
 
@@ -1842,6 +1946,130 @@ export const BoardDock = () => {
                                 <p className="text-[10px] text-text-tertiary leading-tight" data-testid="scheduled-backup-disabled-hint">
                                     自动远端备份已关闭
                                 </p>
+                            )}
+
+                            {scheduledEnabledEffective && (
+                                <div
+                                    className="rounded border border-border-subtle bg-secondary-bg/30 px-2 py-1.5 space-y-1.5 text-[11px] leading-4"
+                                    data-testid="retention-policy-section"
+                                >
+                                    <label className="flex items-center justify-between gap-2 text-xs text-text-secondary cursor-pointer">
+                                        <span className="flex items-center gap-1">
+                                            <Shield className="w-3 h-3 text-text-tertiary" />
+                                            保留策略
+                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            <select
+                                                value={scheduledConfig.retentionCount ?? 5}
+                                                onChange={(e) => onRetentionCountChange(Number(e.target.value))}
+                                                disabled={!scheduledConfig.retentionEnabled || retentionBusy !== 'idle'}
+                                                className="bg-secondary-bg/50 border border-border-subtle rounded px-1 py-0.5 text-[11px] text-text-primary outline-none focus:border-blue-400 disabled:opacity-50"
+                                                data-testid="retention-count-select"
+                                            >
+                                                <option value={5}>5</option>
+                                                <option value={10}>10</option>
+                                                <option value={20}>20</option>
+                                                <option value={50}>50</option>
+                                            </select>
+                                            <input
+                                                type="checkbox"
+                                                checked={scheduledConfig.retentionEnabled}
+                                                onChange={onRetentionToggle}
+                                                disabled={retentionBusy !== 'idle'}
+                                                className="rounded disabled:opacity-50"
+                                                data-testid="retention-enabled-toggle"
+                                            />
+                                        </div>
+                                    </label>
+
+                                    {scheduledConfig.retentionEnabled && (
+                                        <p className="text-[10px] text-text-tertiary leading-tight">
+                                            自动备份成功后，远端将保留最近 {scheduledConfig.retentionCount ?? 5} 个备份文件。
+                                        </p>
+                                    )}
+
+                                    {scheduledState.cliffDropDeferred && (
+                                        <div
+                                            className="flex items-center justify-between gap-2 rounded border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/20 px-2 py-1"
+                                            data-testid="cliff-drop-warning"
+                                        >
+                                            <p className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                                                <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                                                检测到备份数据异常下降，已暂停自动清理
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={onConfirmBaseline}
+                                                className="px-2 py-0.5 text-[10px] rounded bg-amber-100 dark:bg-amber-800/50 hover:bg-amber-200 dark:hover:bg-amber-700/50 text-amber-700 dark:text-amber-300 transition-colors whitespace-nowrap"
+                                                data-testid="confirm-baseline-button"
+                                            >
+                                                设为健康基线
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    <div className="flex items-center gap-1.5">
+                                        <button
+                                            type="button"
+                                            onClick={onPreviewCleanup}
+                                            disabled={retentionBusy !== 'idle'}
+                                            className="px-2 py-1 text-xs rounded bg-primary-bg hover:bg-primary-bg/80 text-primary-fg disabled:opacity-50 transition-colors flex items-center gap-1"
+                                            data-testid="retention-preview-button"
+                                        >
+                                            <Eye className="w-3 h-3" />
+                                            {retentionBusy === 'previewing' ? '预览中…' : '预览清理'}
+                                        </button>
+                                        {retentionPreview !== null && retentionPreview.candidates.length > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={onExecuteCleanup}
+                                                disabled={retentionBusy !== 'idle'}
+                                                className="px-2 py-1 text-xs rounded bg-red-500/90 hover:bg-red-600 text-white disabled:opacity-50 transition-colors flex items-center gap-1"
+                                                data-testid="retention-execute-button"
+                                            >
+                                                <Trash2 className="w-3 h-3" />
+                                                {retentionBusy === 'cleaning' ? '清理中…' : '执行清理'}
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {retentionPreview !== null && (
+                                        <div
+                                            className="rounded border border-border-subtle bg-secondary-bg/50 px-2 py-1 space-y-0.5"
+                                            data-testid="retention-preview-result"
+                                        >
+                                            <p className="text-text-secondary">
+                                                将删除 {retentionPreview.candidates.length} 个备份，保留 {retentionPreview.keep.length} 个
+                                                {retentionPreview.protectedCount > 0 && `（${retentionPreview.protectedCount} 个受保护）`}
+                                            </p>
+                                            {retentionPreview.candidates.length > 0 && (
+                                                <details className="text-[10px] text-text-tertiary">
+                                                    <summary className="cursor-pointer hover:text-text-secondary">查看将删除的文件</summary>
+                                                    <ul className="mt-0.5 space-y-0.5 pl-3">
+                                                        {retentionPreview.candidates.map((c) => (
+                                                            <li key={c.fileName} className="truncate">{c.fileName}</li>
+                                                        ))}
+                                                    </ul>
+                                                </details>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {retentionFeedback && (
+                                        <p
+                                            className={cn(
+                                                retentionFeedback.status === 'error'
+                                                    ? 'text-red-500 dark:text-red-400'
+                                                    : retentionFeedback.status === 'success'
+                                                        ? 'text-green-600 dark:text-green-400'
+                                                        : 'text-text-tertiary',
+                                            )}
+                                            data-testid="retention-feedback"
+                                        >
+                                            {retentionFeedback.message}
+                                        </p>
+                                    )}
+                                </div>
                             )}
                         </div>
 
