@@ -89,7 +89,6 @@ export async function orchestratePostBackupRetentionCleanup(
   const latestSummary = uploadResult.summary;
 
   if (state.baselineConfirmedRemoteCount === null) {
-    // 无基线：如果有本次备份摘要，初始化基线并跳过清理
     if (latestSummary !== null) {
       return {
         baselineConfirmedRemoteCount: latestSummary.noteCount,
@@ -100,10 +99,14 @@ export async function orchestratePostBackupRetentionCleanup(
         baselineConfirmedRemoteFileName: uploadResult.remoteFileName ?? null,
         baselineConfirmedConfirmedAt: clock(),
         baselineConfirmedZipSizeBytes: uploadResult.zipSizeBytes ?? null,
+        lastRetentionCleanupError: 'skipped_no_baseline',
+        lastRetentionCleanupAt: clock(),
       };
     }
-    // 无摘要且无基线，无法建立基线，跳过
-    return {};
+    return {
+      lastRetentionCleanupError: 'skipped_no_baseline',
+      lastRetentionCleanupAt: clock(),
+    };
   }
 
   // -----------------------------------------------------------------------

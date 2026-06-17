@@ -1078,6 +1078,7 @@ export const BoardDock = () => {
 
   const onRetentionCountChange = async (count: number) => {
     await persistScheduledConfig({ ...scheduledConfig, retentionCount: count });
+    setRetentionPreview(null);
     setRetentionFeedback({ status: 'info', message: `新策略将在下次自动备份成功后生效，保留最近 ${count} 个备份。` });
   };
 
@@ -1141,9 +1142,12 @@ export const BoardDock = () => {
           message: `清理完成：已删除 ${result.deletedCount} 个备份，保留 ${result.retainedCount} 个。${result.missingCount > 0 ? `（${result.missingCount} 个已不存在）` : ''}`,
         });
       } else {
+        const detail = result.failedFileName
+          ? `删除 ${result.failedFileName} 时失败：${result.error ?? '未知错误'}`
+          : (result.error ? `原因：${result.error}` : '');
         setRetentionFeedback({
           status: 'error',
-          message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个。${result.failedFileName ? `删除 ${result.failedFileName} 时失败：${result.error ?? '未知错误'}` : ''}`,
+          message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个。${detail}`,
         });
       }
       setRetentionPreview(null);
