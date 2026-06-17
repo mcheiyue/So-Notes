@@ -30,6 +30,7 @@ import type {
   WebDavConfigLoadResult,
 } from './WebDavBackupService';
 import type { StorageData } from '../../store/types';
+import { orchestratePostBackupRetentionCleanup } from './RetentionCleanupOrchestrator';
 
 // ---------------------------------------------------------------------------
 // 模块级服务实例 accessor
@@ -470,6 +471,23 @@ export function createScheduledRemoteBackupService(
         };
 
         patchState(patch);
+
+        // 保留策略编排：仅自动备份成功后触发
+        try {
+          const retentionPatch = await orchestratePostBackupRetentionCleanup({
+            trigger,
+            config: serviceState.config,
+            state: internalState,
+            uploadResult: result,
+            webdavConfig,
+            clock: deps.clock,
+          });
+          if (Object.keys(retentionPatch).length > 0) {
+            patchState(retentionPatch);
+          }
+        } catch {
+          // 保留策略清理失败不影响备份成功状态
+        }
       } else {
         // 失败
         const now = deps.clock();
