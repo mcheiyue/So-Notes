@@ -15,10 +15,10 @@ import type { BackupSummary } from './BackupService';
 /** 严格文件名正则：SoNotes_Backup_YYYYMMDDHHMMSS.zip */
 const BACKUP_FILE_NAME_RE = /^SoNotes_Backup_(\d{14})\.zip$/;
 
-/** 断崖检测：基线 < 此值时跳过所有维度检测 */
+/** 断崖检测：基线 < 此值时跳过 note 维度检测（但仍检查 board 维度） */
 const CLIFF_DROP_MEDIUM_BASELINE_MIN = 5;
 
-/** 断崖检测：基线 ≥ 此值时使用 30% 相对阈值 */
+/** 断崖检测：基线 ≥ 此值时使用 30% 相对阈值（note 维度） */
 const CLIFF_DROP_LARGE_BASELINE_MIN = 10;
 
 /** 断崖检测：中等基线（5-9）时 noteCount 降至 ≤ 此值才触发 */
@@ -26,6 +26,18 @@ const CLIFF_DROP_MEDIUM_CRITICAL_COUNT = 1;
 
 /** 断崖检测：常规样本使用相对阈值 */
 const CLIFF_DROP_RELATIVE_THRESHOLD = 0.3;
+
+/** 断崖检测：board 维度基线 ≥ 此值时使用 50% 相对阈值 */
+const CLIFF_DROP_BOARD_MEDIUM_BASELINE_MIN = 3;
+
+/** 断崖检测：board 维度基线 ≥ 此值且当前为 0 时触发 */
+const CLIFF_DROP_BOARD_ZERO_TRIGGER_MIN = 2;
+
+/** 断崖检测：图片维度（文件数/笔记数）基线 ≥ 此值时使用 30% 相对阈值 */
+const CLIFF_DROP_IMAGE_MEDIUM_BASELINE_MIN = 5;
+
+/** 断崖检测：zip 体积基线 ≥ 此值时才参与判断（1 MiB） */
+const CLIFF_DROP_ZIP_MIN_BYTES = 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -206,67 +218,92 @@ export function proposeRetentionCleanup(input: {
 /**
  * 断崖式骤降检测：比较最新备份摘要与健康基线（多维度）。
  *
- * 规则（三段式）：
- * - baselineNotes < 5：跳过所有维度检测。
- * - baselineNotes 5–9：noteCount 降至 ≤ 1 时触发（CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL），
- *   其他维度（board/image/zip）仍用 30% 相对阈值。
- * - baselineNotes ≥ 10：所有维度统一用 30% 相对阈值。
+ * plan 3.3 规则：
+ * - note 维度：baselineNotes < 5 跳过 note 检测；5-9 降至 ≤ 1 触发；≥ 10 用 30% 阈值。
+ * - board 维度：baselineBoard ≥ 3 用 50% 阈值；≥ 2 且当前为 0 也触发。
+ * - image 维度：基线 ≥ 5 用 30% 阈值。
+ * - zip 维度：仅当两次都有 zipSizeBytes 且基线 ≥ 1 MiB 时参与，不可单独触发。
  *
  * @returns 触发异常时返回比较结果，否则返回 null
  */
 export function detectBackupCliffDrop(input: {
   readonly latestSummary: BackupSummary;
   readonly baselineSummary: BackupSummary;
+  readonly latestZipSizeBytes?: number | null;
+  readonly baselineZipSizeBytes?: number | null;
 }): BackupSummaryComparison | null {
   const { latestSummary, baselineSummary } = input;
 
   const baselineNotes = baselineSummary.noteCount;
   const currentNotes = latestSummary.noteCount;
 
-  // 基线不足时跳过所有维度检测
-  if (baselineNotes < CLIFF_DROP_MEDIUM_BASELINE_MIN) {
-    return null;
-  }
-
-  const isMediumBaseline =
-    baselineNotes >= CLIFF_DROP_MEDIUM_BASELINE_MIN &&
-    baselineNotes < CLIFF_DROP_LARGE_BASELINE_MIN;
-
   const anomalyCodes: RemoteRetentionAnomalyCode[] = [];
 
-  // noteCount 维度：中等基线段用绝对值判断
-  if (isMediumBaseline) {
-    if (currentNotes <= CLIFF_DROP_MEDIUM_CRITICAL_COUNT) {
-      anomalyCodes.push('CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL');
-    }
-  } else {
-    // ≥ 10：用相对阈值
+  // ---- note 维度 ----
+  if (baselineNotes >= CLIFF_DROP_LARGE_BASELINE_MIN) {
     const dropPct = baselineNotes > 0
       ? (baselineNotes - currentNotes) / baselineNotes
       : 0;
     if (dropPct >= CLIFF_DROP_RELATIVE_THRESHOLD) {
       anomalyCodes.push('CLIFF_DROP_RELATIVE');
     }
+  } else if (baselineNotes >= CLIFF_DROP_MEDIUM_BASELINE_MIN) {
+    if (currentNotes <= CLIFF_DROP_MEDIUM_CRITICAL_COUNT) {
+      anomalyCodes.push('CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL');
+    }
+  }
+  // baselineNotes < 5 → 跳过 note 维度检测，但继续检查 board 维度
+
+  // ---- board 维度（baselineNotes < 5 时也检查） ----
+  const baselineBoard = baselineSummary.boardCount;
+  const currentBoard = latestSummary.boardCount;
+  if (baselineBoard >= CLIFF_DROP_BOARD_MEDIUM_BASELINE_MIN) {
+    if (currentBoard < baselineBoard * 0.5) {
+      anomalyCodes.push('CLIFF_DROP_BOARD_COUNT');
+    }
+  } else if (baselineBoard >= CLIFF_DROP_BOARD_ZERO_TRIGGER_MIN && currentBoard === 0) {
+    anomalyCodes.push('CLIFF_DROP_BOARD_COUNT');
   }
 
-  // 其他维度（board/image/zip）统一用相对阈值
-  const otherDimensions: Array<{
-    baseline: number;
-    current: number;
-    code: RemoteRetentionAnomalyCode;
-  }> = [
-    { baseline: baselineSummary.boardCount, current: latestSummary.boardCount, code: 'CLIFF_DROP_BOARD_COUNT' },
-    { baseline: baselineSummary.imageNoteCount, current: latestSummary.imageNoteCount, code: 'CLIFF_DROP_IMAGE_NOTE_COUNT' },
-    { baseline: baselineSummary.imageFileCount, current: latestSummary.imageFileCount, code: 'CLIFF_DROP_IMAGE_FILE_COUNT' },
-    { baseline: baselineSummary.imageFileTotalBytes, current: latestSummary.imageFileTotalBytes, code: 'CLIFF_DROP_ZIP_SIZE_BYTES' },
-  ];
-
-  for (const dim of otherDimensions) {
-    if (dim.baseline <= 0) continue;
-
-    const dropPct = (dim.baseline - dim.current) / dim.baseline;
+  // ---- image file 维度 ----
+  const baselineImageFile = baselineSummary.imageFileCount;
+  const currentImageFile = latestSummary.imageFileCount;
+  if (baselineImageFile >= CLIFF_DROP_IMAGE_MEDIUM_BASELINE_MIN) {
+    const dropPct = baselineImageFile > 0
+      ? (baselineImageFile - currentImageFile) / baselineImageFile
+      : 0;
     if (dropPct >= CLIFF_DROP_RELATIVE_THRESHOLD) {
-      anomalyCodes.push(dim.code);
+      anomalyCodes.push('CLIFF_DROP_IMAGE_FILE_COUNT');
+    }
+  }
+
+  // ---- image note 维度 ----
+  const baselineImageNote = baselineSummary.imageNoteCount;
+  const currentImageNote = latestSummary.imageNoteCount;
+  if (baselineImageNote >= CLIFF_DROP_IMAGE_MEDIUM_BASELINE_MIN) {
+    const dropPct = baselineImageNote > 0
+      ? (baselineImageNote - currentImageNote) / baselineImageNote
+      : 0;
+    if (dropPct >= CLIFF_DROP_RELATIVE_THRESHOLD) {
+      anomalyCodes.push('CLIFF_DROP_IMAGE_NOTE_COUNT');
+    }
+  }
+
+  // ---- zip 维度（不可单独触发，必须伴随其他维度异常） ----
+  const hasOtherAnomaly = anomalyCodes.length > 0;
+  if (hasOtherAnomaly) {
+    const baselineZip = input.baselineZipSizeBytes;
+    const latestZip = input.latestZipSizeBytes;
+    if (
+      baselineZip != null && latestZip != null &&
+      baselineZip >= CLIFF_DROP_ZIP_MIN_BYTES
+    ) {
+      const dropPct = baselineZip > 0
+        ? (baselineZip - latestZip) / baselineZip
+        : 0;
+      if (dropPct >= CLIFF_DROP_RELATIVE_THRESHOLD) {
+        anomalyCodes.push('CLIFF_DROP_ZIP_SIZE_BYTES');
+      }
     }
   }
 

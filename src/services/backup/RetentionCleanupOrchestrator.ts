@@ -135,6 +135,8 @@ export async function orchestratePostBackupRetentionCleanup(
     const cliffDrop = detectBackupCliffDrop({
       latestSummary,
       baselineSummary,
+      latestZipSizeBytes: uploadResult.zipSizeBytes ?? null,
+      baselineZipSizeBytes: state.baselineConfirmedZipSizeBytes ?? null,
     });
 
     if (cliffDrop !== null) {

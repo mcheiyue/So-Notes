@@ -19,7 +19,10 @@ function makeBackup(
   return { fileName, readable: true, ...overrides };
 }
 
-function makeSummary(noteCount: number): BackupSummary {
+function makeSummary(
+  noteCount: number,
+  overrides?: Partial<BackupSummary>,
+): BackupSummary {
   return {
     app: 'SoNotes',
     formatVersion: 1,
@@ -32,6 +35,7 @@ function makeSummary(noteCount: number): BackupSummary {
     trashNoteCount: 0,
     imageFileCount: 0,
     imageFileTotalBytes: 0,
+    ...overrides,
   };
 }
 
@@ -371,7 +375,7 @@ describe('proposeRetentionCleanup', () => {
 // ---------------------------------------------------------------------------
 
 describe('detectBackupCliffDrop', () => {
-  it('baselineNotes < 5 → 跳过检测，返回 null', () => {
+  it('baselineNotes < 5 → 跳过 note 检测，board 也未触发时返回 null', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(0),
       baselineSummary: makeSummary(2),
@@ -389,7 +393,7 @@ describe('detectBackupCliffDrop', () => {
     expect(result).toBeNull();
   });
 
-  it('baselineNotes=4 < 5 → 跳过检测，返回 null', () => {
+  it('baselineNotes=4 < 5 → 跳过 note 检测，board 也未触发时返回 null', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(1),
       baselineSummary: makeSummary(4),
@@ -479,7 +483,7 @@ describe('detectBackupCliffDrop', () => {
     expect(result).toBeNull();
   });
 
-  it('baselineNotes=3 < 5 → 跳过检测', () => {
+  it('baselineNotes=3 < 5 → 跳过 note 检测', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(1),
       baselineSummary: makeSummary(3),
@@ -497,11 +501,260 @@ describe('detectBackupCliffDrop', () => {
     expect(result).toBeNull();
   });
 
-  it('baselineNotes=6 使用相对阈值（≥5 但 <10），currentNotes=4 不触发 noteCount', () => {
-    // noteCount 在 [5,9) 范围用绝对值判断（≤1），currentNotes=4 > 1 → 不触发
+  it('baselineNotes=6 使用中等基线（5-9），currentNotes=4 不触发 noteCount', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(4),
       baselineSummary: makeSummary(6),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  // ---- board 维度测试 ----
+
+  it('board 维度：baselineBoard ≥ 3 且 dropPct ≥ 50% 触发 CLIFF_DROP_BOARD_COUNT', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { boardCount: 1 }),
+      baselineSummary: makeSummary(100, { boardCount: 5 }),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_BOARD_COUNT');
+  });
+
+  it('board 维度：baselineBoard ≥ 3 但 dropPct < 50% 不触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { boardCount: 3 }),
+      baselineSummary: makeSummary(100, { boardCount: 5 }),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('board 维度：baselineBoard ≥ 2 且 currentBoard === 0 触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { boardCount: 0 }),
+      baselineSummary: makeSummary(100, { boardCount: 3 }),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_BOARD_COUNT');
+  });
+
+  it('board 维度：baselineBoard = 2 且 currentBoard === 0 触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { boardCount: 0 }),
+      baselineSummary: makeSummary(100, { boardCount: 2 }),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_BOARD_COUNT');
+  });
+
+  it('board 维度：baselineBoard = 2 但 currentBoard = 1 不触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { boardCount: 1 }),
+      baselineSummary: makeSummary(100, { boardCount: 2 }),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('board 维度：baselineBoard = 1 不触发（< 2）', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { boardCount: 0 }),
+      baselineSummary: makeSummary(100, { boardCount: 1 }),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('note < 5 时仍检查 board 维度 — baselineNotes=2 且 board 也正常 → null', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(2, { boardCount: 1 }),
+      baselineSummary: makeSummary(4, { boardCount: 1 }),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('note < 5 时仍检查 board 维度 — baselineNotes=2 且 board 触发 → 异常', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(2, { boardCount: 0 }),
+      baselineSummary: makeSummary(4, { boardCount: 3 }),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_BOARD_COUNT');
+  });
+
+  // ---- image file 维度测试 ----
+
+  it('image file 维度：baselineImageFile ≥ 5 且 dropPct ≥ 30% 触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { imageFileCount: 3 }),
+      baselineSummary: makeSummary(100, { imageFileCount: 10 }),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_IMAGE_FILE_COUNT');
+  });
+
+  it('image file 维度：baselineImageFile ≥ 5 但 dropPct < 30% 不触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { imageFileCount: 8 }),
+      baselineSummary: makeSummary(100, { imageFileCount: 10 }),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('image file 维度：baselineImageFile = 4 不触发（< 5）', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { imageFileCount: 0 }),
+      baselineSummary: makeSummary(100, { imageFileCount: 4 }),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  // ---- image note 维度测试 ----
+
+  it('image note 维度：baselineImageNote ≥ 5 且 dropPct ≥ 30% 触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { imageNoteCount: 3 }),
+      baselineSummary: makeSummary(100, { imageNoteCount: 10 }),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_IMAGE_NOTE_COUNT');
+  });
+
+  it('image note 维度：baselineImageNote ≥ 5 但 dropPct < 30% 不触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { imageNoteCount: 8 }),
+      baselineSummary: makeSummary(100, { imageNoteCount: 10 }),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('image note 维度：baselineImageNote = 4 不触发（< 5）', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { imageNoteCount: 0 }),
+      baselineSummary: makeSummary(100, { imageNoteCount: 4 }),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  // ---- zip 维度测试 ----
+
+  it('zip 维度：无 zip 参数 → 跳过 zip 检测', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(5),
+      baselineSummary: makeSummary(10),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).not.toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
+  });
+
+  it('zip 维度：有 zip 但无其他维度异常 → 不触发 zip', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100),
+      baselineSummary: makeSummary(100),
+      latestZipSizeBytes: 500_000,
+      baselineZipSizeBytes: 2_000_000,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('zip 维度：有 zip 且有其他维度异常 → 触发 zip', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(5),
+      baselineSummary: makeSummary(10),
+      latestZipSizeBytes: 500_000,
+      baselineZipSizeBytes: 2_000_000,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_RELATIVE');
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
+  });
+
+  it('zip 维度：基线 zip < 1 MiB → 不参与判断', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(5),
+      baselineSummary: makeSummary(10),
+      latestZipSizeBytes: 100_000,
+      baselineZipSizeBytes: 500_000,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_RELATIVE');
+    expect(result!.anomalyCodes).not.toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
+  });
+
+  it('zip 维度：latestZipSizeBytes 为 null → 跳过 zip', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(5),
+      baselineSummary: makeSummary(10),
+      latestZipSizeBytes: null,
+      baselineZipSizeBytes: 2_000_000,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_RELATIVE');
+    expect(result!.anomalyCodes).not.toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
+  });
+
+  it('zip 维度：baselineZipSizeBytes 为 null → 跳过 zip', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(5),
+      baselineSummary: makeSummary(10),
+      latestZipSizeBytes: 500_000,
+      baselineZipSizeBytes: null,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_RELATIVE');
+    expect(result!.anomalyCodes).not.toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
+  });
+
+  it('zip 维度：zip dropPct < 30% → 不触发 zip', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(5),
+      baselineSummary: makeSummary(10),
+      latestZipSizeBytes: 1_500_000,
+      baselineZipSizeBytes: 2_000_000,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_RELATIVE');
+    expect(result!.anomalyCodes).not.toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
+  });
+
+  it('zip 维度：zip dropPct 恰好 ≥ 30% 且有其他异常 → 触发', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(5),
+      baselineSummary: makeSummary(10),
+      latestZipSizeBytes: 1_400_000,
+      baselineZipSizeBytes: 2_000_000,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_RELATIVE');
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
+  });
+
+  // ---- imageFileTotalBytes 不参与断崖检测 ----
+
+  it('imageFileTotalBytes 不再参与断崖检测（已从 otherDimensions 移除）', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(100, { imageFileTotalBytes: 100_000 }),
+      baselineSummary: makeSummary(100, { imageFileTotalBytes: 10_000_000 }),
     });
 
     expect(result).toBeNull();
