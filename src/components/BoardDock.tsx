@@ -1162,11 +1162,16 @@ export const BoardDock = () => {
       baselineConfirmedImageNoteCount: scheduledState.cliffDropLatestSummaryImageNoteCount ?? scheduledState.baselineConfirmedImageNoteCount,
       baselineConfirmedImageFileCount: scheduledState.cliffDropLatestSummaryImageFileCount ?? scheduledState.baselineConfirmedImageFileCount,
       baselineConfirmedImageFileTotalBytes: scheduledState.cliffDropLatestSummaryImageFileTotalBytes ?? scheduledState.baselineConfirmedImageFileTotalBytes,
+      baselineConfirmedRemoteFileName: scheduledState.cliffDropLatestRemoteFileName ?? scheduledState.baselineConfirmedRemoteFileName,
+      baselineConfirmedConfirmedAt: Date.now(),
+      baselineConfirmedZipSizeBytes: scheduledState.cliffDropLatestZipSizeBytes ?? scheduledState.baselineConfirmedZipSizeBytes,
       cliffDropLatestSummaryNoteCount: null,
       cliffDropLatestSummaryBoardCount: null,
       cliffDropLatestSummaryImageNoteCount: null,
       cliffDropLatestSummaryImageFileCount: null,
       cliffDropLatestSummaryImageFileTotalBytes: null,
+      cliffDropLatestRemoteFileName: null,
+      cliffDropLatestZipSizeBytes: null,
     };
     setScheduledState(updated);
     try {

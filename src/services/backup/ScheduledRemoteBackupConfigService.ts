@@ -58,12 +58,17 @@ export interface ScheduledRemoteBackupState {
   readonly baselineConfirmedImageNoteCount: number | null;
   readonly baselineConfirmedImageFileCount: number | null;
   readonly baselineConfirmedImageFileTotalBytes: number | null;
+  readonly baselineConfirmedRemoteFileName: string | null;
+  readonly baselineConfirmedConfirmedAt: number | null;
+  readonly baselineConfirmedZipSizeBytes: number | null;
   readonly cliffDropDeferred: boolean;
   readonly cliffDropLatestSummaryNoteCount: number | null;
   readonly cliffDropLatestSummaryBoardCount: number | null;
   readonly cliffDropLatestSummaryImageNoteCount: number | null;
   readonly cliffDropLatestSummaryImageFileCount: number | null;
   readonly cliffDropLatestSummaryImageFileTotalBytes: number | null;
+  readonly cliffDropLatestRemoteFileName: string | null;
+  readonly cliffDropLatestZipSizeBytes: number | null;
   readonly pendingCleanupTargetCount: number | null;
   readonly lastRetentionCleanupDeletedCount: number | null;
   readonly lastRetentionCleanupFailedFileName: string | null;
@@ -142,12 +147,17 @@ export const DEFAULT_SCHEDULED_BACKUP_STATE: Readonly<ScheduledRemoteBackupState
   baselineConfirmedImageNoteCount: null,
   baselineConfirmedImageFileCount: null,
   baselineConfirmedImageFileTotalBytes: null,
+  baselineConfirmedRemoteFileName: null,
+  baselineConfirmedConfirmedAt: null,
+  baselineConfirmedZipSizeBytes: null,
   cliffDropDeferred: false,
   cliffDropLatestSummaryNoteCount: null,
   cliffDropLatestSummaryBoardCount: null,
   cliffDropLatestSummaryImageNoteCount: null,
   cliffDropLatestSummaryImageFileCount: null,
   cliffDropLatestSummaryImageFileTotalBytes: null,
+  cliffDropLatestRemoteFileName: null,
+  cliffDropLatestZipSizeBytes: null,
   pendingCleanupTargetCount: null,
   lastRetentionCleanupDeletedCount: null,
   lastRetentionCleanupFailedFileName: null,

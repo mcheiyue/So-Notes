@@ -59,12 +59,17 @@ const DEFAULT_STATE: ScheduledRemoteBackupState = {
   baselineConfirmedImageNoteCount: null,
   baselineConfirmedImageFileCount: null,
   baselineConfirmedImageFileTotalBytes: null,
+  baselineConfirmedRemoteFileName: null,
+  baselineConfirmedConfirmedAt: null,
+  baselineConfirmedZipSizeBytes: null,
   cliffDropDeferred: false,
   cliffDropLatestSummaryNoteCount: null,
   cliffDropLatestSummaryBoardCount: null,
   cliffDropLatestSummaryImageNoteCount: null,
   cliffDropLatestSummaryImageFileCount: null,
   cliffDropLatestSummaryImageFileTotalBytes: null,
+  cliffDropLatestRemoteFileName: null,
+  cliffDropLatestZipSizeBytes: null,
   pendingCleanupTargetCount: null,
   lastRetentionCleanupDeletedCount: null,
   lastRetentionCleanupFailedFileName: null,
@@ -218,6 +223,9 @@ describe('RetentionCleanupOrchestrator', () => {
         baselineConfirmedImageNoteCount: 0,
         baselineConfirmedImageFileCount: 0,
         baselineConfirmedImageFileTotalBytes: 0,
+        baselineConfirmedRemoteFileName: null,
+        baselineConfirmedConfirmedAt: 1700000000000,
+        baselineConfirmedZipSizeBytes: 1024,
       });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
       expect(detectBackupCliffDropMock).not.toHaveBeenCalled();
@@ -264,6 +272,8 @@ describe('RetentionCleanupOrchestrator', () => {
         cliffDropLatestSummaryImageNoteCount: 0,
         cliffDropLatestSummaryImageFileCount: 0,
         cliffDropLatestSummaryImageFileTotalBytes: 0,
+        cliffDropLatestRemoteFileName: null,
+        cliffDropLatestZipSizeBytes: 1024,
       });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
@@ -309,6 +319,14 @@ describe('RetentionCleanupOrchestrator', () => {
         protectedFileNames: new Set(),
       });
       expect(result).toEqual({
+        baselineConfirmedRemoteCount: 10,
+        baselineConfirmedBoardCount: 1,
+        baselineConfirmedImageNoteCount: 0,
+        baselineConfirmedImageFileCount: 0,
+        baselineConfirmedImageFileTotalBytes: 0,
+        baselineConfirmedRemoteFileName: null,
+        baselineConfirmedConfirmedAt: 1700000000000,
+        baselineConfirmedZipSizeBytes: 1024,
         pendingCleanupTargetCount: 7,
         lastRetentionCleanupDeletedCount: 0,
         lastRetentionCleanupFailedFileName: null,
@@ -339,6 +357,14 @@ describe('RetentionCleanupOrchestrator', () => {
         makeInput({ state: { baselineConfirmedRemoteCount: 10 } }),
       );
       expect(result).toEqual({
+        baselineConfirmedRemoteCount: 10,
+        baselineConfirmedBoardCount: 1,
+        baselineConfirmedImageNoteCount: 0,
+        baselineConfirmedImageFileCount: 0,
+        baselineConfirmedImageFileTotalBytes: 0,
+        baselineConfirmedRemoteFileName: null,
+        baselineConfirmedConfirmedAt: 1700000000000,
+        baselineConfirmedZipSizeBytes: 1024,
         pendingCleanupTargetCount: 5,
         lastRetentionCleanupDeletedCount: 0,
         lastRetentionCleanupFailedFileName: 'SoNotes_Backup_20250610120000.zip',
@@ -349,7 +375,7 @@ describe('RetentionCleanupOrchestrator', () => {
   });
 
   describe('可疑备份不自动成为新基线', () => {
-    it('有基线时，即使断崖检测未触发，也不覆盖基线', async () => {
+    it('有基线时，断崖检测未触发 → 更新基线为当前备份', async () => {
       detectBackupCliffDropMock.mockReturnValue(null);
       executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 8 });
       const state: ScheduledRemoteBackupState = {
@@ -359,7 +385,8 @@ describe('RetentionCleanupOrchestrator', () => {
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({ state }),
       );
-      expect(result).not.toHaveProperty('baselineConfirmedRemoteCount');
+      expect(result).toHaveProperty('baselineConfirmedRemoteCount', 10);
+      expect(result).toHaveProperty('baselineConfirmedConfirmedAt', 1700000000000);
       expect(result).toHaveProperty('pendingCleanupTargetCount');
     });
 
@@ -394,6 +421,7 @@ describe('RetentionCleanupOrchestrator', () => {
         }),
       );
       expect(executeRetentionCleanupMock).toHaveBeenCalled();
+      expect(result).toHaveProperty('baselineConfirmedRemoteCount', 10);
       expect(result).toHaveProperty('pendingCleanupTargetCount', 3);
     });
 
@@ -418,6 +446,14 @@ describe('RetentionCleanupOrchestrator', () => {
       });
       expect(executeRetentionCleanupMock).toHaveBeenCalled();
       expect(result).toEqual({
+        baselineConfirmedRemoteCount: 10,
+        baselineConfirmedBoardCount: 1,
+        baselineConfirmedImageNoteCount: 0,
+        baselineConfirmedImageFileCount: 0,
+        baselineConfirmedImageFileTotalBytes: 0,
+        baselineConfirmedRemoteFileName: null,
+        baselineConfirmedConfirmedAt: 1700000000000,
+        baselineConfirmedZipSizeBytes: 1024,
         pendingCleanupTargetCount: 10,
         lastRetentionCleanupDeletedCount: 0,
         lastRetentionCleanupFailedFileName: null,

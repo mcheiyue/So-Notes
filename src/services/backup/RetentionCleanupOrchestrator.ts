@@ -97,6 +97,9 @@ export async function orchestratePostBackupRetentionCleanup(
         baselineConfirmedImageNoteCount: latestSummary.imageNoteCount,
         baselineConfirmedImageFileCount: latestSummary.imageFileCount,
         baselineConfirmedImageFileTotalBytes: latestSummary.imageFileTotalBytes,
+        baselineConfirmedRemoteFileName: uploadResult.remoteFileName ?? null,
+        baselineConfirmedConfirmedAt: clock(),
+        baselineConfirmedZipSizeBytes: uploadResult.zipSizeBytes ?? null,
       };
     }
     // 无摘要且无基线，无法建立基线，跳过
@@ -144,6 +147,8 @@ export async function orchestratePostBackupRetentionCleanup(
         cliffDropLatestSummaryImageNoteCount: latestSummary.imageNoteCount,
         cliffDropLatestSummaryImageFileCount: latestSummary.imageFileCount,
         cliffDropLatestSummaryImageFileTotalBytes: latestSummary.imageFileTotalBytes,
+        cliffDropLatestRemoteFileName: uploadResult.remoteFileName ?? null,
+        cliffDropLatestZipSizeBytes: uploadResult.zipSizeBytes ?? null,
       };
     }
   }
@@ -152,6 +157,18 @@ export async function orchestratePostBackupRetentionCleanup(
   // 4. 执行清理
   // -----------------------------------------------------------------------
   try {
+    // 断崖检测通过，更新基线为当前健康备份
+    const baselineUpdate: Partial<ScheduledRemoteBackupState> = {
+      baselineConfirmedRemoteCount: latestSummary?.noteCount ?? state.baselineConfirmedRemoteCount,
+      baselineConfirmedBoardCount: latestSummary?.boardCount ?? state.baselineConfirmedBoardCount,
+      baselineConfirmedImageNoteCount: latestSummary?.imageNoteCount ?? state.baselineConfirmedImageNoteCount,
+      baselineConfirmedImageFileCount: latestSummary?.imageFileCount ?? state.baselineConfirmedImageFileCount,
+      baselineConfirmedImageFileTotalBytes: latestSummary?.imageFileTotalBytes ?? state.baselineConfirmedImageFileTotalBytes,
+      baselineConfirmedRemoteFileName: uploadResult.remoteFileName ?? null,
+      baselineConfirmedConfirmedAt: clock(),
+      baselineConfirmedZipSizeBytes: uploadResult.zipSizeBytes ?? null,
+    };
+
     const cleanupResult = await executeRetentionCleanup({
       config: webdavConfig,
       retentionCount: config.retentionCount,
@@ -162,6 +179,7 @@ export async function orchestratePostBackupRetentionCleanup(
 
     // 返回清理结果到 state（清理失败不改变备份成功状态，仅记录信息）
     return {
+      ...baselineUpdate,
       pendingCleanupTargetCount: cleanupResult.retainedCount,
       lastRetentionCleanupDeletedCount: cleanupResult.deletedCount,
       lastRetentionCleanupFailedFileName: cleanupResult.failedFileName,
