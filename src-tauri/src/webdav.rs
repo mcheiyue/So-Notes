@@ -205,6 +205,10 @@ pub struct WebDavUploadResult {
     pub error_stage: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<backup::BackupSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zip_size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1788,6 +1792,8 @@ async fn webdav_upload_backup_with_client(
             error: Some(webdav_error_message(&op_error)),
             error_stage: Some("ensure_dir".to_string()),
             error_code: op_error.status.map(|s| s.to_string()),
+            summary: None,
+            zip_size_bytes: None,
         });
     }
 
@@ -1812,6 +1818,8 @@ async fn webdav_upload_backup_with_client(
                     error: Some("远端备份上传失败，本地数据未受影响".to_string()),
                     error_stage: Some("read_local_file".to_string()),
                     error_code: None,
+                    summary: None,
+                    zip_size_bytes: None,
                 });
             }
         };
@@ -1825,6 +1833,8 @@ async fn webdav_upload_backup_with_client(
                     error: Some("远端备份上传失败，本地数据未受影响".to_string()),
                     error_stage: Some("read_local_file".to_string()),
                     error_code: None,
+                    summary: None,
+                    zip_size_bytes: None,
                 });
             }
         };
@@ -1854,6 +1864,8 @@ async fn webdav_upload_backup_with_client(
                             error: None,
                             error_stage: None,
                             error_code: None,
+                            summary: None,
+                            zip_size_bytes: None,
                         });
                     }
                     401 | 403 => {
@@ -1866,6 +1878,8 @@ async fn webdav_upload_backup_with_client(
                             error: Some(webdav_error_message(&op_error)),
                             error_stage: Some("auth".to_string()),
                             error_code: Some(status.as_u16().to_string()),
+                            summary: None,
+                            zip_size_bytes: None,
                         });
                     }
                     409 | 412 => {
@@ -1882,6 +1896,8 @@ async fn webdav_upload_backup_with_client(
                             error: Some(webdav_error_message(&op_error)),
                             error_stage: Some("upload".to_string()),
                             error_code: Some(status.as_u16().to_string()),
+                            summary: None,
+                            zip_size_bytes: None,
                         });
                     }
                 }
@@ -1895,6 +1911,8 @@ async fn webdav_upload_backup_with_client(
                     error: Some(webdav_error_message(&op_error)),
                     error_stage: Some("network".to_string()),
                     error_code: op_error.status.map(|s| s.to_string()),
+                    summary: None,
+                    zip_size_bytes: None,
                 });
             }
         }
@@ -1907,6 +1925,8 @@ async fn webdav_upload_backup_with_client(
         error: Some(last_error),
         error_stage: Some("upload_retry_exhausted".to_string()),
         error_code: None,
+        summary: None,
+        zip_size_bytes: None,
     })
 }
 
@@ -1926,6 +1946,8 @@ pub async fn webdav_create_remote_backup(
                 ),
                 error_stage: Some("lock".to_string()),
                 error_code: None,
+                summary: None,
+                zip_size_bytes: None,
             });
         }
     };
@@ -1940,6 +1962,8 @@ pub async fn webdav_create_remote_backup(
                 error: Some(e),
                 error_stage: Some("credential".to_string()),
                 error_code: None,
+                summary: None,
+                zip_size_bytes: None,
             });
         }
     };
@@ -1954,6 +1978,8 @@ pub async fn webdav_create_remote_backup(
                 error: Some(e),
                 error_stage: Some("config".to_string()),
                 error_code: None,
+                summary: None,
+                zip_size_bytes: None,
             });
         }
     };
@@ -1967,6 +1993,8 @@ pub async fn webdav_create_remote_backup(
                 error: Some(e),
                 error_stage: Some("create-zip".to_string()),
                 error_code: None,
+                summary: None,
+                zip_size_bytes: None,
             });
         }
     };
@@ -1977,6 +2005,8 @@ pub async fn webdav_create_remote_backup(
             error: Some(format!("创建本地临时目录失败: {e}")),
             error_stage: Some("create-zip".to_string()),
             error_code: None,
+            summary: None,
+            zip_size_bytes: None,
         });
     }
 
@@ -1995,6 +2025,8 @@ pub async fn webdav_create_remote_backup(
                 error: Some(e),
                 error_stage: Some("create-zip".to_string()),
                 error_code: None,
+                summary: None,
+                zip_size_bytes: None,
             });
         }
     };
@@ -2007,6 +2039,8 @@ pub async fn webdav_create_remote_backup(
             error: Some(backup_result.error.unwrap_or_else(|| "创建备份文件失败".to_string())),
             error_stage: Some("create-zip".to_string()),
             error_code: None,
+            summary: None,
+            zip_size_bytes: None,
         });
     }
 
@@ -2027,6 +2061,8 @@ pub async fn webdav_create_remote_backup(
             error: Some("备份文件路径校验失败".to_string()),
             error_stage: Some("create-zip".to_string()),
             error_code: None,
+            summary: None,
+            zip_size_bytes: None,
         });
     }
 
@@ -2043,17 +2079,24 @@ pub async fn webdav_create_remote_backup(
                 error: Some(format!("构建 HTTP 客户端失败: {e}")),
                 error_stage: Some("upload".to_string()),
                 error_code: None,
+                summary: None,
+                zip_size_bytes: None,
             });
         }
     };
 
-    let result = webdav_upload_backup_with_client(&client, &target, &actual_zip_path).await;
+    let mut upload_result = webdav_upload_backup_with_client(&client, &target, &actual_zip_path).await;
 
     if actual_zip_path != temp_zip_path {
         let _ = std::fs::remove_file(&temp_zip_path);
     }
 
-    result
+    if let Ok(ref mut r) = upload_result {
+        r.summary = backup_result.summary;
+        r.zip_size_bytes = backup_result.zip_size_bytes;
+    }
+
+    upload_result
 }
 
 /// 下载核心实现：接受注入的临时目录和大小上限，便于测试。

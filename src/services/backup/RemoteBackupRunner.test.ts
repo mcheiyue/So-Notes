@@ -42,6 +42,8 @@ function makeDeps(overrides?: Partial<RemoteBackupRunnerDependencies>): RemoteBa
     createRemoteBackup: vi.fn(async () => ({
       success: true,
       remoteFileName: 'SoNotes_Backup_20240101120000.zip',
+      summary: null,
+      zipSizeBytes: null,
     })),
     readDiskStorageData: vi.fn(async () => null),
     getLatestUpdateTimestamp: vi.fn(() => 0),
@@ -355,6 +357,8 @@ describe('RemoteBackupRunner', () => {
           error: 'WebDAV 鉴权失败',
           errorStage: 'credential' as const,
           errorCode: '401',
+          summary: null,
+          zipSizeBytes: null,
         })),
       });
 

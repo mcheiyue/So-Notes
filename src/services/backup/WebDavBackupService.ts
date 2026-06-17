@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { RemoteBackupStage } from './ScheduledRemoteBackupConfigService';
+import type { BackupSummary } from './BackupService';
 
 // ---------------------------------------------------------------------------
 // Rust errorStage → 前端 RemoteBackupStage 映射
@@ -96,6 +97,8 @@ export interface WebDavUploadResult {
   readonly errorCode?: string;
   /** flushNow 成功后从磁盘重新读取的 storageUpdatedAt 时间戳。 */
   readonly capturedStorageUpdatedAt?: number | null;
+  readonly summary: BackupSummary | null;
+  readonly zipSizeBytes: number | null;
 }
 
 export interface WebDavDownloadResult {
@@ -172,6 +175,8 @@ export async function createRemoteBackup(
       error: message,
       errorStage: isCredentialError ? 'credential' : 'unknown',
       errorCode: undefined,
+      summary: null,
+      zipSizeBytes: null,
     };
   }
 }

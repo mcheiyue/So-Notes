@@ -91,6 +91,10 @@ pub struct BackupResult {
     pub attachment_count: u32,
     /// 错误信息（失败时）。
     pub error: Option<String>,
+    /// 备份摘要（成功时）。
+    pub summary: Option<BackupSummary>,
+    /// zip 文件大小（字节，成功时）。
+    pub zip_size_bytes: Option<u64>,
 }
 
 /// 本地恢复操作结果。
@@ -1399,6 +1403,11 @@ fn create_local_backup_inner(
     std::fs::rename(temp_guard.path(), &resolved_path).map_err(|e| format!("重命名备份文件失败: {e}"))?;
     temp_guard.keep();
 
+    let summary = build_summary(&manifest, &storage_data);
+    let zip_size_bytes = std::fs::metadata(&resolved_path)
+        .map(|m| m.len())
+        .ok();
+
     Ok(BackupResult {
         success: true,
         backup_path: Some(resolved_path.to_string_lossy().to_string()),
@@ -1406,6 +1415,8 @@ fn create_local_backup_inner(
         board_count,
         attachment_count,
         error: None,
+        summary: Some(summary),
+        zip_size_bytes,
     })
 }
 
@@ -2140,6 +2151,8 @@ mod tests {
             board_count: 2,
             attachment_count: 5,
             error: None,
+            summary: None,
+            zip_size_bytes: None,
         };
 
         let json = serde_json::to_string(&result).expect("序列化失败");

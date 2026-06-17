@@ -95,6 +95,8 @@ export async function runRemoteBackup(
       success: false,
       error: 'busy',
       errorStage: RemoteBackupErrorStage.SingleFlight,
+      summary: null,
+      zipSizeBytes: null,
     };
   }
 
@@ -111,6 +113,8 @@ export async function runRemoteBackup(
         success: false,
         error: 'Flush failed',
         errorStage: RemoteBackupErrorStage.Flush,
+        summary: null,
+        zipSizeBytes: null,
       };
     }
 
@@ -135,6 +139,8 @@ export async function runRemoteBackup(
       success: false,
       error: message,
       errorStage: RemoteBackupErrorStage.Unknown,
+      summary: null,
+      zipSizeBytes: null,
     };
   } finally {
     handle.release();

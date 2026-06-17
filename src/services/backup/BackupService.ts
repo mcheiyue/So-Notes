@@ -52,6 +52,8 @@ export interface BackupResult {
   readonly boardCount: number;
   readonly attachmentCount: number;
   readonly error?: string;
+  readonly summary: BackupSummary | null;
+  readonly zipSizeBytes: number | null;
 }
 
 export interface RestoreResult {
