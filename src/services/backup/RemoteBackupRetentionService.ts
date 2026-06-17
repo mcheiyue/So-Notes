@@ -69,7 +69,7 @@ function isFatalError(error: string): boolean {
     lower.includes('401') ||
     lower.includes('403') ||
     lower.includes('423') ||
-    lower.includes('5') ||
+    /5\d{2}/.test(lower) ||
     lower.includes('network') ||
     lower.includes('timeout') ||
     lower.includes('connection')

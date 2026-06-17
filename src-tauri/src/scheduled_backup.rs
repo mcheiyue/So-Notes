@@ -179,6 +179,7 @@ pub struct ScheduledRemoteBackupState {
     /// 断崖式检测确认时远端文件基准数量。
     pub baseline_confirmed_remote_count: Option<u32>,
     /// 断崖式骤降已触发延迟处理。
+    #[serde(default)]
     pub cliff_drop_deferred: bool,
     /// 等待清理的目标保留数量。
     pub pending_cleanup_target_count: Option<u32>,
