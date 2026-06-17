@@ -25,7 +25,8 @@ export type BackupJobKind =
   | 'scheduled-remote-backup'
   | 'before-exit-remote-backup'
   | 'local-restore'
-  | 'remote-restore';
+  | 'remote-restore'
+  | 'remote-retention-cleanup';
 
 /**
  * 当前活跃任务的只读快照，不包含可变状态。
