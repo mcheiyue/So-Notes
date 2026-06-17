@@ -174,9 +174,13 @@ export async function orchestratePostBackupRetentionCleanup(
     const cleanupResult = await executeRetentionCleanup({
       config: webdavConfig,
       retentionCount: config.retentionCount,
-      protectedFileNames: new Set(
-        [uploadResult.remoteFileName].filter((f): f is string => f != null && f !== ''),
-      ),
+      protectedFileNames: (() => {
+        const names = new Set<string>();
+        if (uploadResult.remoteFileName) names.add(uploadResult.remoteFileName);
+        if (state.baselineConfirmedRemoteFileName) names.add(state.baselineConfirmedRemoteFileName);
+        if (state.cliffDropLatestRemoteFileName) names.add(state.cliffDropLatestRemoteFileName);
+        return names;
+      })(),
     });
 
     // 返回清理结果到 state（清理失败不改变备份成功状态，仅记录信息）

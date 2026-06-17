@@ -335,6 +335,65 @@ describe('RetentionCleanupOrchestrator', () => {
       });
     });
 
+    it('保护对象包含 uploadResult + baseline + suspicious 三类文件', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 5 });
+      await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: {
+            baselineConfirmedRemoteCount: 10,
+            baselineConfirmedRemoteFileName: 'SoNotes_Baseline_20250601.zip',
+            cliffDropLatestRemoteFileName: 'SoNotes_Suspicious_20250610.zip',
+          },
+          uploadResult: makeUploadResult({ remoteFileName: 'SoNotes_Current_20250615.zip' }),
+        }),
+      );
+      expect(executeRetentionCleanupMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          protectedFileNames: new Set([
+            'SoNotes_Current_20250615.zip',
+            'SoNotes_Baseline_20250601.zip',
+            'SoNotes_Suspicious_20250610.zip',
+          ]),
+        }),
+      );
+    });
+
+    it('仅有 uploadResult 时只保护当前文件', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 5 });
+      await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: { baselineConfirmedRemoteCount: 10 },
+          uploadResult: makeUploadResult({ remoteFileName: 'SoNotes_Current_20250615.zip' }),
+        }),
+      );
+      expect(executeRetentionCleanupMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          protectedFileNames: new Set(['SoNotes_Current_20250615.zip']),
+        }),
+      );
+    });
+
+    it('baseline 和 uploadResult 同名时去重', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 5 });
+      await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: {
+            baselineConfirmedRemoteCount: 10,
+            baselineConfirmedRemoteFileName: 'SoNotes_Same_20250615.zip',
+          },
+          uploadResult: makeUploadResult({ remoteFileName: 'SoNotes_Same_20250615.zip' }),
+        }),
+      );
+      expect(executeRetentionCleanupMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          protectedFileNames: new Set(['SoNotes_Same_20250615.zip']),
+        }),
+      );
+    });
+
     it('清理失败不影响备份成功状态 — 异常被 catch', async () => {
       detectBackupCliffDropMock.mockReturnValue(null);
       executeRetentionCleanupMock.mockRejectedValue(new Error('network timeout'));
@@ -443,6 +502,8 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(detectBackupCliffDropMock).toHaveBeenCalledWith({
         latestSummary: makeUploadResult().summary,
         baselineSummary: expect.objectContaining({ noteCount: 12 }),
+        latestZipSizeBytes: 1024,
+        baselineZipSizeBytes: null,
       });
       expect(executeRetentionCleanupMock).toHaveBeenCalled();
       expect(result).toEqual({

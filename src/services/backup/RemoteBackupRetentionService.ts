@@ -117,7 +117,7 @@ export async function previewRetentionCleanup(input: {
  *
  * 错误处理策略：
  * - `success: true` → deletedCount++
- * - error 包含 "404"/"not found"/"400"/"Not Found" → missingCount++（幂等成功）
+ * - error 包含 "404"/"not found"/"Not Found" → missingCount++（幂等成功）
  * - error 包含 "401"/"403"/"423"/"5xx"/网络错误 → 停止，记录 failedFileName
  * - 其他错误 → 停止，记录 failedFileName
  */

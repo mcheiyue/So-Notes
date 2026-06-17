@@ -1088,10 +1088,14 @@ export const BoardDock = () => {
     setRetentionPreview(null);
     setRetentionBusy('previewing');
     try {
+      const protectedNames = new Set<string>();
+      if (scheduledState.lastRemoteFileName) protectedNames.add(scheduledState.lastRemoteFileName);
+      if (scheduledState.baselineConfirmedRemoteFileName) protectedNames.add(scheduledState.baselineConfirmedRemoteFileName);
+      if (scheduledState.cliffDropLatestRemoteFileName) protectedNames.add(scheduledState.cliffDropLatestRemoteFileName);
       const result = await previewRetentionCleanup({
         config,
         retentionCount: scheduledConfig.retentionCount ?? 5,
-        protectedFileNames: new Set(scheduledState.lastRemoteFileName ? [scheduledState.lastRemoteFileName] : []),
+        protectedFileNames: protectedNames,
       });
       setRetentionPreview(result);
     } catch (err) {
@@ -1122,10 +1126,14 @@ export const BoardDock = () => {
     setRetentionFeedback(null);
     setRetentionBusy('cleaning');
     try {
+      const protectedNames = new Set<string>();
+      if (scheduledState.lastRemoteFileName) protectedNames.add(scheduledState.lastRemoteFileName);
+      if (scheduledState.baselineConfirmedRemoteFileName) protectedNames.add(scheduledState.baselineConfirmedRemoteFileName);
+      if (scheduledState.cliffDropLatestRemoteFileName) protectedNames.add(scheduledState.cliffDropLatestRemoteFileName);
       const result = await executeRetentionCleanup({
         config,
         retentionCount: scheduledConfig.retentionCount ?? 5,
-        protectedFileNames: new Set(scheduledState.lastRemoteFileName ? [scheduledState.lastRemoteFileName] : []),
+        protectedFileNames: protectedNames,
       });
       if (result.success) {
         setRetentionFeedback({
@@ -2008,10 +2016,17 @@ export const BoardDock = () => {
                                             className="flex items-center justify-between gap-2 rounded border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/20 px-2 py-1"
                                             data-testid="cliff-drop-warning"
                                         >
-                                            <p className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                                                <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-                                                检测到备份数据异常下降，已暂停自动清理
-                                            </p>
+                                            <div>
+                                                <p className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                                                    <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                                                    检测到备份数据异常下降，已暂停自动清理
+                                                </p>
+                                                {scheduledState.cliffDropLatestRemoteFileName && (
+                                                    <p className="text-xs text-amber-600 mt-1">
+                                                        可疑备份：{scheduledState.cliffDropLatestRemoteFileName}
+                                                    </p>
+                                                )}
+                                            </div>
                                             <button
                                                 type="button"
                                                 onClick={onConfirmBaseline}
