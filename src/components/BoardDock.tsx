@@ -1195,6 +1195,21 @@ export const BoardDock = () => {
           message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个。${detail}`,
         });
       }
+
+      const retentionStatePatch: Partial<ScheduledRemoteBackupState> = {
+        lastRetentionCleanupDeletedCount: result.deletedCount,
+        lastRetentionCleanupFailedFileName: result.failedFileName ?? null,
+        lastRetentionCleanupError: result.error ?? null,
+        lastRetentionCleanupAt: Date.now(),
+      };
+      const updatedState = { ...scheduledState, ...retentionStatePatch };
+      setScheduledState(updatedState);
+      try {
+        await ScheduledRemoteBackupConfigService.saveState(updatedState);
+      } catch {
+        // 持久化失败不影响清理结果展示
+      }
+
       setRetentionPreview(null);
     } catch (err) {
       setRetentionFeedback({ status: 'error', message: `清理失败：${formatUnknownError(err)}` });
