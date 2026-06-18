@@ -1233,7 +1233,9 @@ export const BoardDock = () => {
     setScheduledState(updated);
     try {
       await ScheduledRemoteBackupConfigService.saveState(updated);
+      await getSchedulerService()?.reloadState();
     } catch (err) {
+      setScheduledState(scheduledState);
       setRetentionFeedback({ status: 'error', message: `保存基线确认失败：${formatUnknownError(err)}` });
     }
   };
