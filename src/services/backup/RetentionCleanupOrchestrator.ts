@@ -79,7 +79,8 @@ export async function orchestratePostBackupRetentionCleanup(
     return {};
   }
 
-  if (config.retentionCount === null || config.retentionCount <= 0) {
+  const retentionCount = config.retentionCount ?? 5;
+  if (retentionCount <= 0) {
     return {};
   }
 
@@ -182,7 +183,7 @@ export async function orchestratePostBackupRetentionCleanup(
   try {
     const cleanupResult = await executeRetentionCleanup({
       config: webdavConfig,
-      retentionCount: config.retentionCount,
+      retentionCount,
       protectedFileNames: (() => {
         const names = new Set<string>();
         if (uploadResult.remoteFileName) names.add(uploadResult.remoteFileName);

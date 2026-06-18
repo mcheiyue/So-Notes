@@ -53,7 +53,8 @@ function isIdempotentSuccessError(error: string): boolean {
   const lower = error.toLowerCase();
   return (
     lower.includes('404') ||
-    lower.includes('not found')
+    lower.includes('not found') ||
+    error.includes('已不存在')
   );
 }
 

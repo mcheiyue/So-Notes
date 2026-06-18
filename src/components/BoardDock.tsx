@@ -1103,6 +1103,7 @@ export const BoardDock = () => {
   };
 
   const onPreviewCleanup = async () => {
+    if (!requireWebdavCredentials()) return;
     const config = buildWebdavConfig();
     if (!config) return;
     setRetentionFeedback(null);
@@ -1129,6 +1130,7 @@ export const BoardDock = () => {
   };
 
   const onExecuteCleanup = async () => {
+    if (!requireWebdavCredentials()) return;
     const config = buildWebdavConfig();
     if (!config) return;
 
@@ -2018,7 +2020,7 @@ export const BoardDock = () => {
                                 </p>
                             )}
 
-                            {webdavPasswordSaved && (
+                            {webdavDraft.serverUrl.trim() && webdavDraft.username.trim() && (
                                 <div
                                     className="rounded border border-border-subtle bg-secondary-bg/30 px-2 py-1.5 space-y-1.5 text-[11px] leading-4"
                                     data-testid="retention-policy-section"
