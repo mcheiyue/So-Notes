@@ -240,11 +240,9 @@ export function detectBackupCliffDrop(input: {
   const anomalyCodes: RemoteRetentionAnomalyCode[] = [];
 
   // ---- note 维度 ----
+  // plan 3.3：本次 note 数少于基线的 30%（即 current < baseline * 0.3）
   if (baselineNotes >= CLIFF_DROP_LARGE_BASELINE_MIN) {
-    const dropPct = baselineNotes > 0
-      ? (baselineNotes - currentNotes) / baselineNotes
-      : 0;
-    if (dropPct >= CLIFF_DROP_RELATIVE_THRESHOLD) {
+    if (currentNotes < baselineNotes * CLIFF_DROP_RELATIVE_THRESHOLD) {
       anomalyCodes.push('CLIFF_DROP_RELATIVE');
     }
   } else if (baselineNotes >= CLIFF_DROP_MEDIUM_BASELINE_MIN) {
@@ -275,10 +273,7 @@ export function detectBackupCliffDrop(input: {
   const baselineImageFile = baselineSummary.imageFileCount;
   const currentImageFile = latestSummary.imageFileCount;
   if (baselineImageFile >= CLIFF_DROP_IMAGE_MEDIUM_BASELINE_MIN) {
-    const dropPct = baselineImageFile > 0
-      ? (baselineImageFile - currentImageFile) / baselineImageFile
-      : 0;
-    if (dropPct >= CLIFF_DROP_RELATIVE_THRESHOLD) {
+    if (currentImageFile < baselineImageFile * CLIFF_DROP_RELATIVE_THRESHOLD) {
       anomalyCodes.push('CLIFF_DROP_IMAGE_FILE_COUNT');
     }
   }
@@ -287,10 +282,7 @@ export function detectBackupCliffDrop(input: {
   const baselineImageNote = baselineSummary.imageNoteCount;
   const currentImageNote = latestSummary.imageNoteCount;
   if (baselineImageNote >= CLIFF_DROP_IMAGE_MEDIUM_BASELINE_MIN) {
-    const dropPct = baselineImageNote > 0
-      ? (baselineImageNote - currentImageNote) / baselineImageNote
-      : 0;
-    if (dropPct >= CLIFF_DROP_RELATIVE_THRESHOLD) {
+    if (currentImageNote < baselineImageNote * CLIFF_DROP_RELATIVE_THRESHOLD) {
       anomalyCodes.push('CLIFF_DROP_IMAGE_NOTE_COUNT');
     }
   }
@@ -304,10 +296,7 @@ export function detectBackupCliffDrop(input: {
       baselineZip != null && latestZip != null &&
       baselineZip >= CLIFF_DROP_ZIP_MIN_BYTES
     ) {
-      const dropPct = baselineZip > 0
-        ? (baselineZip - latestZip) / baselineZip
-        : 0;
-      if (dropPct >= CLIFF_DROP_RELATIVE_THRESHOLD) {
+      if (latestZip < baselineZip * CLIFF_DROP_RELATIVE_THRESHOLD) {
         anomalyCodes.push('CLIFF_DROP_ZIP_SIZE_BYTES');
       }
     }

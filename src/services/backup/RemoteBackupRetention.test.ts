@@ -433,15 +433,15 @@ describe('detectBackupCliffDrop', () => {
     expect(result!.anomalyCodes).toContain('CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL');
   });
 
-  it('baselineNotes ≥ 10 使用相对阈值 — dropPct ≥ 0.3 触发', () => {
+  it('baselineNotes ≥ 10 使用相对阈值 — currentNotes < baseline * 0.3 触发', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(5),
+      latestSummary: makeSummary(2),
       baselineSummary: makeSummary(10),
     });
 
     expect(result).not.toBeNull();
     expect(result!.baselineNotes).toBe(10);
-    expect(result!.currentNotes).toBe(5);
+    expect(result!.currentNotes).toBe(2);
     expect(result!.threshold).toBe(0.3);
     expect(result!.anomalyCodes).toContain('CLIFF_DROP_RELATIVE');
   });
@@ -464,14 +464,13 @@ describe('detectBackupCliffDrop', () => {
     expect(result).toBeNull();
   });
 
-  it('恰好达到相对阈值边界 — dropPct = 0.3 触发', () => {
+  it('恰好达到相对阈值边界 — currentNotes = baseline * 0.3 时不触发', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(7),
+      latestSummary: makeSummary(3),
       baselineSummary: makeSummary(10),
     });
 
-    expect(result).not.toBeNull();
-    expect(result!.dropPct).toBeCloseTo(0.3);
+    expect(result).toBeNull();
   });
 
   it('currentNotes > baselineNotes → 负 dropPct，不触发', () => {
@@ -599,9 +598,9 @@ describe('detectBackupCliffDrop', () => {
 
   // ---- image file 维度测试 ----
 
-  it('image file 维度：baselineImageFile ≥ 5 且 dropPct ≥ 30% 触发', () => {
+  it('image file 维度：baselineImageFile ≥ 5 且 currentImageFile < baseline * 0.3 触发', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(100, { imageFileCount: 3 }),
+      latestSummary: makeSummary(100, { imageFileCount: 2 }),
       baselineSummary: makeSummary(100, { imageFileCount: 10 }),
     });
 
@@ -629,9 +628,9 @@ describe('detectBackupCliffDrop', () => {
 
   // ---- image note 维度测试 ----
 
-  it('image note 维度：baselineImageNote ≥ 5 且 dropPct ≥ 30% 触发', () => {
+  it('image note 维度：baselineImageNote ≥ 5 且 currentImageNote < baseline * 0.3 触发', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(100, { imageNoteCount: 3 }),
+      latestSummary: makeSummary(100, { imageNoteCount: 2 }),
       baselineSummary: makeSummary(100, { imageNoteCount: 10 }),
     });
 
@@ -661,7 +660,7 @@ describe('detectBackupCliffDrop', () => {
 
   it('zip 维度：无 zip 参数 → 跳过 zip 检测', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(5),
+      latestSummary: makeSummary(2),
       baselineSummary: makeSummary(10),
     });
 
@@ -682,7 +681,7 @@ describe('detectBackupCliffDrop', () => {
 
   it('zip 维度：有 zip 且有其他维度异常 → 触发 zip', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(5),
+      latestSummary: makeSummary(2),
       baselineSummary: makeSummary(10),
       latestZipSizeBytes: 500_000,
       baselineZipSizeBytes: 2_000_000,
@@ -695,7 +694,7 @@ describe('detectBackupCliffDrop', () => {
 
   it('zip 维度：基线 zip < 1 MiB → 不参与判断', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(5),
+      latestSummary: makeSummary(2),
       baselineSummary: makeSummary(10),
       latestZipSizeBytes: 100_000,
       baselineZipSizeBytes: 500_000,
@@ -708,7 +707,7 @@ describe('detectBackupCliffDrop', () => {
 
   it('zip 维度：latestZipSizeBytes 为 null → 跳过 zip', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(5),
+      latestSummary: makeSummary(2),
       baselineSummary: makeSummary(10),
       latestZipSizeBytes: null,
       baselineZipSizeBytes: 2_000_000,
@@ -721,7 +720,7 @@ describe('detectBackupCliffDrop', () => {
 
   it('zip 维度：baselineZipSizeBytes 为 null → 跳过 zip', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(5),
+      latestSummary: makeSummary(2),
       baselineSummary: makeSummary(10),
       latestZipSizeBytes: 500_000,
       baselineZipSizeBytes: null,
@@ -732,9 +731,9 @@ describe('detectBackupCliffDrop', () => {
     expect(result!.anomalyCodes).not.toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
   });
 
-  it('zip 维度：zip dropPct < 30% → 不触发 zip', () => {
+  it('zip 维度：zip 未降至阈值以下 → 不触发 zip', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(5),
+      latestSummary: makeSummary(2),
       baselineSummary: makeSummary(10),
       latestZipSizeBytes: 1_500_000,
       baselineZipSizeBytes: 2_000_000,
@@ -745,11 +744,11 @@ describe('detectBackupCliffDrop', () => {
     expect(result!.anomalyCodes).not.toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
   });
 
-  it('zip 维度：zip dropPct 恰好 ≥ 30% 且有其他异常 → 触发', () => {
+  it('zip 维度：zip 降至阈值以下且有其他异常 → 触发', () => {
     const result = detectBackupCliffDrop({
-      latestSummary: makeSummary(5),
+      latestSummary: makeSummary(2),
       baselineSummary: makeSummary(10),
-      latestZipSizeBytes: 1_400_000,
+      latestZipSizeBytes: 500_000,
       baselineZipSizeBytes: 2_000_000,
     });
 
