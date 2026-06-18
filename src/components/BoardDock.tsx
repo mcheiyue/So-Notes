@@ -1085,7 +1085,12 @@ export const BoardDock = () => {
   };
 
   const onRetentionToggle = async () => {
-    await persistScheduledConfig({ ...scheduledConfig, retentionEnabled: !scheduledConfig.retentionEnabled });
+    const enabling = !scheduledConfig.retentionEnabled;
+    await persistScheduledConfig({
+      ...scheduledConfig,
+      retentionEnabled: enabling,
+      retentionCount: enabling ? (scheduledConfig.retentionCount ?? 5) : scheduledConfig.retentionCount,
+    });
   };
 
   const onRetentionCountChange = async (count: number) => {
@@ -2013,7 +2018,7 @@ export const BoardDock = () => {
                                 </p>
                             )}
 
-                            {scheduledEnabledEffective && (
+                            {webdavPasswordSaved && (
                                 <div
                                     className="rounded border border-border-subtle bg-secondary-bg/30 px-2 py-1.5 space-y-1.5 text-[11px] leading-4"
                                     data-testid="retention-policy-section"

@@ -5,7 +5,7 @@
 // 约束：顺序删除旧备份，不并发 delete；接入 BackupJobCoordinator single-flight 保护。
 // ---------------------------------------------------------------------------
 
-import type { WebDavConfig } from './WebDavBackupService';
+import type { WebDavConfig, WebDavDeleteResult } from './WebDavBackupService';
 import {
   listBackups,
   deleteBackup,
@@ -47,8 +47,7 @@ export interface RemoteRetentionCleanupResult {
 /**
  * 判断删除结果中的错误是否为幂等成功（文件不存在）。
  *
- * 404 / "not found" / "Not Found" 视为幂等成功，不中断流程。
- * 400 不视为幂等成功，属于请求/协议问题。
+ * 404 / "not found" 视为幂等成功，不中断流程。
  */
 function isIdempotentSuccessError(error: string): boolean {
   const lower = error.toLowerCase();
@@ -179,33 +178,36 @@ export async function executeRetentionCleanup(input: {
     let fatalErrorMessage: string | null = null;
 
     for (const candidate of candidates) {
-      const result = await deleteBackup(config, candidate.fileName);
-
-      if (result.success) {
-        deletedCount++;
-      } else if (result.error) {
-        const errorStr = result.error;
-
-        if (isIdempotentSuccessError(errorStr)) {
-          missingCount++;
-        } else if (isFatalError(errorStr)) {
-          stoppedAtFileName = candidate.fileName;
-          failedFileName = candidate.fileName;
-          fatalErrorMessage = errorStr;
-          break;
-        } else {
-          // 其他错误也停止
-          stoppedAtFileName = candidate.fileName;
-          failedFileName = candidate.fileName;
-          fatalErrorMessage = errorStr;
-          break;
-        }
-      } else {
-        // 无 error 字段但 success: false 的异常情况
+      let result: WebDavDeleteResult;
+      try {
+        result = await deleteBackup(config, candidate.fileName);
+      } catch (err: unknown) {
+        const errorStr = err instanceof Error ? err.message : String(err);
         stoppedAtFileName = candidate.fileName;
         failedFileName = candidate.fileName;
-        fatalErrorMessage = 'unknown error';
+        fatalErrorMessage = errorStr;
         break;
+      }
+
+      const errorStr = result.error ?? null;
+
+      if (errorStr && isIdempotentSuccessError(errorStr)) {
+        missingCount++;
+      } else if (result.success) {
+        deletedCount++;
+      } else {
+        const msg = errorStr ?? 'unknown error';
+        if (isFatalError(msg)) {
+          stoppedAtFileName = candidate.fileName;
+          failedFileName = candidate.fileName;
+          fatalErrorMessage = msg;
+          break;
+        } else {
+          stoppedAtFileName = candidate.fileName;
+          failedFileName = candidate.fileName;
+          fatalErrorMessage = msg;
+          break;
+        }
       }
     }
 
