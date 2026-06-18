@@ -205,14 +205,19 @@ export function redactStateBeforeSave(
   state: ScheduledRemoteBackupState,
 ): ScheduledRemoteBackupState {
   let redactedReason = state.lastFailureReason;
-
   if (redactedReason !== null && containsSensitivePattern(redactedReason)) {
     redactedReason = '远端备份失败，请检查配置';
+  }
+
+  let redactedCleanupError = state.lastRetentionCleanupError;
+  if (redactedCleanupError !== null && containsSensitivePattern(redactedCleanupError)) {
+    redactedCleanupError = '清理失败，请检查配置';
   }
 
   return {
     ...state,
     lastFailureReason: redactedReason,
+    lastRetentionCleanupError: redactedCleanupError,
   };
 }
 

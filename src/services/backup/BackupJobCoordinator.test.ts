@@ -46,6 +46,7 @@ describe('BackupJobCoordinator', () => {
         'before-exit-remote-backup',
         'local-restore',
         'remote-restore',
+        'remote-retention-cleanup',
       ];
 
       for (const kind of kinds) {

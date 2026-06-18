@@ -1103,13 +1103,11 @@ export const BoardDock = () => {
 
   const onRetentionCountChange = async (count: number) => {
     await persistScheduledConfig({ ...scheduledConfig, retentionCount: count });
-      setRetentionPreview(null);
-      setRetentionProtectedSnapshot(null);
-      setRetentionCountSnapshot(null);
-      setRetentionConfigSnapshot(null);
+    setRetentionPreview(null);
+    setRetentionProtectedSnapshot(null);
     setRetentionCountSnapshot(null);
     setRetentionConfigSnapshot(null);
-    setRetentionFeedback({ status: 'info', message: `新策略将在下次自动备份成功后生效，保留最近 ${count} 个备份。` });
+    setRetentionFeedback({ status: 'info', message: `新策略将在下次自动备份成功后生效，保留最近 ${count} 个备份。也可手动预览并立即清理。` });
   };
 
   const onPreviewCleanup = async () => {
@@ -1267,7 +1265,7 @@ export const BoardDock = () => {
   const onConfirmBaseline = async () => {
     const confirmed = await confirm({
       title: '确认健康基线',
-      message: '确认当前远端备份数据为健康状态？这将清除断崖骤降警告，并以当前远端文件数作为新基线。',
+      message: '确认当前远端备份数据为健康状态？这将清除断崖骤降警告，并以当前备份摘要（笔记/画板/图片/大小）作为新基线。',
     });
     if (!confirmed) return;
 
