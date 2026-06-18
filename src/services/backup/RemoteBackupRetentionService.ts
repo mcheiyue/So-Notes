@@ -128,8 +128,10 @@ export async function executeRetentionCleanup(input: {
   readonly protectedFileNames: ReadonlySet<string>;
   /** 手动场景：直接传入预览时的候选文件名，跳过重新 list */
   readonly candidateFileNames?: readonly RemoteBackupParsedName[];
+  /** 手动场景：传入预览时的保留数量，用于结果展示 */
+  readonly keepCount?: number;
 }): Promise<RemoteRetentionCleanupResult> {
-  const { config, retentionCount, protectedFileNames, candidateFileNames } = input;
+  const { config, retentionCount, protectedFileNames, candidateFileNames, keepCount } = input;
 
   const policy: RemoteBackupRetentionPolicy = {
     retentionEnabled: true,
@@ -158,7 +160,7 @@ export async function executeRetentionCleanup(input: {
 
     if (candidateFileNames) {
       candidates = candidateFileNames;
-      retainedCount = 0;
+      retainedCount = keepCount ?? 0;
     } else {
       const preview = await previewRetentionCleanup({
         config,

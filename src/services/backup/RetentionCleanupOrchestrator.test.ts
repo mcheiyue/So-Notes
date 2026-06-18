@@ -503,11 +503,10 @@ describe('RetentionCleanupOrchestrator', () => {
         ...DEFAULT_STATE,
         baselineConfirmedRemoteCount: 12,
       };
-      const result = await orchestratePostBackupRetentionCleanup(
-        makeInput({ state }),
-      );
+      const input = makeInput({ state });
+      const result = await orchestratePostBackupRetentionCleanup(input);
       expect(detectBackupCliffDropMock).toHaveBeenCalledWith({
-        latestSummary: makeUploadResult().summary,
+        latestSummary: input.uploadResult.summary,
         baselineSummary: expect.objectContaining({ noteCount: 12 }),
         latestZipSizeBytes: 1024,
         baselineZipSizeBytes: null,

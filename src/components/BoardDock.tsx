@@ -273,6 +273,7 @@ export const BoardDock = () => {
           setWebdavPasswordSaved(false);
       setRetentionPreview(null);
       setRetentionProtectedSnapshot(null);
+      setRetentionCountSnapshot(null);
           setRetentionBusy('idle');
           setRetentionFeedback(null);
       }
@@ -1171,6 +1172,7 @@ export const BoardDock = () => {
         retentionCount: retentionCountSnapshot ?? currentRetentionCount,
         protectedFileNames: currentProtectedNames,
         candidateFileNames: preview?.candidates,
+        keepCount: preview?.keep.length,
       });
       if (result.success) {
         setRetentionFeedback({
