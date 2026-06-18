@@ -79,7 +79,11 @@ export async function orchestratePostBackupRetentionCleanup(
     return {};
   }
 
-  const retentionCount = config.retentionCount ?? 5;
+  // retentionCount=null 对应 Rust None=无限保留，跳过自动清理
+  if (config.retentionCount === null) {
+    return {};
+  }
+  const retentionCount = config.retentionCount;
   if (retentionCount <= 0) {
     return {};
   }

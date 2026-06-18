@@ -207,6 +207,7 @@ export const BoardDock = () => {
   const [retentionPreview, setRetentionPreview] = useState<RetentionPreview | null>(null);
   const [retentionProtectedSnapshot, setRetentionProtectedSnapshot] = useState<ReadonlySet<string> | null>(null);
   const [retentionCountSnapshot, setRetentionCountSnapshot] = useState<number | null>(null);
+  const [retentionConfigSnapshot, setRetentionConfigSnapshot] = useState<{ serverUrl: string; username: string; remoteDir: string } | null>(null);
   const [retentionBusy, setRetentionBusy] = useState<'idle' | 'previewing' | 'cleaning'>('idle');
   const [retentionFeedback, setRetentionFeedback] = useState<{ status: 'success' | 'error' | 'info'; message: string } | null>(null);
 
@@ -280,6 +281,7 @@ export const BoardDock = () => {
       setRetentionPreview(null);
       setRetentionProtectedSnapshot(null);
       setRetentionCountSnapshot(null);
+      setRetentionConfigSnapshot(null);
           setRetentionBusy('idle');
           setRetentionFeedback(null);
       }
@@ -1104,7 +1106,9 @@ export const BoardDock = () => {
       setRetentionPreview(null);
       setRetentionProtectedSnapshot(null);
       setRetentionCountSnapshot(null);
+      setRetentionConfigSnapshot(null);
     setRetentionCountSnapshot(null);
+    setRetentionConfigSnapshot(null);
     setRetentionFeedback({ status: 'info', message: `新策略将在下次自动备份成功后生效，保留最近 ${count} 个备份。` });
   };
 
@@ -1128,6 +1132,7 @@ export const BoardDock = () => {
       setRetentionPreview(result);
       setRetentionProtectedSnapshot(protectedNames);
       setRetentionCountSnapshot(scheduledConfig.retentionCount ?? 5);
+      setRetentionConfigSnapshot({ serverUrl: config.serverUrl, username: config.username, remoteDir: config.remoteDir ?? '' });
     } catch (err) {
       setRetentionFeedback({ status: 'error', message: `预览失败：${formatUnknownError(err)}` });
     } finally {
@@ -1157,6 +1162,7 @@ export const BoardDock = () => {
       setRetentionPreview(null);
       setRetentionProtectedSnapshot(null);
       setRetentionCountSnapshot(null);
+      setRetentionConfigSnapshot(null);
       setRetentionFeedback({ status: 'error', message: '备份状态已变化，请重新预览后再执行清理。' });
       return;
     }
@@ -1166,7 +1172,21 @@ export const BoardDock = () => {
       setRetentionPreview(null);
       setRetentionProtectedSnapshot(null);
       setRetentionCountSnapshot(null);
+      setRetentionConfigSnapshot(null);
       setRetentionFeedback({ status: 'error', message: '保留数量已变化，请重新预览后再执行清理。' });
+      return;
+    }
+
+    if (retentionConfigSnapshot && (
+      retentionConfigSnapshot.serverUrl !== config.serverUrl
+      || retentionConfigSnapshot.username !== config.username
+      || retentionConfigSnapshot.remoteDir !== (config.remoteDir ?? '')
+    )) {
+      setRetentionPreview(null);
+      setRetentionProtectedSnapshot(null);
+      setRetentionCountSnapshot(null);
+      setRetentionConfigSnapshot(null);
+      setRetentionFeedback({ status: 'error', message: 'WebDAV 配置已变化，请重新预览后再执行清理。' });
       return;
     }
 
@@ -1219,6 +1239,7 @@ export const BoardDock = () => {
 
       setRetentionPreview(null);
       setRetentionCountSnapshot(null);
+      setRetentionConfigSnapshot(null);
       setRetentionProtectedSnapshot(null);
 
       // 刷新远端备份列表（与单删模式一致）

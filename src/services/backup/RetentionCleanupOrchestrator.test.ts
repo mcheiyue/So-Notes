@@ -170,11 +170,11 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
 
-    it('retentionCount=null → 使用默认值 5，初始化基线后返回', async () => {
+    it('retentionCount=null → 视为无限保留，跳过清理', async () => {
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({ config: { retentionCount: null } }),
       );
-      expect(result.baselineConfirmedRemoteCount).toBe(10);
+      expect(result).toEqual({});
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
 
