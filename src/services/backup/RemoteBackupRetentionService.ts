@@ -13,6 +13,7 @@ import {
 import {
   proposeRetentionCleanup,
   type RetentionPreview,
+  type RemoteBackupParsedName,
 } from './RemoteBackupRetention';
 import {
   tryStartBackupJob,
@@ -125,8 +126,10 @@ export async function executeRetentionCleanup(input: {
   readonly config: WebDavConfig;
   readonly retentionCount: number;
   readonly protectedFileNames: ReadonlySet<string>;
+  /** 手动场景：直接传入预览时的候选文件名，跳过重新 list */
+  readonly candidateFileNames?: readonly RemoteBackupParsedName[];
 }): Promise<RemoteRetentionCleanupResult> {
-  const { config, retentionCount, protectedFileNames } = input;
+  const { config, retentionCount, protectedFileNames, candidateFileNames } = input;
 
   const policy: RemoteBackupRetentionPolicy = {
     retentionEnabled: true,
@@ -150,15 +153,21 @@ export async function executeRetentionCleanup(input: {
   }
 
   try {
-    // 预览清理方案
-    const preview = await previewRetentionCleanup({
-      config,
-      retentionCount,
-      protectedFileNames,
-    });
+    let candidates: readonly RemoteBackupParsedName[];
+    let retainedCount: number;
 
-    const candidates = preview.candidates;
-    const retainedCount = preview.keep.length;
+    if (candidateFileNames) {
+      candidates = candidateFileNames;
+      retainedCount = 0;
+    } else {
+      const preview = await previewRetentionCleanup({
+        config,
+        retentionCount,
+        protectedFileNames,
+      });
+      candidates = preview.candidates;
+      retainedCount = preview.keep.length;
+    }
 
     // 顺序删除候选文件
     let deletedCount = 0;

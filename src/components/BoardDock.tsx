@@ -200,6 +200,7 @@ export const BoardDock = () => {
   // 保留策略相关
   const [retentionPreview, setRetentionPreview] = useState<RetentionPreview | null>(null);
   const [retentionProtectedSnapshot, setRetentionProtectedSnapshot] = useState<ReadonlySet<string> | null>(null);
+  const [retentionCountSnapshot, setRetentionCountSnapshot] = useState<number | null>(null);
   const [retentionBusy, setRetentionBusy] = useState<'idle' | 'previewing' | 'cleaning'>('idle');
   const [retentionFeedback, setRetentionFeedback] = useState<{ status: 'success' | 'error' | 'info'; message: string } | null>(null);
 
@@ -1088,8 +1089,10 @@ export const BoardDock = () => {
 
   const onRetentionCountChange = async (count: number) => {
     await persistScheduledConfig({ ...scheduledConfig, retentionCount: count });
-    setRetentionPreview(null);
-    setRetentionProtectedSnapshot(null);
+      setRetentionPreview(null);
+      setRetentionProtectedSnapshot(null);
+      setRetentionCountSnapshot(null);
+    setRetentionCountSnapshot(null);
     setRetentionFeedback({ status: 'info', message: `新策略将在下次自动备份成功后生效，保留最近 ${count} 个备份。` });
   };
 
@@ -1111,6 +1114,7 @@ export const BoardDock = () => {
       });
       setRetentionPreview(result);
       setRetentionProtectedSnapshot(protectedNames);
+      setRetentionCountSnapshot(scheduledConfig.retentionCount ?? 5);
     } catch (err) {
       setRetentionFeedback({ status: 'error', message: `预览失败：${formatUnknownError(err)}` });
     } finally {
@@ -1138,7 +1142,17 @@ export const BoardDock = () => {
     if (snapshot && !setsEqual(snapshot, currentProtectedNames)) {
       setRetentionPreview(null);
       setRetentionProtectedSnapshot(null);
+      setRetentionCountSnapshot(null);
       setRetentionFeedback({ status: 'error', message: '备份状态已变化，请重新预览后再执行清理。' });
+      return;
+    }
+
+    const currentRetentionCount = scheduledConfig.retentionCount ?? 5;
+    if (retentionCountSnapshot !== null && retentionCountSnapshot !== currentRetentionCount) {
+      setRetentionPreview(null);
+      setRetentionProtectedSnapshot(null);
+      setRetentionCountSnapshot(null);
+      setRetentionFeedback({ status: 'error', message: '保留数量已变化，请重新预览后再执行清理。' });
       return;
     }
 
@@ -1154,8 +1168,9 @@ export const BoardDock = () => {
     try {
       const result = await executeRetentionCleanup({
         config,
-        retentionCount: scheduledConfig.retentionCount ?? 5,
+        retentionCount: retentionCountSnapshot ?? currentRetentionCount,
         protectedFileNames: currentProtectedNames,
+        candidateFileNames: preview?.candidates,
       });
       if (result.success) {
         setRetentionFeedback({
