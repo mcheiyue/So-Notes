@@ -18,6 +18,19 @@ vi.mock('./RemoteBackupRunner', () => ({
   },
 }));
 
+// ---------------------------------------------------------------------------
+// Mock 保留策略编排器（隔离 orchestrator 依赖）
+// ---------------------------------------------------------------------------
+
+const { mockOrchestrateRetentionCleanup } = vi.hoisted(() => ({
+  mockOrchestrateRetentionCleanup: vi.fn(),
+}));
+
+vi.mock('./RetentionCleanupOrchestrator', () => ({
+  orchestratePostBackupRetentionCleanup: (...args: unknown[]) =>
+    mockOrchestrateRetentionCleanup(...args),
+}));
+
 import { _resetCoordinatorForTesting } from './BackupJobCoordinator';
 import {
   createScheduledRemoteBackupService,
@@ -211,6 +224,8 @@ describe('ScheduledRemoteBackupService', () => {
     vi.useFakeTimers();
     _resetCoordinatorForTesting();
     mockRunRemoteBackup.mockReset();
+    mockOrchestrateRetentionCleanup.mockReset();
+    mockOrchestrateRetentionCleanup.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -1837,6 +1852,121 @@ describe('ScheduledRemoteBackupService', () => {
       expect(savedState!.lastManualSuccessAt).toBe(ctx.now);
       expect(savedState!.lastSuccessfulStorageUpdatedAt).toBe(7000);
       expect(savedState!.lastRemoteFileName).toBe('backup.zip');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 24. 保留策略编排集成
+  // -------------------------------------------------------------------------
+
+  describe('保留策略编排集成', () => {
+    it('scheduled-interval 成功后调用 orchestrator', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily', retentionEnabled: true, retentionCount: 10 },
+        state: { nextRunAt: null },
+      });
+      ctx.getAppActivity.mockReturnValue(INACTIVE_ACTIVITY);
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'SoNotes_Backup_20260101.zip',
+        summary: null,
+        zipSizeBytes: null,
+      });
+      mockOrchestrateRetentionCleanup.mockResolvedValue({});
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const freqCallback = ctx.timers.setTimeout.mock.calls[0]?.[0] as (() => void) | undefined;
+      expect(freqCallback).toBeDefined();
+      freqCallback!();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockOrchestrateRetentionCleanup).toHaveBeenCalledTimes(1);
+      expect(mockOrchestrateRetentionCleanup).toHaveBeenCalledWith(
+        expect.objectContaining({ trigger: 'scheduled-interval' }),
+      );
+
+      service.stop();
+    });
+
+    it('orchestrator 返回 patch 合并到保存状态', async () => {
+      const retentionPatch = {
+        cliffDropDeferred: true,
+        cliffDropDetectedAt: 1000000000000,
+        baselineConfirmedRemoteCount: 5,
+      };
+      mockOrchestrateRetentionCleanup.mockResolvedValue(retentionPatch);
+
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 10 },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+        summary: null,
+        zipSizeBytes: null,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(mockOrchestrateRetentionCleanup).toHaveBeenCalledTimes(1);
+      const calls = ctx.saveScheduledState.mock.calls;
+      const savedState = calls[calls.length - 1]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.cliffDropDeferred).toBe(true);
+      expect(savedState!.cliffDropDetectedAt).toBe(1000000000000);
+      expect(savedState!.baselineConfirmedRemoteCount).toBe(5);
+    });
+
+    it('orchestrator 抛异常不影响备份成功状态', async () => {
+      mockOrchestrateRetentionCleanup.mockRejectedValue(new Error('orchestrator failed'));
+
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 5 },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+        summary: null,
+        zipSizeBytes: null,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastFailureReason).toBeNull();
+      expect(savedState!.lastRemoteFileName).toBe('backup.zip');
+    });
+
+    it('orchestrator 返回空 patch 不产生额外 saveScheduledState 调用', async () => {
+      mockOrchestrateRetentionCleanup.mockResolvedValue({});
+
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 5 },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+        summary: null,
+        zipSizeBytes: null,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(mockOrchestrateRetentionCleanup).toHaveBeenCalledTimes(1);
+      expect(ctx.saveScheduledState).toHaveBeenCalledTimes(1);
     });
   });
 });
