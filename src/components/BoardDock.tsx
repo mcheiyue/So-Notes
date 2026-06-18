@@ -2072,6 +2072,46 @@ export const BoardDock = () => {
                                             下次尝试：{new Date(scheduledState.nextRunAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}
                                         </p>
                                     )}
+
+                                    {/* 健康基线信息 */}
+                                    {scheduledState.baselineConfirmedRemoteCount != null && (
+                                        <p className="text-emerald-600 dark:text-emerald-400 text-[10px]" data-testid="baseline-info">
+                                            <Shield className="w-3 h-3 inline-block mr-1 align-text-bottom" />
+                                            健康基线：{scheduledState.baselineConfirmedRemoteCount} 个文件
+                                            {scheduledState.baselineConfirmedConfirmedAt != null && (
+                                                <span className="text-text-tertiary ml-1">
+                                                    （{new Date(scheduledState.baselineConfirmedConfirmedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}）
+                                                </span>
+                                            )}
+                                            {scheduledState.baselineConfirmedRemoteFileName != null && (
+                                                <span className="text-text-tertiary ml-1 truncate inline-block max-w-[180px] align-bottom" title={scheduledState.baselineConfirmedRemoteFileName}>
+                                                    — {scheduledState.baselineConfirmedRemoteFileName}
+                                                </span>
+                                            )}
+                                        </p>
+                                    )}
+
+                                    {/* 最近清理结果 */}
+                                    {scheduledState.lastRetentionCleanupAt != null && (
+                                        <p className="text-[10px]" data-testid="cleanup-result-info">
+                                            <Eye className="w-3 h-3 inline-block mr-1 align-text-bottom text-text-tertiary" />
+                                            {scheduledState.lastRetentionCleanupError != null ? (
+                                                <span className="text-red-500 dark:text-red-400">
+                                                    清理失败：{scheduledState.lastRetentionCleanupError}
+                                                </span>
+                                            ) : (
+                                                <span className="text-text-tertiary">
+                                                    最近清理：删除 {scheduledState.lastRetentionCleanupDeletedCount ?? 0} 个
+                                                    {scheduledState.lastRetentionCleanupFailedFileName != null && (
+                                                        <span className="text-amber-500 ml-1">（{scheduledState.lastRetentionCleanupFailedFileName} 失败）</span>
+                                                    )}
+                                                    <span className="ml-1">
+                                                        （{new Date(scheduledState.lastRetentionCleanupAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}）
+                                                    </span>
+                                                </span>
+                                            )}
+                                        </p>
+                                    )}
                                 </div>
                             )}
 
