@@ -85,6 +85,7 @@ function makeScheduledStateResult(
       cliffDropLatestSummaryImageFileTotalBytes: null,
       cliffDropLatestRemoteFileName: null,
       cliffDropLatestZipSizeBytes: null,
+      cliffDropLatestAnomalyCodes: null,
       pendingCleanupTargetCount: null,
       lastRetentionCleanupDeletedCount: null,
       lastRetentionCleanupFailedFileName: null,

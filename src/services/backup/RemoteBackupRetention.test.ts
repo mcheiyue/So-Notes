@@ -352,6 +352,17 @@ describe('proposeRetentionCleanup', () => {
     expect(result.newestKeepTime).toEqual(new Date(2025, 5, 10, 12, 0, 0));
   });
 
+  it('cliffDropDetected=true 时结果反映断崖检测状态', () => {
+    const result = proposeRetentionCleanup({
+      files: [makeBackup('SoNotes_Backup_20250610120000.zip')],
+      retentionCount: 5,
+      protectedFileNames: new Set(),
+      cliffDropDetected: true,
+    });
+
+    expect(result.cliffDropDetected).toBe(true);
+  });
+
   it('retentionCount=0 → 删除所有非保护的严格命名文件', () => {
     const files: WebDavRemoteBackup[] = [
       makeBackup('SoNotes_Backup_20250610120000.zip'),

@@ -148,7 +148,6 @@ export async function orchestratePostBackupRetentionCleanup(
     });
 
     if (cliffDrop !== null) {
-      // 检测到断崖式骤降：保存警告和最新摘要快照，跳过清理
       return {
         cliffDropDetectedAt: clock(),
         cliffDropDeferred: true,
@@ -159,6 +158,7 @@ export async function orchestratePostBackupRetentionCleanup(
         cliffDropLatestSummaryImageFileTotalBytes: latestSummary.imageFileTotalBytes,
         cliffDropLatestRemoteFileName: uploadResult.remoteFileName ?? null,
         cliffDropLatestZipSizeBytes: uploadResult.zipSizeBytes ?? null,
+        cliffDropLatestAnomalyCodes: [...cliffDrop.anomalyCodes],
       };
     }
   }

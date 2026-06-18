@@ -89,6 +89,7 @@ describe('ScheduledRemoteBackupConfigService', () => {
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropLatestSummaryImageFileTotalBytes).toBeNull();
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropLatestRemoteFileName).toBeNull();
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropLatestZipSizeBytes).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.cliffDropLatestAnomalyCodes).toBeNull();
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.pendingCleanupTargetCount).toBeNull();
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupDeletedCount).toBeNull();
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupFailedFileName).toBeNull();

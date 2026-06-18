@@ -69,6 +69,7 @@ export interface ScheduledRemoteBackupState {
   readonly cliffDropLatestSummaryImageFileTotalBytes: number | null;
   readonly cliffDropLatestRemoteFileName: string | null;
   readonly cliffDropLatestZipSizeBytes: number | null;
+  readonly cliffDropLatestAnomalyCodes: string[] | null;
   readonly pendingCleanupTargetCount: number | null;
   readonly lastRetentionCleanupDeletedCount: number | null;
   readonly lastRetentionCleanupFailedFileName: string | null;
@@ -158,6 +159,7 @@ export const DEFAULT_SCHEDULED_BACKUP_STATE: Readonly<ScheduledRemoteBackupState
   cliffDropLatestSummaryImageFileTotalBytes: null,
   cliffDropLatestRemoteFileName: null,
   cliffDropLatestZipSizeBytes: null,
+  cliffDropLatestAnomalyCodes: null,
   pendingCleanupTargetCount: null,
   lastRetentionCleanupDeletedCount: null,
   lastRetentionCleanupFailedFileName: null,

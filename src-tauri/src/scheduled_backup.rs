@@ -223,6 +223,10 @@ pub struct ScheduledRemoteBackupState {
     /// 断崖式骤降检测时可疑备份的 zip 文件大小（字节）。
     #[serde(default)]
     pub cliff_drop_latest_zip_size_bytes: Option<u64>,
+    /// 断崖式骤降检测时的异常原因码列表。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub cliff_drop_latest_anomaly_codes: Option<Vec<String>>,
     /// 等待清理的目标保留数量。
     pub pending_cleanup_target_count: Option<u32>,
     /// 上次清理实际删除的文件数。
@@ -273,6 +277,7 @@ impl Default for ScheduledRemoteBackupState {
             cliff_drop_latest_summary_image_file_total_bytes: None,
             cliff_drop_latest_remote_file_name: None,
             cliff_drop_latest_zip_size_bytes: None,
+            cliff_drop_latest_anomaly_codes: None,
             pending_cleanup_target_count: None,
             last_retention_cleanup_deleted_count: None,
             last_retention_cleanup_failed_file_name: None,
@@ -882,6 +887,7 @@ mod tests {
             cliff_drop_latest_summary_image_file_total_bytes: None,
             cliff_drop_latest_remote_file_name: None,
             cliff_drop_latest_zip_size_bytes: None,
+            cliff_drop_latest_anomaly_codes: None,
             pending_cleanup_target_count: Some(15),
             last_retention_cleanup_deleted_count: None,
             last_retention_cleanup_failed_file_name: None,
@@ -950,6 +956,7 @@ mod tests {
         assert!(json.contains("cliffDropDeferred"));
         assert!(json.contains("cliffDropLatestRemoteFileName"));
         assert!(json.contains("cliffDropLatestZipSizeBytes"));
+        assert!(json.contains("cliffDropLatestAnomalyCodes"));
         assert!(json.contains("pendingCleanupTargetCount"));
     }
 

@@ -1126,6 +1126,36 @@ export const BoardDock = () => {
         config,
         retentionCount: scheduledConfig.retentionCount ?? 5,
         protectedFileNames: protectedNames,
+        baseline: scheduledState.baselineConfirmedRemoteCount !== null ? {
+          baselineSummary: {
+            app: 'SoNotes',
+            formatVersion: 1,
+            appVersion: '0.0.0',
+            createdAt: 0,
+            noteCount: scheduledState.baselineConfirmedRemoteCount,
+            boardCount: scheduledState.baselineConfirmedBoardCount ?? 0,
+            textNoteCount: 0,
+            imageNoteCount: scheduledState.baselineConfirmedImageNoteCount ?? 0,
+            trashNoteCount: 0,
+            imageFileCount: scheduledState.baselineConfirmedImageFileCount ?? 0,
+            imageFileTotalBytes: scheduledState.baselineConfirmedImageFileTotalBytes ?? 0,
+          },
+          latestSummary: scheduledState.cliffDropLatestSummaryNoteCount !== null ? {
+            app: 'SoNotes',
+            formatVersion: 1,
+            appVersion: '0.0.0',
+            createdAt: 0,
+            noteCount: scheduledState.cliffDropLatestSummaryNoteCount,
+            boardCount: scheduledState.cliffDropLatestSummaryBoardCount ?? 0,
+            textNoteCount: 0,
+            imageNoteCount: scheduledState.cliffDropLatestSummaryImageNoteCount ?? 0,
+            trashNoteCount: 0,
+            imageFileCount: scheduledState.cliffDropLatestSummaryImageFileCount ?? 0,
+            imageFileTotalBytes: scheduledState.cliffDropLatestSummaryImageFileTotalBytes ?? 0,
+          } : null,
+          latestZipSizeBytes: scheduledState.cliffDropLatestZipSizeBytes,
+          baselineZipSizeBytes: scheduledState.baselineConfirmedZipSizeBytes,
+        } : undefined,
       });
       setRetentionPreview(result);
       setRetentionProtectedSnapshot(protectedNames);

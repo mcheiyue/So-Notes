@@ -12,9 +12,11 @@ import {
 } from './WebDavBackupService';
 import {
   proposeRetentionCleanup,
+  detectBackupCliffDrop,
   type RetentionPreview,
   type RemoteBackupParsedName,
 } from './RemoteBackupRetention';
+import type { BackupSummary } from './BackupService';
 import {
   tryStartBackupJob,
 } from './BackupJobCoordinator';
@@ -92,15 +94,35 @@ export async function previewRetentionCleanup(input: {
   readonly config: WebDavConfig;
   readonly retentionCount: number;
   readonly protectedFileNames: ReadonlySet<string>;
+  readonly baseline?: {
+    readonly baselineSummary: BackupSummary;
+    readonly latestSummary?: BackupSummary | null;
+    readonly latestZipSizeBytes?: number | null;
+    readonly baselineZipSizeBytes?: number | null;
+  };
 }): Promise<RetentionPreview> {
-  const { config, retentionCount, protectedFileNames } = input;
+  const { config, retentionCount, protectedFileNames, baseline } = input;
 
   const files = await listBackups(config);
+
+  let cliffDropDetected = false;
+  if (baseline?.latestSummary) {
+    const cliffResult = detectBackupCliffDrop({
+      latestSummary: baseline.latestSummary,
+      baselineSummary: baseline.baselineSummary,
+      latestZipSizeBytes: baseline.latestZipSizeBytes ?? null,
+      baselineZipSizeBytes: baseline.baselineZipSizeBytes ?? null,
+    });
+    if (cliffResult !== null) {
+      cliffDropDetected = true;
+    }
+  }
 
   return proposeRetentionCleanup({
     files,
     retentionCount,
     protectedFileNames,
+    cliffDropDetected,
   });
 }
 

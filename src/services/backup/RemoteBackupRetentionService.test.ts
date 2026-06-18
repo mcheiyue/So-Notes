@@ -29,6 +29,7 @@ import {
 } from './RemoteBackupRetentionService';
 import type { WebDavConfig } from './WebDavBackupService';
 import type { WebDavRemoteBackup } from './WebDavBackupService';
+import type { BackupSummary } from './BackupService';
 
 // ---------------------------------------------------------------------------
 // 辅助
@@ -119,6 +120,121 @@ describe('RemoteBackupRetentionService', () => {
       expect(result.candidates).toHaveLength(0);
       expect(result.keep).toHaveLength(2);
       expect(result.protectedCount).toBe(1);
+    });
+
+    it('传入 baseline 且 latestSummary 触发断崖检测时 cliffDropDetected=true', async () => {
+      const files: WebDavRemoteBackup[] = [
+        makeBackup('SoNotes_Backup_20250610120000.zip'),
+        makeBackup('SoNotes_Backup_20250611120000.zip'),
+        makeBackup('SoNotes_Backup_20250612120000.zip'),
+      ];
+
+      listBackupsMock.mockResolvedValue(files);
+
+      const baselineSummary: BackupSummary = {
+        app: 'SoNotes',
+        formatVersion: 1,
+        appVersion: '1.0.0',
+        createdAt: 0,
+        noteCount: 20,
+        boardCount: 3,
+        textNoteCount: 20,
+        imageNoteCount: 0,
+        trashNoteCount: 0,
+        imageFileCount: 0,
+        imageFileTotalBytes: 0,
+      };
+
+      const latestSummary: BackupSummary = {
+        app: 'SoNotes',
+        formatVersion: 1,
+        appVersion: '1.0.0',
+        createdAt: 0,
+        noteCount: 2,
+        boardCount: 3,
+        textNoteCount: 2,
+        imageNoteCount: 0,
+        trashNoteCount: 0,
+        imageFileCount: 0,
+        imageFileTotalBytes: 0,
+      };
+
+      const result = await previewRetentionCleanup({
+        config: DUMMY_CONFIG,
+        retentionCount: 2,
+        protectedFileNames: new Set(),
+        baseline: {
+          baselineSummary,
+          latestSummary,
+        },
+      });
+
+      expect(result.cliffDropDetected).toBe(true);
+    });
+
+    it('传入 baseline 但 latestSummary 未触发断崖检测时 cliffDropDetected=false', async () => {
+      const files: WebDavRemoteBackup[] = [
+        makeBackup('SoNotes_Backup_20250610120000.zip'),
+        makeBackup('SoNotes_Backup_20250611120000.zip'),
+      ];
+
+      listBackupsMock.mockResolvedValue(files);
+
+      const baselineSummary: BackupSummary = {
+        app: 'SoNotes',
+        formatVersion: 1,
+        appVersion: '1.0.0',
+        createdAt: 0,
+        noteCount: 10,
+        boardCount: 1,
+        textNoteCount: 10,
+        imageNoteCount: 0,
+        trashNoteCount: 0,
+        imageFileCount: 0,
+        imageFileTotalBytes: 0,
+      };
+
+      const latestSummary: BackupSummary = {
+        app: 'SoNotes',
+        formatVersion: 1,
+        appVersion: '1.0.0',
+        createdAt: 0,
+        noteCount: 10,
+        boardCount: 1,
+        textNoteCount: 10,
+        imageNoteCount: 0,
+        trashNoteCount: 0,
+        imageFileCount: 0,
+        imageFileTotalBytes: 0,
+      };
+
+      const result = await previewRetentionCleanup({
+        config: DUMMY_CONFIG,
+        retentionCount: 2,
+        protectedFileNames: new Set(),
+        baseline: {
+          baselineSummary,
+          latestSummary,
+        },
+      });
+
+      expect(result.cliffDropDetected).toBe(false);
+    });
+
+    it('无 baseline 时 cliffDropDetected 始终为 false', async () => {
+      const files: WebDavRemoteBackup[] = [
+        makeBackup('SoNotes_Backup_20250610120000.zip'),
+      ];
+
+      listBackupsMock.mockResolvedValue(files);
+
+      const result = await previewRetentionCleanup({
+        config: DUMMY_CONFIG,
+        retentionCount: 5,
+        protectedFileNames: new Set(),
+      });
+
+      expect(result.cliffDropDetected).toBe(false);
     });
   });
 

@@ -70,6 +70,7 @@ const DEFAULT_STATE: ScheduledRemoteBackupState = {
   cliffDropLatestSummaryImageFileTotalBytes: null,
   cliffDropLatestRemoteFileName: null,
   cliffDropLatestZipSizeBytes: null,
+  cliffDropLatestAnomalyCodes: null,
   pendingCleanupTargetCount: null,
   lastRetentionCleanupDeletedCount: null,
   lastRetentionCleanupFailedFileName: null,
@@ -279,6 +280,7 @@ describe('RetentionCleanupOrchestrator', () => {
         cliffDropLatestSummaryImageFileTotalBytes: 0,
         cliffDropLatestRemoteFileName: null,
         cliffDropLatestZipSizeBytes: 1024,
+        cliffDropLatestAnomalyCodes: ['CLIFF_DROP_RELATIVE'],
       });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
@@ -473,6 +475,7 @@ describe('RetentionCleanupOrchestrator', () => {
       );
       expect(result).not.toHaveProperty('baselineConfirmedRemoteCount');
       expect(result).toHaveProperty('cliffDropDeferred', true);
+      expect(result).toHaveProperty('cliffDropLatestAnomalyCodes', ['CLIFF_DROP_RELATIVE']);
     });
   });
 

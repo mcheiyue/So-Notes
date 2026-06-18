@@ -157,6 +157,7 @@ export function proposeRetentionCleanup(input: {
   readonly files: readonly WebDavRemoteBackup[];
   readonly retentionCount: number;
   readonly protectedFileNames: ReadonlySet<string>;
+  readonly cliffDropDetected?: boolean;
 }): RetentionPreview {
   const { files, retentionCount, protectedFileNames } = input;
 
@@ -211,7 +212,7 @@ export function proposeRetentionCleanup(input: {
     candidates,
     keep,
     protectedCount,
-    cliffDropDetected: false,
+    cliffDropDetected: input.cliffDropDetected ?? false,
     oldestCandidateTime: candidates[0]?.sortTime ?? null,
     newestKeepTime: keep[keep.length - 1]?.sortTime ?? null,
   };
