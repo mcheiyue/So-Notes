@@ -1226,11 +1226,14 @@ export const BoardDock = () => {
         const backups = await WebDavBackupService.listBackups(config);
         setWebdavBackups(backups);
       } catch {
-        if (result.deletedCount > 0) {
-          setWebdavBackups((items) => {
-            const candidateSet = new Set((preview?.candidates ?? []).map((c) => c.fileName));
-            return items.filter((item) => !candidateSet.has(item.fileName));
-          });
+        // listBackups 失败时降级：只移除实际已删除/missing 的前 N 个候选
+        // executeRetentionCleanup 按升序顺序删除，前 deletedCount + missingCount 个已移除
+        const removedCount = result.deletedCount + result.missingCount;
+        if (removedCount > 0 && preview?.candidates) {
+          const removedSet = new Set(
+            preview.candidates.slice(0, removedCount).map((c) => c.fileName),
+          );
+          setWebdavBackups((items) => items.filter((item) => !removedSet.has(item.fileName)));
         }
       }
     } catch (err) {
