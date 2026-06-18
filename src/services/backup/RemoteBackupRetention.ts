@@ -58,6 +58,10 @@ export interface RetentionPreview {
   readonly protectedCount: number;
   /** 是否检测到断崖式骤降（由调用方另行传入摘要时判断，此处仅作为占位） */
   readonly cliffDropDetected: boolean;
+  /** 最旧候选（将被删除）的备份时间，null 表示无候选 */
+  readonly oldestCandidateTime: Date | null;
+  /** 最新保留的备份时间，null 表示无保留 */
+  readonly newestKeepTime: Date | null;
 }
 
 export type RemoteRetentionAnomalyCode =
@@ -208,6 +212,8 @@ export function proposeRetentionCleanup(input: {
     keep,
     protectedCount,
     cliffDropDetected: false,
+    oldestCandidateTime: candidates[0]?.sortTime ?? null,
+    newestKeepTime: keep[keep.length - 1]?.sortTime ?? null,
   };
 }
 

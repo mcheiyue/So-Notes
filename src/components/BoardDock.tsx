@@ -34,6 +34,12 @@ const setsEqual = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean => {
   return true;
 };
 
+const formatTime = (d: Date | null): string => {
+  if (d === null) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 const FREQUENCY_MS: Record<string, number> = {
   'every-6-hours': 6 * 60 * 60 * 1000,
   'every-12-hours': 12 * 60 * 60 * 1000,
@@ -1212,6 +1218,21 @@ export const BoardDock = () => {
       }
 
       setRetentionPreview(null);
+      setRetentionCountSnapshot(null);
+      setRetentionProtectedSnapshot(null);
+
+      // 刷新远端备份列表（与单删模式一致）
+      try {
+        const backups = await WebDavBackupService.listBackups(config);
+        setWebdavBackups(backups);
+      } catch {
+        if (result.deletedCount > 0) {
+          setWebdavBackups((items) => {
+            const candidateSet = new Set((preview?.candidates ?? []).map((c) => c.fileName));
+            return items.filter((item) => !candidateSet.has(item.fileName));
+          });
+        }
+      }
     } catch (err) {
       setRetentionFeedback({ status: 'error', message: `清理失败：${formatUnknownError(err)}` });
     } finally {
@@ -2139,6 +2160,24 @@ export const BoardDock = () => {
                                                 将删除 {retentionPreview.candidates.length} 个备份，保留 {retentionPreview.keep.length} 个
                                                 {retentionPreview.protectedCount > 0 && `（${retentionPreview.protectedCount} 个受保护）`}
                                             </p>
+                                            {(retentionPreview.oldestCandidateTime !== null || retentionPreview.newestKeepTime !== null) && (
+                                                <p className="text-text-secondary text-[11px]">
+                                                    {retentionPreview.oldestCandidateTime !== null && `最旧删除：${formatTime(retentionPreview.oldestCandidateTime)}`}
+                                                    {retentionPreview.oldestCandidateTime !== null && retentionPreview.newestKeepTime !== null && '　'}
+                                                    {retentionPreview.newestKeepTime !== null && `最新保留：${formatTime(retentionPreview.newestKeepTime)}`}
+                                                </p>
+                                            )}
+                                            {retentionPreview.cliffDropDetected && (
+                                                <p className="flex items-center gap-1 text-orange-500 dark:text-orange-400 text-[11px]">
+                                                    <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                                                    检测到备份数量异常下跌，建议先确认健康基线再清理
+                                                </p>
+                                            )}
+                                            {scheduledState.baselineConfirmedRemoteCount === null && (
+                                                <p className="text-text-tertiary text-[11px]">
+                                                    当前还没有历史健康基线，自动断崖保护从下一次自动备份开始生效
+                                                </p>
+                                            )}
                                             {retentionPreview.candidates.length > 0 && (
                                                 <details className="text-[10px] text-text-tertiary">
                                                     <summary className="cursor-pointer hover:text-text-secondary">查看将删除的文件</summary>

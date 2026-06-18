@@ -165,6 +165,8 @@ describe('proposeRetentionCleanup', () => {
     // 非严格命名文件不进入解析，所以 keep 也是空（它们被过滤了）
     expect(result.keep).toHaveLength(0);
     expect(result.protectedCount).toBe(0);
+    expect(result.oldestCandidateTime).toBeNull();
+    expect(result.newestKeepTime).toBeNull();
   });
 
   it('少于 retentionCount → 无需删除', () => {
@@ -182,6 +184,8 @@ describe('proposeRetentionCleanup', () => {
 
     expect(result.candidates).toHaveLength(0);
     expect(result.keep).toHaveLength(3);
+    expect(result.oldestCandidateTime).toBeNull();
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 12, 12, 0, 0));
   });
 
   it('恰好等于 retentionCount → 无需删除', () => {
@@ -199,6 +203,8 @@ describe('proposeRetentionCleanup', () => {
 
     expect(result.candidates).toHaveLength(0);
     expect(result.keep).toHaveLength(3);
+    expect(result.oldestCandidateTime).toBeNull();
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 12, 12, 0, 0));
   });
 
   it('超过 retentionCount → 正确计算候选和保留', () => {
@@ -224,6 +230,8 @@ describe('proposeRetentionCleanup', () => {
     // 保留的应该是最新的三个
     expect(result.keep[0]!.fileName).toBe('SoNotes_Backup_20250612120000.zip');
     expect(result.keep[2]!.fileName).toBe('SoNotes_Backup_20250614120000.zip');
+    expect(result.oldestCandidateTime).toEqual(new Date(2025, 5, 10, 12, 0, 0));
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 14, 12, 0, 0));
   });
 
   it('受保护文件不进入候选', () => {
@@ -249,6 +257,8 @@ describe('proposeRetentionCleanup', () => {
     expect(result.candidates).toHaveLength(0);
     expect(result.keep).toHaveLength(5);
     expect(result.protectedCount).toBe(2);
+    expect(result.oldestCandidateTime).toBeNull();
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 14, 12, 0, 0));
   });
 
   it('保护对象让实际保留数量临时超过 N 时，不删除受保护文件', () => {
@@ -275,6 +285,8 @@ describe('proposeRetentionCleanup', () => {
     expect(result.candidates).toHaveLength(0);
     expect(result.keep).toHaveLength(5);
     expect(result.protectedCount).toBe(3);
+    expect(result.oldestCandidateTime).toBeNull();
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 14, 12, 0, 0));
   });
 
   it('保护对象落在最旧 N 个区间时仍被保留', () => {
@@ -300,6 +312,8 @@ describe('proposeRetentionCleanup', () => {
     expect(result.keep).toHaveLength(4);
     expect(result.candidates[0]!.fileName).toBe('SoNotes_Backup_20250611120000.zip');
     expect(result.protectedCount).toBe(1);
+    expect(result.oldestCandidateTime).toEqual(new Date(2025, 5, 11, 12, 0, 0));
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 14, 12, 0, 0));
   });
 
   it('混合严格和非严格命名文件，只处理严格命名', () => {
@@ -322,6 +336,8 @@ describe('proposeRetentionCleanup', () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.keep).toHaveLength(2);
     expect(result.candidates[0]!.fileName).toBe('SoNotes_Backup_20250610120000.zip');
+    expect(result.oldestCandidateTime).toEqual(new Date(2025, 5, 10, 12, 0, 0));
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 13, 12, 0, 0));
   });
 
   it('cliffDropDetected 默认为 false', () => {
@@ -332,6 +348,8 @@ describe('proposeRetentionCleanup', () => {
     });
 
     expect(result.cliffDropDetected).toBe(false);
+    expect(result.oldestCandidateTime).toBeNull();
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 10, 12, 0, 0));
   });
 
   it('retentionCount=0 → 删除所有非保护的严格命名文件', () => {
@@ -349,6 +367,8 @@ describe('proposeRetentionCleanup', () => {
 
     expect(result.candidates).toHaveLength(3);
     expect(result.keep).toHaveLength(0);
+    expect(result.oldestCandidateTime).toEqual(new Date(2025, 5, 10, 12, 0, 0));
+    expect(result.newestKeepTime).toBeNull();
   });
 
   it('同一秒的文件按文件名字典序稳定排序', () => {
@@ -367,6 +387,8 @@ describe('proposeRetentionCleanup', () => {
     expect(result.keep).toHaveLength(1);
     expect(result.candidates[0]!.fileName).toBe('SoNotes_Backup_20250610120000.zip');
     expect(result.keep[0]!.fileName).toBe('SoNotes_Backup_20250610120001.zip');
+    expect(result.oldestCandidateTime).toEqual(new Date(2025, 5, 10, 12, 0, 0));
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 10, 12, 0, 1));
   });
 });
 
