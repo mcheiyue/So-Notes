@@ -1206,8 +1206,9 @@ export const BoardDock = () => {
       setScheduledState(updatedState);
       try {
         await ScheduledRemoteBackupConfigService.saveState(updatedState);
+        await getSchedulerService()?.reloadState();
       } catch {
-        // 持久化失败不影响清理结果展示
+        setScheduledState(scheduledState);
       }
 
       setRetentionPreview(null);
