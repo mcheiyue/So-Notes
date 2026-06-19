@@ -1318,6 +1318,7 @@ export const BoardDock = () => {
       cliffDropLatestSummaryImageFileTotalBytes: null,
       cliffDropLatestRemoteFileName: null,
       cliffDropLatestZipSizeBytes: null,
+      cliffDropLatestAnomalyCodes: null,
     };
     setScheduledState(updated);
     try {
