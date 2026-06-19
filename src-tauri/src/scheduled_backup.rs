@@ -174,9 +174,9 @@ pub struct ScheduledRemoteBackupState {
     pub last_attempt_captured_storage_updated_at: Option<u64>,
     pub consecutive_credential_failures: u32,
     pub credential_action_required: bool,
-    /// 断崖式远端文件数骤降首次检测时间。
+    /// 断崖式便签数骤降首次检测时间。
     pub cliff_drop_detected_at: Option<u64>,
-    /// 断崖式检测确认时远端文件基准数量。
+    /// 断崖式检测确认时便签基准数量。
     pub baseline_confirmed_remote_count: Option<u32>,
     /// 断崖式检测确认时的基准看板数量。
     #[serde(default)]

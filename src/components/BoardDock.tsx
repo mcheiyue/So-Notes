@@ -2140,7 +2140,7 @@ export const BoardDock = () => {
                                     {scheduledState.baselineConfirmedRemoteCount != null && (
                                         <p className="text-emerald-600 dark:text-emerald-400 text-[10px]" data-testid="baseline-info">
                                             <Shield className="w-3 h-3 inline-block mr-1 align-text-bottom" />
-                                            健康基线：{scheduledState.baselineConfirmedRemoteCount} 个文件
+                                            健康基线：{scheduledState.baselineConfirmedRemoteCount} 条便签、{scheduledState.baselineConfirmedBoardCount ?? 0} 个看板
                                             {scheduledState.baselineConfirmedConfirmedAt != null && (
                                                 <span className="text-text-tertiary ml-1">
                                                     （{new Date(scheduledState.baselineConfirmedConfirmedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}）
