@@ -228,19 +228,24 @@ describe('RetentionCleanupOrchestrator', () => {
         baselineConfirmedRemoteFileName: null,
         baselineConfirmedConfirmedAt: 1700000000000,
         baselineConfirmedZipSizeBytes: 1024,
+        lastRetentionCleanupError: 'skipped_no_baseline',
+        lastRetentionCleanupAt: 1700000000000,
       });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
       expect(detectBackupCliffDropMock).not.toHaveBeenCalled();
     });
 
-    it('无基线且无摘要 → 跳过清理，返回空 patch', async () => {
+    it('无基线且无摘要 → 跳过清理，返回 skipped 状态', async () => {
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({
           state: { baselineConfirmedRemoteCount: null },
           uploadResult: makeUploadResult({ summary: null }),
         }),
       );
-      expect(result).toEqual({});
+      expect(result).toEqual({
+        lastRetentionCleanupError: 'skipped_no_baseline',
+        lastRetentionCleanupAt: 1700000000000,
+      });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
   });

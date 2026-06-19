@@ -104,9 +104,14 @@ export async function orchestratePostBackupRetentionCleanup(
         baselineConfirmedRemoteFileName: uploadResult.remoteFileName ?? null,
         baselineConfirmedConfirmedAt: clock(),
         baselineConfirmedZipSizeBytes: uploadResult.zipSizeBytes ?? null,
+        lastRetentionCleanupError: 'skipped_no_baseline',
+        lastRetentionCleanupAt: clock(),
       };
     }
-    return {};
+    return {
+      lastRetentionCleanupError: 'skipped_no_baseline',
+      lastRetentionCleanupAt: clock(),
+    };
   }
 
   // -----------------------------------------------------------------------

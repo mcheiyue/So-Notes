@@ -1252,6 +1252,7 @@ export const BoardDock = () => {
 
       const retentionStatePatch: Partial<ScheduledRemoteBackupState> = {
         lastRetentionCleanupDeletedCount: result.deletedCount,
+        lastRetentionCleanupMissingCount: result.missingCount,
         lastRetentionCleanupFailedFileName: result.failedFileName ?? null,
         lastRetentionCleanupError: result.error ?? null,
         lastRetentionCleanupAt: Date.now(),
@@ -2126,9 +2127,21 @@ export const BoardDock = () => {
                                     {scheduledState.lastRetentionCleanupAt != null && (
                                         <p className="text-[10px]" data-testid="cleanup-result-info">
                                             <Eye className="w-3 h-3 inline-block mr-1 align-text-bottom text-text-tertiary" />
-                                            {scheduledState.lastRetentionCleanupError != null ? (
-                                                <span className="text-red-500 dark:text-red-400">
-                                                    清理失败：{scheduledState.lastRetentionCleanupError}
+                                            {scheduledState.lastRetentionCleanupError === 'skipped_no_baseline' ? (
+                                                <span className="text-text-tertiary">
+                                                    首次备份已建立健康基线，自动清理将在下次备份后执行
+                                                </span>
+                                            ) : scheduledState.lastRetentionCleanupError != null ? (
+                                                <span className="text-amber-500 dark:text-amber-400">
+                                                    清理部分完成：已删除 {scheduledState.lastRetentionCleanupDeletedCount ?? 0} 个
+                                                    {(scheduledState.lastRetentionCleanupMissingCount ?? 0) > 0 && (
+                                                        <span>，已不存在 {scheduledState.lastRetentionCleanupMissingCount} 个</span>
+                                                    )}
+                                                    {scheduledState.lastRetentionCleanupFailedFileName != null ? (
+                                                        <span>（{scheduledState.lastRetentionCleanupFailedFileName} 失败：{scheduledState.lastRetentionCleanupError}）</span>
+                                                    ) : (
+                                                        <span>（{scheduledState.lastRetentionCleanupError}）</span>
+                                                    )}
                                                 </span>
                                             ) : (
                                                 <span className="text-text-tertiary">
