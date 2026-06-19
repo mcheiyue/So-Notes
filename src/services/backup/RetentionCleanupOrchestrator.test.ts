@@ -76,6 +76,7 @@ const DEFAULT_STATE: ScheduledRemoteBackupState = {
   lastRetentionCleanupMissingCount: null,
   lastRetentionCleanupFailedFileName: null,
   lastRetentionCleanupError: null,
+  lastRetentionCleanupSkipped: null,
   lastRetentionCleanupAt: null,
 };
 
@@ -130,12 +131,16 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
 
-    it('trigger 为 before-exit → 跳过，返回空 patch', async () => {
-      const result = await orchestratePostBackupRetentionCleanup(
-        makeInput({ trigger: 'before-exit' }),
+    it('trigger 为 before-exit → 不跳过（AUTOMATIC_TRIGGERS 已包含）', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 5 });
+      await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          trigger: 'before-exit',
+          state: { baselineConfirmedRemoteCount: 10 },
+        }),
       );
-      expect(result).toEqual({});
-      expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
+      expect(executeRetentionCleanupMock).toHaveBeenCalled();
     });
 
     it('trigger 为 scheduled-interval → 不跳过', async () => {
@@ -228,7 +233,7 @@ describe('RetentionCleanupOrchestrator', () => {
         baselineConfirmedRemoteFileName: null,
         baselineConfirmedConfirmedAt: 1700000000000,
         baselineConfirmedZipSizeBytes: 1024,
-        lastRetentionCleanupError: 'skipped_no_baseline',
+        lastRetentionCleanupSkipped: true,
         lastRetentionCleanupAt: 1700000000000,
       });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
@@ -243,7 +248,7 @@ describe('RetentionCleanupOrchestrator', () => {
         }),
       );
       expect(result).toEqual({
-        lastRetentionCleanupError: 'skipped_no_baseline',
+        lastRetentionCleanupSkipped: true,
         lastRetentionCleanupAt: 1700000000000,
       });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();

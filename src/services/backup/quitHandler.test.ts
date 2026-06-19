@@ -91,6 +91,7 @@ function makeScheduledStateResult(
       lastRetentionCleanupMissingCount: null,
       lastRetentionCleanupFailedFileName: null,
       lastRetentionCleanupError: null,
+      lastRetentionCleanupSkipped: null,
       lastRetentionCleanupAt: null,
       ...overrides,
     },

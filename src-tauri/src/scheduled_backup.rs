@@ -240,6 +240,9 @@ pub struct ScheduledRemoteBackupState {
     /// 上次清理失败的错误信息。
     #[serde(default)]
     pub last_retention_cleanup_error: Option<String>,
+    /// 首次建立基线时跳过清理（非失败）。
+    #[serde(default)]
+    pub last_retention_cleanup_skipped: Option<bool>,
     /// 上次清理执行时间戳。
     #[serde(default)]
     pub last_retention_cleanup_at: Option<u64>,
@@ -285,6 +288,7 @@ impl Default for ScheduledRemoteBackupState {
             last_retention_cleanup_missing_count: None,
             last_retention_cleanup_failed_file_name: None,
             last_retention_cleanup_error: None,
+            last_retention_cleanup_skipped: None,
             last_retention_cleanup_at: None,
         }
     }
@@ -896,6 +900,7 @@ mod tests {
             last_retention_cleanup_missing_count: None,
             last_retention_cleanup_failed_file_name: None,
             last_retention_cleanup_error: None,
+            last_retention_cleanup_skipped: None,
             last_retention_cleanup_at: None,
         };
 

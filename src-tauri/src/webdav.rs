@@ -2121,8 +2121,10 @@ pub async fn webdav_create_remote_backup(
     }
 
     if let Ok(ref mut r) = upload_result {
-        r.summary = backup_result.summary;
-        r.zip_size_bytes = backup_result.zip_size_bytes;
+        if r.success {
+            r.summary = backup_result.summary;
+            r.zip_size_bytes = backup_result.zip_size_bytes;
+        }
     }
 
     upload_result

@@ -610,19 +610,30 @@ describe('detectBackupCliffDrop', () => {
     expect(result).toBeNull();
   });
 
-  it('note < 5 时 board 不独立触发 — baselineNotes=4 且 note>0 时不触发', () => {
+  it('note < 5 时 board 独立触发 — baselineNotes=4 且 baselineBoard ≥ 3 时 board 仍检测', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(2, { boardCount: 0 }),
       baselineSummary: makeSummary(4, { boardCount: 3 }),
     });
 
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_BOARD_COUNT');
   });
 
   it('note < 5 时 board 触发 — note=0 且 board 也异常接近空', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(0, { boardCount: 0 }),
       baselineSummary: makeSummary(4, { boardCount: 3 }),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_BOARD_COUNT');
+  });
+
+  it('baselineNotes=4, baselineBoard=10, currentBoard=0 → 触发 CLIFF_DROP_BOARD_COUNT', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(4, { boardCount: 0 }),
+      baselineSummary: makeSummary(4, { boardCount: 10 }),
     });
 
     expect(result).not.toBeNull();
@@ -701,7 +712,7 @@ describe('detectBackupCliffDrop', () => {
     expect(result!.anomalyCodes).not.toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
   });
 
-  it('zip 维度：有 zip 但无其他维度异常 → 不触发 zip', () => {
+  it('zip 维度：有 zip 但无数量下降 → 不触发 zip', () => {
     const result = detectBackupCliffDrop({
       latestSummary: makeSummary(100),
       baselineSummary: makeSummary(100),
@@ -710,6 +721,29 @@ describe('detectBackupCliffDrop', () => {
     });
 
     expect(result).toBeNull();
+  });
+
+  it('zip 维度：数量小幅下降但 zip 未降至阈值 → 不触发 zip', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(95),
+      baselineSummary: makeSummary(100),
+      latestZipSizeBytes: 1_800_000,
+      baselineZipSizeBytes: 2_000_000,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('zip 维度：数量小幅下降但 zip 大幅下降 → 触发 zip', () => {
+    const result = detectBackupCliffDrop({
+      latestSummary: makeSummary(95),
+      baselineSummary: makeSummary(100),
+      latestZipSizeBytes: 500_000,
+      baselineZipSizeBytes: 2_000_000,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.anomalyCodes).toContain('CLIFF_DROP_ZIP_SIZE_BYTES');
   });
 
   it('zip 维度：有 zip 且有其他维度异常 → 触发 zip', () => {

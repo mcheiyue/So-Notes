@@ -46,6 +46,10 @@ export interface PostBackupRetentionCleanupInput {
 const AUTOMATIC_TRIGGERS: ReadonlySet<RemoteBackupTrigger> = new Set([
   'scheduled-interval',
   'quiet-period',
+  // before-exit 成功后也会更新 lastSuccessfulStorageUpdatedAt，
+  // 若不加入自动触发器，下次 scheduled-interval 会因无变化跳过上传，
+  // 导致 retention 永远无法运行。
+  'before-exit',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -104,12 +108,12 @@ export async function orchestratePostBackupRetentionCleanup(
         baselineConfirmedRemoteFileName: uploadResult.remoteFileName ?? null,
         baselineConfirmedConfirmedAt: clock(),
         baselineConfirmedZipSizeBytes: uploadResult.zipSizeBytes ?? null,
-        lastRetentionCleanupError: 'skipped_no_baseline',
+        lastRetentionCleanupSkipped: true,
         lastRetentionCleanupAt: clock(),
       };
     }
     return {
-      lastRetentionCleanupError: 'skipped_no_baseline',
+      lastRetentionCleanupSkipped: true,
       lastRetentionCleanupAt: clock(),
     };
   }

@@ -2158,7 +2158,7 @@ export const BoardDock = () => {
                                     {scheduledState.lastRetentionCleanupAt != null && (
                                         <p className="text-[10px]" data-testid="cleanup-result-info">
                                             <Eye className="w-3 h-3 inline-block mr-1 align-text-bottom text-text-tertiary" />
-                                            {scheduledState.lastRetentionCleanupError === 'skipped_no_baseline' ? (
+                                            {scheduledState.lastRetentionCleanupSkipped === true ? (
                                                 <span className="text-text-tertiary">
                                                     首次备份已建立健康基线，自动清理将在下次备份后执行
                                                 </span>
@@ -2278,7 +2278,7 @@ export const BoardDock = () => {
                                         <button
                                             type="button"
                                             onClick={onPreviewCleanup}
-                                            disabled={retentionBusy !== 'idle'}
+                                            disabled={retentionBusy !== 'idle' || webdavOperation !== 'idle' || zipOperation !== 'idle'}
                                             className="px-2 py-1 text-xs rounded bg-primary-bg hover:bg-primary-bg/80 text-primary-fg disabled:opacity-50 transition-colors flex items-center gap-1"
                                             data-testid="retention-preview-button"
                                         >
@@ -2289,7 +2289,7 @@ export const BoardDock = () => {
                                             <button
                                                 type="button"
                                                 onClick={onExecuteCleanup}
-                                                disabled={retentionBusy !== 'idle'}
+                                                disabled={retentionBusy !== 'idle' || webdavOperation !== 'idle' || zipOperation !== 'idle'}
                                                 className="px-2 py-1 text-xs rounded bg-red-500/90 hover:bg-red-600 text-white disabled:opacity-50 transition-colors flex items-center gap-1"
                                                 data-testid="retention-execute-button"
                                             >
