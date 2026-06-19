@@ -2133,6 +2133,9 @@ export const BoardDock = () => {
                                             ) : (
                                                 <span className="text-text-tertiary">
                                                     最近清理：删除 {scheduledState.lastRetentionCleanupDeletedCount ?? 0} 个
+                                                    {(scheduledState.lastRetentionCleanupMissingCount ?? 0) > 0 && (
+                                                        <span className="ml-1">，已不存在 {scheduledState.lastRetentionCleanupMissingCount} 个</span>
+                                                    )}
                                                     {scheduledState.lastRetentionCleanupFailedFileName != null && (
                                                         <span className="text-amber-500 ml-1">（{scheduledState.lastRetentionCleanupFailedFileName} 失败）</span>
                                                     )}
