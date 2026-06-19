@@ -212,6 +212,9 @@ export async function orchestratePostBackupRetentionCleanup(
     // 同时记录 retention 失败状态（plan 4.5）
     return {
       ...baselineUpdate,
+      lastRetentionCleanupDeletedCount: 0,
+      lastRetentionCleanupMissingCount: 0,
+      lastRetentionCleanupFailedFileName: null,
       lastRetentionCleanupError: error instanceof Error ? error.message : String(error),
       lastRetentionCleanupAt: clock(),
     };

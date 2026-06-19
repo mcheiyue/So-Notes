@@ -1246,7 +1246,7 @@ export const BoardDock = () => {
           : (result.error ? `原因：${result.error}` : '');
         setRetentionFeedback({
           status: 'error',
-          message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个。${detail}`,
+          message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个${result.missingCount > 0 ? `，${result.missingCount} 个已不存在` : ''}。${detail}`,
         });
       }
 
@@ -1328,6 +1328,37 @@ export const BoardDock = () => {
     } catch (err) {
       setScheduledState(scheduledState);
       setRetentionFeedback({ status: 'error', message: `保存基线确认失败：${formatUnknownError(err)}` });
+    }
+  };
+
+  const onDismissCliffWarning = async () => {
+    const confirmed = await confirm({
+      title: '清除断崖警告',
+      message: '将清除异常检测警告并恢复自动清理，当前健康基线不变。确认？',
+      confirmText: '清除警告',
+    });
+    if (!confirmed) return;
+
+    const updated: ScheduledRemoteBackupState = {
+      ...scheduledState,
+      cliffDropDeferred: false,
+      cliffDropDetectedAt: null,
+      cliffDropLatestSummaryNoteCount: null,
+      cliffDropLatestSummaryBoardCount: null,
+      cliffDropLatestSummaryImageNoteCount: null,
+      cliffDropLatestSummaryImageFileCount: null,
+      cliffDropLatestSummaryImageFileTotalBytes: null,
+      cliffDropLatestRemoteFileName: null,
+      cliffDropLatestZipSizeBytes: null,
+      cliffDropLatestAnomalyCodes: null,
+    };
+    setScheduledState(updated);
+    try {
+      await ScheduledRemoteBackupConfigService.saveState(updated);
+      await getSchedulerService()?.reloadState();
+    } catch (err) {
+      setScheduledState(scheduledState);
+      setRetentionFeedback({ status: 'error', message: `清除警告失败：${formatUnknownError(err)}` });
     }
   };
 
@@ -2231,6 +2262,14 @@ export const BoardDock = () => {
                                                 data-testid="confirm-baseline-button"
                                             >
                                                 设为健康基线
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={onDismissCliffWarning}
+                                                className="px-2 py-0.5 text-[10px] rounded bg-gray-100 dark:bg-gray-800/50 hover:bg-gray-200 dark:hover:bg-gray-700/50 text-gray-600 dark:text-gray-400 transition-colors whitespace-nowrap"
+                                                data-testid="dismiss-cliff-warning-button"
+                                            >
+                                                清除警告
                                             </button>
                                         </div>
                                     )}

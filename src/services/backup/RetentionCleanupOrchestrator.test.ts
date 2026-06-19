@@ -404,13 +404,16 @@ describe('RetentionCleanupOrchestrator', () => {
       );
     });
 
-    it('清理失败不影响备份成功状态 — 异常被 catch，返回基线更新和错误信息', async () => {
+    it('清理失败不影响备份成功状态 — 异常被 catch，返回基线更新、错误信息和零计数', async () => {
       detectBackupCliffDropMock.mockReturnValue(null);
       executeRetentionCleanupMock.mockRejectedValue(new Error('network timeout'));
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({ state: { baselineConfirmedRemoteCount: 10 } }),
       );
       expect(result).toHaveProperty('baselineConfirmedRemoteCount', 10);
+      expect(result).toHaveProperty('lastRetentionCleanupDeletedCount', 0);
+      expect(result).toHaveProperty('lastRetentionCleanupMissingCount', 0);
+      expect(result).toHaveProperty('lastRetentionCleanupFailedFileName', null);
       expect(result).toHaveProperty('lastRetentionCleanupError', 'network timeout');
       expect(result).toHaveProperty('lastRetentionCleanupAt');
     });
