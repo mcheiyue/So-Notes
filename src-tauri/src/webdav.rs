@@ -600,6 +600,35 @@ pub fn validate_remote_backup_filename(name: &str) -> Result<(), String> {
         return Err("远端备份文件名中的日期时间部分必须为 14 位数字".to_string());
     }
 
+    // 日历合法性校验（与 TS parseRemoteBackupFileName 对齐）
+    let month: u32 = datetime_part[4..6].parse().unwrap_or(0);
+    let day: u32 = datetime_part[6..8].parse().unwrap_or(0);
+    let hour: u32 = datetime_part[8..10].parse().unwrap_or(99);
+    let minute: u32 = datetime_part[10..12].parse().unwrap_or(99);
+    let second: u32 = datetime_part[12..14].parse().unwrap_or(99);
+
+    if month < 1 || month > 12 {
+        return Err("月份必须为 01-12".to_string());
+    }
+    if day < 1 || day > 31 {
+        return Err("日期必须为 01-31".to_string());
+    }
+    if hour > 23 {
+        return Err("小时必须为 00-23".to_string());
+    }
+    if minute > 59 {
+        return Err("分钟必须为 00-59".to_string());
+    }
+    if second > 59 {
+        return Err("秒必须为 00-59".to_string());
+    }
+
+    // 使用 chrono 验证日期合法性（如 2 月 30 日）
+    let year: i32 = datetime_part[0..4].parse().unwrap_or(0);
+    if chrono::NaiveDate::from_ymd_opt(year, month, day).is_none() {
+        return Err("日期不合法（如 2 月 30 日）".to_string());
+    }
+
     Ok(())
 }
 
