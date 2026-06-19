@@ -224,7 +224,6 @@ pub struct ScheduledRemoteBackupState {
     #[serde(default)]
     pub cliff_drop_latest_zip_size_bytes: Option<u64>,
     /// 断崖式骤降检测时的异常原因码列表。
-    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub cliff_drop_latest_anomaly_codes: Option<Vec<String>>,
     /// 等待清理的目标保留数量。
@@ -232,6 +231,9 @@ pub struct ScheduledRemoteBackupState {
     /// 上次清理实际删除的文件数。
     #[serde(default)]
     pub last_retention_cleanup_deleted_count: Option<u32>,
+    /// 上次清理已缺失的文件数。
+    #[serde(default)]
+    pub last_retention_cleanup_missing_count: Option<u32>,
     /// 上次清理失败的文件名。
     #[serde(default)]
     pub last_retention_cleanup_failed_file_name: Option<String>,
@@ -280,6 +282,7 @@ impl Default for ScheduledRemoteBackupState {
             cliff_drop_latest_anomaly_codes: None,
             pending_cleanup_target_count: None,
             last_retention_cleanup_deleted_count: None,
+            last_retention_cleanup_missing_count: None,
             last_retention_cleanup_failed_file_name: None,
             last_retention_cleanup_error: None,
             last_retention_cleanup_at: None,
@@ -890,6 +893,7 @@ mod tests {
             cliff_drop_latest_anomaly_codes: None,
             pending_cleanup_target_count: Some(15),
             last_retention_cleanup_deleted_count: None,
+            last_retention_cleanup_missing_count: None,
             last_retention_cleanup_failed_file_name: None,
             last_retention_cleanup_error: None,
             last_retention_cleanup_at: None,

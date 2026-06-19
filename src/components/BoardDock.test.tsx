@@ -157,6 +157,7 @@ const { DEFAULT_SCHEDULED_BACKUP_CONFIG, DEFAULT_SCHEDULED_BACKUP_STATE, mockSch
     cliffDropLatestZipSizeBytes: null as number | null,
     pendingCleanupTargetCount: null as number | null,
     lastRetentionCleanupDeletedCount: null as number | null,
+    lastRetentionCleanupMissingCount: null as number | null,
     lastRetentionCleanupFailedFileName: null as string | null,
     lastRetentionCleanupError: null as string | null,
     lastRetentionCleanupAt: null as number | null,

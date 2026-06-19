@@ -88,6 +88,7 @@ function makeScheduledStateResult(
       cliffDropLatestAnomalyCodes: null,
       pendingCleanupTargetCount: null,
       lastRetentionCleanupDeletedCount: null,
+      lastRetentionCleanupMissingCount: null,
       lastRetentionCleanupFailedFileName: null,
       lastRetentionCleanupError: null,
       lastRetentionCleanupAt: null,

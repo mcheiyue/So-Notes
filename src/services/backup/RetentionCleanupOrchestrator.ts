@@ -197,6 +197,7 @@ export async function orchestratePostBackupRetentionCleanup(
       ...baselineUpdate,
       pendingCleanupTargetCount: cleanupResult.retainedCount,
       lastRetentionCleanupDeletedCount: cleanupResult.deletedCount,
+      lastRetentionCleanupMissingCount: cleanupResult.missingCount,
       lastRetentionCleanupFailedFileName: cleanupResult.failedFileName,
       lastRetentionCleanupError: cleanupResult.error,
       lastRetentionCleanupAt: clock(),

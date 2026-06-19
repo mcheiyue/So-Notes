@@ -73,6 +73,7 @@ const DEFAULT_STATE: ScheduledRemoteBackupState = {
   cliffDropLatestAnomalyCodes: null,
   pendingCleanupTargetCount: null,
   lastRetentionCleanupDeletedCount: null,
+  lastRetentionCleanupMissingCount: null,
   lastRetentionCleanupFailedFileName: null,
   lastRetentionCleanupError: null,
   lastRetentionCleanupAt: null,
@@ -309,6 +310,7 @@ describe('RetentionCleanupOrchestrator', () => {
       executeRetentionCleanupMock.mockResolvedValue({
         retainedCount: 7,
         deletedCount: 0,
+        missingCount: 0,
         failedFileName: null,
         error: null,
       });
@@ -331,6 +333,7 @@ describe('RetentionCleanupOrchestrator', () => {
         baselineConfirmedZipSizeBytes: 1024,
         pendingCleanupTargetCount: 7,
         lastRetentionCleanupDeletedCount: 0,
+        lastRetentionCleanupMissingCount: 0,
         lastRetentionCleanupFailedFileName: null,
         lastRetentionCleanupError: null,
         lastRetentionCleanupAt: 1700000000000,
@@ -413,6 +416,7 @@ describe('RetentionCleanupOrchestrator', () => {
         success: false,
         retainedCount: 5,
         deletedCount: 0,
+        missingCount: 0,
         error: '401 Unauthorized',
         failedFileName: 'SoNotes_Backup_20250610120000.zip',
       });
@@ -430,6 +434,7 @@ describe('RetentionCleanupOrchestrator', () => {
         baselineConfirmedZipSizeBytes: 1024,
         pendingCleanupTargetCount: 5,
         lastRetentionCleanupDeletedCount: 0,
+        lastRetentionCleanupMissingCount: 0,
         lastRetentionCleanupFailedFileName: 'SoNotes_Backup_20250610120000.zip',
         lastRetentionCleanupError: '401 Unauthorized',
         lastRetentionCleanupAt: 1700000000000,
@@ -494,6 +499,7 @@ describe('RetentionCleanupOrchestrator', () => {
       executeRetentionCleanupMock.mockResolvedValue({
         retainedCount: 10,
         deletedCount: 0,
+        missingCount: 0,
         failedFileName: null,
         error: null,
       });
@@ -521,6 +527,7 @@ describe('RetentionCleanupOrchestrator', () => {
         baselineConfirmedZipSizeBytes: 1024,
         pendingCleanupTargetCount: 10,
         lastRetentionCleanupDeletedCount: 0,
+        lastRetentionCleanupMissingCount: 0,
         lastRetentionCleanupFailedFileName: null,
         lastRetentionCleanupError: null,
         lastRetentionCleanupAt: 1700000000000,
