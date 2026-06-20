@@ -169,7 +169,10 @@ export async function orchestratePostBackupRetentionCleanup(
 
   // 无摘要时无法验证健康状态，跳过清理和基线更新（plan 3.8）
   if (latestSummary === null) {
-    return {};
+    return {
+      lastRetentionCleanupSkipped: true,
+      lastRetentionCleanupAt: clock(),
+    };
   }
 
   // 断崖检测通过，更新基线为当前健康备份（plan 3.7：先更新基线再清理）

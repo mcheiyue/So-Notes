@@ -4,7 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useDomainStore } from '../store/domainStore';
 import { useViewportStore } from '../store/viewportStore';
 import { useUIStore } from '../store/uiStore';
-import { createScheduledRemoteBackupService } from '../services/backup/ScheduledRemoteBackupService';
+import { createScheduledRemoteBackupService, FREQUENCY_MS, CREDENTIAL_FAILURE_THRESHOLD } from '../services/backup/ScheduledRemoteBackupService';
 import type { AppActivitySignals } from '../services/backup/ScheduledRemoteBackupService';
 import { registerSchedulerService, unregisterSchedulerService } from '../services/backup/ScheduledRemoteBackupService';
 import { loadConfig as loadScheduledConfig, saveConfig as saveScheduledConfig, loadState as loadScheduledState, saveState as saveScheduledState, DEFAULT_SCHEDULED_BACKUP_STATE } from '../services/backup/ScheduledRemoteBackupConfigService';
@@ -126,21 +126,36 @@ export const ScheduledRemoteBackupController = () => {
           const now = Date.now();
           const stateResult = await loadScheduledState();
           const prev = stateResult.success && stateResult.state ? stateResult.state : DEFAULT_SCHEDULED_BACKUP_STATE;
+          const schedConfigResult = await loadScheduledConfig();
+          const frequencyMs = schedConfigResult.success && schedConfigResult.config
+            ? FREQUENCY_MS[schedConfigResult.config.frequency]
+            : FREQUENCY_MS['daily'];
           await saveScheduledState({
             ...prev,
+            lastStartedAt: now,
             lastFinishedAt: now,
             lastTrigger: 'before-exit',
+            nextRunAt: now + frequencyMs,
             ...(result.success
               ? {
                   lastAutomaticSuccessAt: now,
                   lastRemoteFileName: result.remoteFileName ?? null,
                   lastFailureReason: null,
+                  lastFailureAt: null,
                   lastFailureStage: null,
+                  consecutiveCredentialFailures: 0,
+                  credentialActionRequired: false,
                 }
               : {
                   lastFailureAt: now,
                   lastFailureReason: result.error ?? '退出前备份失败',
                   lastFailureStage: result.errorStage ?? null,
+                  ...(result.errorStage === 'credential'
+                    ? {
+                        consecutiveCredentialFailures: prev.consecutiveCredentialFailures + 1,
+                        credentialActionRequired: prev.consecutiveCredentialFailures + 1 >= CREDENTIAL_FAILURE_THRESHOLD,
+                      }
+                    : {}),
                 }),
           });
           if (!result.success) {

@@ -65,7 +65,7 @@ export function getSchedulerService():
 // 频率到毫秒映射
 // ---------------------------------------------------------------------------
 
-const FREQUENCY_MS: Record<ScheduledRemoteBackupFrequency, number> = {
+export const FREQUENCY_MS: Record<ScheduledRemoteBackupFrequency, number> = {
   'every-6-hours': 6 * 60 * 60 * 1000,
   'every-12-hours': 12 * 60 * 60 * 1000,
   daily: 24 * 60 * 60 * 1000,
@@ -76,7 +76,7 @@ const FREQUENCY_MS: Record<ScheduledRemoteBackupFrequency, number> = {
 // 凭据失败阈值
 // ---------------------------------------------------------------------------
 
-const CREDENTIAL_FAILURE_THRESHOLD = 3;
+export const CREDENTIAL_FAILURE_THRESHOLD = 3;
 
 // ---------------------------------------------------------------------------
 // 触发器到协调器任务类型的映射

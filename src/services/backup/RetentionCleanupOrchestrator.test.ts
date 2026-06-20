@@ -308,7 +308,7 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(result).toHaveProperty('pendingCleanupTargetCount');
     });
 
-    it('uploadResult.summary 为 null → 跳过断崖检测和清理，返回空 patch', async () => {
+    it('uploadResult.summary 为 null → 跳过断崖检测和清理，返回 skipped 状态', async () => {
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({
           state: { baselineConfirmedRemoteCount: 10 },
@@ -317,7 +317,10 @@ describe('RetentionCleanupOrchestrator', () => {
       );
       expect(detectBackupCliffDropMock).not.toHaveBeenCalled();
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
-      expect(result).toEqual({});
+      expect(result).toEqual({
+        lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupAt: 1700000000000,
+      });
     });
   });
 

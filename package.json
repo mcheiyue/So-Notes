@@ -12,7 +12,7 @@
     "lint": "eslint src/store src/test src/services/backup src/components/NoteCard.tsx src/components/Canvas.tsx src/components/ContextMenu.tsx src/components/ScheduledRemoteBackupController.tsx src/components/QuitConfirmDialog.tsx vite.config.ts --max-warnings=0",
     "test": "vitest run --reporter=json --outputFile=test-results.json",
     "test:watch": "vitest",
-    "check": "npm run lint && npm run test && npm run typecheck",
+    "check": "npm run lint && npm run test && npm run typecheck && cargo test --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri"
   },
