@@ -54,6 +54,9 @@ jobs:
       - name: Run lint
         run: npm run lint
 
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - name: Run tests
         run: npm run test
         env:

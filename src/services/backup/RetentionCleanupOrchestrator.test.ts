@@ -59,7 +59,7 @@ const DEFAULT_STATE: ScheduledRemoteBackupState = {
   baselineConfirmedImageNoteCount: null,
   baselineConfirmedImageFileCount: null,
   baselineConfirmedImageFileTotalBytes: null,
-  baselineConfirmedRemoteFileName: null,
+  baselineConfirmedRemoteFileName: 'SoNotes_Backup_20250601000000.zip',
   baselineConfirmedConfirmedAt: null,
   baselineConfirmedZipSizeBytes: null,
   cliffDropDeferred: false,
@@ -249,6 +249,17 @@ describe('RetentionCleanupOrchestrator', () => {
       });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
+
+    it('有 count 但 fileName 为 null → 重新初始化基线，跳过清理', async () => {
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: { baselineConfirmedRemoteCount: 10, baselineConfirmedRemoteFileName: null },
+        }),
+      );
+      expect(result).toHaveProperty('baselineConfirmedRemoteCount', 10);
+      expect(result).toHaveProperty('lastRetentionCleanupSkipped', true);
+      expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
+    });
   });
 
   describe('断崖检测', () => {
@@ -326,7 +337,7 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(executeRetentionCleanupMock).toHaveBeenCalledWith({
         config: DUMMY_WEBDAV_CONFIG,
         retentionCount: 10,
-        protectedFileNames: new Set(),
+        protectedFileNames: new Set(['SoNotes_Backup_20250601000000.zip']),
       });
       expect(result).toEqual({
         baselineConfirmedRemoteCount: 10,
@@ -371,7 +382,7 @@ describe('RetentionCleanupOrchestrator', () => {
       );
     });
 
-    it('仅有 uploadResult 时只保护当前文件', async () => {
+    it('有 uploadResult + baseline 时保护两者', async () => {
       detectBackupCliffDropMock.mockReturnValue(null);
       executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 5 });
       await orchestratePostBackupRetentionCleanup(
@@ -382,7 +393,10 @@ describe('RetentionCleanupOrchestrator', () => {
       );
       expect(executeRetentionCleanupMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          protectedFileNames: new Set(['SoNotes_Current_20250615.zip']),
+          protectedFileNames: new Set([
+            'SoNotes_Current_20250615.zip',
+            'SoNotes_Backup_20250601000000.zip',
+          ]),
         }),
       );
     });

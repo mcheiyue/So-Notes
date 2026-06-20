@@ -93,7 +93,7 @@ export async function orchestratePostBackupRetentionCleanup(
   // -----------------------------------------------------------------------
   const latestSummary = uploadResult.summary;
 
-  if (state.baselineConfirmedRemoteCount === null) {
+  if (state.baselineConfirmedRemoteCount === null || state.baselineConfirmedRemoteFileName === null) {
     if (latestSummary !== null) {
       return {
         baselineConfirmedRemoteCount: latestSummary.noteCount,

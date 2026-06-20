@@ -7,7 +7,7 @@ import { useUIStore } from '../store/uiStore';
 import { createScheduledRemoteBackupService } from '../services/backup/ScheduledRemoteBackupService';
 import type { AppActivitySignals } from '../services/backup/ScheduledRemoteBackupService';
 import { registerSchedulerService, unregisterSchedulerService } from '../services/backup/ScheduledRemoteBackupService';
-import { loadConfig as loadScheduledConfig, saveConfig as saveScheduledConfig, loadState as loadScheduledState, saveState as saveScheduledState } from '../services/backup/ScheduledRemoteBackupConfigService';
+import { loadConfig as loadScheduledConfig, saveConfig as saveScheduledConfig, loadState as loadScheduledState, saveState as saveScheduledState, DEFAULT_SCHEDULED_BACKUP_STATE } from '../services/backup/ScheduledRemoteBackupConfigService';
 import { loadConfig as loadWebDavConfig, createRemoteBackup } from '../services/backup/WebDavBackupService';
 import { runRemoteBackup } from '../services/backup/RemoteBackupRunner';
 import { flushNow } from '../services/storage/PersistenceFacade';
@@ -123,6 +123,26 @@ export const ScheduledRemoteBackupController = () => {
           }
           const webdavConfig = { serverUrl: config.serverUrl, username: config.username, remoteDir: config.remoteDir ?? undefined };
           const result = await runRemoteBackup(runnerDepsRef.current, webdavConfig, { jobKind: 'before-exit-remote-backup' });
+          const now = Date.now();
+          const stateResult = await loadScheduledState();
+          const prev = stateResult.success && stateResult.state ? stateResult.state : DEFAULT_SCHEDULED_BACKUP_STATE;
+          await saveScheduledState({
+            ...prev,
+            lastFinishedAt: now,
+            lastTrigger: 'before-exit',
+            ...(result.success
+              ? {
+                  lastAutomaticSuccessAt: now,
+                  lastRemoteFileName: result.remoteFileName ?? null,
+                  lastFailureReason: null,
+                  lastFailureStage: null,
+                }
+              : {
+                  lastFailureAt: now,
+                  lastFailureReason: result.error ?? '退出前备份失败',
+                  lastFailureStage: result.errorStage ?? null,
+                }),
+          });
           if (!result.success) {
             throw new Error(result.error ?? '退出前备份失败');
           }
