@@ -131,16 +131,12 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
 
-    it('trigger 为 before-exit → 不跳过（AUTOMATIC_TRIGGERS 已包含）', async () => {
-      detectBackupCliffDropMock.mockReturnValue(null);
-      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 5 });
-      await orchestratePostBackupRetentionCleanup(
-        makeInput({
-          trigger: 'before-exit',
-          state: { baselineConfirmedRemoteCount: 10 },
-        }),
+    it('trigger 为 before-exit → 跳过清理（AUTOMATIC_TRIGGERS 不包含）', async () => {
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({ trigger: 'before-exit' }),
       );
-      expect(executeRetentionCleanupMock).toHaveBeenCalled();
+      expect(result).toEqual({});
+      expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
 
     it('trigger 为 scheduled-interval → 不跳过', async () => {
@@ -346,6 +342,7 @@ describe('RetentionCleanupOrchestrator', () => {
         lastRetentionCleanupMissingCount: 0,
         lastRetentionCleanupFailedFileName: null,
         lastRetentionCleanupError: null,
+        lastRetentionCleanupSkipped: false,
         lastRetentionCleanupAt: 1700000000000,
       });
     });
@@ -450,6 +447,7 @@ describe('RetentionCleanupOrchestrator', () => {
         lastRetentionCleanupMissingCount: 0,
         lastRetentionCleanupFailedFileName: 'SoNotes_Backup_20250610120000.zip',
         lastRetentionCleanupError: '401 Unauthorized',
+        lastRetentionCleanupSkipped: false,
         lastRetentionCleanupAt: 1700000000000,
       });
     });
@@ -543,6 +541,7 @@ describe('RetentionCleanupOrchestrator', () => {
         lastRetentionCleanupMissingCount: 0,
         lastRetentionCleanupFailedFileName: null,
         lastRetentionCleanupError: null,
+        lastRetentionCleanupSkipped: false,
         lastRetentionCleanupAt: 1700000000000,
       });
     });

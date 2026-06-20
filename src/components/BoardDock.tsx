@@ -1255,6 +1255,7 @@ export const BoardDock = () => {
         lastRetentionCleanupMissingCount: result.missingCount,
         lastRetentionCleanupFailedFileName: result.failedFileName ?? null,
         lastRetentionCleanupError: result.error ?? null,
+        lastRetentionCleanupSkipped: false,
         lastRetentionCleanupAt: Date.now(),
       };
       const updatedState = { ...scheduledState, ...retentionStatePatch };

@@ -1968,5 +1968,31 @@ describe('ScheduledRemoteBackupService', () => {
       expect(mockOrchestrateRetentionCleanup).toHaveBeenCalledTimes(1);
       expect(ctx.saveScheduledState).toHaveBeenCalledTimes(1);
     });
+
+    it('无本地变化跳过上传时仍调用 orchestrator', async () => {
+      const storageData = makeStorageData({ storageUpdatedAt: 5000 });
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 10 },
+        state: { lastSuccessfulStorageUpdatedAt: 5000 },
+      });
+      ctx.readDiskStorageData.mockResolvedValueOnce(storageData);
+      ctx.getLatestUpdateTimestamp.mockReturnValueOnce(5000);
+      mockOrchestrateRetentionCleanup.mockResolvedValue({});
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(mockRunRemoteBackup).not.toHaveBeenCalled();
+      expect(mockOrchestrateRetentionCleanup).toHaveBeenCalledTimes(1);
+      expect(mockOrchestrateRetentionCleanup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          trigger: 'manual',
+          uploadResult: { success: true, summary: null, zipSizeBytes: null },
+        }),
+      );
+
+      service.stop();
+    });
   });
 });

@@ -46,10 +46,6 @@ export interface PostBackupRetentionCleanupInput {
 const AUTOMATIC_TRIGGERS: ReadonlySet<RemoteBackupTrigger> = new Set([
   'scheduled-interval',
   'quiet-period',
-  // before-exit 成功后也会更新 lastSuccessfulStorageUpdatedAt，
-  // 若不加入自动触发器，下次 scheduled-interval 会因无变化跳过上传，
-  // 导致 retention 永远无法运行。
-  'before-exit',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -209,6 +205,7 @@ export async function orchestratePostBackupRetentionCleanup(
       lastRetentionCleanupMissingCount: cleanupResult.missingCount,
       lastRetentionCleanupFailedFileName: cleanupResult.failedFileName,
       lastRetentionCleanupError: cleanupResult.error,
+      lastRetentionCleanupSkipped: false,
       lastRetentionCleanupAt: clock(),
     };
   } catch (error) {
@@ -220,6 +217,7 @@ export async function orchestratePostBackupRetentionCleanup(
       lastRetentionCleanupMissingCount: 0,
       lastRetentionCleanupFailedFileName: null,
       lastRetentionCleanupError: error instanceof Error ? error.message : String(error),
+      lastRetentionCleanupSkipped: false,
       lastRetentionCleanupAt: clock(),
     };
   }
