@@ -428,27 +428,6 @@ export function createScheduledRemoteBackupService(
             lastAttemptCapturedStorageUpdatedAt: latestUpdate,
             nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
           });
-          // 无本地变化跳过上传，但仍执行保留清理（防止 before-exit 更新时间戳后 retention 饿死）
-          try {
-            const webdavConfig = {
-              serverUrl: webdavResult.serverUrl,
-              username: webdavResult.username ?? '',
-              remoteDir: webdavResult.remoteDir ?? undefined,
-            };
-            const retentionPatch = await orchestratePostBackupRetentionCleanup({
-              trigger,
-              config: serviceState.config,
-              state: internalState,
-              uploadResult: { success: true, summary: null, zipSizeBytes: null },
-              webdavConfig,
-              clock: deps.clock,
-            });
-            if (Object.keys(retentionPatch).length > 0) {
-              patchState(retentionPatch);
-            }
-          } catch {
-            // 保留策略清理失败不影响备份流程
-          }
           await deps.saveScheduledState(internalState);
           return;
         }
@@ -506,8 +485,11 @@ export function createScheduledRemoteBackupService(
           if (Object.keys(retentionPatch).length > 0) {
             patchState(retentionPatch);
           }
-        } catch {
-          // 保留策略清理失败不影响备份成功状态
+        } catch (retentionError) {
+          patchState({
+            lastRetentionCleanupError: retentionError instanceof Error ? retentionError.message : String(retentionError),
+            lastRetentionCleanupAt: deps.clock(),
+          });
         }
       } else {
         // 失败

@@ -97,8 +97,8 @@ export interface WebDavUploadResult {
   readonly errorCode?: string;
   /** flushNow 成功后从磁盘重新读取的 storageUpdatedAt 时间戳。 */
   readonly capturedStorageUpdatedAt?: number | null;
-  readonly summary: BackupSummary | null;
-  readonly zipSizeBytes: number | null;
+  readonly summary?: BackupSummary | null;
+  readonly zipSizeBytes?: number | null;
 }
 
 export interface WebDavDownloadResult {

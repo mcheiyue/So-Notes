@@ -178,7 +178,19 @@ export function proposeRetentionCleanup(input: {
     return a.fileName.localeCompare(b.fileName);
   });
 
-  // 3. 计算受保护文件数（在远端文件列表中确实存在的 protectedFileNames）
+  // 3. retentionCount <= 0 时保护所有文件，不产生任何候选
+  if (retentionCount <= 0) {
+    return {
+      candidates: [],
+      keep: parsedNames,
+      protectedCount: protectedFileNames.size,
+      cliffDropDetected: input.cliffDropDetected ?? false,
+      oldestCandidateTime: null,
+      newestKeepTime: parsedNames.length > 0 ? parsedNames[parsedNames.length - 1].sortTime : null,
+    };
+  }
+
+  // 4. 计算受保护文件数（在远端文件列表中确实存在的 protectedFileNames）
   let protectedCount = 0;
   for (const name of protectedFileNames) {
     if (files.some((f) => f.fileName === name)) {

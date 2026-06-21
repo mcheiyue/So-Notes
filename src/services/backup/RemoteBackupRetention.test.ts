@@ -363,7 +363,7 @@ describe('proposeRetentionCleanup', () => {
     expect(result.cliffDropDetected).toBe(true);
   });
 
-  it('retentionCount=0 → 删除所有非保护的严格命名文件', () => {
+  it('retentionCount=0 → 保护所有文件，不产生候选', () => {
     const files: WebDavRemoteBackup[] = [
       makeBackup('SoNotes_Backup_20250610120000.zip'),
       makeBackup('SoNotes_Backup_20250611120000.zip'),
@@ -376,10 +376,28 @@ describe('proposeRetentionCleanup', () => {
       protectedFileNames: new Set(),
     });
 
-    expect(result.candidates).toHaveLength(3);
-    expect(result.keep).toHaveLength(0);
-    expect(result.oldestCandidateTime).toEqual(new Date(2025, 5, 10, 12, 0, 0));
-    expect(result.newestKeepTime).toBeNull();
+    expect(result.candidates).toHaveLength(0);
+    expect(result.keep).toHaveLength(3);
+    expect(result.oldestCandidateTime).toBeNull();
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 12, 12, 0, 0));
+  });
+
+  it('retentionCount=-1 → 保护所有文件，不产生候选', () => {
+    const files: WebDavRemoteBackup[] = [
+      makeBackup('SoNotes_Backup_20250610120000.zip'),
+      makeBackup('SoNotes_Backup_20250611120000.zip'),
+    ];
+
+    const result = proposeRetentionCleanup({
+      files,
+      retentionCount: -1,
+      protectedFileNames: new Set(),
+    });
+
+    expect(result.candidates).toHaveLength(0);
+    expect(result.keep).toHaveLength(2);
+    expect(result.oldestCandidateTime).toBeNull();
+    expect(result.newestKeepTime).toEqual(new Date(2025, 5, 11, 12, 0, 0));
   });
 
   it('同一秒的文件按文件名字典序稳定排序', () => {

@@ -1948,6 +1948,56 @@ describe('ScheduledRemoteBackupService', () => {
       expect(savedState!.lastRemoteFileName).toBe('backup.zip');
     });
 
+    it('orchestrator 抛异常时 lastRetentionCleanupError 被写入', async () => {
+      mockOrchestrateRetentionCleanup.mockRejectedValue(new Error('retention network timeout'));
+
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 5 },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+        summary: null,
+        zipSizeBytes: null,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastRetentionCleanupError).toBe('retention network timeout');
+      expect(savedState!.lastRetentionCleanupAt).toBe(ctx.now);
+    });
+
+    it('orchestrator 抛非 Error 对象时 lastRetentionCleanupError 也被写入', async () => {
+      mockOrchestrateRetentionCleanup.mockRejectedValue('string error');
+
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 5 },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+        summary: null,
+        zipSizeBytes: null,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastRetentionCleanupError).toBe('string error');
+      expect(savedState!.lastRetentionCleanupAt).toBe(ctx.now);
+    });
+
     it('orchestrator 返回空 patch 不产生额外 saveScheduledState 调用', async () => {
       mockOrchestrateRetentionCleanup.mockResolvedValue({});
 
@@ -1969,7 +2019,7 @@ describe('ScheduledRemoteBackupService', () => {
       expect(ctx.saveScheduledState).toHaveBeenCalledTimes(1);
     });
 
-    it('无本地变化跳过上传时仍调用 orchestrator', async () => {
+    it('无本地变化跳过上传时不调用 orchestrator', async () => {
       const storageData = makeStorageData({ storageUpdatedAt: 5000 });
       const ctx = createTestContext({
         config: { enabled: false, retentionEnabled: true, retentionCount: 10 },
@@ -1984,13 +2034,7 @@ describe('ScheduledRemoteBackupService', () => {
       await service.runNow();
 
       expect(mockRunRemoteBackup).not.toHaveBeenCalled();
-      expect(mockOrchestrateRetentionCleanup).toHaveBeenCalledTimes(1);
-      expect(mockOrchestrateRetentionCleanup).toHaveBeenCalledWith(
-        expect.objectContaining({
-          trigger: 'manual',
-          uploadResult: { success: true, summary: null, zipSizeBytes: null },
-        }),
-      );
+      expect(mockOrchestrateRetentionCleanup).not.toHaveBeenCalled();
 
       service.stop();
     });

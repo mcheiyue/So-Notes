@@ -94,7 +94,7 @@ export async function orchestratePostBackupRetentionCleanup(
   const latestSummary = uploadResult.summary;
 
   if (state.baselineConfirmedRemoteCount === null || state.baselineConfirmedRemoteFileName === null) {
-    if (latestSummary !== null) {
+    if (latestSummary != null) {
       return {
         baselineConfirmedRemoteCount: latestSummary.noteCount,
         baselineConfirmedBoardCount: latestSummary.boardCount,
@@ -125,7 +125,7 @@ export async function orchestratePostBackupRetentionCleanup(
   // -----------------------------------------------------------------------
   // 3. 断崖检测
   // -----------------------------------------------------------------------
-  if (latestSummary !== null) {
+  if (latestSummary != null) {
     const baselineSummary: BackupSummary = {
       noteCount: state.baselineConfirmedRemoteCount,
       app: 'SoNotes',
@@ -168,7 +168,7 @@ export async function orchestratePostBackupRetentionCleanup(
   // -----------------------------------------------------------------------
 
   // 无摘要时无法验证健康状态，跳过清理和基线更新（plan 3.8）
-  if (latestSummary === null) {
+  if (latestSummary == null) {
     return {
       lastRetentionCleanupSkipped: true,
       lastRetentionCleanupAt: clock(),
