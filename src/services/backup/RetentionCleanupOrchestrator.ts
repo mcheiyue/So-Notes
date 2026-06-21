@@ -175,17 +175,34 @@ export async function orchestratePostBackupRetentionCleanup(
     };
   }
 
+  // 小样本保护：baseline < 5 notes 且 < 3 boards 时，如果当前 note 或 board 为 0，
+  // 可能是数据丢失而非真实缩减，跳过基线更新和清理（v1.5.7）
+  const isSmallSample =
+    (state.baselineConfirmedRemoteCount ?? 0) < 5 &&
+    (state.baselineConfirmedBoardCount ?? 0) < 3;
+  const hasSignificantDrop =
+    latestSummary.noteCount === 0 || latestSummary.boardCount === 0;
+  if (isSmallSample && hasSignificantDrop && state.baselineConfirmedRemoteCount !== null) {
+    return {
+      lastRetentionCleanupSkipped: true,
+      lastRetentionCleanupAt: clock(),
+    };
+  }
+
   // 断崖检测通过，更新基线为当前健康备份（plan 3.7：先更新基线再清理）
-  const baselineUpdate: Partial<ScheduledRemoteBackupState> = {
-    baselineConfirmedRemoteCount: latestSummary.noteCount,
-    baselineConfirmedBoardCount: latestSummary.boardCount,
-    baselineConfirmedImageNoteCount: latestSummary.imageNoteCount,
-    baselineConfirmedImageFileCount: latestSummary.imageFileCount,
-    baselineConfirmedImageFileTotalBytes: latestSummary.imageFileTotalBytes,
-    baselineConfirmedRemoteFileName: uploadResult.remoteFileName ?? null,
-    baselineConfirmedConfirmedAt: clock(),
-    baselineConfirmedZipSizeBytes: uploadResult.zipSizeBytes ?? null,
-  };
+  // 仅当 remoteFileName 存在时更新基线，防止 null 文件名覆盖现有基线
+  const baselineUpdate: Partial<ScheduledRemoteBackupState> = uploadResult.remoteFileName
+    ? {
+        baselineConfirmedRemoteCount: latestSummary.noteCount,
+        baselineConfirmedBoardCount: latestSummary.boardCount,
+        baselineConfirmedImageNoteCount: latestSummary.imageNoteCount,
+        baselineConfirmedImageFileCount: latestSummary.imageFileCount,
+        baselineConfirmedImageFileTotalBytes: latestSummary.imageFileTotalBytes,
+        baselineConfirmedRemoteFileName: uploadResult.remoteFileName,
+        baselineConfirmedConfirmedAt: clock(),
+        baselineConfirmedZipSizeBytes: uploadResult.zipSizeBytes ?? null,
+      }
+    : {};
 
   try {
     const cleanupResult = await executeRetentionCleanup({

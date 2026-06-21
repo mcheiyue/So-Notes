@@ -2160,9 +2160,15 @@ export const BoardDock = () => {
                                         <p className="text-[10px]" data-testid="cleanup-result-info">
                                             <Eye className="w-3 h-3 inline-block mr-1 align-text-bottom text-text-tertiary" />
                                             {scheduledState.lastRetentionCleanupSkipped === true ? (
-                                                <span className="text-text-tertiary">
-                                                    首次备份已建立健康基线，自动清理将在下次备份后执行
-                                                </span>
+                                                scheduledState.baselineConfirmedRemoteCount != null && scheduledState.baselineConfirmedRemoteFileName != null ? (
+                                                    <span className="text-text-tertiary">
+                                                        首次备份已建立健康基线，自动清理将在下次备份后执行
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-text-tertiary">
+                                                        跳过清理（备份信息不完整），将在下次完整备份后执行
+                                                    </span>
+                                                )
                                             ) : scheduledState.lastRetentionCleanupError != null ? (
                                                 <span className="text-amber-500 dark:text-amber-400">
                                                     清理部分完成：已删除 {scheduledState.lastRetentionCleanupDeletedCount ?? 0} 个

@@ -97,6 +97,7 @@ function makeUploadResult(overrides?: Partial<WebDavUploadResult>): WebDavUpload
       imageFileTotalBytes: 0,
     },
     zipSizeBytes: 1024,
+    remoteFileName: 'SoNotes_Backup_20250615000000.zip',
     ...overrides,
   };
 }
@@ -247,6 +248,7 @@ describe('RetentionCleanupOrchestrator', () => {
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({
           state: { baselineConfirmedRemoteCount: 10, baselineConfirmedRemoteFileName: null },
+          uploadResult: makeUploadResult({ remoteFileName: undefined }),
         }),
       );
       expect(result).toEqual({
@@ -300,7 +302,7 @@ describe('RetentionCleanupOrchestrator', () => {
         cliffDropLatestSummaryImageNoteCount: 0,
         cliffDropLatestSummaryImageFileCount: 0,
         cliffDropLatestSummaryImageFileTotalBytes: 0,
-        cliffDropLatestRemoteFileName: null,
+        cliffDropLatestRemoteFileName: 'SoNotes_Backup_20250615000000.zip',
         cliffDropLatestZipSizeBytes: 1024,
         cliffDropLatestAnomalyCodes: ['CLIFF_DROP_RELATIVE'],
       });
@@ -349,7 +351,10 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(executeRetentionCleanupMock).toHaveBeenCalledWith({
         config: DUMMY_WEBDAV_CONFIG,
         retentionCount: 10,
-        protectedFileNames: new Set(['SoNotes_Backup_20250601000000.zip']),
+        protectedFileNames: new Set([
+          'SoNotes_Backup_20250615000000.zip',
+          'SoNotes_Backup_20250601000000.zip',
+        ]),
       });
       expect(result).toEqual({
         baselineConfirmedRemoteCount: 10,
@@ -357,7 +362,7 @@ describe('RetentionCleanupOrchestrator', () => {
         baselineConfirmedImageNoteCount: 0,
         baselineConfirmedImageFileCount: 0,
         baselineConfirmedImageFileTotalBytes: 0,
-        baselineConfirmedRemoteFileName: null,
+        baselineConfirmedRemoteFileName: 'SoNotes_Backup_20250615000000.zip',
         baselineConfirmedConfirmedAt: 1700000000000,
         baselineConfirmedZipSizeBytes: 1024,
         pendingCleanupTargetCount: 7,
@@ -465,7 +470,7 @@ describe('RetentionCleanupOrchestrator', () => {
         baselineConfirmedImageNoteCount: 0,
         baselineConfirmedImageFileCount: 0,
         baselineConfirmedImageFileTotalBytes: 0,
-        baselineConfirmedRemoteFileName: null,
+        baselineConfirmedRemoteFileName: 'SoNotes_Backup_20250615000000.zip',
         baselineConfirmedConfirmedAt: 1700000000000,
         baselineConfirmedZipSizeBytes: 1024,
         pendingCleanupTargetCount: 5,
@@ -476,6 +481,43 @@ describe('RetentionCleanupOrchestrator', () => {
         lastRetentionCleanupSkipped: false,
         lastRetentionCleanupAt: 1700000000000,
       });
+    });
+
+    it('uploadResult.remoteFileName 为 null 时不覆盖现有基线', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 8 });
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: {
+            baselineConfirmedRemoteCount: 10,
+            baselineConfirmedRemoteFileName: 'SoNotes_Backup_20250601000000.zip',
+          },
+          uploadResult: makeUploadResult({ remoteFileName: null }),
+        }),
+      );
+      expect(result).not.toHaveProperty('baselineConfirmedRemoteFileName');
+      expect(result).not.toHaveProperty('baselineConfirmedConfirmedAt');
+      expect(result).not.toHaveProperty('baselineConfirmedRemoteCount');
+      expect(result).toHaveProperty('pendingCleanupTargetCount', 8);
+      expect(result).toHaveProperty('lastRetentionCleanupSkipped', false);
+    });
+
+    it('uploadResult.remoteFileName 为 undefined 时不覆盖现有基线', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 6 });
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: {
+            baselineConfirmedRemoteCount: 10,
+            baselineConfirmedRemoteFileName: 'SoNotes_Backup_20250601000000.zip',
+          },
+          uploadResult: makeUploadResult({ remoteFileName: undefined }),
+        }),
+      );
+      expect(result).not.toHaveProperty('baselineConfirmedRemoteFileName');
+      expect(result).not.toHaveProperty('baselineConfirmedConfirmedAt');
+      expect(result).not.toHaveProperty('baselineConfirmedRemoteCount');
+      expect(result).toHaveProperty('pendingCleanupTargetCount', 6);
     });
   });
 
@@ -513,6 +555,158 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(result).not.toHaveProperty('baselineConfirmedRemoteCount');
       expect(result).toHaveProperty('cliffDropDeferred', true);
       expect(result).toHaveProperty('cliffDropLatestAnomalyCodes', ['CLIFF_DROP_RELATIVE']);
+    });
+  });
+
+  describe('小样本数据丢失保护', () => {
+    it('baseline 4 notes / 1 board → 当前 0 notes → 跳过清理，不更新基线', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: {
+            baselineConfirmedRemoteCount: 4,
+            baselineConfirmedBoardCount: 1,
+          },
+          uploadResult: makeUploadResult({
+            summary: {
+              app: 'SoNotes',
+              formatVersion: 1,
+              appVersion: '1.5.7',
+              createdAt: Date.now(),
+              noteCount: 0,
+              boardCount: 1,
+              textNoteCount: 0,
+              imageNoteCount: 0,
+              trashNoteCount: 0,
+              imageFileCount: 0,
+              imageFileTotalBytes: 0,
+            },
+          }),
+        }),
+      );
+      expect(result).toEqual({
+        lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupAt: 1700000000000,
+      });
+      expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
+      expect(result).not.toHaveProperty('baselineConfirmedRemoteCount');
+    });
+
+    it('baseline 4 notes / 1 board → 当前 0 boards → 跳过清理', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: {
+            baselineConfirmedRemoteCount: 4,
+            baselineConfirmedBoardCount: 1,
+          },
+          uploadResult: makeUploadResult({
+            summary: {
+              app: 'SoNotes',
+              formatVersion: 1,
+              appVersion: '1.5.7',
+              createdAt: Date.now(),
+              noteCount: 3,
+              boardCount: 0,
+              textNoteCount: 3,
+              imageNoteCount: 0,
+              trashNoteCount: 0,
+              imageFileCount: 0,
+              imageFileTotalBytes: 0,
+            },
+          }),
+        }),
+      );
+      expect(result).toEqual({
+        lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupAt: 1700000000000,
+      });
+      expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
+    });
+
+    it('baseline >= 5 notes → 不受小样本保护，正常执行清理', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 5 });
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: {
+            baselineConfirmedRemoteCount: 5,
+            baselineConfirmedBoardCount: 1,
+          },
+          uploadResult: makeUploadResult({
+            summary: {
+              app: 'SoNotes',
+              formatVersion: 1,
+              appVersion: '1.5.7',
+              createdAt: Date.now(),
+              noteCount: 0,
+              boardCount: 1,
+              textNoteCount: 0,
+              imageNoteCount: 0,
+              trashNoteCount: 0,
+              imageFileCount: 0,
+              imageFileTotalBytes: 0,
+            },
+          }),
+        }),
+      );
+      expect(executeRetentionCleanupMock).toHaveBeenCalled();
+      expect(result).toHaveProperty('pendingCleanupTargetCount', 5);
+    });
+
+    it('baseline 3 notes / 2 boards → 当前 note 和 board 均 > 0 → 不触发小样本保护', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 5 });
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: {
+            baselineConfirmedRemoteCount: 3,
+            baselineConfirmedBoardCount: 2,
+          },
+          uploadResult: makeUploadResult({
+            summary: {
+              app: 'SoNotes',
+              formatVersion: 1,
+              appVersion: '1.5.7',
+              createdAt: Date.now(),
+              noteCount: 2,
+              boardCount: 1,
+              textNoteCount: 2,
+              imageNoteCount: 0,
+              trashNoteCount: 0,
+              imageFileCount: 0,
+              imageFileTotalBytes: 0,
+            },
+          }),
+        }),
+      );
+      expect(executeRetentionCleanupMock).toHaveBeenCalled();
+      expect(result).toHaveProperty('pendingCleanupTargetCount', 5);
+    });
+
+    it('首次初始化（baselineConfirmedRemoteCount=null）→ 不受小样本保护，走初始化路径', async () => {
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: { baselineConfirmedRemoteCount: null },
+          uploadResult: makeUploadResult({
+            summary: {
+              app: 'SoNotes',
+              formatVersion: 1,
+              appVersion: '1.5.7',
+              createdAt: Date.now(),
+              noteCount: 0,
+              boardCount: 0,
+              textNoteCount: 0,
+              imageNoteCount: 0,
+              trashNoteCount: 0,
+              imageFileCount: 0,
+              imageFileTotalBytes: 0,
+            },
+          }),
+        }),
+      );
+      expect(result).toHaveProperty('baselineConfirmedRemoteCount', 0);
+      expect(result).toHaveProperty('lastRetentionCleanupSkipped', true);
     });
   });
 
@@ -559,7 +753,7 @@ describe('RetentionCleanupOrchestrator', () => {
         baselineConfirmedImageNoteCount: 0,
         baselineConfirmedImageFileCount: 0,
         baselineConfirmedImageFileTotalBytes: 0,
-        baselineConfirmedRemoteFileName: null,
+        baselineConfirmedRemoteFileName: 'SoNotes_Backup_20250615000000.zip',
         baselineConfirmedConfirmedAt: 1700000000000,
         baselineConfirmedZipSizeBytes: 1024,
         pendingCleanupTargetCount: 10,

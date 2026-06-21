@@ -321,6 +321,7 @@ describe('RemoteBackupRetentionService', () => {
       tryStartBackupJobMock.mockReturnValue(handle);
 
       const files: WebDavRemoteBackup[] = [
+        makeBackup('SoNotes_Backup_20250609120000.zip'),
         makeBackup('SoNotes_Backup_20250610120000.zip'),
         makeBackup('SoNotes_Backup_20250611120000.zip'),
       ];
@@ -332,7 +333,7 @@ describe('RemoteBackupRetentionService', () => {
 
       const result = await executeRetentionCleanup({
         config: DUMMY_CONFIG,
-        retentionCount: 0,
+        retentionCount: 1,
         protectedFileNames: new Set(),
       });
 
@@ -357,7 +358,7 @@ describe('RemoteBackupRetentionService', () => {
 
       const result = await executeRetentionCleanup({
         config: DUMMY_CONFIG,
-        retentionCount: 0,
+        retentionCount: 1,
         protectedFileNames: new Set(),
       });
 
@@ -384,7 +385,7 @@ describe('RemoteBackupRetentionService', () => {
 
       const result = await executeRetentionCleanup({
         config: DUMMY_CONFIG,
-        retentionCount: 0,
+        retentionCount: 1,
         protectedFileNames: new Set(),
       });
 
@@ -408,7 +409,7 @@ describe('RemoteBackupRetentionService', () => {
 
       const result = await executeRetentionCleanup({
         config: DUMMY_CONFIG,
-        retentionCount: 0,
+        retentionCount: 1,
         protectedFileNames: new Set(),
       });
 
@@ -431,7 +432,7 @@ describe('RemoteBackupRetentionService', () => {
 
       const result = await executeRetentionCleanup({
         config: DUMMY_CONFIG,
-        retentionCount: 0,
+        retentionCount: 1,
         protectedFileNames: new Set(),
       });
 
@@ -510,6 +511,7 @@ describe('RemoteBackupRetentionService', () => {
       tryStartBackupJobMock.mockReturnValue(handle);
 
       const files: WebDavRemoteBackup[] = [
+        makeBackup('SoNotes_Backup_20250609120000.zip'),
         makeBackup('SoNotes_Backup_20250610120000.zip'),
         makeBackup('SoNotes_Backup_20250611120000.zip'),
         makeBackup('SoNotes_Backup_20250612120000.zip'),
@@ -523,7 +525,7 @@ describe('RemoteBackupRetentionService', () => {
 
       const result = await executeRetentionCleanup({
         config: DUMMY_CONFIG,
-        retentionCount: 0,
+        retentionCount: 1,
         protectedFileNames: new Set(),
       });
 
