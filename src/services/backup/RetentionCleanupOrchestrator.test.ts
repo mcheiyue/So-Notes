@@ -199,11 +199,12 @@ describe('RetentionCleanupOrchestrator', () => {
   });
 
   describe('基线初始化', () => {
-    it('无基线且有摘要 → 建立基线，跳过清理', async () => {
+    it('无基线且有摘要但 remoteFileName 为空 → 跳过基线初始化，返回 skipped', async () => {
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({
           state: { baselineConfirmedRemoteCount: null },
           uploadResult: makeUploadResult({
+            remoteFileName: undefined,
             summary: {
               app: 'SoNotes',
               formatVersion: 1,
@@ -221,14 +222,6 @@ describe('RetentionCleanupOrchestrator', () => {
         }),
       );
       expect(result).toEqual({
-        baselineConfirmedRemoteCount: 15,
-        baselineConfirmedBoardCount: 2,
-        baselineConfirmedImageNoteCount: 0,
-        baselineConfirmedImageFileCount: 0,
-        baselineConfirmedImageFileTotalBytes: 0,
-        baselineConfirmedRemoteFileName: null,
-        baselineConfirmedConfirmedAt: 1700000000000,
-        baselineConfirmedZipSizeBytes: 1024,
         lastRetentionCleanupSkipped: true,
         lastRetentionCleanupAt: 1700000000000,
       });
@@ -250,14 +243,30 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
 
-    it('有 count 但 fileName 为 null → 重新初始化基线，跳过清理', async () => {
+    it('有 count 但 fileName 为 null 且 remoteFileName 为空 → 跳过基线初始化', async () => {
       const result = await orchestratePostBackupRetentionCleanup(
         makeInput({
           state: { baselineConfirmedRemoteCount: 10, baselineConfirmedRemoteFileName: null },
         }),
       );
-      expect(result).toHaveProperty('baselineConfirmedRemoteCount', 10);
-      expect(result).toHaveProperty('lastRetentionCleanupSkipped', true);
+      expect(result).toEqual({
+        lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupAt: 1700000000000,
+      });
+      expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
+    });
+
+    it('无基线且 remoteFileName 为 null → 跳过基线初始化，返回 skipped', async () => {
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: { baselineConfirmedRemoteCount: null },
+          uploadResult: makeUploadResult({ remoteFileName: null }),
+        }),
+      );
+      expect(result).toEqual({
+        lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupAt: 1700000000000,
+      });
       expect(executeRetentionCleanupMock).not.toHaveBeenCalled();
     });
   });

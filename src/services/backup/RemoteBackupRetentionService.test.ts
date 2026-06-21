@@ -459,6 +459,35 @@ describe('RemoteBackupRetentionService', () => {
       expect(deleteBackupMock).not.toHaveBeenCalled();
     });
 
+    it('candidateFileNames 包含 protected 文件时被过滤，不删除', async () => {
+      const handle = makeHandle();
+      tryStartBackupJobMock.mockReturnValue(handle);
+
+      const candidates = [
+        { fileName: 'SoNotes_Backup_20250610120000.zip', sortTime: new Date(0) },
+        { fileName: 'SoNotes_Backup_20250611120000.zip', sortTime: new Date(1) },
+        { fileName: 'SoNotes_Backup_20250612120000.zip', sortTime: new Date(2) },
+      ];
+
+      deleteBackupMock.mockResolvedValue({ success: true });
+
+      const result = await executeRetentionCleanup({
+        config: DUMMY_CONFIG,
+        retentionCount: 1,
+        protectedFileNames: new Set(['SoNotes_Backup_20250611120000.zip']),
+        candidateFileNames: candidates,
+        keepCount: 1,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.deletedCount).toBe(2);
+      expect(deleteBackupMock).toHaveBeenCalledTimes(2);
+      expect(deleteBackupMock).not.toHaveBeenCalledWith(
+        DUMMY_CONFIG,
+        'SoNotes_Backup_20250611120000.zip',
+      );
+    });
+
     it('always releases handle even on error', async () => {
       const handle = makeHandle();
       tryStartBackupJobMock.mockReturnValue(handle);

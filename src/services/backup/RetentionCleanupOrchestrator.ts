@@ -94,14 +94,14 @@ export async function orchestratePostBackupRetentionCleanup(
   const latestSummary = uploadResult.summary;
 
   if (state.baselineConfirmedRemoteCount === null || state.baselineConfirmedRemoteFileName === null) {
-    if (latestSummary != null) {
+    if (latestSummary != null && uploadResult.remoteFileName) {
       return {
         baselineConfirmedRemoteCount: latestSummary.noteCount,
         baselineConfirmedBoardCount: latestSummary.boardCount,
         baselineConfirmedImageNoteCount: latestSummary.imageNoteCount,
         baselineConfirmedImageFileCount: latestSummary.imageFileCount,
         baselineConfirmedImageFileTotalBytes: latestSummary.imageFileTotalBytes,
-        baselineConfirmedRemoteFileName: uploadResult.remoteFileName ?? null,
+        baselineConfirmedRemoteFileName: uploadResult.remoteFileName,
         baselineConfirmedConfirmedAt: clock(),
         baselineConfirmedZipSizeBytes: uploadResult.zipSizeBytes ?? null,
         lastRetentionCleanupSkipped: true,

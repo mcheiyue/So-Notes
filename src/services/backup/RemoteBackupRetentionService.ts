@@ -181,7 +181,7 @@ export async function executeRetentionCleanup(input: {
     let retainedCount: number;
 
     if (candidateFileNames) {
-      candidates = candidateFileNames;
+      candidates = candidateFileNames.filter(c => !protectedFileNames.has(c.fileName));
       retainedCount = keepCount ?? 0;
     } else {
       const preview = await previewRetentionCleanup({
