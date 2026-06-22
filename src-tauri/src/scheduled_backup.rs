@@ -662,13 +662,30 @@ fn validate_state_no_secrets(state: &ScheduledRemoteBackupState) -> Result<(), S
             || lower.contains("密码")
             || lower.contains("令牌")
         {
-            // 允许"密码"出现在"请重新保存密码"等提示中，
-            // 只拒绝实际密码值泄露（长度 > 20 且不含空格的连续字符串）
-            // 这里做宽松检查：如果原因中包含这些关键词但都是指导性文案，放行
+            // 检测疑似密钥的长连续字符序列（base64/hex 形式，> 20 字符）
+            let mut max_run: usize = 0;
+            let mut current_run: usize = 0;
+            for ch in reason.chars() {
+                if ch.is_ascii_alphanumeric()
+                    || ch == '+'
+                    || ch == '/'
+                    || ch == '='
+                    || ch == '_'
+                    || ch == '-'
+                {
+                    current_run += 1;
+                    if current_run > max_run {
+                        max_run = current_run;
+                    }
+                } else {
+                    current_run = 0;
+                }
+            }
+            if max_run > 20 {
+                return Err("状态文件可能包含敏感信息（疑似密钥或令牌）".to_string());
+            }
         }
     }
-    // 结构体本身没有 password/token/Authorization 字段，
-    // serde 反序列化时未知字段会被忽略（默认 deny），所以序列化后不会包含
     Ok(())
 }
 

@@ -56,7 +56,7 @@ export interface RetentionPreview {
   readonly keep: readonly RemoteBackupParsedName[];
   /** 实际受保护的文件数量（在远端文件列表中确实存在的 protectedFileNames 数量） */
   readonly protectedCount: number;
-  /** 是否检测到断崖式骤降（由调用方另行传入摘要时判断，此处仅作为占位） */
+  /** 是否检测到断崖式骤降（由 proposeRetentionCleanup 根据调用方传入的摘要计算） */
   readonly cliffDropDetected: boolean;
   /** 最旧候选（将被删除）的备份时间，null 表示无候选 */
   readonly oldestCandidateTime: Date | null;
@@ -72,15 +72,12 @@ export type RemoteRetentionAnomalyCode =
   | 'CLIFF_DROP_IMAGE_FILE_COUNT'
   | 'CLIFF_DROP_ZIP_SIZE_BYTES';
 
-export interface RemoteRetentionAnomaly {
-  readonly code: RemoteRetentionAnomalyCode;
-  readonly message: string;
-}
 
 export interface BackupSummaryComparison {
   readonly baselineNotes: number;
   readonly currentNotes: number;
   readonly dropPct: number;
+  /** 骤降阈值（当前统一使用 0.3，即 30%） */
   readonly threshold: number;
   readonly anomalyCodes: readonly RemoteRetentionAnomalyCode[];
 }
@@ -180,10 +177,16 @@ export function proposeRetentionCleanup(input: {
 
   // 3. retentionCount <= 0 时保护所有文件，不产生任何候选
   if (retentionCount <= 0) {
+    let protectedCount = 0;
+    for (const name of protectedFileNames) {
+      if (files.some((f) => f.fileName === name)) {
+        protectedCount++;
+      }
+    }
     return {
       candidates: [],
       keep: parsedNames,
-      protectedCount: protectedFileNames.size,
+      protectedCount,
       cliffDropDetected: input.cliffDropDetected ?? false,
       oldestCandidateTime: null,
       newestKeepTime: parsedNames.length > 0 ? parsedNames[parsedNames.length - 1].sortTime : null,

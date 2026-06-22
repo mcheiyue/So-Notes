@@ -866,7 +866,7 @@ export const BoardDock = () => {
               lastFinishedAt: finishedAt,
               lastTrigger: 'manual' as const,
               lastFailureAt: finishedAt,
-              lastFailureReason: result.error ?? '未知错误',
+              lastFailureReason: formatWebdavError(result.error ?? '未知错误'),
               lastFailureStage: isRemoteBackupStage(result.errorStage ?? '') ? (result.errorStage as RemoteBackupStage) : 'unknown',
               ...(capturedStorageUpdatedAt !== null
                 ? { lastAttemptCapturedStorageUpdatedAt: capturedStorageUpdatedAt }
@@ -1258,13 +1258,20 @@ export const BoardDock = () => {
         lastRetentionCleanupSkipped: false,
         lastRetentionCleanupAt: Date.now(),
       };
-      const updatedState = { ...scheduledState, ...retentionStatePatch };
-      setScheduledState(updatedState);
+      let updatedState: ScheduledRemoteBackupState;
+      let stateBeforeUpdate: ScheduledRemoteBackupState | null = null;
+      setScheduledState(prev => {
+        stateBeforeUpdate = prev;
+        updatedState = { ...prev, ...retentionStatePatch };
+        return updatedState;
+      });
       try {
-        await ScheduledRemoteBackupConfigService.saveState(updatedState);
+        await ScheduledRemoteBackupConfigService.saveState(updatedState!);
         await getSchedulerService()?.reloadState();
       } catch {
-        setScheduledState(scheduledState);
+        if (stateBeforeUpdate) {
+          setScheduledState(stateBeforeUpdate);
+        }
       }
 
       setRetentionPreview(null);

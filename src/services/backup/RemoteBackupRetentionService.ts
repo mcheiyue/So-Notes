@@ -56,27 +56,10 @@ function isIdempotentSuccessError(error: string): boolean {
   return (
     lower.includes('404') ||
     lower.includes('not found') ||
-    error.includes('已不存在')
+    lower.includes('已不存在')
   );
 }
 
-/**
- * 判断删除结果中的错误是否为致命错误（应停止后续删除）。
- *
- * 401 / 403 / 423 / 5xx / 网络错误 / 超时 / 连接错误 应停止后续删除。
- */
-function isFatalError(error: string): boolean {
-  const lower = error.toLowerCase();
-  return (
-    lower.includes('401') ||
-    lower.includes('403') ||
-    lower.includes('423') ||
-    /5\d{2}/.test(lower) ||
-    lower.includes('network') ||
-    lower.includes('timeout') ||
-    lower.includes('connection')
-  );
-}
 
 // ---------------------------------------------------------------------------
 // previewRetentionCleanup
@@ -152,8 +135,15 @@ export async function executeRetentionCleanup(input: {
   readonly candidateFileNames?: readonly RemoteBackupParsedName[];
   /** 手动场景：传入预览时的保留数量，用于结果展示 */
   readonly keepCount?: number;
+  /** 断崖检测基线数据 */
+  readonly baseline?: {
+    readonly baselineSummary: BackupSummary;
+    readonly latestSummary?: BackupSummary | null;
+    readonly latestZipSizeBytes?: number | null;
+    readonly baselineZipSizeBytes?: number | null;
+  };
 }): Promise<RemoteRetentionCleanupResult> {
-  const { config, retentionCount, protectedFileNames, candidateFileNames, keepCount } = input;
+  const { config, retentionCount, protectedFileNames, candidateFileNames, keepCount, baseline } = input;
 
   const policy: RemoteBackupRetentionPolicy = {
     retentionEnabled: true,
@@ -188,6 +178,7 @@ export async function executeRetentionCleanup(input: {
         config,
         retentionCount,
         protectedFileNames,
+        baseline,
       });
       candidates = preview.candidates;
       retainedCount = preview.keep.length;
@@ -220,17 +211,10 @@ export async function executeRetentionCleanup(input: {
         deletedCount++;
       } else {
         const msg = errorStr ?? 'unknown error';
-        if (isFatalError(msg)) {
-          stoppedAtFileName = candidate.fileName;
-          failedFileName = candidate.fileName;
-          fatalErrorMessage = msg;
-          break;
-        } else {
-          stoppedAtFileName = candidate.fileName;
-          failedFileName = candidate.fileName;
-          fatalErrorMessage = msg;
-          break;
-        }
+        stoppedAtFileName = candidate.fileName;
+        failedFileName = candidate.fileName;
+        fatalErrorMessage = msg;
+        break;
       }
     }
 

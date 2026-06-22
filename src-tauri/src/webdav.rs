@@ -601,11 +601,11 @@ pub fn validate_remote_backup_filename(name: &str) -> Result<(), String> {
     }
 
     // 日历合法性校验（与 TS parseRemoteBackupFileName 对齐）
-    let month: u32 = datetime_part[4..6].parse().unwrap_or(0);
-    let day: u32 = datetime_part[6..8].parse().unwrap_or(0);
-    let hour: u32 = datetime_part[8..10].parse().unwrap_or(99);
-    let minute: u32 = datetime_part[10..12].parse().unwrap_or(99);
-    let second: u32 = datetime_part[12..14].parse().unwrap_or(99);
+    let month: u32 = datetime_part[4..6].parse().unwrap_or(u32::MAX);
+    let day: u32 = datetime_part[6..8].parse().unwrap_or(u32::MAX);
+    let hour: u32 = datetime_part[8..10].parse().unwrap_or(u32::MAX);
+    let minute: u32 = datetime_part[10..12].parse().unwrap_or(u32::MAX);
+    let second: u32 = datetime_part[12..14].parse().unwrap_or(u32::MAX);
 
     if month < 1 || month > 12 {
         return Err("月份必须为 01-12".to_string());

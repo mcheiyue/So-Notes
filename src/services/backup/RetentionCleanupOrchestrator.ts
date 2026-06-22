@@ -133,7 +133,7 @@ export async function orchestratePostBackupRetentionCleanup(
       appVersion: '0.0.0',
       createdAt: 0,
       boardCount: state.baselineConfirmedBoardCount ?? 0,
-      textNoteCount: 0,
+      textNoteCount: state.baselineConfirmedRemoteCount - (state.baselineConfirmedImageNoteCount ?? 0),
       imageNoteCount: state.baselineConfirmedImageNoteCount ?? 0,
       trashNoteCount: 0,
       imageFileCount: state.baselineConfirmedImageFileCount ?? 0,
