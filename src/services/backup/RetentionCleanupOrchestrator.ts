@@ -167,7 +167,7 @@ export async function orchestratePostBackupRetentionCleanup(
   // 4. 执行清理
   // -----------------------------------------------------------------------
 
-  // 无摘要时跳过断崖检测和基线更新，但仍执行清理（防止 before-exit 饿死）
+  // 无摘要时跳过断崖检测和基线更新
   if (latestSummary == null) {
     // 基线未确认时无法保护健康备份，跳过清理
     if (state.baselineConfirmedRemoteCount === null) {
@@ -177,7 +177,20 @@ export async function orchestratePostBackupRetentionCleanup(
       };
     }
 
-    // 基线已确认，执行清理（跳过断崖检测和基线更新）
+    // 仅在有新备份已上传但未清理时执行清理（防止 before-exit 饿死）
+    // 条件：lastRemoteFileName 存在 且 上次清理在上次备份之前
+    const hasNewBackupSinceLastCleanup =
+      state.lastRemoteFileName !== null &&
+      (state.lastRetentionCleanupAt === null ||
+        state.lastRetentionCleanupAt < (state.lastSuccessfulStorageUpdatedAt ?? 0));
+    if (!hasNewBackupSinceLastCleanup) {
+      return {
+        lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupAt: clock(),
+      };
+    }
+
+    // 执行清理（跳过断崖检测和基线更新）
     try {
       const cleanupResult = await executeRetentionCleanup({
         config: webdavConfig,
@@ -186,6 +199,7 @@ export async function orchestratePostBackupRetentionCleanup(
           const names = new Set<string>();
           if (state.baselineConfirmedRemoteFileName) names.add(state.baselineConfirmedRemoteFileName);
           if (state.cliffDropLatestRemoteFileName) names.add(state.cliffDropLatestRemoteFileName);
+          if (state.lastRemoteFileName) names.add(state.lastRemoteFileName);
           return names;
         })(),
       });
