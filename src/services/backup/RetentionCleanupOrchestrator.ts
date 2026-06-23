@@ -167,12 +167,48 @@ export async function orchestratePostBackupRetentionCleanup(
   // 4. 执行清理
   // -----------------------------------------------------------------------
 
-  // 无摘要时无法验证健康状态，跳过清理和基线更新（plan 3.8）
+  // 无摘要时跳过断崖检测和基线更新，但仍执行清理（防止 before-exit 饿死）
   if (latestSummary == null) {
-    return {
-      lastRetentionCleanupSkipped: true,
-      lastRetentionCleanupAt: clock(),
-    };
+    // 基线未确认时无法保护健康备份，跳过清理
+    if (state.baselineConfirmedRemoteCount === null) {
+      return {
+        lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupAt: clock(),
+      };
+    }
+
+    // 基线已确认，执行清理（跳过断崖检测和基线更新）
+    try {
+      const cleanupResult = await executeRetentionCleanup({
+        config: webdavConfig,
+        retentionCount,
+        protectedFileNames: (() => {
+          const names = new Set<string>();
+          if (state.baselineConfirmedRemoteFileName) names.add(state.baselineConfirmedRemoteFileName);
+          if (state.cliffDropLatestRemoteFileName) names.add(state.cliffDropLatestRemoteFileName);
+          return names;
+        })(),
+      });
+
+      return {
+        pendingCleanupTargetCount: cleanupResult.retainedCount,
+        lastRetentionCleanupDeletedCount: cleanupResult.deletedCount,
+        lastRetentionCleanupMissingCount: cleanupResult.missingCount,
+        lastRetentionCleanupFailedFileName: cleanupResult.failedFileName,
+        lastRetentionCleanupError: cleanupResult.error,
+        lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupAt: clock(),
+      };
+    } catch (error) {
+      return {
+        lastRetentionCleanupDeletedCount: 0,
+        lastRetentionCleanupMissingCount: 0,
+        lastRetentionCleanupFailedFileName: null,
+        lastRetentionCleanupError: error instanceof Error ? error.message : String(error),
+        lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupAt: clock(),
+      };
+    }
   }
 
   // 小样本保护：baseline < 5 notes 且 < 3 boards 时，如果当前 note 或 board 为 0，
