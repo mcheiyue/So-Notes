@@ -932,10 +932,16 @@ export const BoardDock = () => {
     if (!config) return;
     if (!requireWebdavCredentials()) return;
 
+    // 提前获取 single-flight 锁，防止 retention cleanup 或定时备份并发执行
+    let restoreJobHandle: BackupJobHandle | null = tryStartBackupJob('remote-restore');
+    if (!restoreJobHandle) {
+      setWebdavFeedback({ status: 'error', message: '恢复失败：已有备份任务运行中，请稍后重试。' });
+      return;
+    }
+
     setWebdavFeedback(null);
     setWebdavOperation('restoring');
     let pauseOccurred = false;
-    let restoreJobHandle: BackupJobHandle | null = null;
     let downloadToken: string | null = null;
     try {
       const dlResult = await WebDavBackupService.downloadBackup(config, fileName);
@@ -976,12 +982,6 @@ export const BoardDock = () => {
       }
       persistenceFacade.pause();
       pauseOccurred = true;
-
-      restoreJobHandle = tryStartBackupJob('remote-restore');
-      if (!restoreJobHandle) {
-        setWebdavFeedback({ status: 'error', message: '恢复失败：已有备份任务运行中，请稍后重试。' });
-        return;
-      }
 
       const result = await restoreLocalBackup(resolveResult.localPath);
       if (!result.success) {

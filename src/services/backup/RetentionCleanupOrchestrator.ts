@@ -211,14 +211,17 @@ export async function orchestratePostBackupRetentionCleanup(
     }
   }
 
-  // 小样本保护：baseline < 5 notes 且 < 3 boards 时，如果当前 note 或 board 为 0，
+  // 小样本保护：baseline < 5 notes 或 < 3 boards 时，如果当前 note 或 board 为 0，
   // 可能是数据丢失而非真实缩减，跳过基线更新和清理（v1.5.7）
-  const isSmallSample =
-    (state.baselineConfirmedRemoteCount ?? 0) < 5 &&
-    (state.baselineConfirmedBoardCount ?? 0) < 3;
-  const hasSignificantDrop =
-    latestSummary.noteCount === 0 || latestSummary.boardCount === 0;
-  if (isSmallSample && hasSignificantDrop && state.baselineConfirmedRemoteCount !== null) {
+  const baselineNotes = state.baselineConfirmedRemoteCount ?? 0;
+  const baselineBoards = state.baselineConfirmedBoardCount ?? 0;
+  const isNoteSmallSample = baselineNotes < 5;
+  const isBoardSmallSample = baselineBoards < 3;
+  const noteDroppedToZero = latestSummary.noteCount === 0;
+  const boardDroppedToZero = latestSummary.boardCount === 0;
+  const hasSmallSampleDrop =
+    (isNoteSmallSample && noteDroppedToZero) || (isBoardSmallSample && boardDroppedToZero);
+  if (hasSmallSampleDrop && state.baselineConfirmedRemoteCount !== null) {
     return {
       lastRetentionCleanupSkipped: true,
       lastRetentionCleanupAt: clock(),

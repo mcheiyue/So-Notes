@@ -271,8 +271,10 @@ export function detectBackupCliffDrop(input: {
     if (currentNotes <= CLIFF_DROP_MEDIUM_CRITICAL_COUNT) {
       anomalyCodes.push('CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL');
     }
+  } else if (baselineNotes > 0 && currentNotes === 0) {
+    // 小样本全丢失：baselineNotes < 5 但 note 降为 0，视为异常
+    anomalyCodes.push('CLIFF_DROP_MEDIUM_SAMPLE_CRITICAL');
   }
-  // baselineNotes < 5 → 跳过 note 维度检测，但继续检查 board 维度
 
   // ---- board 维度（独立于 note 基线判断） ----
   const baselineBoard = baselineSummary.boardCount;
