@@ -177,10 +177,13 @@ export async function orchestratePostBackupRetentionCleanup(
       };
     }
 
-    // 仅在有新备份已上传但未清理时执行清理（防止 before-exit 饿死）
-    // 条件：lastRemoteFileName 存在 且 该文件尚未被清理过
+    // 仅在以下情况执行清理（跳过断崖检测和基线更新）：
+    // - 有新备份已上传但从未清理（lastRetentionCleanupAt === null）
+    // - 上次清理失败，需要重试（lastRetentionCleanupError !== null）
+    const neverCleaned = state.lastRetentionCleanupAt === null;
+    const lastCleanupFailed = state.lastRetentionCleanupError !== null;
     const hasNewBackupSinceLastCleanup =
-      state.lastRemoteFileName !== null && state.lastRetentionCleanupAt === null;
+      state.lastRemoteFileName !== null && (neverCleaned || lastCleanupFailed);
     if (!hasNewBackupSinceLastCleanup) {
       return {
         lastRetentionCleanupSkipped: true,

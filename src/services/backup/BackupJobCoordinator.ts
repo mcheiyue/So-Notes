@@ -26,7 +26,8 @@ export type BackupJobKind =
   | 'before-exit-remote-backup'
   | 'local-restore'
   | 'remote-restore'
-  | 'remote-retention-cleanup';
+  | 'remote-retention-cleanup'
+  | 'manual-delete-backup';
 
 /**
  * 当前活跃任务的只读快照，不包含可变状态。

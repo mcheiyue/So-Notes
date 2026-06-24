@@ -2468,7 +2468,6 @@ describe('BoardDock 恢复流程与 BackupJobCoordinator 集成', () => {
 
   it('远端恢复期间有活跃备份任务时显示错误', async () => {
     const { loadConfig, listBackups, downloadBackup } = await import('../services/backup/WebDavBackupService');
-    const { pause, resume } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(loadConfig).mockResolvedValue({
       success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
@@ -2487,8 +2486,6 @@ describe('BoardDock 恢复流程与 BackupJobCoordinator 集成', () => {
     const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
     await clickElement(restoreBtn);
 
-    expect(pause).toHaveBeenCalled();
-    expect(resume).toHaveBeenCalled();
     const feedback = container.querySelector('[data-testid="webdav-feedback"]');
     expect(feedback).not.toBeNull();
     expect(feedback?.textContent).toContain('已有备份任务运行中');

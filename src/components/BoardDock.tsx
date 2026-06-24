@@ -899,6 +899,12 @@ export const BoardDock = () => {
     if (!config) return;
     if (!requireWebdavCredentials()) return;
 
+    const deleteHandle = tryStartBackupJob('manual-delete-backup');
+    if (!deleteHandle) {
+      setWebdavFeedback({ status: 'error', message: '删除失败：已有备份任务运行中，请稍后重试。' });
+      return;
+    }
+
     setWebdavFeedback(null);
     setWebdavOperation('deleting');
     try {
@@ -918,6 +924,7 @@ export const BoardDock = () => {
       setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${formatWebdavError(formatUnknownError(err))}` });
     } finally {
       setWebdavOperation('idle');
+      deleteHandle.release();
     }
   };
 
