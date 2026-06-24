@@ -708,6 +708,37 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(result).toHaveProperty('baselineConfirmedRemoteCount', 0);
       expect(result).toHaveProperty('lastRetentionCleanupSkipped', true);
     });
+
+    it('纯笔记用户（baselineBoardCount=0, boardCount=0）→ 不触发 board 保护，正常清理', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      executeRetentionCleanupMock.mockResolvedValue({ retainedCount: 5 });
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({
+          state: {
+            baselineConfirmedRemoteCount: 10,
+            baselineConfirmedBoardCount: 0,
+          },
+          uploadResult: makeUploadResult({
+            summary: {
+              app: 'SoNotes',
+              formatVersion: 1,
+              appVersion: '1.5.7',
+              createdAt: Date.now(),
+              noteCount: 8,
+              boardCount: 0,
+              textNoteCount: 8,
+              imageNoteCount: 0,
+              trashNoteCount: 0,
+              imageFileCount: 0,
+              imageFileTotalBytes: 0,
+            },
+          }),
+        }),
+      );
+      expect(executeRetentionCleanupMock).toHaveBeenCalled();
+      expect(result).toHaveProperty('pendingCleanupTargetCount', 5);
+      expect(result.lastRetentionCleanupSkipped).toBe(false);
+    });
   });
 
   describe('综合场景', () => {

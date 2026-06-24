@@ -178,11 +178,9 @@ export async function orchestratePostBackupRetentionCleanup(
     }
 
     // 仅在有新备份已上传但未清理时执行清理（防止 before-exit 饿死）
-    // 条件：lastRemoteFileName 存在 且 上次清理在上次备份之前
+    // 条件：lastRemoteFileName 存在 且 该文件尚未被清理过
     const hasNewBackupSinceLastCleanup =
-      state.lastRemoteFileName !== null &&
-      (state.lastRetentionCleanupAt === null ||
-        state.lastRetentionCleanupAt < (state.lastSuccessfulStorageUpdatedAt ?? 0));
+      state.lastRemoteFileName !== null && state.lastRetentionCleanupAt === null;
     if (!hasNewBackupSinceLastCleanup) {
       return {
         lastRetentionCleanupSkipped: true,
@@ -227,10 +225,11 @@ export async function orchestratePostBackupRetentionCleanup(
 
   // 小样本保护：baseline < 5 notes 或 < 3 boards 时，如果当前 note 或 board 为 0，
   // 可能是数据丢失而非真实缩减，跳过基线更新和清理（v1.5.7）
+  // 注意：baselineBoards === 0 表示用户无画板，不触发 board 保护
   const baselineNotes = state.baselineConfirmedRemoteCount ?? 0;
   const baselineBoards = state.baselineConfirmedBoardCount ?? 0;
   const isNoteSmallSample = baselineNotes < 5;
-  const isBoardSmallSample = baselineBoards < 3;
+  const isBoardSmallSample = baselineBoards > 0 && baselineBoards < 3;
   const noteDroppedToZero = latestSummary.noteCount === 0;
   const boardDroppedToZero = latestSummary.boardCount === 0;
   const hasSmallSampleDrop =

@@ -429,32 +429,6 @@ export function createScheduledRemoteBackupService(
             nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
           });
 
-          // 无本地变化时仍触发 retention 编排，防止 before-exit 更新时间戳后饿死清理
-          try {
-            const webdavConfig = {
-              serverUrl: webdavResult.serverUrl,
-              username: webdavResult.username ?? '',
-              remoteDir: webdavResult.remoteDir ?? undefined,
-            };
-            const retentionPatch = await orchestratePostBackupRetentionCleanup({
-              trigger,
-              config: serviceState.config,
-              state: internalState,
-              uploadResult: { success: true, summary: null, zipSizeBytes: null },
-              webdavConfig,
-              clock: deps.clock,
-            });
-            if (Object.keys(retentionPatch).length > 0) {
-              patchState(retentionPatch);
-            }
-          } catch (retentionError) {
-            patchState({
-              lastRetentionCleanupError:
-                retentionError instanceof Error ? retentionError.message : String(retentionError),
-              lastRetentionCleanupAt: deps.clock(),
-            });
-          }
-
           await deps.saveScheduledState(internalState);
           return;
         }
