@@ -1996,7 +1996,7 @@ export const BoardDock = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => onWebdavDeleteBackup(backup.fileName)}
-                                                disabled={webdavOperation !== 'idle' || zipOperation !== 'idle'}
+                                                disabled={webdavOperation !== 'idle' || zipOperation !== 'idle' || retentionBusy !== 'idle'}
                                                 className="flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 rounded transition-colors disabled:opacity-50"
                                                 data-testid="webdav-delete-button"
                                             >
