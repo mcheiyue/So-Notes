@@ -896,7 +896,7 @@ export const BoardDock = () => {
         }
       } else {
         setWebdavFeedback({ status: 'error', message: `清除失败：${result.error ?? '未知错误'}` });
-        safeLogActivity({ operation: 'credential-status', status: 'failed', level: 'error', message: result.error, startedAt: Date.now(), finishedAt: Date.now() });
+        safeLogActivity({ operation: 'credential-status', status: 'failed', level: 'error', message: result.error ?? '清除失败', startedAt: Date.now(), finishedAt: Date.now() });
       }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `清除失败：${formatUnknownError(err)}` });

@@ -659,6 +659,13 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_message_truncates_multibyte_safely() {
+        let msg = "备".repeat(300);
+        let result = sanitize_message(&msg);
+        assert_eq!(result.chars().count(), 240);
+    }
+
+    #[test]
     fn remove_url_userinfo_strips_credentials() {
         let url = "https://user:pass@example.com/path";
         assert_eq!(remove_url_userinfo(url), "https://example.com/path");
