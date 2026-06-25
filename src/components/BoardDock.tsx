@@ -27,8 +27,10 @@ import {
   appendBackupActivity,
   toBackupActivitySummary,
   fileNameFromPath,
+  loadRecentActivities,
+  clearBackupActivities,
 } from "../services/backup/BackupActivityLogService";
-import type { BackupActivityAppendInput } from "../services/backup/BackupActivityLogService";
+import type { BackupActivityAppendInput, BackupActivityEntry } from "../services/backup/BackupActivityLogService";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 
@@ -227,6 +229,13 @@ export const BoardDock = () => {
   const [retentionBusy, setRetentionBusy] = useState<'idle' | 'previewing' | 'cleaning'>('idle');
   const [retentionFeedback, setRetentionFeedback] = useState<{ status: 'success' | 'error' | 'info'; message: string } | null>(null);
 
+  // 活动日志状态
+  const [activityEntries, setActivityEntries] = useState<BackupActivityEntry[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
+  const [activityClearing, setActivityClearing] = useState(false);
+  const activityEntriesRef = useRef<BackupActivityEntry[]>([]);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const dockContainerRef = useRef<HTMLDivElement>(null);
@@ -300,6 +309,11 @@ export const BoardDock = () => {
       setRetentionConfigSnapshot(null);
           setRetentionBusy('idle');
           setRetentionFeedback(null);
+          setActivityEntries([]);
+          setActivityLoading(false);
+          setActivityError(null);
+          setActivityClearing(false);
+          activityEntriesRef.current = [];
       }
   }, [showSettings]);
 
@@ -355,12 +369,28 @@ export const BoardDock = () => {
       } finally {
         if (!cancelled) setScheduledLoading(false);
       }
+
+      setActivityLoading(true);
+      setActivityError(null);
+      try {
+        const entries = await loadRecentActivities(10);
+        if (cancelled) return;
+        const safeEntries = entries ?? [];
+        activityEntriesRef.current = safeEntries;
+        setActivityEntries(safeEntries);
+      } catch (err) {
+        if (!cancelled) {
+          setActivityError(formatUnknownError(err));
+        }
+      } finally {
+        if (!cancelled) setActivityLoading(false);
+      }
     })();
     return () => { cancelled = true; };
   }, [settingsView]);
 
   useEffect(() => {
-    if (settingsView !== 'WEBDAV' || !scheduledConfig.enabled) return;
+    if (settingsView !== 'WEBDAV') return;
     const intervalId = window.setInterval(async () => {
       try {
         const stateResult = await ScheduledRemoteBackupConfigService.loadState();
@@ -368,9 +398,18 @@ export const BoardDock = () => {
           setScheduledState(stateResult.state);
         }
       } catch { /* 轮询失败静默忽略 */ }
+      try {
+        const entries = await loadRecentActivities(10);
+        const safeEntries = entries ?? [];
+        const prev = activityEntriesRef.current;
+        if (safeEntries.length !== prev.length || safeEntries.some((e, i) => e.id !== prev[i]?.id)) {
+          activityEntriesRef.current = safeEntries;
+          setActivityEntries(safeEntries);
+        }
+      } catch { /* 轮询失败静默忽略 */ }
     }, 5000);
     return () => { window.clearInterval(intervalId); };
-  }, [settingsView, scheduledConfig.enabled]);
+  }, [settingsView]);
 
   useEffect(() => {
     if (!scheduledConfig.exitPromptEnabled || !webdavPasswordSaved) {
@@ -1652,6 +1691,75 @@ export const BoardDock = () => {
   const disableScheduledByCredential = !webdavPasswordSaved && scheduledConfig.enabled;
   const scheduledEnabledEffective = scheduledConfig.enabled && webdavPasswordSaved;
 
+  const ACTIVITY_OPERATION_LABELS: Record<string, string> = {
+    'local-backup': '本地备份',
+    'local-restore': '本地恢复',
+    'remote-backup': '远端备份',
+    'scheduled-remote-backup': '自动备份',
+    'remote-restore': '远端恢复',
+    'remote-delete': '远端删除',
+    'remote-list': '列表刷新',
+    'retention-cleanup': '保留清理',
+    'retention-cliff-drop': '断崖保护',
+    'credential-status': '凭据状态',
+  };
+
+  const ACTIVITY_STATUS_LABELS: Record<string, string> = {
+    'success': '成功',
+    'failed': '失败',
+    'skipped': '跳过',
+    'partial': '部分完成',
+    'cancelled': '已取消',
+  };
+
+  const ACTIVITY_STATUS_ICONS: Record<string, string> = {
+    'success': '✅',
+    'failed': '❌',
+    'skipped': '⏭️',
+    'partial': '⚠️',
+    'cancelled': '🚫',
+  };
+
+  const formatActivityTime = (timestamp: number): string => {
+    const d = new Date(timestamp);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const refreshActivities = async () => {
+    setActivityLoading(true);
+    setActivityError(null);
+    try {
+      const entries = await loadRecentActivities(10);
+      const safeEntries = entries ?? [];
+      activityEntriesRef.current = safeEntries;
+      setActivityEntries(safeEntries);
+    } catch (err) {
+      setActivityError(formatUnknownError(err));
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
+  const onClearActivities = async () => {
+    const confirmed = await confirm({
+      title: '清空活动日志',
+      message: '确定要清空所有备份活动日志吗？此操作不会影响定时备份状态、健康基线和 WebDAV 配置。',
+    });
+    if (!confirmed) return;
+
+    setActivityClearing(true);
+    try {
+      await clearBackupActivities();
+      activityEntriesRef.current = [];
+      setActivityEntries([]);
+    } catch (err) {
+      setActivityError(`清空失败：${formatUnknownError(err)}`);
+    } finally {
+      setActivityClearing(false);
+    }
+  };
+
   const importSummaryText = importFeedback?.summary && !importFeedback.rolledBack
     ? formatImportSummary(importFeedback.summary)
     : null;
@@ -2647,6 +2755,121 @@ export const BoardDock = () => {
                                         </p>
                                     )}
                                 </div>
+                            )}
+                        </div>
+
+                        <div className="mx-3 my-1.5 border-t border-border-subtle" />
+
+                        <div className="px-3 py-2 space-y-2" data-testid="activity-log-section">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs text-text-primary font-medium flex items-center gap-1">
+                                    <Activity className="w-3 h-3 text-text-tertiary" />
+                                    最近活动
+                                </span>
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        type="button"
+                                        onClick={refreshActivities}
+                                        disabled={activityLoading || activityClearing}
+                                        className="p-1 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded text-text-tertiary hover:text-text-secondary transition-colors disabled:opacity-50"
+                                        data-testid="activity-refresh-button"
+                                    >
+                                        <RefreshCw className={cn("w-3 h-3", activityLoading && "animate-spin")} />
+                                    </button>
+                                    {activityEntries.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={onClearActivities}
+                                            disabled={activityLoading || activityClearing}
+                                            className="p-1 hover:bg-red-50 dark:hover:bg-red-950/30 rounded text-text-tertiary hover:text-red-500 transition-colors disabled:opacity-50"
+                                            data-testid="activity-clear-button"
+                                        >
+                                            <Trash2 className="w-3 h-3" />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {activityLoading && activityEntries.length === 0 && (
+                                <p className="text-[10px] text-text-tertiary text-center py-2" data-testid="activity-loading">
+                                    加载中…
+                                </p>
+                            )}
+
+                            {activityError && (
+                                <div
+                                    className="rounded border border-red-100 dark:border-red-900/50 bg-red-50/50 dark:bg-red-900/20 px-2 py-1.5"
+                                    role="alert"
+                                    data-testid="activity-error"
+                                >
+                                    <p className="text-[10px] text-red-600 dark:text-red-400">{activityError}</p>
+                                    <button
+                                        type="button"
+                                        onClick={refreshActivities}
+                                        className="mt-1 text-[10px] text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 underline"
+                                        data-testid="activity-retry-button"
+                                    >
+                                        重试
+                                    </button>
+                                </div>
+                            )}
+
+                            {!activityLoading && !activityError && activityEntries.length === 0 && (
+                                <p className="text-[10px] text-text-tertiary text-center py-2" data-testid="activity-empty">
+                                    暂无备份活动
+                                </p>
+                            )}
+
+                            {activityEntries.length > 0 && (
+                                <div className="space-y-1 max-h-[200px] overflow-y-auto" data-testid="activity-list">
+                                    {activityEntries.map((entry) => (
+                                        <div
+                                            key={entry.id}
+                                            className="flex items-start gap-1.5 px-1.5 py-1 rounded bg-secondary-bg/30 text-[10px] leading-4"
+                                            data-testid="activity-entry"
+                                        >
+                                            <span className="flex-shrink-0 mt-0.5" title={ACTIVITY_STATUS_LABELS[entry.status]}>
+                                                {ACTIVITY_STATUS_ICONS[entry.status]}
+                                            </span>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-text-tertiary flex-shrink-0">
+                                                        {formatActivityTime(entry.startedAt)}
+                                                    </span>
+                                                    <span className="text-text-secondary font-medium">
+                                                        {ACTIVITY_OPERATION_LABELS[entry.operation] ?? entry.operation}
+                                                    </span>
+                                                    <span className={cn(
+                                                        "flex-shrink-0",
+                                                        entry.status === 'success' && "text-green-600 dark:text-green-400",
+                                                        entry.status === 'failed' && "text-red-500 dark:text-red-400",
+                                                        entry.status === 'skipped' && "text-text-tertiary",
+                                                        entry.status === 'partial' && "text-amber-500 dark:text-amber-400",
+                                                        entry.status === 'cancelled' && "text-text-tertiary",
+                                                    )}>
+                                                        {ACTIVITY_STATUS_LABELS[entry.status]}
+                                                    </span>
+                                                </div>
+                                                {(entry.remoteFileName || entry.localFileName) && (
+                                                    <p className="text-text-tertiary truncate" title={entry.remoteFileName ?? entry.localFileName ?? undefined}>
+                                                        {entry.remoteFileName ?? entry.localFileName}
+                                                    </p>
+                                                )}
+                                                {entry.status === 'failed' && entry.message && (
+                                                    <p className="text-red-400 dark:text-red-500 truncate" title={entry.message}>
+                                                        {entry.stage ? `[${entry.stage}] ` : ''}{entry.message}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {activityClearing && (
+                                <p className="text-[10px] text-text-tertiary text-center" data-testid="activity-clearing">
+                                    清空中…
+                                </p>
                             )}
                         </div>
 
