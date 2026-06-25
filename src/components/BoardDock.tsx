@@ -543,8 +543,7 @@ export const BoardDock = () => {
           status: 'success',
           level: 'info',
           localFileName: fileNameFromPath(targetPath),
-          summary: toBackupActivitySummary(result),
-          metrics: { zipSizeBytes: result.zipSizeBytes },
+          summary: { ...toBackupActivitySummary(result), zipSizeBytes: result.zipSizeBytes },
           startedAt,
           finishedAt: Date.now(),
         });
@@ -986,8 +985,7 @@ export const BoardDock = () => {
           status: 'success',
           level: 'info',
           remoteFileName: result.remoteFileName ?? undefined,
-          summary: toBackupActivitySummary(result.summary),
-          metrics: { zipSizeBytes: result.zipSizeBytes },
+          summary: { ...toBackupActivitySummary(result.summary), zipSizeBytes: result.zipSizeBytes },
           startedAt,
           finishedAt: Date.now(),
         });
