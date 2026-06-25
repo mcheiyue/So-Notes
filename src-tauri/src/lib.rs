@@ -13,6 +13,7 @@ use tauri_plugin_positioner::{Position, WindowExt};
 use tokio::sync;
 
 mod attachments;
+mod backup_activity;
 pub mod backup;
 mod persistence;
 pub mod scheduled_backup;
@@ -671,6 +672,9 @@ pub fn run() {
             scheduled_backup::scheduled_backup_save_config,
             scheduled_backup::scheduled_backup_load_state,
             scheduled_backup::scheduled_backup_save_state,
+            backup_activity::backup_activity_list,
+            backup_activity::backup_activity_append,
+            backup_activity::backup_activity_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
