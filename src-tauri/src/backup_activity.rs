@@ -245,9 +245,9 @@ fn sanitize_message(message: &str) -> String {
         result.pop();
     }
 
-    // 截断至 240 字符
-    if result.len() > 240 {
-        result.truncate(240);
+    // 截断至 240 字符（按字符边界安全截断，避免 UTF-8 多字节字符 panic）
+    if result.chars().count() > 240 {
+        result = result.chars().take(240).collect();
     }
 
     result

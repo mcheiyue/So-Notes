@@ -889,14 +889,18 @@ export const BoardDock = () => {
         }
         if (result.secretCleanupWarning) {
           setWebdavFeedback({ status: 'info', message: result.secretCleanupWarning });
+          safeLogActivity({ operation: 'credential-status', status: 'partial', level: 'warning', message: 'secret_cleanup_warning', startedAt: Date.now(), finishedAt: Date.now() });
         } else {
           setWebdavFeedback({ status: 'info', message: '配置已清除。' });
+          safeLogActivity({ operation: 'credential-status', status: 'success', level: 'info', startedAt: Date.now(), finishedAt: Date.now() });
         }
       } else {
         setWebdavFeedback({ status: 'error', message: `清除失败：${result.error ?? '未知错误'}` });
+        safeLogActivity({ operation: 'credential-status', status: 'failed', level: 'error', message: result.error, startedAt: Date.now(), finishedAt: Date.now() });
       }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `清除失败：${formatUnknownError(err)}` });
+      safeLogActivity({ operation: 'credential-status', status: 'failed', level: 'error', message: formatUnknownError(err), startedAt: Date.now(), finishedAt: Date.now() });
     } finally {
       setWebdavOperation('idle');
     }
@@ -1556,6 +1560,7 @@ export const BoardDock = () => {
           status: 'success',
           message: `清理完成：已删除 ${result.deletedCount} 个备份，保留 ${result.retainedCount} 个。${result.missingCount > 0 ? `（${result.missingCount} 个已不存在）` : ''}`,
         });
+        safeLogActivity({ operation: 'retention-cleanup', status: 'success', level: 'info', message: `deleted=${result.deletedCount} retained=${result.retainedCount} missing=${result.missingCount}`, startedAt: Date.now(), finishedAt: Date.now() });
       } else {
         const detail = result.failedFileName
           ? `删除 ${result.failedFileName} 时失败：${result.error ?? '未知错误'}`
@@ -1564,6 +1569,7 @@ export const BoardDock = () => {
           status: 'error',
           message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个${result.missingCount > 0 ? `，${result.missingCount} 个已不存在` : ''}。${detail}`,
         });
+        safeLogActivity({ operation: 'retention-cleanup', status: 'partial', level: 'warning', message: `deleted=${result.deletedCount} retained=${result.retainedCount} missing=${result.missingCount}`, startedAt: Date.now(), finishedAt: Date.now() });
       }
 
       const retentionStatePatch: Partial<ScheduledRemoteBackupState> = {
@@ -1612,6 +1618,7 @@ export const BoardDock = () => {
       }
     } catch (err) {
       setRetentionFeedback({ status: 'error', message: `清理失败：${formatUnknownError(err)}` });
+      safeLogActivity({ operation: 'retention-cleanup', status: 'failed', level: 'error', message: formatUnknownError(err), startedAt: Date.now(), finishedAt: Date.now() });
     } finally {
       setRetentionBusy('idle');
     }
@@ -1649,6 +1656,7 @@ export const BoardDock = () => {
     try {
       await ScheduledRemoteBackupConfigService.saveState(updated);
       await getSchedulerService()?.reloadState();
+      safeLogActivity({ operation: 'retention-cliff-drop', status: 'success', level: 'info', message: 'baseline_confirmed', startedAt: Date.now(), finishedAt: Date.now() });
     } catch (err) {
       setScheduledState(scheduledState);
       setRetentionFeedback({ status: 'error', message: `保存基线确认失败：${formatUnknownError(err)}` });
@@ -1680,6 +1688,7 @@ export const BoardDock = () => {
     try {
       await ScheduledRemoteBackupConfigService.saveState(updated);
       await getSchedulerService()?.reloadState();
+      safeLogActivity({ operation: 'retention-cliff-drop', status: 'success', level: 'info', message: 'warning_dismissed', startedAt: Date.now(), finishedAt: Date.now() });
     } catch (err) {
       setScheduledState(scheduledState);
       setRetentionFeedback({ status: 'error', message: `清除警告失败：${formatUnknownError(err)}` });
@@ -2820,7 +2829,7 @@ export const BoardDock = () => {
 
                             {activityEntries.length > 0 && (
                                 <div className="space-y-1 max-h-[200px] overflow-y-auto" data-testid="activity-list">
-                                    {activityEntries.map((entry) => (
+                                    {[...activityEntries].reverse().map((entry) => (
                                         <div
                                             key={entry.id}
                                             className="flex items-start gap-1.5 px-1.5 py-1 rounded bg-secondary-bg/30 text-[10px] leading-4"
