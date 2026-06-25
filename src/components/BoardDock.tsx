@@ -23,6 +23,12 @@ import { db } from "../store/db";
 import type { Note } from "../store/types";
 import { previewRetentionCleanup, executeRetentionCleanup } from "../services/backup/RemoteBackupRetentionService";
 import type { RetentionPreview } from "../services/backup/RemoteBackupRetention";
+import {
+  appendBackupActivity,
+  toBackupActivitySummary,
+  fileNameFromPath,
+} from "../services/backup/BackupActivityLogService";
+import type { BackupActivityAppendInput } from "../services/backup/BackupActivityLogService";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 
@@ -144,6 +150,16 @@ const prehydrateRestoredImageNoteAssetUrls = async (notes: Note[]): Promise<void
       resolveAttachmentAssetUrlCached(relativePath),
     ),
   );
+};
+
+/**
+ * 安全记录备份活动日志。appendBackupActivity 内部已有 try/catch，
+ * 这里再包一层确保调用方不会因日志写入而中断主流程。
+ */
+const safeLogActivity = (input: BackupActivityAppendInput): void => {
+  void appendBackupActivity(input).catch((err) => {
+    console.warn('[BackupActivityLog] safeLogActivity failed:', err);
+  });
 };
 
 export const BoardDock = () => {
@@ -459,12 +475,22 @@ export const BoardDock = () => {
       return;
     }
 
+    const startedAt = Date.now();
     setZipFeedback(null);
     setZipOperation('backing-up');
     try {
       const flushed = await persistenceFacade.flushNow();
       if (!flushed) {
         setZipFeedback({ status: 'error', message: '备份失败：当前数据尚未成功写入磁盘，请稍后重试。' });
+        safeLogActivity({
+          operation: 'local-backup',
+          status: 'failed',
+          level: 'error',
+          stage: 'flush',
+          message: '当前数据尚未成功写入磁盘',
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
       const result = await createLocalBackup(targetPath);
@@ -473,11 +499,39 @@ export const BoardDock = () => {
           status: 'success',
           message: `备份成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。${result.backupPath ? `\n${result.backupPath}` : ''}`,
         });
+        safeLogActivity({
+          operation: 'local-backup',
+          status: 'success',
+          level: 'info',
+          localFileName: fileNameFromPath(targetPath),
+          summary: toBackupActivitySummary(result),
+          metrics: { zipSizeBytes: result.zipSizeBytes },
+          startedAt,
+          finishedAt: Date.now(),
+        });
       } else {
         setZipFeedback({ status: 'error', message: `备份失败：${result.error ?? '未知错误'}` });
+        safeLogActivity({
+          operation: 'local-backup',
+          status: 'failed',
+          level: 'error',
+          stage: 'backup',
+          message: result.error ?? '未知错误',
+          startedAt,
+          finishedAt: Date.now(),
+        });
       }
     } catch (err) {
       setZipFeedback({ status: 'error', message: `备份失败：${formatUnknownError(err)}` });
+      safeLogActivity({
+        operation: 'local-backup',
+        status: 'failed',
+        level: 'error',
+        stage: 'backup',
+        message: formatUnknownError(err),
+        startedAt,
+        finishedAt: Date.now(),
+      });
     } finally {
       localJobHandle.release();
       setZipOperation('idle');
@@ -590,6 +644,7 @@ export const BoardDock = () => {
     const sourceZipPath = await openZipDialog();
     if (!sourceZipPath) return;
 
+    const startedAt = Date.now();
     setZipFeedback(null);
     setZipOperation('restoring');
     let pauseOccurred = false;
@@ -602,6 +657,16 @@ export const BoardDock = () => {
           status: 'error',
           message: formatValidationErrorMessage(validation.errors),
         });
+        safeLogActivity({
+          operation: 'local-restore',
+          status: 'failed',
+          level: 'error',
+          stage: 'validation',
+          errorCode: validation.errors[0]?.code,
+          message: formatValidationErrorMessage(validation.errors),
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
 
@@ -612,11 +677,29 @@ export const BoardDock = () => {
       }
 
       const confirmed = await confirm({ title: '覆盖恢复确认', message: buildRestoreSummaryMessage(summary), kind: 'danger' });
-      if (!confirmed) return;
+      if (!confirmed) {
+        safeLogActivity({
+          operation: 'local-restore',
+          status: 'cancelled',
+          level: 'info',
+          stage: 'confirm',
+          startedAt,
+          finishedAt: Date.now(),
+        });
+        return;
+      }
 
       const flushed = await persistenceFacade.flushNow();
       if (!flushed) {
         setZipFeedback({ status: 'error', message: '恢复失败：当前数据尚未成功写入磁盘，请稍后重试。' });
+        safeLogActivity({
+          operation: 'local-restore',
+          status: 'failed',
+          level: 'error',
+          stage: 'flush',
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
       persistenceFacade.pause();
@@ -631,12 +714,29 @@ export const BoardDock = () => {
       const result = await restoreLocalBackup(sourceZipPath);
       if (!result.success) {
         setZipFeedback({ status: 'error', message: `恢复失败：${result.error ?? '未知错误'}` });
+        safeLogActivity({
+          operation: 'local-restore',
+          status: 'failed',
+          level: 'error',
+          stage: 'restore',
+          message: result.error ?? '未知错误',
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
 
       const applied = await applyRestoredDiskData();
       if (!applied) {
         setZipFeedback({ status: 'error', message: '恢复成功但无法读取磁盘数据，请重启应用。' });
+        safeLogActivity({
+          operation: 'local-restore',
+          status: 'partial',
+          level: 'warning',
+          summary: toBackupActivitySummary(validation.summary ?? result),
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
 
@@ -646,6 +746,14 @@ export const BoardDock = () => {
       setZipFeedback({
         status: 'success',
         message: `恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
+      });
+      safeLogActivity({
+        operation: 'local-restore',
+        status: 'success',
+        level: 'info',
+        summary: toBackupActivitySummary(validation.summary ?? result),
+        startedAt,
+        finishedAt: Date.now(),
       });
     } catch (err) {
       setZipFeedback({ status: 'error', message: `恢复失败：${formatUnknownError(err)}` });
@@ -780,6 +888,7 @@ export const BoardDock = () => {
     const config = buildWebdavConfig();
     if (!config) return;
     if (!requireWebdavCredentials()) return;
+    const startedAt = Date.now();
     setWebdavFeedback(null);
     setWebdavOperation('listing');
     try {
@@ -788,8 +897,24 @@ export const BoardDock = () => {
       if (backups.length === 0) {
         setWebdavFeedback({ status: 'info', message: '远端无备份文件。' });
       }
+      safeLogActivity({
+        operation: 'remote-list',
+        status: 'success',
+        level: 'info',
+        metrics: { retainedCount: backups.length },
+        startedAt,
+        finishedAt: Date.now(),
+      });
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `获取备份列表失败：${formatWebdavError(formatUnknownError(err))}` });
+      safeLogActivity({
+        operation: 'remote-list',
+        status: 'failed',
+        level: 'error',
+        message: formatWebdavError(formatUnknownError(err)),
+        startedAt,
+        finishedAt: Date.now(),
+      });
     } finally {
       setWebdavOperation('idle');
     }
@@ -799,6 +924,7 @@ export const BoardDock = () => {
     const config = buildWebdavConfig();
     if (!config) return;
     if (!requireWebdavCredentials()) return;
+    const startedAt = Date.now();
     setWebdavFeedback(null);
     setWebdavOperation('creating');
     const manualStartedAt = Date.now();
@@ -816,11 +942,29 @@ export const BoardDock = () => {
       );
       if (result.success) {
         setWebdavFeedback({ status: 'success', message: `远端备份已创建：${result.remoteFileName ?? '完成'}` });
+        safeLogActivity({
+          operation: 'remote-backup',
+          status: 'success',
+          level: 'info',
+          remoteFileName: result.remoteFileName ?? undefined,
+          summary: toBackupActivitySummary(result.summary),
+          metrics: { zipSizeBytes: result.zipSizeBytes },
+          startedAt,
+          finishedAt: Date.now(),
+        });
         try {
           const backups = await WebDavBackupService.listBackups(config);
           setWebdavBackups(backups);
         } catch {
           // list refresh failure is non-critical
+          safeLogActivity({
+            operation: 'remote-list',
+            status: 'failed',
+            level: 'error',
+            stage: 'list-refresh',
+            startedAt,
+            finishedAt: Date.now(),
+          });
         }
 
         // 更新定时备份状态：手动成功也覆盖快照字段
@@ -855,6 +999,19 @@ export const BoardDock = () => {
         }
       } else {
         setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatWebdavError(result.error ?? '未知错误')}` });
+        const isBusy = result.error === 'busy' || result.errorStage === 'single-flight';
+        safeLogActivity({
+          operation: 'remote-backup',
+          status: isBusy ? 'skipped' : 'failed',
+          level: isBusy ? 'info' : 'error',
+          ...(isBusy ? { reasonCode: 'single_flight' } : {
+            stage: result.errorStage ?? undefined,
+            errorCode: result.errorCode ?? undefined,
+            message: formatWebdavError(result.error ?? '未知错误'),
+          }),
+          startedAt,
+          finishedAt: Date.now(),
+        });
         try {
           const stateResult = await ScheduledRemoteBackupConfigService.loadState();
           if (stateResult.success && stateResult.state) {
@@ -902,15 +1059,33 @@ export const BoardDock = () => {
     const deleteHandle = tryStartBackupJob('manual-delete-backup');
     if (!deleteHandle) {
       setWebdavFeedback({ status: 'error', message: '删除失败：已有备份任务运行中，请稍后重试。' });
+      safeLogActivity({
+        operation: 'remote-delete',
+        status: 'skipped',
+        level: 'info',
+        remoteFileName: fileNameFromPath(fileName),
+        reasonCode: 'single_flight',
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
       return;
     }
 
+    const startedAt = Date.now();
     setWebdavFeedback(null);
     setWebdavOperation('deleting');
     try {
       const result = await WebDavBackupService.deleteBackup(config, fileName);
       if (result.success) {
         setWebdavFeedback({ status: 'success', message: '远端备份已删除。' });
+        safeLogActivity({
+          operation: 'remote-delete',
+          status: 'success',
+          level: 'info',
+          remoteFileName: fileNameFromPath(fileName),
+          startedAt,
+          finishedAt: Date.now(),
+        });
         try {
           const backups = await WebDavBackupService.listBackups(config);
           setWebdavBackups(backups);
@@ -919,9 +1094,27 @@ export const BoardDock = () => {
         }
       } else {
         setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${formatWebdavError(result.error ?? '未知错误')}` });
+        safeLogActivity({
+          operation: 'remote-delete',
+          status: 'failed',
+          level: 'error',
+          remoteFileName: fileNameFromPath(fileName),
+          message: formatWebdavError(result.error ?? '未知错误'),
+          startedAt,
+          finishedAt: Date.now(),
+        });
       }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${formatWebdavError(formatUnknownError(err))}` });
+      safeLogActivity({
+        operation: 'remote-delete',
+        status: 'failed',
+        level: 'error',
+        remoteFileName: fileNameFromPath(fileName),
+        message: formatWebdavError(formatUnknownError(err)),
+        startedAt,
+        finishedAt: Date.now(),
+      });
     } finally {
       setWebdavOperation('idle');
       deleteHandle.release();
@@ -943,9 +1136,19 @@ export const BoardDock = () => {
     let restoreJobHandle: BackupJobHandle | null = tryStartBackupJob('remote-restore');
     if (!restoreJobHandle) {
       setWebdavFeedback({ status: 'error', message: '恢复失败：已有备份任务运行中，请稍后重试。' });
+      safeLogActivity({
+        operation: 'remote-restore',
+        status: 'skipped',
+        level: 'info',
+        remoteFileName: fileNameFromPath(fileName),
+        reasonCode: 'single_flight',
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
       return;
     }
 
+    const startedAt = Date.now();
     setWebdavFeedback(null);
     setWebdavOperation('restoring');
     let pauseOccurred = false;
@@ -954,6 +1157,16 @@ export const BoardDock = () => {
       const dlResult = await WebDavBackupService.downloadBackup(config, fileName);
       if (!dlResult.success || !dlResult.downloadToken) {
         setWebdavFeedback({ status: 'error', message: `下载失败：${formatWebdavError(dlResult.error ?? '未知错误')}` });
+        safeLogActivity({
+          operation: 'remote-restore',
+          status: 'failed',
+          level: 'error',
+          remoteFileName: fileNameFromPath(fileName),
+          stage: 'download',
+          message: formatWebdavError(dlResult.error ?? '未知错误'),
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
       downloadToken = dlResult.downloadToken;
@@ -970,6 +1183,17 @@ export const BoardDock = () => {
           status: 'error',
           message: formatValidationErrorMessage(validation.errors),
         });
+        safeLogActivity({
+          operation: 'remote-restore',
+          status: 'failed',
+          level: 'error',
+          remoteFileName: fileNameFromPath(fileName),
+          stage: 'validation',
+          errorCode: validation.errors[0]?.code,
+          message: formatValidationErrorMessage(validation.errors),
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
 
@@ -980,11 +1204,31 @@ export const BoardDock = () => {
       }
 
       const restoreConfirmed = await confirm({ title: '覆盖恢复确认', message: buildRestoreSummaryMessage(summary), kind: 'danger' });
-      if (!restoreConfirmed) return;
+      if (!restoreConfirmed) {
+        safeLogActivity({
+          operation: 'remote-restore',
+          status: 'cancelled',
+          level: 'info',
+          remoteFileName: fileNameFromPath(fileName),
+          stage: 'confirm',
+          startedAt,
+          finishedAt: Date.now(),
+        });
+        return;
+      }
 
       const flushed = await persistenceFacade.flushNow();
       if (!flushed) {
         setWebdavFeedback({ status: 'error', message: '恢复失败：当前数据尚未成功写入磁盘，请稍后重试。' });
+        safeLogActivity({
+          operation: 'remote-restore',
+          status: 'failed',
+          level: 'error',
+          remoteFileName: fileNameFromPath(fileName),
+          stage: 'flush',
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
       persistenceFacade.pause();
@@ -993,12 +1237,31 @@ export const BoardDock = () => {
       const result = await restoreLocalBackup(resolveResult.localPath);
       if (!result.success) {
         setWebdavFeedback({ status: 'error', message: `恢复失败：${formatWebdavError(result.error ?? '未知错误')}` });
+        safeLogActivity({
+          operation: 'remote-restore',
+          status: 'failed',
+          level: 'error',
+          remoteFileName: fileNameFromPath(fileName),
+          stage: 'restore',
+          message: formatWebdavError(result.error ?? '未知错误'),
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
 
       const applied = await applyRestoredDiskData();
       if (!applied) {
         setWebdavFeedback({ status: 'error', message: '恢复成功但无法读取磁盘数据，请重启应用。' });
+        safeLogActivity({
+          operation: 'remote-restore',
+          status: 'partial',
+          level: 'warning',
+          remoteFileName: fileNameFromPath(fileName),
+          summary: toBackupActivitySummary(validation.summary ?? result),
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
 
@@ -1008,6 +1271,15 @@ export const BoardDock = () => {
       setWebdavFeedback({
         status: 'success',
         message: `远端恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
+      });
+      safeLogActivity({
+        operation: 'remote-restore',
+        status: 'success',
+        level: 'info',
+        remoteFileName: fileNameFromPath(fileName),
+        summary: toBackupActivitySummary(validation.summary ?? result),
+        startedAt,
+        finishedAt: Date.now(),
       });
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `恢复失败：${formatWebdavError(formatUnknownError(err))}` });
