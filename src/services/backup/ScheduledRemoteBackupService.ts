@@ -31,6 +31,7 @@ import type {
 } from './WebDavBackupService';
 import type { StorageData } from '../../store/types';
 import { orchestratePostBackupRetentionCleanup } from './RetentionCleanupOrchestrator';
+import type { BackupActivityAppendInput } from './BackupActivityLogService';
 
 // ---------------------------------------------------------------------------
 // 模块级服务实例 accessor
@@ -156,6 +157,8 @@ export interface ScheduledRemoteBackupDependencies {
   readDiskStorageData: () => Promise<StorageData | null>;
   /** 获取最近更新时间戳 */
   getLatestUpdateTimestamp: (data: StorageData) => number | null;
+  /** 追加活动日志（可选，失败仅 console.warn） */
+  appendActivity?: (input: BackupActivityAppendInput) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +201,20 @@ export function createScheduledRemoteBackupService(
   ): void {
     internalState = { ...internalState, ...patch };
     serviceState.state = internalState;
+  }
+
+  async function safeAppendActivity(
+    input: BackupActivityAppendInput,
+  ): Promise<void> {
+    if (!deps.appendActivity) return;
+    try {
+      await deps.appendActivity(input);
+    } catch (err: unknown) {
+      console.warn(
+        '[ScheduledRemoteBackup] appendActivity failed:',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -341,6 +358,16 @@ export function createScheduledRemoteBackupService(
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
         await deps.saveScheduledState(internalState);
+        await safeAppendActivity({
+          operation: 'scheduled-remote-backup',
+          status: 'failed',
+          level: 'error',
+          startedAt: startNow,
+          finishedAt: now,
+          trigger,
+          stage: 'config',
+          message: '缺少 WebDAV 配置',
+        });
         if (trigger === 'before-exit') {
           beforeExitError = new Error('缺少 WebDAV 配置');
         }
@@ -361,6 +388,16 @@ export function createScheduledRemoteBackupService(
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
         await deps.saveScheduledState(internalState);
+        await safeAppendActivity({
+          operation: 'scheduled-remote-backup',
+          status: 'failed',
+          level: 'error',
+          startedAt: startNow,
+          finishedAt: now,
+          trigger,
+          stage: 'credential',
+          message: '未保存 WebDAV 凭据',
+        });
         if (trigger === 'before-exit') {
           beforeExitError = new Error('未保存 WebDAV 凭据');
         }
@@ -378,6 +415,15 @@ export function createScheduledRemoteBackupService(
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
         await deps.saveScheduledState(internalState);
+        await safeAppendActivity({
+          operation: 'scheduled-remote-backup',
+          status: 'skipped',
+          level: 'warning',
+          startedAt: startNow,
+          finishedAt: deps.clock(),
+          trigger,
+          reasonCode: 'credential_action_required',
+        });
         if (trigger === 'before-exit') {
           beforeExitError = new Error('凭据失败次数过多，请重新保存密码');
         }
@@ -406,6 +452,16 @@ export function createScheduledRemoteBackupService(
             nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
           });
           await deps.saveScheduledState(internalState);
+          await safeAppendActivity({
+            operation: 'scheduled-remote-backup',
+            status: 'failed',
+            level: 'error',
+            startedAt: startNow,
+            finishedAt: deps.clock(),
+            trigger,
+            stage: 'flush',
+            message: '当前数据尚未成功写入磁盘',
+          });
           if (trigger === 'before-exit') {
             beforeExitError = new Error('当前数据尚未成功写入磁盘');
           }
@@ -430,6 +486,15 @@ export function createScheduledRemoteBackupService(
           });
 
           await deps.saveScheduledState(internalState);
+          await safeAppendActivity({
+            operation: 'scheduled-remote-backup',
+            status: 'skipped',
+            level: 'info',
+            startedAt: startNow,
+            finishedAt: now,
+            trigger,
+            reasonCode: 'no_local_changes',
+          });
           return;
         }
       }
@@ -473,6 +538,21 @@ export function createScheduledRemoteBackupService(
 
         patchState(patch);
 
+        const isAutomaticForActivity =
+          trigger === 'scheduled-interval' || trigger === 'quiet-period';
+        if (isAutomaticForActivity) {
+          await safeAppendActivity({
+            operation: 'scheduled-remote-backup',
+            status: 'success',
+            level: 'info',
+            startedAt: startNow,
+            finishedAt: now,
+            trigger,
+            remoteFileName: result.remoteFileName ?? null,
+            summary: result.summary ?? null,
+          });
+        }
+
         // 保留策略编排：仅自动备份成功后触发
         try {
           const retentionPatch = await orchestratePostBackupRetentionCleanup({
@@ -485,11 +565,57 @@ export function createScheduledRemoteBackupService(
           });
           if (Object.keys(retentionPatch).length > 0) {
             patchState(retentionPatch);
+
+            if (retentionPatch.cliffDropDeferred) {
+              await safeAppendActivity({
+                operation: 'retention-cliff-drop',
+                status: 'skipped',
+                level: 'warning',
+                startedAt: startNow,
+                finishedAt: deps.clock(),
+                reasonCode: 'cliff_drop_deferred',
+                metrics: {
+                  anomalyCodes: retentionPatch.cliffDropLatestAnomalyCodes ?? null,
+                },
+              });
+            } else if (!retentionPatch.lastRetentionCleanupSkipped) {
+              const hasError = retentionPatch.lastRetentionCleanupError != null;
+              await safeAppendActivity({
+                operation: 'retention-cleanup',
+                status: hasError ? 'partial' : 'success',
+                level: hasError ? 'warning' : 'info',
+                startedAt: startNow,
+                finishedAt: deps.clock(),
+                ...(hasError
+                  ? {
+                      metrics: {
+                        failedFileName: retentionPatch.lastRetentionCleanupFailedFileName ?? null,
+                        deletedCount: retentionPatch.lastRetentionCleanupDeletedCount ?? null,
+                      },
+                    }
+                  : {
+                      metrics: {
+                        deletedCount: retentionPatch.lastRetentionCleanupDeletedCount ?? null,
+                        retainedCount: retentionPatch.pendingCleanupTargetCount ?? null,
+                        missingCount: retentionPatch.lastRetentionCleanupMissingCount ?? null,
+                      },
+                    }),
+              });
+            }
           }
         } catch (retentionError) {
+          const errorMsg = retentionError instanceof Error ? retentionError.message : String(retentionError);
           patchState({
-            lastRetentionCleanupError: retentionError instanceof Error ? retentionError.message : String(retentionError),
+            lastRetentionCleanupError: errorMsg,
             lastRetentionCleanupAt: deps.clock(),
+          });
+          await safeAppendActivity({
+            operation: 'retention-cleanup',
+            status: 'partial',
+            level: 'warning',
+            startedAt: startNow,
+            finishedAt: deps.clock(),
+            message: errorMsg,
           });
         }
       } else {
@@ -518,6 +644,16 @@ export function createScheduledRemoteBackupService(
         };
 
         patchState(patch);
+        await safeAppendActivity({
+          operation: 'scheduled-remote-backup',
+          status: 'failed',
+          level: 'error',
+          startedAt: startNow,
+          finishedAt: now,
+          trigger,
+          stage: failureStage,
+          message: result.error ?? 'Unknown error',
+        });
       }
 
       // before-exit 失败时保存错误，finally 后抛出让 handleQuitRequest 捕获
@@ -537,6 +673,16 @@ export function createScheduledRemoteBackupService(
         nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
       });
       await deps.saveScheduledState(internalState);
+      await safeAppendActivity({
+        operation: 'scheduled-remote-backup',
+        status: 'failed',
+        level: 'error',
+        startedAt: startNow,
+        finishedAt: deps.clock(),
+        trigger,
+        stage: 'unknown',
+        message: err instanceof Error ? err.message : String(err),
+      });
       if (trigger === 'before-exit') {
         beforeExitError = err instanceof Error ? err : new Error(String(err));
       }

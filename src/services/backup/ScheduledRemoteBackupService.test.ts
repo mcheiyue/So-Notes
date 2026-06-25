@@ -126,6 +126,7 @@ interface TestContext {
   saveScheduledState: ReturnType<typeof vi.fn>;
   readDiskStorageData: ReturnType<typeof vi.fn>;
   getLatestUpdateTimestamp: ReturnType<typeof vi.fn>;
+  mockAppendActivity: ReturnType<typeof vi.fn>;
   deps: ScheduledRemoteBackupDependencies;
 }
 
@@ -182,6 +183,7 @@ function createTestContext(overrides?: {
   );
   const readDiskStorageData = vi.fn(async () => null as StorageData | null);
   const getLatestUpdateTimestamp = vi.fn(() => 0);
+  const mockAppendActivity = vi.fn(async () => {});
 
   const deps: ScheduledRemoteBackupDependencies = {
     clock,
@@ -196,6 +198,7 @@ function createTestContext(overrides?: {
     saveScheduledState,
     readDiskStorageData,
     getLatestUpdateTimestamp,
+    appendActivity: mockAppendActivity,
   };
 
   return {
@@ -211,6 +214,7 @@ function createTestContext(overrides?: {
     saveScheduledState,
     readDiskStorageData,
     getLatestUpdateTimestamp,
+    mockAppendActivity,
     deps,
   };
 }
@@ -2035,6 +2039,377 @@ describe('ScheduledRemoteBackupService', () => {
       expect(mockRunRemoteBackup).not.toHaveBeenCalled();
       expect(mockOrchestrateRetentionCleanup).not.toHaveBeenCalled();
 
+      service.stop();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 25. 活动日志
+  // -------------------------------------------------------------------------
+
+  describe('活动日志', () => {
+    it('scheduled-interval 成功后记录 success 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 0 },
+        state: { nextRunAt: null },
+      });
+      ctx.getAppActivity.mockReturnValue(INACTIVE_ACTIVITY);
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'SoNotes_Backup_20260101.zip',
+        summary: { noteCount: 10, boardCount: 2 },
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const freqCallback = ctx.timers.setTimeout.mock.calls[0]?.[0] as (() => void) | undefined;
+      freqCallback!();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledTimes(1);
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'scheduled-remote-backup',
+          status: 'success',
+          level: 'info',
+          trigger: 'scheduled-interval',
+          remoteFileName: 'SoNotes_Backup_20260101.zip',
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('manual 成功不记录 scheduled-remote-backup 活动（仅自动备份记录）', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).not.toHaveBeenCalled();
+
+      service.stop();
+    });
+
+    it('备份失败记录 failed 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: false,
+        error: 'Network timeout',
+        errorStage: 'upload',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'scheduled-remote-backup',
+          status: 'failed',
+          level: 'error',
+          stage: 'upload',
+          message: 'Network timeout',
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('无本地变更跳过时记录 skipped 活动', async () => {
+      const storageData = makeStorageData({ storageUpdatedAt: 5000 });
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastSuccessfulStorageUpdatedAt: 5000 },
+      });
+      ctx.readDiskStorageData.mockResolvedValueOnce(storageData);
+      ctx.getLatestUpdateTimestamp.mockReturnValueOnce(5000);
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'scheduled-remote-backup',
+          status: 'skipped',
+          level: 'info',
+          reasonCode: 'no_local_changes',
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('缺少 WebDAV 配置时记录 failed 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+      ctx.loadWebDavConfig.mockResolvedValueOnce({
+        success: false,
+        serverUrl: null,
+        passwordSaved: false,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'scheduled-remote-backup',
+          status: 'failed',
+          level: 'error',
+          stage: 'config',
+          message: '缺少 WebDAV 配置',
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('未保存凭据时记录 failed 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+      ctx.loadWebDavConfig.mockResolvedValueOnce({
+        success: true,
+        serverUrl: 'https://example.com/dav',
+        username: 'user',
+        passwordSaved: false,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'scheduled-remote-backup',
+          status: 'failed',
+          level: 'error',
+          stage: 'credential',
+          message: '未保存 WebDAV 凭据',
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('凭据失败阈值达到时记录 skipped 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { consecutiveCredentialFailures: 3, credentialActionRequired: true },
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'scheduled-remote-backup',
+          status: 'skipped',
+          level: 'warning',
+          reasonCode: 'credential_action_required',
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('flush 失败时记录 failed 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 0 },
+      });
+      ctx.runnerDeps.flushNow.mockResolvedValue(false);
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      service.notifyLocalChange();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'scheduled-remote-backup',
+          status: 'failed',
+          level: 'error',
+          stage: 'flush',
+          message: '当前数据尚未成功写入磁盘',
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('保留策略清理成功记录 retention-cleanup success 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 10 },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+      mockOrchestrateRetentionCleanup.mockResolvedValue({
+        lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupDeletedCount: 2,
+        pendingCleanupTargetCount: 8,
+        lastRetentionCleanupMissingCount: 0,
+        lastRetentionCleanupAt: ctx.now,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'retention-cleanup',
+          status: 'success',
+          level: 'info',
+          metrics: expect.objectContaining({
+            deletedCount: 2,
+            retainedCount: 8,
+            missingCount: 0,
+          }),
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('保留策略清理部分失败记录 retention-cleanup partial 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 10 },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+      mockOrchestrateRetentionCleanup.mockResolvedValue({
+        lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupDeletedCount: 1,
+        lastRetentionCleanupFailedFileName: 'old.zip',
+        lastRetentionCleanupError: 'WebDAV 409',
+        lastRetentionCleanupAt: ctx.now,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'retention-cleanup',
+          status: 'partial',
+          level: 'warning',
+          metrics: expect.objectContaining({
+            failedFileName: 'old.zip',
+            deletedCount: 1,
+          }),
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('断崖保护触发记录 retention-cliff-drop skipped 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 10 },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+      mockOrchestrateRetentionCleanup.mockResolvedValue({
+        cliffDropDeferred: true,
+        cliffDropDetectedAt: ctx.now,
+        cliffDropLatestAnomalyCodes: ['note_count_drop', 'zip_size_drop'],
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'retention-cliff-drop',
+          status: 'skipped',
+          level: 'warning',
+          reasonCode: 'cliff_drop_deferred',
+          metrics: expect.objectContaining({
+            anomalyCodes: ['note_count_drop', 'zip_size_drop'],
+          }),
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('before-exit 失败时 appendActivity 后原错误仍抛出', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: false,
+        error: '上传失败',
+        errorStage: 'upload',
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await expect(service.runBeforeExit()).rejects.toThrow('上传失败');
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'scheduled-remote-backup',
+          status: 'failed',
+          stage: 'upload',
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('appendActivity 失败不影响备份流程', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 0 },
+        state: { nextRunAt: null },
+      });
+      ctx.getAppActivity.mockReturnValue(INACTIVE_ACTIVITY);
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+      ctx.mockAppendActivity.mockRejectedValueOnce(new Error('activity service down'));
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const freqCallback = ctx.timers.setTimeout.mock.calls[0]?.[0] as (() => void) | undefined;
+      freqCallback!();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockRunRemoteBackup).toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[ScheduledRemoteBackup] appendActivity failed:',
+        'activity service down',
+      );
+
+      warnSpy.mockRestore();
       service.stop();
     });
   });

@@ -16,6 +16,7 @@ import { tryStartBackupJob } from '../services/backup/BackupJobCoordinator';
 import { handleQuitRequest } from '../services/backup/quitHandler';
 import { useQuitConfirmStore } from '../store/quitConfirmStore';
 import { promptQuitConfirm, promptBackupFailed } from '../store/quitConfirmStore';
+import { appendBackupActivity } from '../services/backup/BackupActivityLogService';
 
 const STORAGE_FILENAME = 'data.json';
 
@@ -72,6 +73,7 @@ export const ScheduledRemoteBackupController = () => {
         saveScheduledState,
         readDiskStorageData: () => readDiskStorageData(STORAGE_FILENAME),
         getLatestUpdateTimestamp,
+        appendActivity: appendBackupActivity,
       });
 
       if (cancelled) return;
