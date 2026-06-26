@@ -331,6 +331,14 @@ export function createScheduledRemoteBackupService(
         lastFailureStage: 'single-flight',
       });
       await deps.saveScheduledState(internalState);
+      await safeAppendActivity({
+        operation: 'scheduled-remote-backup',
+        status: 'skipped',
+        level: 'warning',
+        message: '备份任务正在运行中',
+        startedAt: now,
+        finishedAt: now,
+      });
       if (trigger === 'before-exit') {
         throw new Error('备份任务正在运行中，请稍候再试');
       }

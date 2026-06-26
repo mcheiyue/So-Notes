@@ -185,7 +185,7 @@ describe('BackupActivityLogService', () => {
         ...baseInput,
         message: 'Authorization: Bearer abc123',
       });
-      expect(result.message).toBe('Authorization=[REDACTED] Bearer abc123');
+      expect(result.message).toBe('Authorization: Bearer=[REDACTED]');
     });
 
     it('替换 message 中的 secret 关键词', () => {
@@ -204,6 +204,14 @@ describe('BackupActivityLogService', () => {
       expect(result.message).toBe(
         '请求 https://[REDACTED]@example.com 失败',
       );
+    });
+
+    it('替换 Bearer token', () => {
+      const result = sanitizeActivityInput({
+        ...baseInput,
+        message: 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9',
+      });
+      expect(result.message).toBe('Authorization: Bearer [REDACTED]');
     });
 
     it('截断超过 240 字符的 message', () => {
@@ -252,6 +260,24 @@ describe('BackupActivityLogService', () => {
         localFileName: 'note-backup.zip',
       });
       expect(result.localFileName).toBe('note-backup.zip');
+    });
+
+    it('metrics.failedFileName 只保留 basename', () => {
+      const result = sanitizeActivityInput({
+        ...baseInput,
+        metrics: {
+          failedFileName: '/home/user/backups/SoNotes_Backup_20260626120000.zip',
+        },
+      });
+      expect(result.metrics?.failedFileName).toBe('SoNotes_Backup_20260626120000.zip');
+    });
+
+    it('metrics 为 null 时保持 null', () => {
+      const result = sanitizeActivityInput({
+        ...baseInput,
+        metrics: null,
+      });
+      expect(result.metrics).toBeNull();
     });
 
     it('同时包含敏感词和长消息时正确处理', () => {

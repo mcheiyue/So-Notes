@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { confirm } from "../store/confirmStore";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
@@ -154,16 +154,6 @@ const prehydrateRestoredImageNoteAssetUrls = async (notes: Note[]): Promise<void
   );
 };
 
-/**
- * 安全记录备份活动日志。appendBackupActivity 内部已有 try/catch，
- * 这里再包一层确保调用方不会因日志写入而中断主流程。
- */
-const safeLogActivity = (input: BackupActivityAppendInput): void => {
-  void appendBackupActivity(input).catch((err) => {
-    console.warn('[BackupActivityLog] safeLogActivity failed:', err);
-  });
-};
-
 export const BoardDock = () => {
   const store = useStore();
   const { 
@@ -235,6 +225,24 @@ export const BoardDock = () => {
   const [activityError, setActivityError] = useState<string | null>(null);
   const [activityClearing, setActivityClearing] = useState(false);
   const activityEntriesRef = useRef<BackupActivityEntry[]>([]);
+
+  const logActivityAndRefresh = useCallback(async (input: BackupActivityAppendInput) => {
+    try {
+      await appendBackupActivity(input);
+    } catch (err) {
+      console.warn('[BackupActivityLog] append failed:', err);
+      return;
+    }
+    try {
+      const entries = await loadRecentActivities(10);
+      const safeEntries = entries ?? [];
+      activityEntriesRef.current = safeEntries;
+      setActivityEntries(safeEntries);
+      setActivityError(null);
+    } catch {
+      // 刷新失败不阻塞主流程
+    }
+  }, []);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -522,7 +530,7 @@ export const BoardDock = () => {
       const flushed = await persistenceFacade.flushNow();
       if (!flushed) {
         setZipFeedback({ status: 'error', message: '备份失败：当前数据尚未成功写入磁盘，请稍后重试。' });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'local-backup',
           status: 'failed',
           level: 'error',
@@ -539,7 +547,7 @@ export const BoardDock = () => {
           status: 'success',
           message: `备份成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。${result.backupPath ? `\n${result.backupPath}` : ''}`,
         });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'local-backup',
           status: 'success',
           level: 'info',
@@ -550,7 +558,7 @@ export const BoardDock = () => {
         });
       } else {
         setZipFeedback({ status: 'error', message: `备份失败：${result.error ?? '未知错误'}` });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'local-backup',
           status: 'failed',
           level: 'error',
@@ -562,7 +570,7 @@ export const BoardDock = () => {
       }
     } catch (err) {
       setZipFeedback({ status: 'error', message: `备份失败：${formatUnknownError(err)}` });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'local-backup',
         status: 'failed',
         level: 'error',
@@ -696,7 +704,7 @@ export const BoardDock = () => {
           status: 'error',
           message: formatValidationErrorMessage(validation.errors),
         });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'local-restore',
           status: 'failed',
           level: 'error',
@@ -717,7 +725,7 @@ export const BoardDock = () => {
 
       const confirmed = await confirm({ title: '覆盖恢复确认', message: buildRestoreSummaryMessage(summary), kind: 'danger' });
       if (!confirmed) {
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'local-restore',
           status: 'cancelled',
           level: 'info',
@@ -731,7 +739,7 @@ export const BoardDock = () => {
       const flushed = await persistenceFacade.flushNow();
       if (!flushed) {
         setZipFeedback({ status: 'error', message: '恢复失败：当前数据尚未成功写入磁盘，请稍后重试。' });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'local-restore',
           status: 'failed',
           level: 'error',
@@ -753,7 +761,7 @@ export const BoardDock = () => {
       const result = await restoreLocalBackup(sourceZipPath);
       if (!result.success) {
         setZipFeedback({ status: 'error', message: `恢复失败：${result.error ?? '未知错误'}` });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'local-restore',
           status: 'failed',
           level: 'error',
@@ -768,7 +776,7 @@ export const BoardDock = () => {
       const applied = await applyRestoredDiskData();
       if (!applied) {
         setZipFeedback({ status: 'error', message: '恢复成功但无法读取磁盘数据，请重启应用。' });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'local-restore',
           status: 'partial',
           level: 'warning',
@@ -786,7 +794,7 @@ export const BoardDock = () => {
         status: 'success',
         message: `恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
       });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'local-restore',
         status: 'success',
         level: 'info',
@@ -796,7 +804,7 @@ export const BoardDock = () => {
       });
     } catch (err) {
       setZipFeedback({ status: 'error', message: `恢复失败：${formatUnknownError(err)}` });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'local-restore',
         status: 'failed',
         level: 'error',
@@ -822,7 +830,7 @@ export const BoardDock = () => {
   const requireWebdavCredentials = (): boolean => {
     if (webdavDraft.password.trim() || webdavPasswordSaved) return true;
     setWebdavFeedback({ status: 'error', message: '请先输入密码或在设置中勾选"记住密码"。' });
-    safeLogActivity({
+    void logActivityAndRefresh({
       operation: 'credential-status',
       status: 'skipped',
       level: 'warning',
@@ -836,7 +844,7 @@ export const BoardDock = () => {
   const buildWebdavConfig = (): WebDavBackupService.WebDavConfig | null => {
     if (!webdavDraft.serverUrl.trim() || !webdavDraft.username.trim()) {
       setWebdavFeedback({ status: 'error', message: '请填写服务器地址和用户名。' });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'credential-status',
         status: 'skipped',
         level: 'warning',
@@ -914,18 +922,18 @@ export const BoardDock = () => {
         }
         if (result.secretCleanupWarning) {
           setWebdavFeedback({ status: 'info', message: result.secretCleanupWarning });
-          safeLogActivity({ operation: 'credential-status', status: 'partial', level: 'warning', message: 'secret_cleanup_warning', startedAt: Date.now(), finishedAt: Date.now() });
+          void logActivityAndRefresh({ operation: 'credential-status', status: 'partial', level: 'warning', message: 'secret_cleanup_warning', startedAt: Date.now(), finishedAt: Date.now() });
         } else {
           setWebdavFeedback({ status: 'info', message: '配置已清除。' });
-          safeLogActivity({ operation: 'credential-status', status: 'success', level: 'info', startedAt: Date.now(), finishedAt: Date.now() });
+          void logActivityAndRefresh({ operation: 'credential-status', status: 'success', level: 'info', startedAt: Date.now(), finishedAt: Date.now() });
         }
       } else {
         setWebdavFeedback({ status: 'error', message: `清除失败：${result.error ?? '未知错误'}` });
-        safeLogActivity({ operation: 'credential-status', status: 'failed', level: 'error', message: result.error ?? '清除失败', startedAt: Date.now(), finishedAt: Date.now() });
+        void logActivityAndRefresh({ operation: 'credential-status', status: 'failed', level: 'error', message: result.error ?? '清除失败', startedAt: Date.now(), finishedAt: Date.now() });
       }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `清除失败：${formatUnknownError(err)}` });
-      safeLogActivity({ operation: 'credential-status', status: 'failed', level: 'error', message: formatUnknownError(err), startedAt: Date.now(), finishedAt: Date.now() });
+      void logActivityAndRefresh({ operation: 'credential-status', status: 'failed', level: 'error', message: formatUnknownError(err), startedAt: Date.now(), finishedAt: Date.now() });
     } finally {
       setWebdavOperation('idle');
     }
@@ -943,7 +951,7 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'success', message: '连接测试成功。' });
       } else {
         setWebdavFeedback({ status: 'error', message: `连接失败：${formatWebdavError(result.error ?? '未知错误')}` });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'credential-status',
           status: 'failed',
           level: 'error',
@@ -954,7 +962,7 @@ export const BoardDock = () => {
       }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `连接失败：${formatWebdavError(formatUnknownError(err))}` });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'credential-status',
         status: 'failed',
         level: 'error',
@@ -980,7 +988,7 @@ export const BoardDock = () => {
       if (backups.length === 0) {
         setWebdavFeedback({ status: 'info', message: '远端无备份文件。' });
       }
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'remote-list',
         status: 'success',
         level: 'info',
@@ -990,7 +998,7 @@ export const BoardDock = () => {
       });
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `获取备份列表失败：${formatWebdavError(formatUnknownError(err))}` });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'remote-list',
         status: 'failed',
         level: 'error',
@@ -1025,7 +1033,7 @@ export const BoardDock = () => {
       );
       if (result.success) {
         setWebdavFeedback({ status: 'success', message: `远端备份已创建：${result.remoteFileName ?? '完成'}` });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-backup',
           status: 'success',
           level: 'info',
@@ -1039,7 +1047,7 @@ export const BoardDock = () => {
           setWebdavBackups(backups);
         } catch {
           // list refresh failure is non-critical
-          safeLogActivity({
+          void logActivityAndRefresh({
             operation: 'remote-list',
             status: 'failed',
             level: 'error',
@@ -1082,7 +1090,7 @@ export const BoardDock = () => {
       } else {
         setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatWebdavError(result.error ?? '未知错误')}` });
         const isBusy = result.error === 'busy' || result.errorStage === 'single-flight';
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-backup',
           status: isBusy ? 'skipped' : 'failed',
           level: isBusy ? 'info' : 'error',
@@ -1121,6 +1129,14 @@ export const BoardDock = () => {
       }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `创建远端备份失败：${formatWebdavError(formatUnknownError(err))}` });
+      void logActivityAndRefresh({
+        operation: 'remote-backup',
+        status: 'failed',
+        level: 'error',
+        message: formatWebdavError(formatUnknownError(err)),
+        startedAt,
+        finishedAt: Date.now(),
+      });
     } finally {
       setWebdavOperation('idle');
     }
@@ -1141,7 +1157,7 @@ export const BoardDock = () => {
     const deleteHandle = tryStartBackupJob('manual-delete-backup');
     if (!deleteHandle) {
       setWebdavFeedback({ status: 'error', message: '删除失败：已有备份任务运行中，请稍后重试。' });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'remote-delete',
         status: 'skipped',
         level: 'info',
@@ -1160,7 +1176,7 @@ export const BoardDock = () => {
       const result = await WebDavBackupService.deleteBackup(config, fileName);
       if (result.success) {
         setWebdavFeedback({ status: 'success', message: '远端备份已删除。' });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-delete',
           status: 'success',
           level: 'info',
@@ -1176,7 +1192,7 @@ export const BoardDock = () => {
         }
       } else {
         setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${formatWebdavError(result.error ?? '未知错误')}` });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-delete',
           status: 'failed',
           level: 'error',
@@ -1188,7 +1204,7 @@ export const BoardDock = () => {
       }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `删除远端备份失败：${formatWebdavError(formatUnknownError(err))}` });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'remote-delete',
         status: 'failed',
         level: 'error',
@@ -1218,7 +1234,7 @@ export const BoardDock = () => {
     let restoreJobHandle: BackupJobHandle | null = tryStartBackupJob('remote-restore');
     if (!restoreJobHandle) {
       setWebdavFeedback({ status: 'error', message: '恢复失败：已有备份任务运行中，请稍后重试。' });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'remote-restore',
         status: 'skipped',
         level: 'info',
@@ -1239,7 +1255,7 @@ export const BoardDock = () => {
       const dlResult = await WebDavBackupService.downloadBackup(config, fileName);
       if (!dlResult.success || !dlResult.downloadToken) {
         setWebdavFeedback({ status: 'error', message: `下载失败：${formatWebdavError(dlResult.error ?? '未知错误')}` });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-restore',
           status: 'failed',
           level: 'error',
@@ -1256,7 +1272,7 @@ export const BoardDock = () => {
       const resolveResult = await WebDavBackupService.resolveDownloadedBackup(downloadToken);
       if (!resolveResult.success || !resolveResult.localPath) {
         setWebdavFeedback({ status: 'error', message: `解析下载文件失败：${formatWebdavError(resolveResult.error ?? '未知错误')}` });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-restore',
           status: 'failed',
           level: 'error',
@@ -1274,7 +1290,7 @@ export const BoardDock = () => {
           status: 'error',
           message: formatValidationErrorMessage(validation.errors),
         });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-restore',
           status: 'failed',
           level: 'error',
@@ -1296,7 +1312,7 @@ export const BoardDock = () => {
 
       const restoreConfirmed = await confirm({ title: '覆盖恢复确认', message: buildRestoreSummaryMessage(summary), kind: 'danger' });
       if (!restoreConfirmed) {
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-restore',
           status: 'cancelled',
           level: 'info',
@@ -1311,7 +1327,7 @@ export const BoardDock = () => {
       const flushed = await persistenceFacade.flushNow();
       if (!flushed) {
         setWebdavFeedback({ status: 'error', message: '恢复失败：当前数据尚未成功写入磁盘，请稍后重试。' });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-restore',
           status: 'failed',
           level: 'error',
@@ -1328,7 +1344,7 @@ export const BoardDock = () => {
       const result = await restoreLocalBackup(resolveResult.localPath);
       if (!result.success) {
         setWebdavFeedback({ status: 'error', message: `恢复失败：${formatWebdavError(result.error ?? '未知错误')}` });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-restore',
           status: 'failed',
           level: 'error',
@@ -1344,7 +1360,7 @@ export const BoardDock = () => {
       const applied = await applyRestoredDiskData();
       if (!applied) {
         setWebdavFeedback({ status: 'error', message: '恢复成功但无法读取磁盘数据，请重启应用。' });
-        safeLogActivity({
+        void logActivityAndRefresh({
           operation: 'remote-restore',
           status: 'partial',
           level: 'warning',
@@ -1363,7 +1379,7 @@ export const BoardDock = () => {
         status: 'success',
         message: `远端恢复成功：${result.noteCount} 条便签，${result.boardCount} 个看板，${result.attachmentCount} 个图片文件。`,
       });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'remote-restore',
         status: 'success',
         level: 'info',
@@ -1374,7 +1390,7 @@ export const BoardDock = () => {
       });
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `恢复失败：${formatWebdavError(formatUnknownError(err))}` });
-      safeLogActivity({
+      void logActivityAndRefresh({
         operation: 'remote-restore',
         status: 'failed',
         level: 'error',
@@ -1618,7 +1634,7 @@ export const BoardDock = () => {
           status: 'success',
           message: `清理完成：已删除 ${result.deletedCount} 个备份，保留 ${result.retainedCount} 个。${result.missingCount > 0 ? `（${result.missingCount} 个已不存在）` : ''}`,
         });
-        safeLogActivity({ operation: 'retention-cleanup', status: 'success', level: 'info', message: `deleted=${result.deletedCount} retained=${result.retainedCount} missing=${result.missingCount}`, startedAt: Date.now(), finishedAt: Date.now() });
+        void logActivityAndRefresh({ operation: 'retention-cleanup', status: 'success', level: 'info', message: `deleted=${result.deletedCount} retained=${result.retainedCount} missing=${result.missingCount}`, startedAt: Date.now(), finishedAt: Date.now() });
       } else {
         const detail = result.failedFileName
           ? `删除 ${result.failedFileName} 时失败：${result.error ?? '未知错误'}`
@@ -1627,7 +1643,7 @@ export const BoardDock = () => {
           status: 'error',
           message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个${result.missingCount > 0 ? `，${result.missingCount} 个已不存在` : ''}。${detail}`,
         });
-        safeLogActivity({ operation: 'retention-cleanup', status: 'partial', level: 'warning', message: `deleted=${result.deletedCount} retained=${result.retainedCount} missing=${result.missingCount}`, startedAt: Date.now(), finishedAt: Date.now() });
+        void logActivityAndRefresh({ operation: 'retention-cleanup', status: 'partial', level: 'warning', message: `deleted=${result.deletedCount} retained=${result.retainedCount} missing=${result.missingCount}`, startedAt: Date.now(), finishedAt: Date.now() });
       }
 
       const retentionStatePatch: Partial<ScheduledRemoteBackupState> = {
@@ -1676,7 +1692,7 @@ export const BoardDock = () => {
       }
     } catch (err) {
       setRetentionFeedback({ status: 'error', message: `清理失败：${formatUnknownError(err)}` });
-      safeLogActivity({ operation: 'retention-cleanup', status: 'failed', level: 'error', message: formatUnknownError(err), startedAt: Date.now(), finishedAt: Date.now() });
+      void logActivityAndRefresh({ operation: 'retention-cleanup', status: 'failed', level: 'error', message: formatUnknownError(err), startedAt: Date.now(), finishedAt: Date.now() });
     } finally {
       setRetentionBusy('idle');
     }
@@ -1714,7 +1730,7 @@ export const BoardDock = () => {
     try {
       await ScheduledRemoteBackupConfigService.saveState(updated);
       await getSchedulerService()?.reloadState();
-      safeLogActivity({ operation: 'retention-cliff-drop', status: 'success', level: 'info', message: 'baseline_confirmed', startedAt: Date.now(), finishedAt: Date.now() });
+      void logActivityAndRefresh({ operation: 'retention-cliff-drop', status: 'success', level: 'info', message: 'baseline_confirmed', startedAt: Date.now(), finishedAt: Date.now() });
     } catch (err) {
       setScheduledState(scheduledState);
       setRetentionFeedback({ status: 'error', message: `保存基线确认失败：${formatUnknownError(err)}` });
@@ -1746,7 +1762,7 @@ export const BoardDock = () => {
     try {
       await ScheduledRemoteBackupConfigService.saveState(updated);
       await getSchedulerService()?.reloadState();
-      safeLogActivity({ operation: 'retention-cliff-drop', status: 'success', level: 'info', message: 'warning_dismissed', startedAt: Date.now(), finishedAt: Date.now() });
+      void logActivityAndRefresh({ operation: 'retention-cliff-drop', status: 'success', level: 'info', message: 'warning_dismissed', startedAt: Date.now(), finishedAt: Date.now() });
     } catch (err) {
       setScheduledState(scheduledState);
       setRetentionFeedback({ status: 'error', message: `清除警告失败：${formatUnknownError(err)}` });

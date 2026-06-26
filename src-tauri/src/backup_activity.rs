@@ -8,6 +8,7 @@
 //! - 最大条目数：100（超出时移除最旧条目）
 //! - Rust 侧脱敏：message 字段自动过滤敏感信息并截断至 240 字符
 
+use fs4::fs_std::FileExt;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -395,12 +396,28 @@ pub async fn backup_activity_list(
 /// - 自动脱敏 message 字段
 /// - 自动填充空 id（生成 UUID）
 /// - 超过 100 条时移除最旧的条目
+/// - 使用文件锁防止并发写入导致数据丢失
 #[tauri::command]
 pub async fn backup_activity_append(
     app: tauri::AppHandle,
     entry: BackupActivityEntry,
 ) -> Result<(), String> {
     let path = log_file_path(&app)?;
+
+    // 打开或创建日志文件用于加锁
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("打开日志文件失败: {e}"))?;
+
+    // 获取独占锁，防止并发写入
+    lock_file
+        .lock_exclusive()
+        .map_err(|e| format!("获取日志文件锁失败: {e}"))?;
+
+    // 在锁保护下执行 load -> push -> save
     let mut log = load_log_from_path(&path)?;
 
     // 脱敏处理
@@ -419,7 +436,12 @@ pub async fn backup_activity_append(
         log.entries.drain(..drain_count);
     }
 
-    save_log_to_path(&path, &log)
+    let result = save_log_to_path(&path, &log);
+
+    // 释放锁（文件关闭时自动释放，但显式 drop 更清晰）
+    drop(lock_file);
+
+    result
 }
 
 /// 清除所有备份活动日志条目。

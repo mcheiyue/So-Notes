@@ -93,6 +93,9 @@ export interface BackupActivityAppendInput {
 const SENSITIVE_PATTERN =
   /(password|token|authorization|secret)[^\s,;)}\]]{0,100}/gi;
 
+/** Bearer token 模式：匹配 Bearer 后面的 token 值 */
+const BEARER_TOKEN_PATTERN = /(Bearer\s+)[^\s,;)}\]]{1,100}/gi;
+
 /** URL userinfo 模式：匹配 scheme://user:pass@host */
 const URL_USERINFO_PATTERN =
   /((?:https?|ftp):\/\/)([^@/]+)@/gi;
@@ -108,6 +111,8 @@ export function sanitizeActivityInput(
   let message = input.message;
 
   if (message != null) {
+    // 替换 Bearer token（必须在通用敏感词之前，避免重复替换）
+    message = message.replace(BEARER_TOKEN_PATTERN, '$1[REDACTED]');
     // 替换敏感关键词
     message = message.replace(SENSITIVE_PATTERN, '$1=[REDACTED]');
     // 移除 URL userinfo
@@ -127,6 +132,7 @@ export function sanitizeActivityInput(
     remoteFileName: input.remoteFileName
       ? fileNameFromPath(input.remoteFileName)
       : input.remoteFileName,
+    metrics: sanitizeMetrics(input.metrics),
   };
 }
 
@@ -136,6 +142,22 @@ export function sanitizeActivityInput(
 export function fileNameFromPath(path: string): string {
   const lastSeparator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
   return lastSeparator >= 0 ? path.slice(lastSeparator + 1) : path;
+}
+
+/**
+ * 对 metrics 对象中的文件名字段进行脱敏（提取 basename）。
+ */
+function sanitizeMetrics(
+  metrics: BackupActivityMetrics | null | undefined,
+): BackupActivityMetrics | null | undefined {
+  if (metrics == null) return metrics;
+
+  return {
+    ...metrics,
+    failedFileName: metrics.failedFileName
+      ? fileNameFromPath(metrics.failedFileName)
+      : metrics.failedFileName,
+  };
 }
 
 /**
