@@ -796,6 +796,14 @@ export const BoardDock = () => {
       });
     } catch (err) {
       setZipFeedback({ status: 'error', message: `恢复失败：${formatUnknownError(err)}` });
+      safeLogActivity({
+        operation: 'local-restore',
+        status: 'failed',
+        level: 'error',
+        message: formatUnknownError(err),
+        startedAt,
+        finishedAt: Date.now(),
+      });
     } finally {
       if (restoreJobHandle) {
         restoreJobHandle.release();
@@ -814,12 +822,28 @@ export const BoardDock = () => {
   const requireWebdavCredentials = (): boolean => {
     if (webdavDraft.password.trim() || webdavPasswordSaved) return true;
     setWebdavFeedback({ status: 'error', message: '请先输入密码或在设置中勾选"记住密码"。' });
+    safeLogActivity({
+      operation: 'credential-status',
+      status: 'skipped',
+      level: 'warning',
+      message: '缺少密码',
+      startedAt: Date.now(),
+      finishedAt: Date.now(),
+    });
     return false;
   };
 
   const buildWebdavConfig = (): WebDavBackupService.WebDavConfig | null => {
     if (!webdavDraft.serverUrl.trim() || !webdavDraft.username.trim()) {
       setWebdavFeedback({ status: 'error', message: '请填写服务器地址和用户名。' });
+      safeLogActivity({
+        operation: 'credential-status',
+        status: 'skipped',
+        level: 'warning',
+        message: '缺少服务器地址或用户名',
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
       return null;
     }
     return {
@@ -919,9 +943,25 @@ export const BoardDock = () => {
         setWebdavFeedback({ status: 'success', message: '连接测试成功。' });
       } else {
         setWebdavFeedback({ status: 'error', message: `连接失败：${formatWebdavError(result.error ?? '未知错误')}` });
+        safeLogActivity({
+          operation: 'credential-status',
+          status: 'failed',
+          level: 'error',
+          message: formatWebdavError(result.error ?? '未知错误'),
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+        });
       }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `连接失败：${formatWebdavError(formatUnknownError(err))}` });
+      safeLogActivity({
+        operation: 'credential-status',
+        status: 'failed',
+        level: 'error',
+        message: formatWebdavError(formatUnknownError(err)),
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
     } finally {
       setWebdavOperation('idle');
     }
@@ -1216,6 +1256,15 @@ export const BoardDock = () => {
       const resolveResult = await WebDavBackupService.resolveDownloadedBackup(downloadToken);
       if (!resolveResult.success || !resolveResult.localPath) {
         setWebdavFeedback({ status: 'error', message: `解析下载文件失败：${formatWebdavError(resolveResult.error ?? '未知错误')}` });
+        safeLogActivity({
+          operation: 'remote-restore',
+          status: 'failed',
+          level: 'error',
+          stage: 'resolve',
+          message: formatWebdavError(resolveResult.error ?? '未知错误'),
+          startedAt,
+          finishedAt: Date.now(),
+        });
         return;
       }
 
@@ -1325,6 +1374,14 @@ export const BoardDock = () => {
       });
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `恢复失败：${formatWebdavError(formatUnknownError(err))}` });
+      safeLogActivity({
+        operation: 'remote-restore',
+        status: 'failed',
+        level: 'error',
+        message: formatWebdavError(formatUnknownError(err)),
+        startedAt,
+        finishedAt: Date.now(),
+      });
     } finally {
       if (restoreJobHandle) {
         restoreJobHandle.release();
