@@ -372,6 +372,7 @@ describe('BackupActivityLogService', () => {
       expect(summary).toEqual({
         noteCount: 5,
         boardCount: 1,
+        imageFileCount: 3,
       });
     });
 

@@ -168,6 +168,7 @@ export function toBackupActivitySummary(
     return {
       noteCount: typeof r.noteCount === 'number' ? r.noteCount : null,
       boardCount: typeof r.boardCount === 'number' ? r.boardCount : null,
+      imageFileCount: typeof r.attachmentCount === 'number' ? r.attachmentCount : null,
     };
   }
 

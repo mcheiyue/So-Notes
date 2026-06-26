@@ -406,6 +406,7 @@ export const BoardDock = () => {
           activityEntriesRef.current = safeEntries;
           setActivityEntries(safeEntries);
         }
+        setActivityError(null);
       } catch { /* 轮询失败静默忽略 */ }
     }, 5000);
     return () => { window.clearInterval(intervalId); };

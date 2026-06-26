@@ -574,6 +574,7 @@ export function createScheduledRemoteBackupService(
                 startedAt: startNow,
                 finishedAt: deps.clock(),
                 reasonCode: 'cliff_drop_deferred',
+                remoteFileName: result.remoteFileName ?? null,
                 metrics: {
                   anomalyCodes: retentionPatch.cliffDropLatestAnomalyCodes ?? null,
                 },
@@ -586,6 +587,7 @@ export function createScheduledRemoteBackupService(
                 level: hasError ? 'warning' : 'info',
                 startedAt: startNow,
                 finishedAt: deps.clock(),
+                remoteFileName: result.remoteFileName ?? null,
                 ...(hasError
                   ? {
                       metrics: {

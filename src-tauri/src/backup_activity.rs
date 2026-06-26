@@ -273,22 +273,33 @@ fn remove_url_userinfo(s: &str) -> String {
     s.to_string()
 }
 
+/// 从路径中提取 basename（兼容 Windows `\` 和 Unix `/`）。
+fn extract_basename(name: &str) -> &str {
+    if let Some(pos) = name.rfind(|c| c == '\\' || c == '/') {
+        &name[pos + 1..]
+    } else {
+        name
+    }
+}
+
 /// 对 entry 进行脱敏处理，返回脱敏后的副本。
 fn sanitize_entry(mut entry: BackupActivityEntry) -> BackupActivityEntry {
-    // 脱敏 message 字段
     if let Some(ref msg) = entry.message {
         entry.message = Some(sanitize_message(msg));
     }
 
-    // 脱敏 remote_file_name 和 local_file_name（移除可能的 userinfo）
     if let Some(ref name) = entry.remote_file_name {
-        let sanitized = remove_url_userinfo(name);
+        let without_userinfo = remove_url_userinfo(name);
+        let basename = extract_basename(&without_userinfo);
+        let sanitized = basename.to_string();
         if sanitized != *name {
             entry.remote_file_name = Some(sanitized);
         }
     }
     if let Some(ref name) = entry.local_file_name {
-        let sanitized = remove_url_userinfo(name);
+        let without_userinfo = remove_url_userinfo(name);
+        let basename = extract_basename(&without_userinfo);
+        let sanitized = basename.to_string();
         if sanitized != *name {
             entry.local_file_name = Some(sanitized);
         }
@@ -837,5 +848,66 @@ mod tests {
     #[test]
     fn log_version_is_one() {
         assert_eq!(LOG_VERSION, 1);
+    }
+
+    #[test]
+    fn extract_basename_unix_path() {
+        assert_eq!(extract_basename("/tmp/backups/file.zip"), "file.zip");
+    }
+
+    #[test]
+    fn extract_basename_windows_path() {
+        assert_eq!(extract_basename("C:\\Users\\test\\file.zip"), "file.zip");
+    }
+
+    #[test]
+    fn extract_basename_already_basename() {
+        assert_eq!(extract_basename("file.zip"), "file.zip");
+    }
+
+    #[test]
+    fn sanitize_entry_strips_local_path_to_basename() {
+        let entry = BackupActivityEntry {
+            id: "test".into(),
+            operation: "local-backup".into(),
+            status: "success".into(),
+            level: "info".into(),
+            started_at: 0,
+            finished_at: 0,
+            trigger: None,
+            stage: None,
+            reason_code: None,
+            error_code: None,
+            message: None,
+            remote_file_name: None,
+            local_file_name: Some("C:\\Users\\test\\backups\\SoNotes_Backup_20260626120000.zip".into()),
+            summary: None,
+            metrics: None,
+        };
+        let sanitized = sanitize_entry(entry);
+        assert_eq!(sanitized.local_file_name.as_deref(), Some("SoNotes_Backup_20260626120000.zip"));
+    }
+
+    #[test]
+    fn sanitize_entry_strips_remote_path_to_basename() {
+        let entry = BackupActivityEntry {
+            id: "test".into(),
+            operation: "remote-backup".into(),
+            status: "success".into(),
+            level: "info".into(),
+            started_at: 0,
+            finished_at: 0,
+            trigger: None,
+            stage: None,
+            reason_code: None,
+            error_code: None,
+            message: None,
+            remote_file_name: Some("/backups/SoNotes_Backup_20260626120000.zip".into()),
+            local_file_name: None,
+            summary: None,
+            metrics: None,
+        };
+        let sanitized = sanitize_entry(entry);
+        assert_eq!(sanitized.remote_file_name.as_deref(), Some("SoNotes_Backup_20260626120000.zip"));
     }
 }
