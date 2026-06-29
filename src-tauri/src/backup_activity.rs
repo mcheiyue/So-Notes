@@ -20,6 +20,7 @@ use tauri::Manager;
 
 /// 日志文件名。
 const LOG_FILENAME: &str = "backup-activity-log.json";
+const LOCK_FILENAME: &str = "backup-activity-log.lock";
 
 /// 日志文件格式版本。
 const LOG_VERSION: u32 = 1;
@@ -120,6 +121,15 @@ fn log_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .app_config_dir()
         .map_err(|e| format!("获取应用配置目录失败: {e}"))?;
     Ok(config_dir.join(LOG_FILENAME))
+}
+
+/// 获取锁文件路径（与日志文件同目录，独立文件避免 Windows 上句柄冲突）。
+fn lock_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("获取应用配置目录失败: {e}"))?;
+    Ok(config_dir.join(LOCK_FILENAME))
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +433,7 @@ pub async fn backup_activity_append(
     entry: BackupActivityEntry,
 ) -> Result<(), String> {
     let path = log_file_path(&app)?;
+    let lock_path = lock_file_path(&app)?;
 
     // 确保父目录存在（首次安装时配置目录可能尚未创建）
     if let Some(parent) = path.parent() {
@@ -432,15 +443,14 @@ pub async fn backup_activity_append(
         }
     }
 
-    // 打开或创建日志文件用于加锁
+    // 使用独立锁文件加锁，避免 Windows 上日志文件句柄与原子替换冲突
     let lock_file = std::fs::OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
-        .open(&path)
-        .map_err(|e| format!("打开日志文件失败: {e}"))?;
+        .open(&lock_path)
+        .map_err(|e| format!("打开锁文件失败: {e}"))?;
 
-    // 获取独占锁，防止并发写入
     lock_file
         .lock_exclusive()
         .map_err(|e| format!("获取日志文件锁失败: {e}"))?;
@@ -478,6 +488,7 @@ pub async fn backup_activity_append(
 #[tauri::command]
 pub async fn backup_activity_clear(app: tauri::AppHandle) -> Result<(), String> {
     let path = log_file_path(&app)?;
+    let lock_path = lock_file_path(&app)?;
 
     // 确保父目录存在
     if let Some(parent) = path.parent() {
@@ -487,13 +498,13 @@ pub async fn backup_activity_clear(app: tauri::AppHandle) -> Result<(), String> 
         }
     }
 
-    // 打开或创建日志文件用于加锁（与 append 共享同一把锁）
+    // 使用独立锁文件加锁（与 append 共享同一把锁）
     let lock_file = std::fs::OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
-        .open(&path)
-        .map_err(|e| format!("打开日志文件失败: {e}"))?;
+        .open(&lock_path)
+        .map_err(|e| format!("打开锁文件失败: {e}"))?;
 
     lock_file
         .lock_exclusive()
