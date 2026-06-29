@@ -520,6 +520,14 @@ export const BoardDock = () => {
     const localJobHandle = tryStartBackupJob('manual-local-backup');
     if (!localJobHandle) {
       setZipFeedback({ status: 'error', message: '备份失败：已有备份任务正在运行，请稍后重试。' });
+      void logActivityAndRefresh({
+        operation: 'local-backup',
+        status: 'skipped',
+        level: 'info',
+        message: '已有备份任务正在运行',
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
       return;
     }
 
@@ -755,6 +763,14 @@ export const BoardDock = () => {
       restoreJobHandle = tryStartBackupJob('local-restore');
       if (!restoreJobHandle) {
         setZipFeedback({ status: 'error', message: '恢复失败：已有备份任务运行中，请稍后重试。' });
+        void logActivityAndRefresh({
+          operation: 'local-restore',
+          status: 'skipped',
+          level: 'info',
+          message: '已有备份任务正在运行',
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+        });
         return;
       }
 

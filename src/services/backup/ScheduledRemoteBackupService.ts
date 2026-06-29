@@ -621,8 +621,8 @@ export function createScheduledRemoteBackupService(
           });
           await safeAppendActivity({
             operation: 'retention-cleanup',
-            status: 'partial',
-            level: 'warning',
+            status: 'failed',
+            level: 'error',
             startedAt: startNow,
             finishedAt: deps.clock(),
             message: errorMsg,
@@ -655,7 +655,7 @@ export function createScheduledRemoteBackupService(
 
         patchState(patch);
         await safeAppendActivity({
-          operation: 'scheduled-remote-backup',
+          operation: (trigger === 'scheduled-interval' || trigger === 'quiet-period') ? 'scheduled-remote-backup' : 'remote-backup',
           status: 'failed',
           level: 'error',
           startedAt: startNow,
@@ -684,7 +684,7 @@ export function createScheduledRemoteBackupService(
       });
       await deps.saveScheduledState(internalState);
       await safeAppendActivity({
-        operation: 'scheduled-remote-backup',
+        operation: (trigger === 'scheduled-interval' || trigger === 'quiet-period') ? 'scheduled-remote-backup' : 'remote-backup',
         status: 'failed',
         level: 'error',
         startedAt: startNow,

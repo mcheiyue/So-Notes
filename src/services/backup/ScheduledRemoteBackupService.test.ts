@@ -2115,7 +2115,7 @@ describe('ScheduledRemoteBackupService', () => {
 
       expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
         expect.objectContaining({
-          operation: 'scheduled-remote-backup',
+          operation: 'remote-backup',
           status: 'failed',
           level: 'error',
           stage: 'upload',
@@ -2373,7 +2373,7 @@ describe('ScheduledRemoteBackupService', () => {
 
       expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
         expect.objectContaining({
-          operation: 'scheduled-remote-backup',
+          operation: 'remote-backup',
           status: 'failed',
           stage: 'upload',
         }),
