@@ -244,8 +244,9 @@ fn sanitize_message(message: &str) -> String {
         if has_sensitive_keyword {
             result.push_str("[REDACTED]");
         } else {
-            // 移除 URL userinfo：`://user:pass@` → `://`
-            let sanitized = remove_url_userinfo(line);
+            // 先脱敏 Bearer/Basic token，再移除 URL userinfo
+            let token_redacted = redact_auth_tokens(line);
+            let sanitized = remove_url_userinfo(&token_redacted);
             result.push_str(&sanitized);
         }
         result.push('\n');
@@ -277,6 +278,30 @@ fn remove_url_userinfo(s: &str) -> String {
                 let mut result = String::with_capacity(s.len());
                 result.push_str(&s[..after_protocol]);
                 result.push_str(&s[after_protocol + at_pos + 1..]);
+                return result;
+            }
+        }
+    }
+    s.to_string()
+}
+
+/// 脱敏 Bearer/Basic 认证 token（大小写无关）。
+/// 匹配 `Bearer <token>` 或 `Basic <token>` 模式，替换为 `[REDACTED]`。
+fn redact_auth_tokens(s: &str) -> String {
+    let lower = s.to_lowercase();
+    for scheme in &["bearer ", "basic "] {
+        if let Some(pos) = lower.find(scheme) {
+            let token_start = pos + scheme.len();
+            // token 结束于行尾、空格、逗号或分号
+            let token_end = s[token_start..]
+                .find(|c: char| c == ' ' || c == ',' || c == ';' || c == '\n')
+                .map(|i| token_start + i)
+                .unwrap_or(s.len());
+            if token_end > token_start {
+                let mut result = String::with_capacity(s.len());
+                result.push_str(&s[..pos]);
+                result.push_str("[REDACTED]");
+                result.push_str(&s[token_end..]);
                 return result;
             }
         }
