@@ -114,7 +114,7 @@ export function sanitizeActivityInput(
     // 替换 Bearer token（必须在通用敏感词之前，避免重复替换）
     message = message.replace(BEARER_TOKEN_PATTERN, '$1[REDACTED]');
     // 替换敏感关键词
-    message = message.replace(SENSITIVE_PATTERN, (match, g1, g2, g3) => {
+    message = message.replace(SENSITIVE_PATTERN, (_match, g1, g2, g3) => {
       const keyword = (g1 ?? g2 ?? g3).toLowerCase();
       return `${keyword}=[REDACTED]`;
     });
