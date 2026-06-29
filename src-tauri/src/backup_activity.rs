@@ -306,6 +306,18 @@ fn sanitize_entry(mut entry: BackupActivityEntry) -> BackupActivityEntry {
         }
     }
 
+    // metrics.failedFileName 也可能包含绝对路径或 URL 凭证
+    if let Some(ref mut metrics) = entry.metrics {
+        if let Some(ref fname) = metrics.failed_file_name {
+            let without_userinfo = remove_url_userinfo(fname);
+            let basename = extract_basename(&without_userinfo);
+            let sanitized = basename.to_string();
+            if sanitized != *fname {
+                metrics.failed_file_name = Some(sanitized);
+            }
+        }
+    }
+
     entry
 }
 
@@ -333,7 +345,7 @@ fn generate_uuid() -> String {
 // 文件读写
 // ---------------------------------------------------------------------------
 
-/// 从文件加载日志。文件不存在时返回空日志；解析失败返回明确错误。
+/// 从文件加载日志。文件不存在或为空时返回空日志；解析失败返回明确错误。
 fn load_log_from_path(path: &Path) -> Result<BackupActivityLogFile, String> {
     if !path.exists() {
         return Ok(BackupActivityLogFile {
@@ -344,6 +356,14 @@ fn load_log_from_path(path: &Path) -> Result<BackupActivityLogFile, String> {
 
     let content =
         std::fs::read_to_string(path).map_err(|e| format!("读取备份活动日志文件失败: {e}"))?;
+
+    // 空文件（首次创建或清空场景）视为空日志
+    if content.trim().is_empty() {
+        return Ok(BackupActivityLogFile {
+            version: LOG_VERSION,
+            entries: Vec::new(),
+        });
+    }
 
     let file: BackupActivityLogFile =
         serde_json::from_str(&content).map_err(|e| format!("解析备份活动日志文件失败: {e}"))?;
@@ -404,6 +424,14 @@ pub async fn backup_activity_append(
 ) -> Result<(), String> {
     let path = log_file_path(&app)?;
 
+    // 确保父目录存在（首次安装时配置目录可能尚未创建）
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建日志目录失败: {e}"))?;
+        }
+    }
+
     // 打开或创建日志文件用于加锁
     let lock_file = std::fs::OpenOptions::new()
         .create(true)
@@ -446,15 +474,39 @@ pub async fn backup_activity_append(
 
 /// 清除所有备份活动日志条目。
 ///
-/// 写入一个空的日志文件（保留版本号）。
+/// 写入一个空的日志文件（保留版本号）。使用与 append 相同的文件锁防止并发丢失。
 #[tauri::command]
 pub async fn backup_activity_clear(app: tauri::AppHandle) -> Result<(), String> {
     let path = log_file_path(&app)?;
+
+    // 确保父目录存在
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建日志目录失败: {e}"))?;
+        }
+    }
+
+    // 打开或创建日志文件用于加锁（与 append 共享同一把锁）
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("打开日志文件失败: {e}"))?;
+
+    lock_file
+        .lock_exclusive()
+        .map_err(|e| format!("获取日志文件锁失败: {e}"))?;
+
     let log = BackupActivityLogFile {
         version: LOG_VERSION,
         entries: Vec::new(),
     };
-    save_log_to_path(&path, &log)
+    let result = save_log_to_path(&path, &log);
+
+    drop(lock_file);
+    result
 }
 
 // ===========================================================================
