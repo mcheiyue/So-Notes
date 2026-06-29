@@ -31,7 +31,7 @@ import type {
 } from './WebDavBackupService';
 import type { StorageData } from '../../store/types';
 import { orchestratePostBackupRetentionCleanup } from './RetentionCleanupOrchestrator';
-import type { BackupActivityAppendInput } from './BackupActivityLogService';
+import type { BackupActivityAppendInput, BackupActivityOperation } from './BackupActivityLogService';
 
 // ---------------------------------------------------------------------------
 // 模块级服务实例 accessor
@@ -217,6 +217,12 @@ export function createScheduledRemoteBackupService(
     }
   }
 
+  function backupOperationForTrigger(trigger: RemoteBackupTrigger): BackupActivityOperation {
+    return trigger === 'scheduled-interval' || trigger === 'quiet-period'
+      ? 'scheduled-remote-backup'
+      : 'remote-backup';
+  }
+
   // -------------------------------------------------------------------------
   // 初始化
   // -------------------------------------------------------------------------
@@ -367,7 +373,7 @@ export function createScheduledRemoteBackupService(
         });
         await deps.saveScheduledState(internalState);
         await safeAppendActivity({
-          operation: 'scheduled-remote-backup',
+          operation: backupOperationForTrigger(trigger),
           status: 'failed',
           level: 'error',
           startedAt: startNow,
@@ -397,7 +403,7 @@ export function createScheduledRemoteBackupService(
         });
         await deps.saveScheduledState(internalState);
         await safeAppendActivity({
-          operation: 'scheduled-remote-backup',
+          operation: backupOperationForTrigger(trigger),
           status: 'failed',
           level: 'error',
           startedAt: startNow,
@@ -424,7 +430,7 @@ export function createScheduledRemoteBackupService(
         });
         await deps.saveScheduledState(internalState);
         await safeAppendActivity({
-          operation: 'scheduled-remote-backup',
+          operation: backupOperationForTrigger(trigger),
           status: 'skipped',
           level: 'warning',
           startedAt: startNow,
@@ -461,7 +467,7 @@ export function createScheduledRemoteBackupService(
           });
           await deps.saveScheduledState(internalState);
           await safeAppendActivity({
-            operation: 'scheduled-remote-backup',
+            operation: backupOperationForTrigger(trigger),
             status: 'failed',
             level: 'error',
             startedAt: startNow,
@@ -495,7 +501,7 @@ export function createScheduledRemoteBackupService(
 
           await deps.saveScheduledState(internalState);
           await safeAppendActivity({
-            operation: 'scheduled-remote-backup',
+            operation: backupOperationForTrigger(trigger),
             status: 'skipped',
             level: 'info',
             startedAt: startNow,

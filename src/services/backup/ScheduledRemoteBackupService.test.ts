@@ -2141,7 +2141,7 @@ describe('ScheduledRemoteBackupService', () => {
 
       expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
         expect.objectContaining({
-          operation: 'scheduled-remote-backup',
+          operation: 'remote-backup',
           status: 'skipped',
           level: 'info',
           reasonCode: 'no_local_changes',
@@ -2167,7 +2167,7 @@ describe('ScheduledRemoteBackupService', () => {
 
       expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
         expect.objectContaining({
-          operation: 'scheduled-remote-backup',
+          operation: 'remote-backup',
           status: 'failed',
           level: 'error',
           stage: 'config',
@@ -2195,7 +2195,7 @@ describe('ScheduledRemoteBackupService', () => {
 
       expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
         expect.objectContaining({
-          operation: 'scheduled-remote-backup',
+          operation: 'remote-backup',
           status: 'failed',
           level: 'error',
           stage: 'credential',
@@ -2218,7 +2218,7 @@ describe('ScheduledRemoteBackupService', () => {
 
       expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
         expect.objectContaining({
-          operation: 'scheduled-remote-backup',
+          operation: 'remote-backup',
           status: 'skipped',
           level: 'warning',
           reasonCode: 'credential_action_required',
@@ -2242,7 +2242,7 @@ describe('ScheduledRemoteBackupService', () => {
 
       expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
         expect.objectContaining({
-          operation: 'scheduled-remote-backup',
+          operation: 'remote-backup',
           status: 'failed',
           level: 'error',
           stage: 'flush',
