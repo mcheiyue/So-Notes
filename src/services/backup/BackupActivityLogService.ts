@@ -89,9 +89,9 @@ export interface BackupActivityAppendInput {
 // 脱敏与工具函数
 // ---------------------------------------------------------------------------
 
-/** 敏感词模式：匹配 password / token / authorization / secret（大小写不敏感） */
+/** 敏感词模式：keyword 后跟 :=/_ 分隔符和值，或 keyword 独立出现（后跟空格/逗号/结尾） */
 const SENSITIVE_PATTERN =
-  /(password|token|authorization|secret)[^\s,;)}\]]{0,100}/gi;
+  /(password|token|authorization|secret)[=:]\s*\S+|(password|token|authorization|secret)_\S+|(password|token|authorization|secret)(?=[\s,;)}\]]|$)/gi;
 
 /** Bearer token 模式：匹配 Bearer 后面的 token 值 */
 const BEARER_TOKEN_PATTERN = /(Bearer\s+)[^\s,;)}\]]{1,100}/gi;
@@ -114,7 +114,10 @@ export function sanitizeActivityInput(
     // 替换 Bearer token（必须在通用敏感词之前，避免重复替换）
     message = message.replace(BEARER_TOKEN_PATTERN, '$1[REDACTED]');
     // 替换敏感关键词
-    message = message.replace(SENSITIVE_PATTERN, '$1=[REDACTED]');
+    message = message.replace(SENSITIVE_PATTERN, (match, g1, g2, g3) => {
+      const keyword = (g1 ?? g2 ?? g3).toLowerCase();
+      return `${keyword}=[REDACTED]`;
+    });
     // 移除 URL userinfo
     message = message.replace(URL_USERINFO_PATTERN, '$1[REDACTED]@');
     // 截断

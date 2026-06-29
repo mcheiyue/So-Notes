@@ -185,7 +185,7 @@ describe('BackupActivityLogService', () => {
         ...baseInput,
         message: 'Authorization: Bearer abc123',
       });
-      expect(result.message).toBe('Authorization: Bearer=[REDACTED]');
+      expect(result.message).toBe('authorization=[REDACTED] [REDACTED]');
     });
 
     it('替换 message 中的 secret 关键词', () => {
@@ -211,7 +211,7 @@ describe('BackupActivityLogService', () => {
         ...baseInput,
         message: 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9',
       });
-      expect(result.message).toBe('Authorization: Bearer [REDACTED]');
+      expect(result.message).toBe('authorization=[REDACTED] [REDACTED]');
     });
 
     it('截断超过 240 字符的 message', () => {
