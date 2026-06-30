@@ -265,48 +265,70 @@ fn sanitize_message(message: &str) -> String {
     result
 }
 
-/// 移除 URL 中的 userinfo 部分。
-/// 匹配 `://` 后紧跟的 `user:pass@` 模式。
+/// 移除 URL 中的 userinfo 部分（全局扫描替换）。
+/// 匹配 `://` 后紧跟的 `user:pass@` 模式，替换所有匹配项。
 fn remove_url_userinfo(s: &str) -> String {
-    // 查找 `://` 后面是否有 `user:pass@` 模式
-    if let Some(protocol_end) = s.find("://") {
-        let after_protocol = protocol_end + 3;
-        if let Some(at_pos) = s[after_protocol..].find('@') {
-            // 确保 `://` 和 `@` 之间有 `:`（即 user:pass 格式）
-            let userinfo_region = &s[after_protocol..after_protocol + at_pos];
-            if userinfo_region.contains(':') {
-                let mut result = String::with_capacity(s.len());
-                result.push_str(&s[..after_protocol]);
-                result.push_str(&s[after_protocol + at_pos + 1..]);
-                return result;
+    let mut result = String::with_capacity(s.len());
+    let mut cursor = 0;
+    while cursor < s.len() {
+        if let Some(rel) = s[cursor..].find("://") {
+            let protocol_end = cursor + rel + 3;
+            // 尝试在 `://` 之后找 `@`
+            if let Some(rel_at) = s[protocol_end..].find('@') {
+                let userinfo_region = &s[protocol_end..protocol_end + rel_at];
+                if userinfo_region.contains(':') {
+                    // 找到 user:pass@ → 替换：写入 protocol 部分，跳过 userinfo
+                    result.push_str(&s[cursor..protocol_end]);
+                    cursor = protocol_end + rel_at + 1; // 跳过 `@`
+                    continue;
+                }
             }
+            // 没有 userinfo → 写入到 protocol_end 之后继续
+            result.push_str(&s[cursor..protocol_end]);
+            cursor = protocol_end;
+        } else {
+            // 没有更多 `://` → 写入剩余部分
+            result.push_str(&s[cursor..]);
+            break;
         }
     }
-    s.to_string()
+    result
 }
 
-/// 脱敏 Bearer/Basic 认证 token（大小写无关）。
-/// 匹配 `Bearer <token>` 或 `Basic <token>` 模式，替换为 `[REDACTED]`。
+/// 脱敏 Bearer/Basic 认证 token（大小写无关，全局扫描替换）。
+/// 匹配 `Bearer <token>` 或 `Basic <token>` 模式，替换所有匹配项为 `[REDACTED]`。
 fn redact_auth_tokens(s: &str) -> String {
-    let lower = s.to_lowercase();
-    for scheme in &["bearer ", "basic "] {
-        if let Some(pos) = lower.find(scheme) {
-            let token_start = pos + scheme.len();
-            // token 结束于行尾、空格、逗号或分号
-            let token_end = s[token_start..]
-                .find(|c: char| c == ' ' || c == ',' || c == ';' || c == '\n')
-                .map(|i| token_start + i)
-                .unwrap_or(s.len());
-            if token_end > token_start {
-                let mut result = String::with_capacity(s.len());
-                result.push_str(&s[..pos]);
-                result.push_str("[REDACTED]");
-                result.push_str(&s[token_end..]);
-                return result;
+    let schemes = ["bearer ", "basic "];
+    let mut result = s.to_string();
+    let mut offset = 0;
+    loop {
+        let lower = result[offset..].to_lowercase();
+        // 在所有 scheme 中找最早出现的位置
+        let mut best: Option<(usize, usize)> = None; // (pos, scheme_len)
+        for scheme in &schemes {
+            if let Some(rel_pos) = lower.find(scheme) {
+                let pos = offset + rel_pos;
+                match best {
+                    Some((prev_pos, _)) if pos >= prev_pos => {}
+                    _ => best = Some((pos, scheme.len())),
+                }
             }
         }
+        if let Some((pos, scheme_len)) = best {
+            let token_start = pos + scheme_len;
+            let token_end = result[token_start..]
+                .find(|c: char| c == ' ' || c == ',' || c == ';' || c == '\n')
+                .map(|i| token_start + i)
+                .unwrap_or(result.len());
+            if token_end > token_start {
+                result.replace_range(pos..token_end, "[REDACTED]");
+                offset = pos + "[REDACTED]".len();
+                continue;
+            }
+        }
+        break;
     }
-    s.to_string()
+    result
 }
 
 /// 从路径中提取 basename（兼容 Windows `\` 和 Unix `/`）。
@@ -809,6 +831,32 @@ mod tests {
         // `://user@host` 格式不应被修改（没有密码部分）
         let url = "https://user@example.com/path";
         assert_eq!(remove_url_userinfo(url), "https://user@example.com/path");
+    }
+
+    #[test]
+    fn remove_url_userinfo_strips_multiple_credentials() {
+        let msg = "upload https://u:p@host1.com/a and https://u2:p2@host2.com/b done";
+        let result = remove_url_userinfo(msg);
+        assert_eq!(result, "upload https://host1.com/a and https://host2.com/b done");
+    }
+
+    #[test]
+    fn redact_auth_tokens_single_bearer() {
+        assert_eq!(redact_auth_tokens("Bearer abc123"), "[REDACTED]");
+    }
+
+    #[test]
+    fn redact_auth_tokens_multiple_bearer() {
+        let msg = "first Bearer aaa, second Bearer bbb";
+        let result = redact_auth_tokens(msg);
+        assert_eq!(result, "first [REDACTED], second [REDACTED]");
+    }
+
+    #[test]
+    fn redact_auth_tokens_mixed_schemes() {
+        let msg = "got Basic xxx then Bearer yyy";
+        let result = redact_auth_tokens(msg);
+        assert_eq!(result, "got [REDACTED] then [REDACTED]");
     }
 
     #[test]
