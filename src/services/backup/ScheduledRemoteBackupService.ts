@@ -553,7 +553,7 @@ export function createScheduledRemoteBackupService(
         patchState(patch);
 
         const isAutomaticForActivity =
-          trigger === 'scheduled-interval' || trigger === 'quiet-period';
+          trigger === 'scheduled-interval' || trigger === 'quiet-period' || trigger === 'before-exit';
         if (isAutomaticForActivity) {
           await safeAppendActivity({
             operation: 'scheduled-remote-backup',
@@ -616,6 +616,15 @@ export function createScheduledRemoteBackupService(
                         missingCount: retentionPatch.lastRetentionCleanupMissingCount ?? null,
                       },
                     }),
+              });
+            } else {
+              await safeAppendActivity({
+                operation: 'retention-cleanup',
+                status: 'skipped',
+                level: 'info',
+                startedAt: startNow,
+                finishedAt: deps.clock(),
+                reasonCode: 'retention_condition_not_met',
               });
             }
           }

@@ -728,6 +728,15 @@ export const BoardDock = () => {
       const summary = validation.summary;
       if (!summary) {
         setZipFeedback({ status: 'error', message: '备份验证通过但摘要信息不可用，本地数据未受影响。' });
+        void logActivityAndRefresh({
+          operation: 'local-restore',
+          status: 'skipped',
+          level: 'warning',
+          stage: 'validate',
+          message: '摘要信息不可用',
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+        });
         return;
       }
 
@@ -1323,6 +1332,15 @@ export const BoardDock = () => {
       const summary = validation.summary;
       if (!summary) {
         setWebdavFeedback({ status: 'error', message: '备份验证通过但摘要信息不可用，本地数据未受影响。' });
+        void logActivityAndRefresh({
+          operation: 'remote-restore',
+          status: 'skipped',
+          level: 'warning',
+          stage: 'validate',
+          message: '摘要信息不可用',
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+        });
         return;
       }
 
@@ -1659,7 +1677,7 @@ export const BoardDock = () => {
           status: 'error',
           message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个${result.missingCount > 0 ? `，${result.missingCount} 个已不存在` : ''}。${detail}`,
         });
-        void logActivityAndRefresh({ operation: 'retention-cleanup', status: 'partial', level: 'warning', message: `deleted=${result.deletedCount} retained=${result.retainedCount} missing=${result.missingCount}`, startedAt: Date.now(), finishedAt: Date.now() });
+        void logActivityAndRefresh({ operation: 'retention-cleanup', status: 'partial', level: 'warning', message: `deleted=${result.deletedCount} retained=${result.retainedCount} missing=${result.missingCount}${result.failedFileName ? ` failed=${result.failedFileName}` : ''}${result.error ? ` error=${result.error}` : ''}`, startedAt: Date.now(), finishedAt: Date.now() });
       }
 
       const retentionStatePatch: Partial<ScheduledRemoteBackupState> = {
@@ -2952,7 +2970,7 @@ export const BoardDock = () => {
                                                         {entry.remoteFileName ?? entry.localFileName}
                                                     </p>
                                                 )}
-                                                {entry.status === 'failed' && entry.message && (
+                                                {(entry.status === 'failed' || entry.status === 'partial') && entry.message && (
                                                     <p className="text-red-400 dark:text-red-500 truncate" title={entry.message}>
                                                         {entry.stage ? `[${entry.stage}] ` : ''}{entry.message}
                                                     </p>

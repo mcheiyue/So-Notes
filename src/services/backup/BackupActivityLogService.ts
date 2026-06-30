@@ -100,6 +100,10 @@ const BEARER_TOKEN_PATTERN = /(Bearer\s+)[^\s,;)}\]]{1,100}/gi;
 const URL_USERINFO_PATTERN =
   /((?:https?|ftp):\/\/)([^@/]+)@/gi;
 
+/** 绝对路径模式：匹配 Windows 盘符路径和 Unix 绝对路径 */
+const LOCAL_PATH_PATTERN =
+  /[A-Za-z]:\\[^\s"':,;)}\]]+|\/(?:[^/\s"':,;)}\]]+\/)+[^/\s"':,;)}\]]*/g;
+
 const MESSAGE_MAX_LENGTH = 240;
 
 /**
@@ -120,6 +124,8 @@ export function sanitizeActivityInput(
     });
     // 移除 URL userinfo
     message = message.replace(URL_USERINFO_PATTERN, '$1[REDACTED]@');
+    // 替换绝对路径
+    message = message.replace(LOCAL_PATH_PATTERN, '[REDACTED]');
     // 截断
     if (message.length > MESSAGE_MAX_LENGTH) {
       message = message.slice(0, MESSAGE_MAX_LENGTH);

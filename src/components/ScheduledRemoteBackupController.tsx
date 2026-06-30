@@ -160,6 +160,18 @@ export const ScheduledRemoteBackupController = () => {
                     : {}),
                 }),
           });
+          try {
+            await appendBackupActivity({
+              operation: 'scheduled-remote-backup',
+              status: result.success ? 'success' : 'failed',
+              level: result.success ? 'info' : 'error',
+              startedAt: now,
+              finishedAt: now,
+              trigger: 'before-exit',
+              remoteFileName: result.remoteFileName ?? null,
+              message: result.success ? null : (result.error ?? '退出前备份失败'),
+            });
+          } catch { /* 活动日志写入失败不影响主流程 */ }
           if (!result.success) {
             throw new Error(result.error ?? '退出前备份失败');
           }
