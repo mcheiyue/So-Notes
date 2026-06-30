@@ -295,22 +295,35 @@ fn remove_url_userinfo(s: &str) -> String {
     result
 }
 
-/// 脱敏 Bearer/Basic 认证 token（大小写无关，全局扫描替换）。
+/// ASCII 大小写无关比较（仅限 ASCII 字节）。
+fn ascii_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b.iter())
+            .all(|(x, y)| x.to_ascii_lowercase() == *y)
+}
+
+/// 脱敏 Bearer/Basic 认证 token（ASCII 大小写无关，全局扫描替换）。
 /// 匹配 `Bearer <token>` 或 `Basic <token>` 模式，替换所有匹配项为 `[REDACTED]`。
 fn redact_auth_tokens(s: &str) -> String {
-    let schemes = ["bearer ", "basic "];
+    let schemes: &[&[u8]] = &[b"bearer ", b"basic "];
+    let bytes = s.as_bytes();
     let mut result = s.to_string();
     let mut offset = 0;
     loop {
-        let lower = result[offset..].to_lowercase();
-        // 在所有 scheme 中找最早出现的位置
+        let remaining = &result.as_bytes()[offset..];
         let mut best: Option<(usize, usize)> = None; // (pos, scheme_len)
-        for scheme in &schemes {
-            if let Some(rel_pos) = lower.find(scheme) {
-                let pos = offset + rel_pos;
-                match best {
-                    Some((prev_pos, _)) if pos >= prev_pos => {}
-                    _ => best = Some((pos, scheme.len())),
+        for scheme in schemes {
+            for i in 0..remaining.len() {
+                if remaining[i..].len() >= scheme.len()
+                    && ascii_eq_ignore_case(&remaining[i..i + scheme.len()], scheme)
+                {
+                    let pos = offset + i;
+                    match best {
+                        Some((prev_pos, _)) if pos >= prev_pos => {}
+                        _ => best = Some((pos, scheme.len())),
+                    }
+                    break;
                 }
             }
         }

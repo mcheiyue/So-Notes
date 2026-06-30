@@ -1520,6 +1520,39 @@ describe('ScheduledRemoteBackupService', () => {
       service.stop();
     });
 
+    it('manual 触发 busy 时活动日志 operation 为 remote-backup 而非 scheduled-remote-backup', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+
+      let resolveFirst: (() => void) | undefined;
+      mockRunRemoteBackup.mockImplementation(
+        () =>
+          new Promise<{ success: boolean; remoteFileName: string }>((resolve) => {
+            resolveFirst = () => resolve({ success: true, remoteFileName: 'b.zip' });
+          }),
+      );
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const firstRun = service.runNow();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'remote-backup',
+          status: 'skipped',
+        }),
+      );
+
+      resolveFirst!();
+      await firstRun;
+      service.stop();
+    });
+
     it('before-exit 触发 busy 时记录 single-flight 状态并仍 reject', async () => {
       const ctx = createTestContext({
         config: { enabled: false },

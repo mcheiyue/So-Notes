@@ -338,7 +338,7 @@ export function createScheduledRemoteBackupService(
       });
       await deps.saveScheduledState(internalState);
       await safeAppendActivity({
-        operation: 'scheduled-remote-backup',
+        operation: backupOperationForTrigger(trigger),
         status: 'skipped',
         level: 'warning',
         message: '备份任务正在运行中',
