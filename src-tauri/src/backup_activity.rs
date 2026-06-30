@@ -307,7 +307,6 @@ fn ascii_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
 /// 匹配 `Bearer <token>` 或 `Basic <token>` 模式，替换所有匹配项为 `[REDACTED]`。
 fn redact_auth_tokens(s: &str) -> String {
     let schemes: &[&[u8]] = &[b"bearer ", b"basic "];
-    let bytes = s.as_bytes();
     let mut result = s.to_string();
     let mut offset = 0;
     loop {
