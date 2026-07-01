@@ -266,7 +266,7 @@ fn sanitize_message(message: &str) -> String {
 }
 
 /// 移除 URL 中的 userinfo 部分（全局扫描替换）。
-/// 匹配 `://` 后紧跟的 `user:pass@` 模式，替换所有匹配项。
+/// 匹配 `://` 后紧跟的 `user:pass@` 或 `user@` 模式，替换所有匹配项。
 fn remove_url_userinfo(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut cursor = 0;
@@ -276,8 +276,9 @@ fn remove_url_userinfo(s: &str) -> String {
             // 尝试在 `://` 之后找 `@`
             if let Some(rel_at) = s[protocol_end..].find('@') {
                 let userinfo_region = &s[protocol_end..protocol_end + rel_at];
-                if userinfo_region.contains(':') {
-                    // 找到 user:pass@ → 替换：写入 protocol 部分，跳过 userinfo
+                // userinfo 非空即可（含 `user:pass@` 或纯 `user@`）
+                if !userinfo_region.is_empty() {
+                    // 写入 protocol 部分，跳过 userinfo 和 `@`
                     result.push_str(&s[cursor..protocol_end]);
                     cursor = protocol_end + rel_at + 1; // 跳过 `@`
                     continue;
@@ -840,9 +841,9 @@ mod tests {
 
     #[test]
     fn remove_url_userinfo_handles_no_colon_in_userinfo() {
-        // `://user@host` 格式不应被修改（没有密码部分）
+        // `://user@host` 格式也应脱敏（纯用户名无密码）
         let url = "https://user@example.com/path";
-        assert_eq!(remove_url_userinfo(url), "https://user@example.com/path");
+        assert_eq!(remove_url_userinfo(url), "https://example.com/path");
     }
 
     #[test]

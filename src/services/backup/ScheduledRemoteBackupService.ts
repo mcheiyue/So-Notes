@@ -218,7 +218,7 @@ export function createScheduledRemoteBackupService(
   }
 
   function backupOperationForTrigger(trigger: RemoteBackupTrigger): BackupActivityOperation {
-    return trigger === 'scheduled-interval' || trigger === 'quiet-period'
+    return trigger === 'scheduled-interval' || trigger === 'quiet-period' || trigger === 'before-exit'
       ? 'scheduled-remote-backup'
       : 'remote-backup';
   }
@@ -563,7 +563,10 @@ export function createScheduledRemoteBackupService(
             finishedAt: now,
             trigger,
             remoteFileName: result.remoteFileName ?? null,
-            summary: result.summary ?? null,
+            summary: {
+              ...(result.summary ?? {}),
+              ...(result.zipSizeBytes != null ? { zipSizeBytes: result.zipSizeBytes } : {}),
+            },
           });
         }
 
