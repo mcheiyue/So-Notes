@@ -702,7 +702,7 @@ export function createScheduledRemoteBackupService(
       });
       await deps.saveScheduledState(internalState);
       await safeAppendActivity({
-        operation: (trigger === 'scheduled-interval' || trigger === 'quiet-period') ? 'scheduled-remote-backup' : 'remote-backup',
+        operation: backupOperationForTrigger(trigger),
         status: 'failed',
         level: 'error',
         startedAt: startNow,
