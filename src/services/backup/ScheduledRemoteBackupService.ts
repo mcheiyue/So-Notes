@@ -670,7 +670,7 @@ export function createScheduledRemoteBackupService(
 
         patchState(patch);
         await safeAppendActivity({
-          operation: (trigger === 'scheduled-interval' || trigger === 'quiet-period') ? 'scheduled-remote-backup' : 'remote-backup',
+          operation: (trigger === 'scheduled-interval' || trigger === 'quiet-period' || trigger === 'before-exit') ? 'scheduled-remote-backup' : 'remote-backup',
           status: 'failed',
           level: 'error',
           startedAt: startNow,

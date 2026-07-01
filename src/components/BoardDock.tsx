@@ -1301,6 +1301,7 @@ export const BoardDock = () => {
           operation: 'remote-restore',
           status: 'failed',
           level: 'error',
+          remoteFileName: fileNameFromPath(fileName),
           stage: 'resolve',
           message: formatWebdavError(resolveResult.error ?? '未知错误'),
           startedAt,
@@ -1868,6 +1869,7 @@ export const BoardDock = () => {
       await clearBackupActivities();
       activityEntriesRef.current = [];
       setActivityEntries([]);
+      setActivityError(null);
     } catch (err) {
       setActivityError(`清空失败：${formatUnknownError(err)}`);
     } finally {

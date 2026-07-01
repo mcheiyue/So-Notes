@@ -170,6 +170,7 @@ export const ScheduledRemoteBackupController = () => {
               trigger: 'before-exit',
               remoteFileName: result.remoteFileName ?? null,
               message: result.success ? null : (result.error ?? '退出前备份失败'),
+              summary: result.summary ?? (result.zipSizeBytes != null ? { zipSizeBytes: result.zipSizeBytes } : null),
             });
           } catch { /* 活动日志写入失败不影响主流程 */ }
           if (!result.success) {

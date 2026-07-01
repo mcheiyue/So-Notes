@@ -230,6 +230,22 @@ describe('BackupActivityLogService', () => {
       expect(result.message).toBe('读取失败: [REDACTED]');
     });
 
+    it('替换 message 中带空格的 Windows 路径', () => {
+      const result = sanitizeActivityInput({
+        ...baseInput,
+        message: '备份目标目录不存在: C:\\Users\\Jane Doe\\So Notes\\backups',
+      });
+      expect(result.message).toBe('备份目标目录不存在: [REDACTED]');
+    });
+
+    it('替换 message 中带空格的 Unix 路径', () => {
+      const result = sanitizeActivityInput({
+        ...baseInput,
+        message: '读取失败: /Users/Jane Doe/So Notes/data.json',
+      });
+      expect(result.message).toBe('读取失败: [REDACTED]');
+    });
+
     it('截断超过 240 字符的 message', () => {
       const longMessage = 'a'.repeat(300);
       const result = sanitizeActivityInput({

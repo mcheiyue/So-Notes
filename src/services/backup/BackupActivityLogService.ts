@@ -102,7 +102,7 @@ const URL_USERINFO_PATTERN =
 
 /** 绝对路径模式：匹配 Windows 盘符路径和 Unix 绝对路径 */
 const LOCAL_PATH_PATTERN =
-  /[A-Za-z]:\\[^\s"':,;)}\]]+|\/(?:[^/\s"':,;)}\]]+\/)+[^/\s"':,;)}\]]*/g;
+  /[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*|\/(?:[^/\0\r\n]+\/)+[^/\0\r\n]*/g;
 
 const MESSAGE_MAX_LENGTH = 240;
 
