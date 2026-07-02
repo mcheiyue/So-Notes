@@ -652,6 +652,23 @@ export function createScheduledRemoteBackupService(
             message: errorMsg,
           });
         }
+      } else if (result.errorStage === 'single-flight') {
+        const now = deps.clock();
+        patchState({
+          lastFinishedAt: now,
+          lastTrigger: trigger,
+          nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
+        });
+        await safeAppendActivity({
+          operation: backupOperationForTrigger(trigger),
+          status: 'skipped',
+          level: 'info',
+          startedAt: startNow,
+          finishedAt: now,
+          trigger,
+          stage: 'single-flight',
+          reasonCode: 'already_running',
+        });
       } else {
         // 失败
         const now = deps.clock();
@@ -744,9 +761,13 @@ export function createScheduledRemoteBackupService(
   }
 
   async function getCurrentDiskTimestamp(): Promise<number | null> {
-    const storageData = await deps.readDiskStorageData();
-    if (!storageData) return null;
-    return deps.getLatestUpdateTimestamp(storageData);
+    try {
+      const storageData = await deps.readDiskStorageData();
+      if (!storageData) return null;
+      return deps.getLatestUpdateTimestamp(storageData);
+    } catch {
+      return null;
+    }
   }
 
   // -------------------------------------------------------------------------
