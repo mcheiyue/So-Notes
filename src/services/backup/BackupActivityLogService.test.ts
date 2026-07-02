@@ -61,6 +61,12 @@ describe('BackupActivityLogService', () => {
         limit: undefined,
       });
     });
+
+    it('invoke 失败时向上抛出异常', async () => {
+      invokeMock.mockRejectedValueOnce(new Error('IPC 通道断开'));
+
+      await expect(loadRecentActivities(10)).rejects.toThrow('IPC 通道断开');
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -148,6 +154,12 @@ describe('BackupActivityLogService', () => {
       await clearBackupActivities();
 
       expect(invokeMock).toHaveBeenCalledWith('backup_activity_clear');
+    });
+
+    it('invoke 失败时抛出异常', async () => {
+      invokeMock.mockRejectedValueOnce(new Error('文件被占用'));
+
+      await expect(clearBackupActivities()).rejects.toThrow('文件被占用');
     });
   });
 

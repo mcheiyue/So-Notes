@@ -1318,4 +1318,97 @@ mod tests {
         let sanitized = sanitize_entry(entry);
         assert_eq!(sanitized.remote_file_name.as_deref(), Some("SoNotes_Backup_20260626120000.zip"));
     }
+
+    #[test]
+    fn sanitize_entry_processes_message_through_sanitize_message() {
+        let entry = BackupActivityEntry {
+            id: "test".into(),
+            operation: "remote-backup".into(),
+            status: "failed".into(),
+            level: "error".into(),
+            started_at: 0,
+            finished_at: 0,
+            trigger: None,
+            stage: None,
+            reason_code: None,
+            error_code: None,
+            message: Some("password=abc123 连接失败".into()),
+            remote_file_name: None,
+            local_file_name: None,
+            summary: None,
+            metrics: None,
+        };
+        let sanitized = sanitize_entry(entry);
+        assert_eq!(sanitized.message.as_deref(), Some("password=[REDACTED] 连接失败"));
+    }
+
+    #[test]
+    fn sanitize_entry_extracts_basename_for_metrics_failed_file_name() {
+        let entry = BackupActivityEntry {
+            id: "test".into(),
+            operation: "retention-cleanup".into(),
+            status: "partial".into(),
+            level: "warning".into(),
+            started_at: 0,
+            finished_at: 0,
+            trigger: None,
+            stage: None,
+            reason_code: None,
+            error_code: None,
+            message: None,
+            remote_file_name: None,
+            local_file_name: None,
+            summary: None,
+            metrics: Some(BackupActivityMetrics {
+                deleted_count: Some(1),
+                retained_count: Some(5),
+                missing_count: None,
+                attempted_count: None,
+                failed_file_name: Some("/backups/old/user:pass@server/SoNotes_Old_20260101.zip".into()),
+                anomaly_codes: None,
+            }),
+        };
+        let sanitized = sanitize_entry(entry);
+        assert_eq!(
+            sanitized.metrics.as_ref().unwrap().failed_file_name.as_deref(),
+            Some("SoNotes_Old_20260101.zip")
+        );
+    }
+
+    #[test]
+    fn sanitize_entry_full_pipeline_with_all_fields() {
+        let entry = BackupActivityEntry {
+            id: "test".into(),
+            operation: "remote-restore".into(),
+            status: "failed".into(),
+            level: "error".into(),
+            started_at: 0,
+            finished_at: 0,
+            trigger: None,
+            stage: Some("resolve".into()),
+            reason_code: None,
+            error_code: Some("file_not_found".into()),
+            message: Some("Bearer abc123 token 无效，C:\\Users\\test\\error.log 路径".into()),
+            remote_file_name: Some("https://user:secret@example.com/dav/SoNotes_Backup_20260626.zip".into()),
+            local_file_name: Some("D:\\Backups\\SoNotes_Backup_20260626.zip".into()),
+            summary: None,
+            metrics: Some(BackupActivityMetrics {
+                deleted_count: None,
+                retained_count: None,
+                missing_count: None,
+                attempted_count: Some(10),
+                failed_file_name: Some("C:\\Temp\\failed.zip".into()),
+                anomaly_codes: None,
+            }),
+        };
+        let sanitized = sanitize_entry(entry);
+        assert!(sanitized.message.as_deref().unwrap().contains("[REDACTED]"));
+        assert!(!sanitized.message.as_deref().unwrap().contains("abc123"));
+        assert_eq!(sanitized.remote_file_name.as_deref(), Some("SoNotes_Backup_20260626.zip"));
+        assert_eq!(sanitized.local_file_name.as_deref(), Some("SoNotes_Backup_20260626.zip"));
+        assert_eq!(
+            sanitized.metrics.as_ref().unwrap().failed_file_name.as_deref(),
+            Some("failed.zip")
+        );
+    }
 }

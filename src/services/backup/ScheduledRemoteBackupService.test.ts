@@ -2445,5 +2445,66 @@ describe('ScheduledRemoteBackupService', () => {
       warnSpy.mockRestore();
       service.stop();
     });
+
+    it('quiet-period 触发的备份记录 trigger: quiet-period', async () => {
+      const ctx = createTestContext({
+        config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 5 },
+        state: { nextRunAt: 1000000000000 - 1000 },
+      });
+      ctx.getAppActivity.mockReturnValue(ACTIVE_ACTIVITY);
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+        summary: { noteCount: 10, boardCount: 2 },
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+
+      const quietCallback = ctx.timers.setTimeout.mock.calls.find(
+        (call: unknown[]) => {
+          const delay = call[1];
+          return typeof delay === 'number' && delay === 5 * 60 * 1000;
+        },
+      )?.[0] as (() => void) | undefined;
+      expect(quietCallback).toBeDefined();
+
+      ctx.getAppActivity.mockReturnValue(INACTIVE_ACTIVITY);
+      quietCallback!();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'scheduled-remote-backup',
+          status: 'success',
+          trigger: 'quiet-period',
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('runRemoteBackup 抛出异常时记录 failed 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+      mockRunRemoteBackup.mockRejectedValue(new Error('网络连接中断'));
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'remote-backup',
+          status: 'failed',
+          level: 'error',
+          stage: 'unknown',
+          message: '网络连接中断',
+        }),
+      );
+
+      service.stop();
+    });
   });
 });
