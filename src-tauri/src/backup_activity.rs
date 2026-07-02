@@ -230,27 +230,119 @@ const SENSITIVE_KEYWORDS: &[&str] = &[
     "令牌",
 ];
 
+/// 对单行文本进行精确敏感词替换（与 TS 侧 SENSITIVE_PATTERN 行为对齐）：
+/// - `keyword=value` 或 `keyword: value` → `keyword=[REDACTED]`
+/// - `keyword_something` → `keyword=[REDACTED]`
+/// - 独立 keyword（后跟空格/逗号/结尾）→ `keyword=[REDACTED]`
+fn redact_sensitive_keywords(line: &str) -> String {
+    let mut result = String::with_capacity(line.len());
+    let lower = line.to_lowercase();
+    let bytes = line.as_bytes();
+    let mut cursor = 0;
+
+    while cursor < line.len() {
+        // 尝试在当前位置之后找敏感词
+        let mut found = false;
+        for kw in SENSITIVE_KEYWORDS {
+            let kw_lower = *kw;
+            let kw_len = kw_lower.len();
+            let after = cursor + kw_len;
+            // 边界检查：确保 after 在字符边界上，避免截断多字节字符
+            if after > line.len() || !line.is_char_boundary(after) {
+                continue;
+            }
+            let candidate = &lower[cursor..after];
+            if candidate != kw_lower {
+                continue;
+            }
+            // 检查后面紧跟的字符
+            if after < line.len() {
+                let next_char = bytes[after];
+                // `keyword=value` 或 `keyword: value`
+                if next_char == b'=' || next_char == b':' {
+                    // 找到分隔符，向后扫描到值的结尾（空格/逗号/结尾）
+                    let val_start = after + 1;
+                    // 跳过分隔符后的空格
+                    let val_start = line[val_start..]
+                        .find(|c: char| !c.is_whitespace())
+                        .map(|i| val_start + i)
+                        .unwrap_or(line.len());
+                    let val_end = line[val_start..]
+                        .find(|c: char| c.is_whitespace() || c == ',')
+                        .map(|i| val_start + i)
+                        .unwrap_or(line.len());
+                    // 写入 keyword=[REDACTED]
+                    result.push_str(&line[cursor..after]);
+                    result.push_str("=[REDACTED]");
+                    cursor = val_end;
+                    found = true;
+                    break;
+                }
+                // `keyword_something`
+                if next_char == b'_' {
+                    let val_end = line[after + 1..]
+                        .find(|c: char| c.is_whitespace() || c == ',')
+                        .map(|i| after + 1 + i)
+                        .unwrap_or(line.len());
+                    result.push_str(&line[cursor..after]);
+                    result.push_str("=[REDACTED]");
+                    cursor = val_end;
+                    found = true;
+                    break;
+                }
+                // 独立 keyword（后跟空格/逗号/标点）
+                if next_char.is_ascii_whitespace()
+                    || next_char == b','
+                    || next_char == b';'
+                    || next_char == b')'
+                    || next_char == b'}'
+                    || next_char == b']'
+                {
+                    result.push_str(&line[cursor..after]);
+                    result.push_str("=[REDACTED]");
+                    cursor = after;
+                    found = true;
+                    break;
+                }
+            } else {
+                // keyword 在行尾
+                result.push_str(&line[cursor..after]);
+                result.push_str("=[REDACTED]");
+                cursor = after;
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            // 当前位置不匹配任何敏感词，写入当前字符并前进
+            let ch = line[cursor..].chars().next().unwrap();
+            result.push(ch);
+            cursor += ch.len_utf8();
+        }
+    }
+
+    result
+}
+
 /// 对 message 字段进行脱敏处理：
-/// 1. 替换包含敏感关键词的整行
-/// 2. 移除 URL 中的 userinfo（`://user:pass@`）
-/// 3. 替换本地绝对路径为 `[REDACTED]`
-/// 4. 截断至 240 字符
+/// 1. 精确替换敏感关键词（与 TS 侧对齐）
+/// 2. 脱敏 Bearer/Basic token
+/// 3. 移除 URL 中的 userinfo（`://user:pass@`）
+/// 4. 替换本地绝对路径为 `[REDACTED]`
+/// 5. 截断至 240 字符
 fn sanitize_message(message: &str) -> String {
     let mut result = String::with_capacity(message.len());
 
     for line in message.lines() {
-        let lower = line.to_lowercase();
-        let has_sensitive_keyword = SENSITIVE_KEYWORDS.iter().any(|kw| lower.contains(kw));
-
-        if has_sensitive_keyword {
-            result.push_str("[REDACTED]");
-        } else {
-            // 先脱敏 Bearer/Basic token，再移除 URL userinfo，最后脱敏绝对路径
-            let token_redacted = redact_auth_tokens(line);
-            let url_sanitized = remove_url_userinfo(&token_redacted);
-            let path_sanitized = redact_local_paths(&url_sanitized);
-            result.push_str(&path_sanitized);
-        }
+        // 先精确替换敏感关键词
+        let keyword_redacted = redact_sensitive_keywords(line);
+        // 再脱敏 Bearer/Basic token
+        let token_redacted = redact_auth_tokens(&keyword_redacted);
+        // 移除 URL userinfo
+        let url_sanitized = remove_url_userinfo(&token_redacted);
+        // 脱敏绝对路径
+        let path_sanitized = redact_local_paths(&url_sanitized);
+        result.push_str(&path_sanitized);
         result.push('\n');
     }
 
@@ -488,7 +580,7 @@ fn generate_uuid() -> String {
 // 文件读写
 // ---------------------------------------------------------------------------
 
-/// 从文件加载日志。文件不存在或为空时返回空日志；解析失败返回明确错误。
+/// 从文件加载日志。文件不存在或为空时返回空日志；解析失败返回明确错误；版本不匹配返回错误。
 fn load_log_from_path(path: &Path) -> Result<BackupActivityLogFile, String> {
     if !path.exists() {
         return Ok(BackupActivityLogFile {
@@ -510,6 +602,14 @@ fn load_log_from_path(path: &Path) -> Result<BackupActivityLogFile, String> {
 
     let file: BackupActivityLogFile =
         serde_json::from_str(&content).map_err(|e| format!("解析备份活动日志文件失败: {e}"))?;
+
+    // 版本校验：拒绝不兼容的日志文件
+    if file.version != LOG_VERSION {
+        return Err(format!(
+            "备份活动日志版本不兼容：期望 {}，实际 {}",
+            LOG_VERSION, file.version
+        ));
+    }
 
     Ok(file)
 }
@@ -866,10 +966,29 @@ mod tests {
 
     #[test]
     fn sanitize_message_replaces_sensitive_keywords() {
-        assert_eq!(sanitize_message("password is abc123"), "[REDACTED]");
-        assert_eq!(sanitize_message("token: xyz"), "[REDACTED]");
-        assert_eq!(sanitize_message("Authorization: Bearer xxx"), "[REDACTED]");
-        assert_eq!(sanitize_message("secret key"), "[REDACTED]");
+        // keyword=value 模式
+        assert_eq!(
+            sanitize_message("password=abc123"),
+            "password=[REDACTED]"
+        );
+        assert_eq!(
+            sanitize_message("token: xyz"),
+            "token=[REDACTED]"
+        );
+        // 独立 keyword 模式
+        assert_eq!(
+            sanitize_message("password is abc123"),
+            "password=[REDACTED] is abc123"
+        );
+        assert_eq!(
+            sanitize_message("secret key"),
+            "secret=[REDACTED] key"
+        );
+        // keyword_something 模式
+        assert_eq!(
+            sanitize_message("my_password_value"),
+            "my_password=[REDACTED]"
+        );
     }
 
     #[test]
@@ -884,7 +1003,7 @@ mod tests {
     fn sanitize_message_truncates_at_240_chars() {
         let long_msg = "a".repeat(300);
         let result = sanitize_message(&long_msg);
-        assert_eq!(result.len(), 240);
+        assert_eq!(result.chars().count(), 240);
     }
 
     #[test]
