@@ -239,8 +239,8 @@ export const BoardDock = () => {
       activityEntriesRef.current = safeEntries;
       setActivityEntries(safeEntries);
       setActivityError(null);
-    } catch {
-      // 刷新失败不阻塞主流程
+    } catch (err) {
+      setActivityError(`刷新失败：${formatUnknownError(err)}`);
     }
   }, []);
 
