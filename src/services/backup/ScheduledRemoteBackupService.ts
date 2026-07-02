@@ -680,6 +680,7 @@ export function createScheduledRemoteBackupService(
           finishedAt: now,
           trigger,
           stage: failureStage,
+          errorCode: result.errorCode ?? null,
           message: result.error ?? 'Unknown error',
         });
       }

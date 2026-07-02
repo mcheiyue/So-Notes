@@ -168,6 +168,8 @@ export const ScheduledRemoteBackupController = () => {
               startedAt: now,
               finishedAt: now,
               trigger: 'before-exit',
+              stage: result.success ? null : (result.errorStage ?? 'unknown'),
+              errorCode: result.errorCode ?? null,
               remoteFileName: result.remoteFileName ?? null,
               message: result.success ? null : (result.error ?? '退出前备份失败'),
               summary: {
