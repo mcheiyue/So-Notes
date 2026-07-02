@@ -91,7 +91,7 @@ export interface BackupActivityAppendInput {
 
 /** 敏感词模式：keyword 后跟 :=/_ 分隔符和值，或 keyword 独立出现（后跟空格/逗号/结尾） */
 const SENSITIVE_PATTERN =
-  /(password|token|authorization|secret)[=:]\s*\S+|(password|token|authorization|secret)_\S+|(password|token|authorization|secret)(?=[\s,;)}\]]|$)/gi;
+  /(password|token|authorization|secret|密码|令牌)[=:]\s*\S+|(password|token|authorization|secret|密码|令牌)_\S+|(password|token|authorization|secret|密码|令牌)(?=[\s,;)}\]]|$)/gi;
 
 /** Bearer token 模式：匹配 Bearer 后面的 token 值 */
 const BEARER_TOKEN_PATTERN = /(Bearer\s+)[^\s,;)}\]]{1,100}/gi;
@@ -245,7 +245,7 @@ export async function appendBackupActivity(
     const sanitized = sanitizeActivityInput(input);
     const entry: BackupActivityEntry = {
       ...sanitized,
-      id: sanitized.id ?? crypto.randomUUID(),
+      id: sanitized.id || crypto.randomUUID(),
     };
     await invoke<void>('backup_activity_append', { entry });
   } catch (err: unknown) {
