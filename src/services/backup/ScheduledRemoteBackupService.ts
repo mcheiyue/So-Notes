@@ -341,9 +341,12 @@ export function createScheduledRemoteBackupService(
         operation: backupOperationForTrigger(trigger),
         status: 'skipped',
         level: 'warning',
-        message: '备份任务正在运行中',
         startedAt: now,
         finishedAt: now,
+        trigger,
+        stage: 'single-flight',
+        reasonCode: 'already_running',
+        message: '备份任务正在运行中',
       });
       if (trigger === 'before-exit') {
         throw new Error('备份任务正在运行中，请稍候再试');
@@ -425,6 +428,8 @@ export function createScheduledRemoteBackupService(
       ) {
         const now = deps.clock();
         patchState({
+          lastFinishedAt: now,
+          lastTrigger: trigger,
           credentialActionRequired: true,
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
