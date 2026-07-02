@@ -833,6 +833,7 @@ export const BoardDock = () => {
         operation: 'local-restore',
         status: 'failed',
         level: 'error',
+        stage: 'restore',
         message: formatUnknownError(err),
         startedAt,
         finishedAt: Date.now(),
@@ -1429,6 +1430,8 @@ export const BoardDock = () => {
         operation: 'remote-restore',
         status: 'failed',
         level: 'error',
+        stage: 'restore',
+        remoteFileName: fileNameFromPath(fileName),
         message: formatWebdavError(formatUnknownError(err)),
         startedAt,
         finishedAt: Date.now(),
@@ -2904,7 +2907,7 @@ export const BoardDock = () => {
                                     >
                                         <RefreshCw className={cn("w-3 h-3", activityLoading && "animate-spin")} />
                                     </button>
-                                    {activityEntries.length > 0 && (
+                                    {(activityEntries.length > 0 || activityError) && (
                                         <button
                                             type="button"
                                             onClick={onClearActivities}
