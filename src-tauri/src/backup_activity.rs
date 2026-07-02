@@ -233,7 +233,8 @@ const SENSITIVE_KEYWORDS: &[&str] = &[
 /// 对 message 字段进行脱敏处理：
 /// 1. 替换包含敏感关键词的整行
 /// 2. 移除 URL 中的 userinfo（`://user:pass@`）
-/// 3. 截断至 240 字符
+/// 3. 替换本地绝对路径为 `[REDACTED]`
+/// 4. 截断至 240 字符
 fn sanitize_message(message: &str) -> String {
     let mut result = String::with_capacity(message.len());
 
@@ -244,10 +245,11 @@ fn sanitize_message(message: &str) -> String {
         if has_sensitive_keyword {
             result.push_str("[REDACTED]");
         } else {
-            // 先脱敏 Bearer/Basic token，再移除 URL userinfo
+            // 先脱敏 Bearer/Basic token，再移除 URL userinfo，最后脱敏绝对路径
             let token_redacted = redact_auth_tokens(line);
-            let sanitized = remove_url_userinfo(&token_redacted);
-            result.push_str(&sanitized);
+            let url_sanitized = remove_url_userinfo(&token_redacted);
+            let path_sanitized = redact_local_paths(&url_sanitized);
+            result.push_str(&path_sanitized);
         }
         result.push('\n');
     }
@@ -293,6 +295,77 @@ fn remove_url_userinfo(s: &str) -> String {
             break;
         }
     }
+    result
+}
+
+/// 脱敏本地绝对路径（全局扫描替换）。
+/// 匹配 Windows 盘符路径（`C:\...` 或 `C:/...`）和 Unix 绝对路径（`/home/...`），
+/// 替换为 `[REDACTED]`。
+fn redact_local_paths(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        // Windows 盘符路径：字母 + : + \ 或 /
+        if i + 2 < bytes.len()
+            && bytes[i].is_ascii_alphabetic()
+            && bytes[i + 1] == b':'
+            && (bytes[i + 2] == b'\\' || bytes[i + 2] == b'/')
+        {
+            // 向后扫描到行尾或空格/引号等分隔符
+            let mut end = i + 3;
+            while end < bytes.len()
+                && bytes[end] != b'\n'
+                && bytes[end] != b'\r'
+                && !bytes[end].is_ascii_whitespace()
+                && bytes[end] != b'"'
+                && bytes[end] != b'\''
+            {
+                end += 1;
+            }
+            // 至少 `\X` 才算路径（避免误匹配 `C:\` 单独出现）
+            if end > i + 3 {
+                result.push_str("[REDACTED]");
+                i = end;
+                continue;
+            }
+        }
+
+        // Unix 绝对路径：/ 后跟非空格字符，且至少包含一个子目录 /
+        if bytes[i] == b'/'
+            && i + 1 < bytes.len()
+            && !bytes[i + 1].is_ascii_whitespace()
+            && bytes[i + 1] != b'/'
+        {
+            let mut end = i + 1;
+            let mut has_sep = false;
+            while end < bytes.len()
+                && bytes[end] != b'\n'
+                && bytes[end] != b'\r'
+                && !bytes[end].is_ascii_whitespace()
+                && bytes[end] != b'"'
+                && bytes[end] != b'\''
+            {
+                if bytes[end] == b'/' {
+                    has_sep = true;
+                }
+                end += 1;
+            }
+            // 至少 /dir/file 形式才替换，避免误匹配单个 /word
+            if has_sep && end > i + 2 {
+                result.push_str("[REDACTED]");
+                i = end;
+                continue;
+            }
+        }
+
+        // 普通 UTF-8 字符
+        let ch_len = s[i..].chars().next().map_or(1, |c| c.len_utf8());
+        result.push_str(&s[i..i + ch_len]);
+        i += ch_len;
+    }
+
     result
 }
 
@@ -879,6 +952,51 @@ mod tests {
         assert!(result.contains("line1 is safe"));
         assert!(result.contains("[REDACTED]"));
         assert!(result.contains("line3 is safe"));
+    }
+
+    // -----------------------------------------------------------------------
+    // redact_local_paths
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn redact_local_paths_windows_path() {
+        assert_eq!(redact_local_paths("failed C:\\Users\\test\\backup.zip"), "failed [REDACTED]");
+    }
+
+    #[test]
+    fn redact_local_paths_windows_path_forward_slash() {
+        assert_eq!(redact_local_paths("path D:/backups/file.zip end"), "path [REDACTED] end");
+    }
+
+    #[test]
+    fn redact_local_paths_unix_path() {
+        assert_eq!(redact_local_paths("error /home/user/backups/test.zip"), "error [REDACTED]");
+    }
+
+    #[test]
+    fn redact_local_paths_no_path() {
+        assert_eq!(redact_local_paths("no path here"), "no path here");
+    }
+
+    #[test]
+    fn redact_local_paths_single_word_slash() {
+        assert_eq!(redact_local_paths("status/success"), "status/success");
+    }
+
+    #[test]
+    fn redact_local_paths_multiple_paths() {
+        assert_eq!(
+            redact_local_paths("C:\\a\\b.zip and /c/d/e.zip"),
+            "[REDACTED] and [REDACTED]"
+        );
+    }
+
+    #[test]
+    fn sanitize_message_redacts_local_path() {
+        assert_eq!(
+            sanitize_message("恢复失败 C:\\Users\\test\\backup.zip"),
+            "恢复失败 [REDACTED]"
+        );
     }
 
     // -----------------------------------------------------------------------
