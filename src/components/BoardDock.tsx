@@ -1669,7 +1669,18 @@ export const BoardDock = () => {
           status: 'success',
           message: `清理完成：已删除 ${result.deletedCount} 个备份，保留 ${result.retainedCount} 个。${result.missingCount > 0 ? `（${result.missingCount} 个已不存在）` : ''}`,
         });
-        void logActivityAndRefresh({ operation: 'retention-cleanup', status: 'success', level: 'info', message: `deleted=${result.deletedCount} retained=${result.retainedCount} missing=${result.missingCount}`, startedAt: Date.now(), finishedAt: Date.now() });
+        void logActivityAndRefresh({
+          operation: 'retention-cleanup',
+          status: 'success',
+          level: 'info',
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+          metrics: {
+            deletedCount: result.deletedCount,
+            retainedCount: result.retainedCount,
+            missingCount: result.missingCount,
+          },
+        });
       } else {
         const detail = result.failedFileName
           ? `删除 ${result.failedFileName} 时失败：${result.error ?? '未知错误'}`
@@ -2975,6 +2986,13 @@ export const BoardDock = () => {
                                                 {(entry.status === 'failed' || entry.status === 'partial') && entry.message && (
                                                     <p className="text-red-400 dark:text-red-500 truncate" title={entry.message}>
                                                         {entry.stage ? `[${entry.stage}] ` : ''}{entry.message}
+                                                    </p>
+                                                )}
+                                                {entry.status === 'success' && entry.metrics && (
+                                                    <p className="text-text-tertiary truncate">
+                                                        {entry.metrics.deletedCount != null && `删除 ${entry.metrics.deletedCount}`}
+                                                        {entry.metrics.retainedCount != null && ` · 保留 ${entry.metrics.retainedCount}`}
+                                                        {entry.metrics.missingCount != null && entry.metrics.missingCount > 0 && ` · 缺失 ${entry.metrics.missingCount}`}
                                                     </p>
                                                 )}
                                             </div>
