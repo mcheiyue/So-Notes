@@ -260,18 +260,22 @@ fn redact_sensitive_keywords(line: &str) -> String {
                 let next_char = bytes[after];
                 // `keyword=value` 或 `keyword: value`
                 if next_char == b'=' || next_char == b':' {
-                    // 找到分隔符，向后扫描到值的结尾（空格/逗号/结尾）
                     let val_start = after + 1;
-                    // 跳过分隔符后的空格
                     let val_start = line[val_start..]
                         .find(|c: char| !c.is_whitespace())
                         .map(|i| val_start + i)
                         .unwrap_or(line.len());
+                    // 值已被前序步骤（redact_auth_tokens）脱敏时跳过，避免重复替换
+                    if line[val_start..].starts_with("[REDACTED]") {
+                        result.push_str(&line[cursor..after]);
+                        cursor = after;
+                        found = true;
+                        break;
+                    }
                     let val_end = line[val_start..]
                         .find(|c: char| c.is_whitespace() || c == ',')
                         .map(|i| val_start + i)
                         .unwrap_or(line.len());
-                    // 写入 keyword=[REDACTED]
                     result.push_str(&line[cursor..after]);
                     result.push_str("=[REDACTED]");
                     cursor = val_end;
@@ -325,8 +329,8 @@ fn redact_sensitive_keywords(line: &str) -> String {
 }
 
 /// 对 message 字段进行脱敏处理：
-/// 1. 精确替换敏感关键词（与 TS 侧对齐）
-/// 2. 脱敏 Bearer/Basic token
+/// 1. 脱敏 Bearer/Basic token（先于敏感词，避免 keyword 替换破坏 token 模式）
+/// 2. 精确替换敏感关键词（与 TS 侧对齐）
 /// 3. 移除 URL 中的 userinfo（`://user:pass@`）
 /// 4. 替换本地绝对路径为 `[REDACTED]`
 /// 5. 截断至 240 字符
@@ -334,12 +338,12 @@ fn sanitize_message(message: &str) -> String {
     let mut result = String::with_capacity(message.len());
 
     for line in message.lines() {
-        // 先精确替换敏感关键词
-        let keyword_redacted = redact_sensitive_keywords(line);
-        // 再脱敏 Bearer/Basic token
-        let token_redacted = redact_auth_tokens(&keyword_redacted);
+        // 先脱敏 Bearer/Basic token（避免敏感词替换破坏 "Bearer xxx" 模式）
+        let token_redacted = redact_auth_tokens(line);
+        // 再精确替换敏感关键词
+        let keyword_redacted = redact_sensitive_keywords(&token_redacted);
         // 移除 URL userinfo
-        let url_sanitized = remove_url_userinfo(&token_redacted);
+        let url_sanitized = remove_url_userinfo(&keyword_redacted);
         // 脱敏绝对路径
         let path_sanitized = redact_local_paths(&url_sanitized);
         result.push_str(&path_sanitized);
@@ -509,13 +513,21 @@ fn redact_auth_tokens(s: &str) -> String {
     result
 }
 
-/// 从路径中提取 basename（兼容 Windows `\` 和 Unix `/`）。
+/// 从路径中提取 basename（兼容 Windows `\` 和 Unix `/`），
+/// 并剥离 query（`?`）和 fragment（`#`）以避免泄露 token。
 fn extract_basename(name: &str) -> &str {
-    if let Some(pos) = name.rfind(|c| c == '\\' || c == '/') {
+    let after_sep = if let Some(pos) = name.rfind(|c| c == '\\' || c == '/') {
         &name[pos + 1..]
     } else {
         name
-    }
+    };
+    after_sep
+        .split('?')
+        .next()
+        .unwrap_or(after_sep)
+        .split('#')
+        .next()
+        .unwrap_or(after_sep)
 }
 
 /// 对 entry 进行脱敏处理，返回脱敏后的副本。
@@ -989,6 +1001,11 @@ mod tests {
             sanitize_message("my_password_value"),
             "my_password=[REDACTED]"
         );
+        // Authorization: Bearer token — 先被 redact_auth_tokens 处理，再由 redact_sensitive_keywords 处理
+        assert_eq!(
+            sanitize_message("Authorization: Bearer abc123xyz"),
+            "Authorization: [REDACTED]"
+        );
     }
 
     #[test]
@@ -1271,6 +1288,13 @@ mod tests {
     #[test]
     fn extract_basename_already_basename() {
         assert_eq!(extract_basename("file.zip"), "file.zip");
+    }
+
+    #[test]
+    fn extract_basename_strips_query_and_fragment() {
+        assert_eq!(extract_basename("file.zip?token=secret123"), "file.zip");
+        assert_eq!(extract_basename("/tmp/file.zip?token=abc#frag"), "file.zip");
+        assert_eq!(extract_basename("file.zip#section"), "file.zip");
     }
 
     #[test]
