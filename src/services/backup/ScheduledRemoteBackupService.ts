@@ -607,6 +607,7 @@ export function createScheduledRemoteBackupService(
                 remoteFileName: result.remoteFileName ?? null,
                 ...(hasError
                   ? {
+                      message: retentionPatch.lastRetentionCleanupError,
                       metrics: {
                         failedFileName: retentionPatch.lastRetentionCleanupFailedFileName ?? null,
                         deletedCount: retentionPatch.lastRetentionCleanupDeletedCount ?? null,
@@ -627,7 +628,7 @@ export function createScheduledRemoteBackupService(
                 level: 'info',
                 startedAt: startNow,
                 finishedAt: deps.clock(),
-                reasonCode: 'retention_condition_not_met',
+                reasonCode: retentionPatch.baselineConfirmedRemoteCount != null ? 'baseline_established' : 'retention_condition_not_met',
               });
             }
           }
