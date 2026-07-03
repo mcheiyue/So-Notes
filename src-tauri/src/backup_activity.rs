@@ -44,7 +44,8 @@ struct BackupActivityLogFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupActivityEntry {
-    pub id: String,
+    #[serde(default)]
+    pub id: Option<String>,
     pub operation: String,
     pub status: String,
     pub level: String,
@@ -206,9 +207,19 @@ fn replace_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
     if !path.exists() {
         return std::fs::rename(tmp_path, path);
     }
-    // Windows 上 rename 已存在目标会失败，先删除再重命名
-    std::fs::remove_file(path)?;
-    std::fs::rename(tmp_path, path)
+    // Windows 上 rename 已存在目标会失败：先备份原文件，再 rename，失败时恢复备份
+    let backup_path = path.with_extension("json.bak");
+    std::fs::rename(path, &backup_path)?;
+    match std::fs::rename(tmp_path, path) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&backup_path);
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::rename(&backup_path, path);
+            Err(e)
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -394,6 +405,20 @@ fn remove_url_userinfo(s: &str) -> String {
     result
 }
 
+/// 从 `start` 位置向后扫描，在当前"词"范围内寻找 `\` 或 `/`。
+/// "词"由空格、换行、引号、尖括号界定。找到分隔符返回 true。
+fn has_path_separator_after(bytes: &[u8], start: usize) -> bool {
+    let mut j = start;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'\\' | b'/' => return true,
+            b' ' | b'\t' | b'\n' | b'\r' | b'"' | b'\'' | b'<' | b'>' => return false,
+            _ => j += 1,
+        }
+    }
+    false
+}
+
 /// 脱敏本地绝对路径（全局扫描替换）。
 /// 匹配 Windows 盘符路径（`C:\...` 或 `C:/...`）和 Unix 绝对路径（`/home/...`），
 /// 替换为 `[REDACTED]`。
@@ -409,18 +434,25 @@ fn redact_local_paths(s: &str) -> String {
             && bytes[i + 1] == b':'
             && (bytes[i + 2] == b'\\' || bytes[i + 2] == b'/')
         {
-            // 向后扫描到行尾或空格/引号等分隔符
             let mut end = i + 3;
             while end < bytes.len()
                 && bytes[end] != b'\n'
                 && bytes[end] != b'\r'
-                && !bytes[end].is_ascii_whitespace()
                 && bytes[end] != b'"'
                 && bytes[end] != b'\''
+                && bytes[end] != b'<'
+                && bytes[end] != b'>'
             {
+                if bytes[end] == b' ' {
+                    // 空格后是否还有 \ 或 /（路径分隔符），有则说明空格在路径内
+                    if has_path_separator_after(bytes, end + 1) {
+                        end += 1;
+                        continue;
+                    }
+                    break;
+                }
                 end += 1;
             }
-            // 至少 `\X` 才算路径（避免误匹配 `C:\` 单独出现）
             if end > i + 3 {
                 result.push_str("[REDACTED]");
                 i = end;
@@ -431,24 +463,33 @@ fn redact_local_paths(s: &str) -> String {
         // Unix 绝对路径：/ 后跟非空格字符，且至少包含一个子目录 /
         if bytes[i] == b'/'
             && i + 1 < bytes.len()
-            && !bytes[i + 1].is_ascii_whitespace()
+            && bytes[i + 1] != b' '
             && bytes[i + 1] != b'/'
+            && bytes[i + 1] != b'\n'
+            && bytes[i + 1] != b'\r'
         {
             let mut end = i + 1;
             let mut has_sep = false;
             while end < bytes.len()
                 && bytes[end] != b'\n'
                 && bytes[end] != b'\r'
-                && !bytes[end].is_ascii_whitespace()
                 && bytes[end] != b'"'
                 && bytes[end] != b'\''
+                && bytes[end] != b'<'
+                && bytes[end] != b'>'
             {
+                if bytes[end] == b' ' {
+                    if has_path_separator_after(bytes, end + 1) {
+                        end += 1;
+                        continue;
+                    }
+                    break;
+                }
                 if bytes[end] == b'/' {
                     has_sep = true;
                 }
                 end += 1;
             }
-            // 至少 /dir/file 形式才替换，避免误匹配单个 /word
             if has_sep && end > i + 2 {
                 result.push_str("[REDACTED]");
                 i = end;
@@ -706,9 +747,10 @@ pub async fn backup_activity_append(
     // 脱敏处理
     let mut entry = sanitize_entry(entry);
 
-    // id 兜底：为空时生成 UUID
-    if entry.id.is_empty() {
-        entry.id = generate_uuid();
+    // id 兜底：为 None 或空时生成 UUID
+    match &entry.id {
+        Some(id) if !id.is_empty() => {}
+        _ => entry.id = Some(generate_uuid()),
     }
 
     log.entries.push(entry);
@@ -787,7 +829,7 @@ mod tests {
     /// 构造一条测试用的 BackupActivityEntry。
     fn make_test_entry(id: &str) -> BackupActivityEntry {
         BackupActivityEntry {
-            id: id.to_string(),
+            id: Some(id.to_string()),
             operation: "backup".to_string(),
             status: "success".to_string(),
             level: "info".to_string(),
@@ -873,7 +915,7 @@ mod tests {
 
         let loaded = load_log_from_path(&path).unwrap();
         assert_eq!(loaded.entries.len(), 1);
-        assert_eq!(loaded.entries[0].id, "test-001");
+        assert_eq!(loaded.entries[0].id, Some("test-001".into()));
         assert_eq!(loaded.entries[0].operation, "backup");
 
         let _ = fs::remove_dir_all(dir);
@@ -899,8 +941,8 @@ mod tests {
 
         let loaded = load_log_from_path(&path).unwrap();
         assert_eq!(loaded.entries.len(), 3);
-        assert_eq!(loaded.entries[0].id, "entry-000");
-        assert_eq!(loaded.entries[2].id, "entry-002");
+        assert_eq!(loaded.entries[0].id, Some("entry-000".into()));
+        assert_eq!(loaded.entries[2].id, Some("entry-002".into()));
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -932,8 +974,8 @@ mod tests {
 
         assert_eq!(log.entries.len(), MAX_ENTRIES);
         // 最旧的 5 条应被移除
-        assert_eq!(log.entries[0].id, "entry-005");
-        assert_eq!(log.entries[MAX_ENTRIES - 1].id, "entry-104");
+        assert_eq!(log.entries[0].id, Some("entry-005".into()));
+        assert_eq!(log.entries[MAX_ENTRIES - 1].id, Some("entry-104".into()));
 
         save_log_to_path(&path, &log).unwrap();
         let loaded = load_log_from_path(&path).unwrap();
@@ -1300,7 +1342,7 @@ mod tests {
     #[test]
     fn sanitize_entry_strips_local_path_to_basename() {
         let entry = BackupActivityEntry {
-            id: "test".into(),
+            id: Some("test".into()),
             operation: "local-backup".into(),
             status: "success".into(),
             level: "info".into(),
@@ -1323,7 +1365,7 @@ mod tests {
     #[test]
     fn sanitize_entry_strips_remote_path_to_basename() {
         let entry = BackupActivityEntry {
-            id: "test".into(),
+            id: Some("test".into()),
             operation: "remote-backup".into(),
             status: "success".into(),
             level: "info".into(),
@@ -1346,7 +1388,7 @@ mod tests {
     #[test]
     fn sanitize_entry_processes_message_through_sanitize_message() {
         let entry = BackupActivityEntry {
-            id: "test".into(),
+            id: Some("test".into()),
             operation: "remote-backup".into(),
             status: "failed".into(),
             level: "error".into(),
@@ -1369,7 +1411,7 @@ mod tests {
     #[test]
     fn sanitize_entry_extracts_basename_for_metrics_failed_file_name() {
         let entry = BackupActivityEntry {
-            id: "test".into(),
+            id: Some("test".into()),
             operation: "retention-cleanup".into(),
             status: "partial".into(),
             level: "warning".into(),
@@ -1402,7 +1444,7 @@ mod tests {
     #[test]
     fn sanitize_entry_full_pipeline_with_all_fields() {
         let entry = BackupActivityEntry {
-            id: "test".into(),
+            id: Some("test".into()),
             operation: "remote-restore".into(),
             status: "failed".into(),
             level: "error".into(),
@@ -1434,5 +1476,48 @@ mod tests {
             sanitized.metrics.as_ref().unwrap().failed_file_name.as_deref(),
             Some("failed.zip")
         );
+    }
+
+    #[test]
+    fn redact_local_paths_windows_path_with_spaces() {
+        assert_eq!(
+            redact_local_paths("error C:\\Users\\Jane Doe\\Documents\\backup.zip failed"),
+            "error [REDACTED] failed"
+        );
+    }
+
+    #[test]
+    fn redact_local_paths_unix_path_with_spaces() {
+        assert_eq!(
+            redact_local_paths("error /home/jane doe/backups/test.zip failed"),
+            "error [REDACTED] failed"
+        );
+    }
+
+    #[test]
+    fn entry_deserializes_without_id() {
+        let json = r#"{
+            "operation": "backup",
+            "status": "success",
+            "level": "info",
+            "startedAt": 1700000000000,
+            "finishedAt": 1700000060000
+        }"#;
+        let entry: BackupActivityEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.id, None);
+    }
+
+    #[test]
+    fn entry_deserializes_with_empty_id() {
+        let json = r#"{
+            "id": "",
+            "operation": "backup",
+            "status": "success",
+            "level": "info",
+            "startedAt": 1700000000000,
+            "finishedAt": 1700000060000
+        }"#;
+        let entry: BackupActivityEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.id, Some("".to_string()));
     }
 }

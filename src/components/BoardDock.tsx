@@ -2986,15 +2986,20 @@ export const BoardDock = () => {
                                                         {entry.remoteFileName ?? entry.localFileName}
                                                     </p>
                                                 )}
-                                                {(entry.status === 'failed' || entry.status === 'partial') && entry.message && (
-                                                    <p className="text-red-400 dark:text-red-500 truncate" title={entry.message}>
-                                                        {entry.stage ? `[${entry.stage}] ` : ''}{entry.message}
+                                                {(entry.status === 'failed' || entry.status === 'partial') && (entry.message || entry.stage) && (
+                                                    <p className="text-red-400 dark:text-red-500 truncate" title={entry.message ?? entry.stage ?? undefined}>
+                                                        {entry.stage ? `[${entry.stage}] ` : ''}{entry.message ?? ''}
+                                                    </p>
+                                                )}
+                                                {entry.status === 'skipped' && (entry.reasonCode || entry.stage) && (
+                                                    <p className="text-text-tertiary truncate" title={entry.reasonCode ?? entry.stage ?? undefined}>
+                                                        {entry.stage ? `[${entry.stage}] ` : ''}{entry.reasonCode ?? ''}
                                                     </p>
                                                 )}
                                                 {entry.status === 'success' && entry.metrics && (
                                                     <p className="text-text-tertiary truncate">
                                                         {entry.metrics.deletedCount != null && `删除 ${entry.metrics.deletedCount}`}
-                                                        {entry.metrics.retainedCount != null && ` · 保留 ${entry.metrics.retainedCount}`}
+                                                        {entry.metrics.retainedCount != null && (entry.operation === 'remote-list' ? ` · 找到 ${entry.metrics.retainedCount}` : ` · 保留 ${entry.metrics.retainedCount}`)}
                                                         {entry.metrics.missingCount != null && entry.metrics.missingCount > 0 && ` · 缺失 ${entry.metrics.missingCount}`}
                                                     </p>
                                                 )}
