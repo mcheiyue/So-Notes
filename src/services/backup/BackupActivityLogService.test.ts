@@ -333,6 +333,22 @@ describe('BackupActivityLogService', () => {
       expect(result.message).toHaveLength(240);
       expect(result.message).toContain('password=[REDACTED]');
     });
+
+    it('脱敏 message 中的 HTTPS URL', () => {
+      const result = sanitizeActivityInput({
+        ...baseInput,
+        message: 'WebDAV 连接失败 https://dav.example.com/remote.php/dav/files/user/',
+      });
+      expect(result.message).toBe('WebDAV 连接失败 [URL_REDACTED]');
+    });
+
+    it('脱敏 message 中的 HTTP URL（含端口）', () => {
+      const result = sanitizeActivityInput({
+        ...baseInput,
+        message: '无法访问 http://192.168.1.100:5000/webdav',
+      });
+      expect(result.message).toBe('无法访问 [URL_REDACTED]');
+    });
   });
 
   // -----------------------------------------------------------------------

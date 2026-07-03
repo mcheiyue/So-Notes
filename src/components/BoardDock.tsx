@@ -128,7 +128,8 @@ const formatWebdavError = (message: string): string => {
   if (message === 'Flush failed') {
     return '当前数据尚未成功写入磁盘';
   }
-  return message;
+  // 脱敏 WebDAV 服务地址
+  return message.replace(/https?:\/\/[^\s,;)}\]\s]{1,500}/gi, '[REDACTED]');
 };
 
 const formatWebDavLastModified = (value?: string | null): string => {
@@ -1850,6 +1851,16 @@ export const BoardDock = () => {
     'cancelled': '🚫',
   };
 
+  const ACTIVITY_REASON_LABELS: Record<string, string> = {
+    'single_flight': '已有任务运行中',
+    'already_running': '已有任务运行中',
+    'no_local_changes': '无本地变更',
+    'credential_action_required': '凭据需要操作',
+    'retention_condition_not_met': '保留条件未满足',
+    'baseline_established': '基线已建立',
+    'quiet_period': '静默期',
+  };
+
   const formatActivityTime = (timestamp: number): string => {
     const d = new Date(timestamp);
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -2993,7 +3004,7 @@ export const BoardDock = () => {
                                                 )}
                                                 {entry.status === 'skipped' && (entry.reasonCode || entry.stage) && (
                                                     <p className="text-text-tertiary truncate" title={entry.reasonCode ?? entry.stage ?? undefined}>
-                                                        {entry.stage ? `[${entry.stage}] ` : ''}{entry.reasonCode ?? ''}
+                                                        {entry.stage ? `[${entry.stage}] ` : ''}{ACTIVITY_REASON_LABELS[entry.reasonCode ?? ''] ?? entry.reasonCode ?? ''}
                                                     </p>
                                                 )}
                                                 {entry.status === 'success' && entry.metrics && (

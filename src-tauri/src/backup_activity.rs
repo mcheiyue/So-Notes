@@ -209,6 +209,7 @@ fn replace_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
     }
     // Windows 上 rename 已存在目标会失败：先备份原文件，再 rename，失败时恢复备份
     let backup_path = path.with_extension("json.bak");
+    let _ = std::fs::remove_file(&backup_path);
     std::fs::rename(path, &backup_path)?;
     match std::fs::rename(tmp_path, path) {
         Ok(()) => {
@@ -419,6 +420,20 @@ fn has_path_separator_after(bytes: &[u8], start: usize) -> bool {
     false
 }
 
+/// 检查从 `start` 位置开始的下一个"词"是否包含 `.`（文件名常见特征）。
+/// 用于判断空格后的内容是否属于文件名的一部分（如 "My File.zip"）。
+fn next_word_has_dot(bytes: &[u8], start: usize) -> bool {
+    let mut j = start;
+    while j < bytes.len() {
+        match bytes[j] {
+            b' ' | b'\t' | b'\n' | b'\r' | b'"' | b'\'' | b'<' | b'>' => break,
+            b'.' => return true,
+            _ => j += 1,
+        }
+    }
+    false
+}
+
 /// 脱敏本地绝对路径（全局扫描替换）。
 /// 匹配 Windows 盘符路径（`C:\...` 或 `C:/...`）和 Unix 绝对路径（`/home/...`），
 /// 替换为 `[REDACTED]`。
@@ -444,8 +459,11 @@ fn redact_local_paths(s: &str) -> String {
                 && bytes[end] != b'>'
             {
                 if bytes[end] == b' ' {
-                    // 空格后是否还有 \ 或 /（路径分隔符），有则说明空格在路径内
                     if has_path_separator_after(bytes, end + 1) {
+                        end += 1;
+                        continue;
+                    }
+                    if next_word_has_dot(bytes, end + 1) {
                         end += 1;
                         continue;
                     }
@@ -1303,6 +1321,28 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn replace_file_succeeds_when_bak_already_exists() {
+        let dir = test_dir();
+        let path = dir.join(LOG_FILENAME);
+
+        fs::write(&path, "original content").unwrap();
+
+        let bak_path = path.with_extension("json.bak");
+        fs::write(&bak_path, "stale backup").unwrap();
+
+        let tmp_path = dir.join(".replace-test.tmp");
+        fs::write(&tmp_path, "new content").unwrap();
+
+        replace_file(&tmp_path, &path).unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new content");
+        assert!(!bak_path.exists());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
     // -----------------------------------------------------------------------
     // 文件常量
     // -----------------------------------------------------------------------
@@ -1482,6 +1522,14 @@ mod tests {
     fn redact_local_paths_windows_path_with_spaces() {
         assert_eq!(
             redact_local_paths("error C:\\Users\\Jane Doe\\Documents\\backup.zip failed"),
+            "error [REDACTED] failed"
+        );
+    }
+
+    #[test]
+    fn redact_local_paths_windows_filename_with_spaces() {
+        assert_eq!(
+            redact_local_paths("error C:\\Backups\\My File.zip failed"),
             "error [REDACTED] failed"
         );
     }

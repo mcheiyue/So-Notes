@@ -104,6 +104,9 @@ const URL_USERINFO_PATTERN =
 const LOCAL_PATH_PATTERN =
   /[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*|\/(?:[^/\0\r\n]+\/)+[^/\0\r\n]*/g;
 
+/** 匹配 HTTP/HTTPS URL */
+const URL_PATTERN = /https?:\/\/[^\s,;)}\]\s]{1,500}/gi;
+
 const MESSAGE_MAX_LENGTH = 240;
 
 /**
@@ -124,6 +127,10 @@ export function sanitizeActivityInput(
     });
     // 移除 URL userinfo
     message = message.replace(URL_USERINFO_PATTERN, '$1[REDACTED]@');
+    // 替换完整 URL（已含 [REDACTED] 的跳过，保留 userinfo 脱敏结果）
+    message = message.replace(URL_PATTERN, (match) =>
+      match.includes('[REDACTED') ? match : '[URL_REDACTED]',
+    );
     // 替换绝对路径
     message = message.replace(LOCAL_PATH_PATTERN, '[REDACTED]');
     // 截断
