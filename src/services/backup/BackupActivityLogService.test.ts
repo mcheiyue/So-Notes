@@ -214,7 +214,7 @@ describe('BackupActivityLogService', () => {
         message: '请求 https://user:pass@example.com 失败',
       });
       expect(result.message).toBe(
-        '请求 https://[REDACTED]@example.com 失败',
+        '请求 [URL_REDACTED] 失败',
       );
     });
 

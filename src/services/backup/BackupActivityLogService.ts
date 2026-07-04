@@ -96,10 +96,6 @@ const SENSITIVE_PATTERN =
 /** Bearer/Basic token 模式：匹配 Bearer 或 Basic 后面的 token 值 */
 const BEARER_TOKEN_PATTERN = /((?:Bearer|Basic)\s+)[^\s,;)}\]]{1,100}/gi;
 
-/** URL userinfo 模式：匹配 scheme://user:pass@host */
-const URL_USERINFO_PATTERN =
-  /((?:https?|ftp):\/\/)([^@/]+)@/gi;
-
 /** 绝对路径模式：匹配 Windows 盘符路径和 Unix 绝对路径 */
 const LOCAL_PATH_PATTERN =
   /[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*|\/(?:[^/\0\r\n]+\/)+[^/\0\r\n]*/g;
@@ -125,12 +121,8 @@ export function sanitizeActivityInput(
       const keyword = (g1 ?? g2 ?? g3).toLowerCase();
       return `${keyword}=[REDACTED]`;
     });
-    // 移除 URL userinfo
-    message = message.replace(URL_USERINFO_PATTERN, '$1[REDACTED]@');
-    // 替换完整 URL（已含 [REDACTED] 的跳过，保留 userinfo 脱敏结果）
-    message = message.replace(URL_PATTERN, (match) =>
-      match.includes('[REDACTED') ? match : '[URL_REDACTED]',
-    );
+    // 替换完整 URL（在 userinfo 脱敏之前，确保 host/path 不泄露）
+    message = message.replace(URL_PATTERN, '[URL_REDACTED]');
     // 替换绝对路径
     message = message.replace(LOCAL_PATH_PATTERN, '[REDACTED]');
     // 截断

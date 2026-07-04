@@ -374,7 +374,6 @@ export function createScheduledRemoteBackupService(
           lastAttemptCapturedStorageUpdatedAt: diskTs,
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
-        await deps.saveScheduledState(internalState);
         await safeAppendActivity({
           operation: backupOperationForTrigger(trigger),
           status: 'failed',
@@ -385,6 +384,7 @@ export function createScheduledRemoteBackupService(
           stage: 'config',
           message: '缺少 WebDAV 配置',
         });
+        await deps.saveScheduledState(internalState);
         if (trigger === 'before-exit') {
           beforeExitError = new Error('缺少 WebDAV 配置');
         }
@@ -404,7 +404,6 @@ export function createScheduledRemoteBackupService(
           lastAttemptCapturedStorageUpdatedAt: diskTs,
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
-        await deps.saveScheduledState(internalState);
         await safeAppendActivity({
           operation: backupOperationForTrigger(trigger),
           status: 'failed',
@@ -415,6 +414,7 @@ export function createScheduledRemoteBackupService(
           stage: 'credential',
           message: '未保存 WebDAV 凭据',
         });
+        await deps.saveScheduledState(internalState);
         if (trigger === 'before-exit') {
           beforeExitError = new Error('未保存 WebDAV 凭据');
         }
@@ -433,7 +433,6 @@ export function createScheduledRemoteBackupService(
           credentialActionRequired: true,
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
         });
-        await deps.saveScheduledState(internalState);
         await safeAppendActivity({
           operation: backupOperationForTrigger(trigger),
           status: 'skipped',
@@ -443,6 +442,7 @@ export function createScheduledRemoteBackupService(
           trigger,
           reasonCode: 'credential_action_required',
         });
+        await deps.saveScheduledState(internalState);
         if (trigger === 'before-exit') {
           beforeExitError = new Error('凭据失败次数过多，请重新保存密码');
         }
@@ -470,7 +470,6 @@ export function createScheduledRemoteBackupService(
             lastFailureStage: 'flush',
             nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
           });
-          await deps.saveScheduledState(internalState);
           await safeAppendActivity({
             operation: backupOperationForTrigger(trigger),
             status: 'failed',
@@ -481,6 +480,7 @@ export function createScheduledRemoteBackupService(
             stage: 'flush',
             message: '当前数据尚未成功写入磁盘',
           });
+          await deps.saveScheduledState(internalState);
           if (trigger === 'before-exit') {
             beforeExitError = new Error('当前数据尚未成功写入磁盘');
           }
@@ -504,7 +504,6 @@ export function createScheduledRemoteBackupService(
             nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
           });
 
-          await deps.saveScheduledState(internalState);
           await safeAppendActivity({
             operation: backupOperationForTrigger(trigger),
             status: 'skipped',
@@ -514,6 +513,7 @@ export function createScheduledRemoteBackupService(
             trigger,
             reasonCode: 'no_local_changes',
           });
+          await deps.saveScheduledState(internalState);
           return;
         }
       }
@@ -616,6 +616,8 @@ export function createScheduledRemoteBackupService(
                       metrics: {
                         failedFileName: retentionPatch.lastRetentionCleanupFailedFileName ?? null,
                         deletedCount: retentionPatch.lastRetentionCleanupDeletedCount ?? null,
+                        retainedCount: retentionPatch.pendingCleanupTargetCount ?? null,
+                        missingCount: retentionPatch.lastRetentionCleanupMissingCount ?? null,
                       },
                     }
                   : {
@@ -713,7 +715,20 @@ export function createScheduledRemoteBackupService(
         beforeExitError = new Error(result.error ?? '退出前备份失败');
       }
 
-      await deps.saveScheduledState(internalState);
+      try {
+        await deps.saveScheduledState(internalState);
+      } catch (saveErr: unknown) {
+        await safeAppendActivity({
+          operation: backupOperationForTrigger(trigger),
+          status: 'failed',
+          level: 'error',
+          startedAt: startNow,
+          finishedAt: deps.clock(),
+          trigger,
+          stage: 'save-state',
+          message: saveErr instanceof Error ? saveErr.message : String(saveErr),
+        });
+      }
     } catch (err: unknown) {
       const now = deps.clock();
       patchState({

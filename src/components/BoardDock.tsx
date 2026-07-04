@@ -29,10 +29,24 @@ import {
   fileNameFromPath,
   loadRecentActivities,
   clearBackupActivities,
+  sanitizeActivityInput,
 } from "../services/backup/BackupActivityLogService";
 import type { BackupActivityAppendInput, BackupActivityEntry } from "../services/backup/BackupActivityLogService";
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
+
+const sanitizeErrorMessage = (err: unknown): string => {
+  const raw = formatUnknownError(err);
+  const { message } = sanitizeActivityInput({
+    message: raw,
+    operation: 'local-backup',
+    status: 'failed',
+    level: 'error',
+    startedAt: 0,
+    finishedAt: 0,
+  });
+  return message ?? '操作失败';
+};
 
 const setsEqual = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean => {
   if (a.size !== b.size) return false;
@@ -241,7 +255,7 @@ export const BoardDock = () => {
       setActivityEntries(safeEntries);
       setActivityError(null);
     } catch (err) {
-      setActivityError(`刷新失败：${formatUnknownError(err)}`);
+          setActivityError(`刷新失败：${sanitizeErrorMessage(err)}`);
     }
   }, []);
 
@@ -389,7 +403,7 @@ export const BoardDock = () => {
         setActivityEntries(safeEntries);
       } catch (err) {
         if (!cancelled) {
-          setActivityError(formatUnknownError(err));
+          setActivityError(sanitizeErrorMessage(err));
         }
       } finally {
         if (!cancelled) setActivityLoading(false);
@@ -525,6 +539,8 @@ export const BoardDock = () => {
         operation: 'local-backup',
         status: 'skipped',
         level: 'info',
+        stage: 'single-flight',
+        reasonCode: 'already_running',
         message: '已有备份任务正在运行',
         startedAt: Date.now(),
         finishedAt: Date.now(),
@@ -734,6 +750,7 @@ export const BoardDock = () => {
           status: 'skipped',
           level: 'warning',
           stage: 'validate',
+          reasonCode: 'summary_unavailable',
           message: '摘要信息不可用',
           startedAt: Date.now(),
           finishedAt: Date.now(),
@@ -777,6 +794,8 @@ export const BoardDock = () => {
           operation: 'local-restore',
           status: 'skipped',
           level: 'info',
+          stage: 'single-flight',
+          reasonCode: 'already_running',
           message: '已有备份任务正在运行',
           startedAt: Date.now(),
           finishedAt: Date.now(),
@@ -806,6 +825,8 @@ export const BoardDock = () => {
           operation: 'local-restore',
           status: 'partial',
           level: 'warning',
+          stage: 'apply',
+          reasonCode: 'apply_failed',
           summary: toBackupActivitySummary(validation.summary ?? result),
           startedAt,
           finishedAt: Date.now(),
@@ -1876,7 +1897,7 @@ export const BoardDock = () => {
       activityEntriesRef.current = safeEntries;
       setActivityEntries(safeEntries);
     } catch (err) {
-      setActivityError(formatUnknownError(err));
+      setActivityError(sanitizeErrorMessage(err));
     } finally {
       setActivityLoading(false);
     }
@@ -1896,7 +1917,7 @@ export const BoardDock = () => {
       setActivityEntries([]);
       setActivityError(null);
     } catch (err) {
-      setActivityError(`清空失败：${formatUnknownError(err)}`);
+      setActivityError(`清空失败：${sanitizeErrorMessage(err)}`);
     } finally {
       setActivityClearing(false);
     }
@@ -2900,6 +2921,28 @@ export const BoardDock = () => {
                             )}
                         </div>
 
+                        {webdavFeedback && (
+                            <div
+                                data-testid="webdav-feedback"
+                                role={webdavFeedback.status === 'error' ? 'alert' : 'status'}
+                                aria-live="polite"
+                                className={cn(
+                                    'mx-3 mt-2 rounded-md border px-3 py-2 text-xs leading-5',
+                                    webdavFeedback.status === 'error'
+                                        ? 'border-red-100 bg-red-50 text-red-600 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-400'
+                                        : webdavFeedback.status === 'success'
+                                            ? 'border-green-100 bg-green-50 text-green-700 dark:border-green-900/50 dark:bg-green-900/30 dark:text-green-400'
+                                            : 'border-border-subtle bg-secondary-bg/70 text-text-secondary'
+                                )}
+                            >
+                                <p className="font-medium whitespace-pre-line">{webdavFeedback.message}</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {(settingsView === 'WEBDAV' || settingsView === 'DATA') && (
+                    <>
                         <div className="mx-3 my-1.5 border-t border-border-subtle" />
 
                         <div className="px-3 py-2 space-y-2" data-testid="activity-log-section">
@@ -3026,25 +3069,7 @@ export const BoardDock = () => {
                                 </p>
                             )}
                         </div>
-
-                        {webdavFeedback && (
-                            <div
-                                data-testid="webdav-feedback"
-                                role={webdavFeedback.status === 'error' ? 'alert' : 'status'}
-                                aria-live="polite"
-                                className={cn(
-                                    'mx-3 mt-2 rounded-md border px-3 py-2 text-xs leading-5',
-                                    webdavFeedback.status === 'error'
-                                        ? 'border-red-100 bg-red-50 text-red-600 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-400'
-                                        : webdavFeedback.status === 'success'
-                                            ? 'border-green-100 bg-green-50 text-green-700 dark:border-green-900/50 dark:bg-green-900/30 dark:text-green-400'
-                                            : 'border-border-subtle bg-secondary-bg/70 text-text-secondary'
-                                )}
-                            >
-                                <p className="font-medium whitespace-pre-line">{webdavFeedback.message}</p>
-                            </div>
-                        )}
-                    </div>
+                    </>
                 )}
 
                 {settingsView === 'DIAGNOSTICS' && (

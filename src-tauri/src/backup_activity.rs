@@ -242,6 +242,26 @@ const SENSITIVE_KEYWORDS: &[&str] = &[
     "令牌",
 ];
 
+/// 合法的 operation 枚举值（与 TS 侧 BackupActivityOperation 对齐）。
+const VALID_OPERATIONS: &[&str] = &[
+    "local-backup",
+    "local-restore",
+    "remote-backup",
+    "remote-list",
+    "remote-delete",
+    "remote-restore",
+    "scheduled-remote-backup",
+    "retention-cleanup",
+    "retention-cliff-drop",
+    "credential-status",
+];
+
+/// 合法的 status 枚举值（与 TS 侧 BackupActivityStatus 对齐）。
+const VALID_STATUSES: &[&str] = &["success", "failed", "skipped", "partial", "cancelled"];
+
+/// 合法的 level 枚举值（与 TS 侧 BackupActivityLevel 对齐）。
+const VALID_LEVELS: &[&str] = &["info", "warning", "error"];
+
 /// 对单行文本进行精确敏感词替换（与 TS 侧 SENSITIVE_PATTERN 行为对齐）：
 /// - `keyword=value` 或 `keyword: value` → `keyword=[REDACTED]`
 /// - `keyword_something` → `keyword=[REDACTED]`
@@ -343,26 +363,23 @@ fn redact_sensitive_keywords(line: &str) -> String {
 /// 对 message 字段进行脱敏处理：
 /// 1. 脱敏 Bearer/Basic token（先于敏感词，避免 keyword 替换破坏 token 模式）
 /// 2. 精确替换敏感关键词（与 TS 侧对齐）
-/// 3. 移除 URL 中的 userinfo（`://user:pass@`）
-/// 4. 替换本地绝对路径为 `[REDACTED]`
-/// 5. 截断至 240 字符
+/// 3. 替换所有 HTTP(S) URL 为 `[URL_REDACTED]`
+/// 4. 移除 URL 中的 userinfo（`://user:pass@`）
+/// 5. 替换本地绝对路径为 `[REDACTED]`
+/// 6. 截断至 240 字符
 fn sanitize_message(message: &str) -> String {
     let mut result = String::with_capacity(message.len());
 
     for line in message.lines() {
-        // 先脱敏 Bearer/Basic token（避免敏感词替换破坏 "Bearer xxx" 模式）
         let token_redacted = redact_auth_tokens(line);
-        // 再精确替换敏感关键词
         let keyword_redacted = redact_sensitive_keywords(&token_redacted);
-        // 移除 URL userinfo
-        let url_sanitized = remove_url_userinfo(&keyword_redacted);
-        // 脱敏绝对路径
-        let path_sanitized = redact_local_paths(&url_sanitized);
+        let url_redacted = redact_urls(&keyword_redacted);
+        let userinfo_removed = remove_url_userinfo(&url_redacted);
+        let path_sanitized = redact_local_paths(&userinfo_removed);
         result.push_str(&path_sanitized);
         result.push('\n');
     }
 
-    // 移除末尾多余的换行符
     while result.ends_with('\n') {
         result.pop();
     }
@@ -399,6 +416,46 @@ fn remove_url_userinfo(s: &str) -> String {
             cursor = protocol_end;
         } else {
             // 没有更多 `://` → 写入剩余部分
+            result.push_str(&s[cursor..]);
+            break;
+        }
+    }
+    result
+}
+
+/// 替换所有 HTTP(S) URL 为 `[URL_REDACTED]`（全局扫描）。
+/// 跳过已含 `[REDACTED` 的文本，避免与 userinfo 脱敏冲突。
+fn redact_urls(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut cursor = 0;
+    let lower = s.to_lowercase();
+    while cursor < s.len() {
+        let pos_http = lower[cursor..].find("http://").map(|r| cursor + r);
+        let pos_https = lower[cursor..].find("https://").map(|r| cursor + r);
+        let abs = match (pos_http, pos_https) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        if let Some(abs) = abs {
+            let url_start = abs;
+            let mut url_end = abs;
+            let bytes = s.as_bytes();
+            while url_end < bytes.len() {
+                match bytes[url_end] {
+                    b' ' | b'\t' | b'\n' | b'\r' | b',' | b';' | b')' | b'}' | b']' | b'"'
+                    | b'\'' | b'<' | b'>' => break,
+                    _ => url_end += 1,
+                }
+            }
+            let url = &s[url_start..url_end];
+            result.push_str(&s[cursor..url_start]);
+            if url.contains("[REDACTED") {
+                result.push_str(url);
+            } else if url_end > url_start {
+                result.push_str("[URL_REDACTED]");
+            }
+            cursor = url_end;
+        } else {
             result.push_str(&s[cursor..]);
             break;
         }
@@ -591,6 +648,16 @@ fn extract_basename(name: &str) -> &str {
 
 /// 对 entry 进行脱敏处理，返回脱敏后的副本。
 fn sanitize_entry(mut entry: BackupActivityEntry) -> BackupActivityEntry {
+    if !VALID_OPERATIONS.contains(&entry.operation.as_str()) {
+        entry.operation = "unknown".to_string();
+    }
+    if !VALID_STATUSES.contains(&entry.status.as_str()) {
+        entry.status = "failed".to_string();
+    }
+    if !VALID_LEVELS.contains(&entry.level.as_str()) {
+        entry.level = "error".to_string();
+    }
+
     if let Some(ref msg) = entry.message {
         entry.message = Some(sanitize_message(msg));
     }
@@ -848,7 +915,7 @@ mod tests {
     fn make_test_entry(id: &str) -> BackupActivityEntry {
         BackupActivityEntry {
             id: Some(id.to_string()),
-            operation: "backup".to_string(),
+            operation: "local-backup".to_string(),
             status: "success".to_string(),
             level: "info".to_string(),
             started_at: 1700000000000,
@@ -934,7 +1001,7 @@ mod tests {
         let loaded = load_log_from_path(&path).unwrap();
         assert_eq!(loaded.entries.len(), 1);
         assert_eq!(loaded.entries[0].id, Some("test-001".into()));
-        assert_eq!(loaded.entries[0].operation, "backup");
+        assert_eq!(loaded.entries[0].operation, "local-backup");
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -1567,5 +1634,76 @@ mod tests {
         }"#;
         let entry: BackupActivityEntry = serde_json::from_str(json).unwrap();
         assert_eq!(entry.id, Some("".to_string()));
+    }
+
+    #[test]
+    fn redact_urls_replaces_http_url() {
+        assert_eq!(redact_urls("visit http://example.com/path"), "visit [URL_REDACTED]");
+    }
+
+    #[test]
+    fn redact_urls_replaces_https_url() {
+        assert_eq!(redact_urls("see https://host.com/a?b=c end"), "see [URL_REDACTED] end");
+    }
+
+    #[test]
+    fn redact_urls_replaces_multiple_urls() {
+        let msg = "first https://a.com/x second http://b.com/y";
+        assert_eq!(redact_urls(msg), "first [URL_REDACTED] second [URL_REDACTED]");
+    }
+
+    #[test]
+    fn redact_urls_skips_already_redacted() {
+        let msg = "https://[REDACTED]@host.com/path remains";
+        assert_eq!(redact_urls(msg), "https://[REDACTED]@host.com/path remains");
+    }
+
+    #[test]
+    fn redact_urls_no_url_unchanged() {
+        assert_eq!(redact_urls("no urls here"), "no urls here");
+    }
+
+    #[test]
+    fn sanitize_message_redacts_full_url() {
+        let msg = "upload to https://user:pass@host.com/webdav/file.zip failed";
+        let result = sanitize_message(msg);
+        assert!(!result.contains("host.com"), "host should be redacted: {result}");
+        assert!(result.contains("[URL_REDACTED]"), "should contain [URL_REDACTED]: {result}");
+    }
+
+    #[test]
+    fn sanitize_entry_rejects_invalid_operation() {
+        let mut entry = make_test_entry("test");
+        entry.operation = "invalid-op".to_string();
+        let sanitized = sanitize_entry(entry);
+        assert_eq!(sanitized.operation, "unknown");
+    }
+
+    #[test]
+    fn sanitize_entry_rejects_invalid_status() {
+        let mut entry = make_test_entry("test");
+        entry.status = "bogus".to_string();
+        let sanitized = sanitize_entry(entry);
+        assert_eq!(sanitized.status, "failed");
+    }
+
+    #[test]
+    fn sanitize_entry_rejects_invalid_level() {
+        let mut entry = make_test_entry("test");
+        entry.level = "critical".to_string();
+        let sanitized = sanitize_entry(entry);
+        assert_eq!(sanitized.level, "error");
+    }
+
+    #[test]
+    fn sanitize_entry_accepts_valid_values() {
+        let mut entry = make_test_entry("test");
+        entry.operation = "remote-backup".to_string();
+        entry.status = "partial".to_string();
+        entry.level = "warning".to_string();
+        let sanitized = sanitize_entry(entry);
+        assert_eq!(sanitized.operation, "remote-backup");
+        assert_eq!(sanitized.status, "partial");
+        assert_eq!(sanitized.level, "warning");
     }
 }
