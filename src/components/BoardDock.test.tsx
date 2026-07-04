@@ -1554,6 +1554,40 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(feedback?.textContent).toContain('配置已保存');
   });
 
+  it('保存 WebDAV 配置失败时记录 credential-status failed 活动', async () => {
+    const { saveConfig, loadConfig } = await import('../services/backup/WebDavBackupService');
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+    vi.mocked(saveConfig).mockResolvedValue({ success: false, error: '密钥链写入失败' });
+
+    await openWebdavView();
+
+    const serverInput = container.querySelector('[data-testid="webdav-server-url"]') as HTMLInputElement;
+    const usernameInput = container.querySelector('[data-testid="webdav-username"]') as HTMLInputElement;
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(serverInput, 'https://dav.example.com');
+      serverInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(usernameInput, 'user1');
+      usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await clickElement(findButtonByText('保存配置'));
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      'backup_activity_append',
+      expect.objectContaining({
+        entry: expect.objectContaining({
+          operation: 'credential-status',
+          status: 'failed',
+          level: 'error',
+          stage: 'config-save',
+          message: '保存失败：密钥链写入失败',
+        }),
+      }),
+    );
+  });
+
   it('测试连接调用 testConnection 服务', async () => {
     const { testConnection, loadConfig } = await import('../services/backup/WebDavBackupService');
     vi.mocked(loadConfig).mockResolvedValue({ success: true, passwordSaved: true });
@@ -2642,6 +2676,61 @@ describe('BoardDock 恢复流程与 BackupJobCoordinator 集成', () => {
     const feedback = container.querySelector('[data-testid="zip-feedback"]');
     expect(feedback).not.toBeNull();
     expect(feedback?.textContent).toContain('恢复成功');
+  });
+
+  it('本地 zip 恢复后 WAL 清理失败时显示精确错误并记录 wal-clear 活动', async () => {
+    const { openZipDialog } = await import('../utils/fileSystem');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
+    const { db } = await import('../store/db');
+    const { invoke } = await import('@tauri-apps/api/core');
+
+    vi.mocked(openZipDialog).mockResolvedValue('/backups/good.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: Date.now(),
+        noteCount: 1, boardCount: 1, textNoteCount: 1, imageNoteCount: 0, trashNoteCount: 0,
+        imageFileCount: 0, imageFileTotalBytes: 0,
+      },
+      errors: [],
+      warnings: [],
+    });
+    vi.mocked(restoreLocalBackup).mockResolvedValue({
+      success: true, noteCount: 1, boardCount: 1, attachmentCount: 0,
+    });
+    vi.mocked(readDiskStorageData).mockResolvedValue({
+      schemaVersion: 1,
+      storageUpdatedAt: Date.now(),
+      notes: [
+        { id: 'restored-ok', kind: 'text', boardId: 'default', x: 0, y: 0, title: '', content: '恢复便签', color: '#FFF', z: 1, collapsed: false, createdAt: 1, updatedAt: 1 },
+      ],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config },
+    });
+    vi.mocked(db.clearWAL).mockRejectedValueOnce(new Error('wal locked'));
+    vi.mocked(confirm).mockResolvedValue(true);
+
+    await openDataSettings();
+    await clickElement(findButtonByText('从 zip 覆盖恢复'));
+
+    const feedback = container.querySelector('[data-testid="zip-feedback"]');
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent).toContain('WAL 清理失败');
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      'backup_activity_append',
+      expect.objectContaining({
+        entry: expect.objectContaining({
+          operation: 'local-restore',
+          status: 'partial',
+          level: 'warning',
+          stage: 'wal-clear',
+          reasonCode: 'wal_clear_failed',
+          message: expect.stringContaining('WAL 清理失败'),
+        }),
+      }),
+    );
   });
 
   it('远端恢复成功后释放协调器任务', async () => {

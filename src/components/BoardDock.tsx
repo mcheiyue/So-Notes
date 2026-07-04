@@ -33,6 +33,15 @@ import {
 } from "../services/backup/BackupActivityLogService";
 import type { BackupActivityAppendInput, BackupActivityEntry } from "../services/backup/BackupActivityLogService";
 
+type RestoreApplyResult =
+  | { readonly success: true }
+  | {
+      readonly success: false;
+      readonly stage: 'apply' | 'wal-clear';
+      readonly reasonCode: 'apply_failed' | 'wal_clear_failed';
+      readonly message: string;
+    };
+
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
 
 const sanitizeErrorMessage = (err: unknown): string => {
@@ -624,9 +633,11 @@ export const BoardDock = () => {
     }
   };
 
-  const applyRestoredDiskData = async (): Promise<boolean> => {
+  const applyRestoredDiskData = async (): Promise<RestoreApplyResult> => {
     const restoredData = await readDiskStorageData('data.json');
-    if (!restoredData) return false;
+    if (!restoredData) {
+      return { success: false, stage: 'apply', reasonCode: 'apply_failed', message: '无法读取磁盘数据' };
+    }
 
     restoredData.notes.forEach((note) => {
       note.boardId = note.boardId || 'default';
@@ -685,10 +696,15 @@ export const BoardDock = () => {
 
     try {
       await db.clearWAL();
-    } catch {
-      return false;
+    } catch (err) {
+      return {
+        success: false,
+        stage: 'wal-clear',
+        reasonCode: 'wal_clear_failed',
+        message: `WAL 清理失败：${formatUnknownError(err)}`,
+      };
     }
-    return true;
+    return { success: true };
   };
 
   const formatBytesForRestore = (bytes: number): string => {
@@ -837,14 +853,15 @@ export const BoardDock = () => {
       }
 
       const applied = await applyRestoredDiskData();
-      if (!applied) {
-        setZipFeedback({ status: 'error', message: '恢复成功但无法读取磁盘数据，请重启应用。' });
+      if (!applied.success) {
+        setZipFeedback({ status: 'error', message: `恢复成功但${applied.message}，请重启应用。` });
         void logActivityAndRefresh({
           operation: 'local-restore',
           status: 'partial',
           level: 'warning',
-          stage: 'apply',
-          reasonCode: 'apply_failed',
+          stage: applied.stage,
+          reasonCode: applied.reasonCode,
+          message: applied.message,
           summary: toBackupActivitySummary(validation.summary ?? result),
           startedAt,
           finishedAt: Date.now(),
@@ -977,10 +994,30 @@ export const BoardDock = () => {
           setWebdavFeedback({ status: 'success', message: '配置已保存。' });
         }
       } else {
-        setWebdavFeedback({ status: 'error', message: `保存失败：${result.error ?? '未知错误'}` });
+        const message = `保存失败：${result.error ?? '未知错误'}`;
+        setWebdavFeedback({ status: 'error', message });
+        void logActivityAndRefresh({
+          operation: 'credential-status',
+          status: 'failed',
+          level: 'error',
+          stage: 'config-save',
+          message,
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+        });
       }
     } catch (err) {
-      setWebdavFeedback({ status: 'error', message: `保存失败：${formatUnknownError(err)}` });
+      const message = `保存失败：${formatUnknownError(err)}`;
+      setWebdavFeedback({ status: 'error', message });
+      void logActivityAndRefresh({
+        operation: 'credential-status',
+        status: 'failed',
+        level: 'error',
+        stage: 'config-save',
+        message,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
     } finally {
       setWebdavOperation('idle');
     }
@@ -1446,13 +1483,16 @@ export const BoardDock = () => {
       }
 
       const applied = await applyRestoredDiskData();
-      if (!applied) {
-        setWebdavFeedback({ status: 'error', message: '恢复成功但无法读取磁盘数据，请重启应用。' });
+      if (!applied.success) {
+        setWebdavFeedback({ status: 'error', message: `恢复成功但${applied.message}，请重启应用。` });
         void logActivityAndRefresh({
           operation: 'remote-restore',
           status: 'partial',
           level: 'warning',
+          stage: applied.stage,
+          reasonCode: applied.reasonCode,
           remoteFileName: fileNameFromPath(fileName),
+          message: applied.message,
           summary: toBackupActivitySummary(validation.summary ?? result),
           startedAt,
           finishedAt: Date.now(),

@@ -18,6 +18,7 @@ const {
   mockGetLatestUpdateTimestamp,
   mockTryStartBackupJob,
   mockCreateRemoteBackup,
+  mockRunRemoteBackup,
 } = vi.hoisted(() => ({
   mockInitialize: vi.fn(),
   mockStart: vi.fn(),
@@ -34,15 +35,27 @@ const {
   mockGetLatestUpdateTimestamp: vi.fn(),
   mockTryStartBackupJob: vi.fn(),
   mockCreateRemoteBackup: vi.fn(),
+  mockRunRemoteBackup: vi.fn(),
 }));
 
 vi.mock('../services/backup/ScheduledRemoteBackupService', () => ({
   createScheduledRemoteBackupService: mockCreateService,
+  FREQUENCY_MS: {
+    daily: 24 * 60 * 60 * 1000,
+    weekly: 7 * 24 * 60 * 60 * 1000,
+    'every-6-hours': 6 * 60 * 60 * 1000,
+    'every-12-hours': 12 * 60 * 60 * 1000,
+  },
+  CREDENTIAL_FAILURE_THRESHOLD: 3,
   registerSchedulerService: vi.fn(),
   unregisterSchedulerService: vi.fn(),
 }));
 
 vi.mock('../services/backup/ScheduledRemoteBackupConfigService', () => ({
+  DEFAULT_SCHEDULED_BACKUP_STATE: {
+    consecutiveCredentialFailures: 0,
+    credentialActionRequired: false,
+  },
   loadConfig: mockLoadScheduledConfig,
   saveConfig: mockSaveScheduledConfig,
   loadState: mockLoadScheduledState,
@@ -52,6 +65,10 @@ vi.mock('../services/backup/ScheduledRemoteBackupConfigService', () => ({
 vi.mock('../services/backup/WebDavBackupService', () => ({
   loadConfig: mockLoadWebDavConfig,
   createRemoteBackup: mockCreateRemoteBackup,
+}));
+
+vi.mock('../services/backup/RemoteBackupRunner', () => ({
+  runRemoteBackup: mockRunRemoteBackup,
 }));
 
 vi.mock('../services/storage/PersistenceFacade', () => ({
@@ -134,6 +151,7 @@ describe('ScheduledRemoteBackupController', () => {
     mockGetLatestUpdateTimestamp.mockReset();
     mockTryStartBackupJob.mockReset();
     mockCreateRemoteBackup.mockReset();
+    mockRunRemoteBackup.mockReset();
     mockListen.mockReset();
     mockListen.mockResolvedValue(vi.fn());
     mockInvoke.mockReset();
@@ -154,6 +172,7 @@ describe('ScheduledRemoteBackupController', () => {
     mockGetLatestUpdateTimestamp.mockReturnValue(0);
     mockTryStartBackupJob.mockReturnValue(null);
     mockCreateRemoteBackup.mockResolvedValue({ success: false });
+    mockRunRemoteBackup.mockResolvedValue({ success: false });
 
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -360,6 +379,62 @@ describe('ScheduledRemoteBackupController', () => {
     expect(passedRunBeforeExit).toBeDefined();
 
     await expect(passedRunBeforeExit!()).rejects.toThrow('退出前备份服务尚未就绪');
+  });
+
+  it('退出前 fallback 备份成功后保存 lastSuccessfulStorageUpdatedAt', async () => {
+    const serviceInstance = {
+      ...stubService(),
+      initialize: vi.fn().mockRejectedValue(new Error('初始化失败')),
+    };
+    mockCreateService.mockReturnValue(serviceInstance);
+    mockLoadWebDavConfig.mockResolvedValue({
+      success: true,
+      serverUrl: 'https://dav.example.com',
+      username: 'user1',
+      remoteDir: 'SoNotes_Backups/',
+      passwordSaved: true,
+    });
+    mockRunRemoteBackup.mockResolvedValue({
+      success: true,
+      remoteFileName: 'backup.zip',
+      summary: null,
+      zipSizeBytes: null,
+    });
+    const storageData = { storageUpdatedAt: 12345 };
+    mockReadDiskStorageData.mockResolvedValue(storageData);
+    mockGetLatestUpdateTimestamp.mockReturnValue(12345);
+
+    await act(async () => {
+      root.render(<ScheduledRemoteBackupController />);
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const listener = mockListen.mock.calls.find(
+      ([event]) => event === 'remote-backup-before-quit-requested',
+    )?.[1] as (() => Promise<void>) | undefined;
+
+    expect(listener).toBeDefined();
+
+    await act(async () => {
+      await listener!();
+    });
+
+    const { calls: quitCallsRetry } = vi.mocked(handleQuitRequest).mock;
+    const passedRunBeforeExit = quitCallsRetry[quitCallsRetry.length - 1]?.[0];
+    expect(passedRunBeforeExit).toBeDefined();
+
+    await passedRunBeforeExit!();
+
+    expect(mockReadDiskStorageData).toHaveBeenCalled();
+    expect(mockGetLatestUpdateTimestamp).toHaveBeenCalledWith(storageData);
+    expect(mockSaveScheduledState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastSuccessfulStorageUpdatedAt: 12345,
+      }),
+    );
   });
 });
 
