@@ -173,6 +173,10 @@ fn temp_file_path(path: &Path) -> Result<PathBuf, String> {
     Ok(parent.join(format!(".{file_name}.tmp-{:016x}", rand::random::<u64>())))
 }
 
+fn backup_file_path(path: &Path) -> PathBuf {
+    path.with_extension("json.bak")
+}
+
 /// 原子写入：先写临时文件，再 rename 替换目标文件。
 fn write_atomic(path: &Path, content: &str) -> Result<(), String> {
     let parent = path
@@ -205,7 +209,7 @@ fn replace_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
         return std::fs::rename(tmp_path, path);
     }
     // Windows 上 rename 已存在目标会失败：先备份原文件，再 rename，失败时恢复备份
-    let backup_path = path.with_extension("json.bak");
+    let backup_path = backup_file_path(path);
     let _ = std::fs::remove_file(&backup_path);
     std::fs::rename(path, &backup_path)?;
     match std::fs::rename(tmp_path, path) {
@@ -775,8 +779,21 @@ fn generate_uuid() -> String {
 // 文件读写
 // ---------------------------------------------------------------------------
 
+fn recover_orphaned_log_backup_if_missing(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        return Ok(());
+    }
+    let backup_path = backup_file_path(path);
+    if !backup_path.exists() {
+        return Ok(());
+    }
+    std::fs::rename(&backup_path, path).map_err(|e| format!("恢复备份活动日志 .bak 失败: {e}"))
+}
+
 /// 从文件加载日志。文件不存在或为空时返回空日志；解析失败返回明确错误；版本不匹配返回错误。
 fn load_log_from_path(path: &Path) -> Result<BackupActivityLogFile, String> {
+    recover_orphaned_log_backup_if_missing(path)?;
+
     if !path.exists() {
         return Ok(BackupActivityLogFile {
             version: LOG_VERSION,
@@ -1000,6 +1017,28 @@ mod tests {
 
         assert_eq!(log.version, LOG_VERSION);
         assert!(log.entries.is_empty());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_log_from_path_recovers_orphaned_bak_when_main_file_missing() {
+        let dir = test_dir();
+        let path = dir.join(LOG_FILENAME);
+        let backup_path = path.with_extension("json.bak");
+        let entry = make_test_entry("bak-001");
+        let log = BackupActivityLogFile {
+            version: LOG_VERSION,
+            entries: vec![entry],
+        };
+        fs::write(&backup_path, serde_json::to_string_pretty(&log).unwrap()).unwrap();
+
+        let loaded = load_log_from_path(&path).unwrap();
+
+        assert!(path.exists());
+        assert!(!backup_path.exists());
+        assert_eq!(loaded.entries.len(), 1);
+        assert_eq!(loaded.entries[0].id, Some("bak-001".into()));
 
         let _ = fs::remove_dir_all(dir);
     }
