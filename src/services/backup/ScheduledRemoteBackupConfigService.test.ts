@@ -367,6 +367,50 @@ describe('ScheduledRemoteBackupConfigService', () => {
       expect(redacted.lastFailureReason).toBe('远端备份失败，请检查配置');
     });
 
+    it('脱敏包含 URL 的失败原因', () => {
+      const state: ScheduledRemoteBackupState = {
+        ...DEFAULT_SCHEDULED_BACKUP_STATE,
+        lastFailureReason: 'WebDAV 连接失败：https://dav.example.com/remote.php/dav/files/alice',
+      };
+
+      const redacted = redactStateBeforeSave(state);
+
+      expect(redacted.lastFailureReason).toBe('WebDAV 连接失败：[URL_REDACTED]');
+    });
+
+    it('脱敏包含本地路径的失败原因', () => {
+      const state: ScheduledRemoteBackupState = {
+        ...DEFAULT_SCHEDULED_BACKUP_STATE,
+        lastFailureReason: '读取失败 C:\\Users\\alice\\backup.zip',
+      };
+
+      const redacted = redactStateBeforeSave(state);
+
+      expect(redacted.lastFailureReason).toBe('读取失败 [REDACTED]');
+    });
+
+    it('脱敏保留清理错误中的 URL 和本地路径', () => {
+      const state: ScheduledRemoteBackupState = {
+        ...DEFAULT_SCHEDULED_BACKUP_STATE,
+        lastRetentionCleanupError: '删除 https://dav.example.com/backups/old.zip 失败，缓存 C:\\Temp\\old.zip',
+      };
+
+      const redacted = redactStateBeforeSave(state);
+
+      expect(redacted.lastRetentionCleanupError).toBe('删除 [URL_REDACTED] 失败，缓存 [REDACTED]');
+    });
+
+    it('敏感关键词优先使用通用失败原因', () => {
+      const state: ScheduledRemoteBackupState = {
+        ...DEFAULT_SCHEDULED_BACKUP_STATE,
+        lastFailureReason: 'password leaked at https://dav.example.com/path',
+      };
+
+      const redacted = redactStateBeforeSave(state);
+
+      expect(redacted.lastFailureReason).toBe('远端备份失败，请检查配置');
+    });
+
     it('null 失败原因保持 null', () => {
       const state: ScheduledRemoteBackupState = {
         ...DEFAULT_SCHEDULED_BACKUP_STATE,

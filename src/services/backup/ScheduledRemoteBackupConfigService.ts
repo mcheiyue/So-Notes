@@ -192,6 +192,9 @@ export function isValidFrequency(
  * 敏感字段名模式（用于防御性检查）。
  */
 const SENSITIVE_PATTERNS = ['password', 'token', 'authorization'] as const;
+const URL_PATTERN = /https?:\/\/[^\s,;)}\]\s]{1,500}/gi;
+const LOCAL_PATH_PATTERN =
+  /[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*|\/(?:[^/\0\r\n]+\/)+[^/\0\r\n]*/g;
 
 /**
  * 检查字符串是否包含敏感信息模式。
@@ -199,6 +202,12 @@ const SENSITIVE_PATTERNS = ['password', 'token', 'authorization'] as const;
 function containsSensitivePattern(value: string): boolean {
   const lower = value.toLowerCase();
   return SENSITIVE_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+function redactUrlAndLocalPath(value: string): string {
+  return value
+    .replace(URL_PATTERN, '[URL_REDACTED]')
+    .replace(LOCAL_PATH_PATTERN, '[REDACTED]');
 }
 
 /**
@@ -213,11 +222,15 @@ export function redactStateBeforeSave(
   let redactedReason = state.lastFailureReason;
   if (redactedReason !== null && containsSensitivePattern(redactedReason)) {
     redactedReason = '远端备份失败，请检查配置';
+  } else if (redactedReason !== null) {
+    redactedReason = redactUrlAndLocalPath(redactedReason);
   }
 
   let redactedCleanupError = state.lastRetentionCleanupError;
   if (redactedCleanupError !== null && containsSensitivePattern(redactedCleanupError)) {
     redactedCleanupError = '清理失败，请检查配置';
+  } else if (redactedCleanupError !== null) {
+    redactedCleanupError = redactUrlAndLocalPath(redactedCleanupError);
   }
 
   return {
