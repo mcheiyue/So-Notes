@@ -371,11 +371,11 @@ fn sanitize_message(message: &str) -> String {
     let mut result = String::with_capacity(message.len());
 
     for line in message.lines() {
-        let token_redacted = redact_auth_tokens(line);
+        // 先替换 URL，避免后续 token 脱敏把 URL 里的参数变成 [REDACTED] 导致 redact_urls 跳过
+        let url_redacted = redact_urls(line);
+        let token_redacted = redact_auth_tokens(&url_redacted);
         let keyword_redacted = redact_sensitive_keywords(&token_redacted);
-        let url_redacted = redact_urls(&keyword_redacted);
-        let userinfo_removed = remove_url_userinfo(&url_redacted);
-        let path_sanitized = redact_local_paths(&userinfo_removed);
+        let path_sanitized = redact_local_paths(&keyword_redacted);
         result.push_str(&path_sanitized);
         result.push('\n');
     }
@@ -424,7 +424,6 @@ fn remove_url_userinfo(s: &str) -> String {
 }
 
 /// 替换所有 HTTP(S) URL 为 `[URL_REDACTED]`（全局扫描）。
-/// 跳过已含 `[REDACTED` 的文本，避免与 userinfo 脱敏冲突。
 fn redact_urls(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut cursor = 0;
@@ -442,16 +441,14 @@ fn redact_urls(s: &str) -> String {
             let bytes = s.as_bytes();
             while url_end < bytes.len() {
                 match bytes[url_end] {
-                    b' ' | b'\t' | b'\n' | b'\r' | b',' | b';' | b')' | b'}' | b']' | b'"'
+                    b' ' | b'\t' | b'\n' | b'\r' | b',' | b';' | b')' | b'}' | b'"'
                     | b'\'' | b'<' | b'>' => break,
                     _ => url_end += 1,
                 }
             }
             let url = &s[url_start..url_end];
             result.push_str(&s[cursor..url_start]);
-            if url.contains("[REDACTED") {
-                result.push_str(url);
-            } else if url_end > url_start {
+            if url_end > url_start {
                 result.push_str("[URL_REDACTED]");
             }
             cursor = url_end;
@@ -1653,9 +1650,15 @@ mod tests {
     }
 
     #[test]
-    fn redact_urls_skips_already_redacted() {
+    fn redact_urls_replaces_all_urls() {
         let msg = "https://[REDACTED]@host.com/path remains";
-        assert_eq!(redact_urls(msg), "https://[REDACTED]@host.com/path remains");
+        assert_eq!(redact_urls(msg), "[URL_REDACTED] remains");
+    }
+
+    #[test]
+    fn redact_urls_handles_brackets_in_url() {
+        let msg = "https://host.com/path?[key=value] remains";
+        assert_eq!(redact_urls(msg), "[URL_REDACTED] remains");
     }
 
     #[test]
