@@ -392,7 +392,14 @@ export const BoardDock = () => {
       } finally {
         if (!cancelled) setScheduledLoading(false);
       }
+    })();
+    return () => { cancelled = true; };
+  }, [settingsView]);
 
+  useEffect(() => {
+    if (settingsView !== 'WEBDAV' && settingsView !== 'DATA') return;
+    let cancelled = false;
+    (async () => {
       setActivityLoading(true);
       setActivityError(null);
       try {
@@ -421,6 +428,13 @@ export const BoardDock = () => {
           setScheduledState(stateResult.state);
         }
       } catch { /* 轮询失败静默忽略 */ }
+    }, 5000);
+    return () => { window.clearInterval(intervalId); };
+  }, [settingsView]);
+
+  useEffect(() => {
+    if (settingsView !== 'WEBDAV' && settingsView !== 'DATA') return;
+    const intervalId = window.setInterval(async () => {
       try {
         const entries = await loadRecentActivities(10);
         const safeEntries = entries ?? [];
@@ -849,6 +863,18 @@ export const BoardDock = () => {
         startedAt,
         finishedAt: Date.now(),
       });
+
+      // 恢复成功后重置 lastSuccessfulStorageUpdatedAt，避免远端备份误判"无本地变更"
+      try {
+        const stateResult = await ScheduledRemoteBackupConfigService.loadState();
+        if (stateResult.success && stateResult.state) {
+          await ScheduledRemoteBackupConfigService.saveState({
+            ...stateResult.state,
+            lastSuccessfulStorageUpdatedAt: null,
+          });
+          setScheduledState(prev => ({ ...prev, lastSuccessfulStorageUpdatedAt: null }));
+        }
+      } catch { /* 重置失败不影响恢复结果 */ }
     } catch (err) {
       setZipFeedback({ status: 'error', message: `恢复失败：${formatUnknownError(err)}` });
       void logActivityAndRefresh({

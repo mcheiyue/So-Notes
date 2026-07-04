@@ -728,6 +728,9 @@ export function createScheduledRemoteBackupService(
           stage: 'save-state',
           message: saveErr instanceof Error ? saveErr.message : String(saveErr),
         });
+        if (trigger === 'before-exit') {
+          throw saveErr;
+        }
       }
     } catch (err: unknown) {
       const now = deps.clock();
