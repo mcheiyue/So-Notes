@@ -170,10 +170,7 @@ fn temp_file_path(path: &Path) -> Result<PathBuf, String> {
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| "日志文件名无效".to_string())?;
-    Ok(parent.join(format!(
-        ".{file_name}.tmp-{:016x}",
-        rand::random::<u64>()
-    )))
+    Ok(parent.join(format!(".{file_name}.tmp-{:016x}", rand::random::<u64>())))
 }
 
 /// 原子写入：先写临时文件，再 rename 替换目标文件。
@@ -262,6 +259,45 @@ const VALID_STATUSES: &[&str] = &["success", "failed", "skipped", "partial", "ca
 /// 合法的 level 枚举值（与 TS 侧 BackupActivityLevel 对齐）。
 const VALID_LEVELS: &[&str] = &["info", "warning", "error"];
 
+fn sensitive_value_end(line: &str, start: usize) -> usize {
+    line[start..]
+        .find(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == '，' || c == '。')
+        .map(|i| start + i)
+        .unwrap_or(line.len())
+}
+
+fn natural_language_value_start(line: &str, after_keyword: usize) -> Option<usize> {
+    let rest = &line[after_keyword..];
+    if let Some(after_copula) = rest.strip_prefix('是') {
+        let value_start = after_keyword + '是'.len_utf8();
+        return after_copula
+            .find(|c: char| !c.is_whitespace())
+            .map(|i| value_start + i);
+    }
+
+    let whitespace_end = rest
+        .find(|c: char| !c.is_whitespace())
+        .map(|i| after_keyword + i)?;
+    let words = &line[whitespace_end..];
+    for copula in ["is", "was"] {
+        if words
+            .get(..copula.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(copula))
+            && words
+                .get(copula.len()..)
+                .and_then(|rest| rest.chars().next())
+                .is_some_and(char::is_whitespace)
+        {
+            let value_region = whitespace_end + copula.len();
+            return line[value_region..]
+                .find(|c: char| !c.is_whitespace())
+                .map(|i| value_region + i);
+        }
+    }
+
+    None
+}
+
 /// 对单行文本进行精确敏感词替换（与 TS 侧 SENSITIVE_PATTERN 行为对齐）：
 /// - `keyword=value` 或 `keyword: value` → `keyword=[REDACTED]`
 /// - `keyword_something` → `keyword=[REDACTED]`
@@ -304,10 +340,7 @@ fn redact_sensitive_keywords(line: &str) -> String {
                         found = true;
                         break;
                     }
-                    let val_end = line[val_start..]
-                        .find(|c: char| c.is_whitespace() || c == ',')
-                        .map(|i| val_start + i)
-                        .unwrap_or(line.len());
+                    let val_end = sensitive_value_end(line, val_start);
                     result.push_str(&line[cursor..after]);
                     result.push_str("=[REDACTED]");
                     cursor = val_end;
@@ -322,6 +355,14 @@ fn redact_sensitive_keywords(line: &str) -> String {
                         .unwrap_or(line.len());
                     result.push_str(&line[cursor..after]);
                     result.push_str("=[REDACTED]");
+                    cursor = val_end;
+                    found = true;
+                    break;
+                }
+                if let Some(val_start) = natural_language_value_start(line, after) {
+                    let val_end = sensitive_value_end(line, val_start);
+                    result.push_str(&line[cursor..val_start]);
+                    result.push_str("[REDACTED]");
                     cursor = val_end;
                     found = true;
                     break;
@@ -441,12 +482,11 @@ fn redact_urls(s: &str) -> String {
             let bytes = s.as_bytes();
             while url_end < bytes.len() {
                 match bytes[url_end] {
-                    b' ' | b'\t' | b'\n' | b'\r' | b',' | b';' | b')' | b'}' | b'"'
-                    | b'\'' | b'<' | b'>' => break,
+                    b' ' | b'\t' | b'\n' | b'\r' | b',' | b';' | b')' | b'}' | b'"' | b'\''
+                    | b'<' | b'>' => break,
                     _ => url_end += 1,
                 }
             }
-            let url = &s[url_start..url_end];
             result.push_str(&s[cursor..url_start]);
             if url_end > url_start {
                 result.push_str("[URL_REDACTED]");
@@ -658,6 +698,18 @@ fn sanitize_entry(mut entry: BackupActivityEntry) -> BackupActivityEntry {
     if let Some(ref msg) = entry.message {
         entry.message = Some(sanitize_message(msg));
     }
+    if let Some(ref trigger) = entry.trigger {
+        entry.trigger = Some(sanitize_message(trigger));
+    }
+    if let Some(ref stage) = entry.stage {
+        entry.stage = Some(sanitize_message(stage));
+    }
+    if let Some(ref reason_code) = entry.reason_code {
+        entry.reason_code = Some(sanitize_message(reason_code));
+    }
+    if let Some(ref error_code) = entry.error_code {
+        entry.error_code = Some(sanitize_message(error_code));
+    }
 
     if let Some(ref name) = entry.remote_file_name {
         let without_userinfo = remove_url_userinfo(name);
@@ -685,6 +737,14 @@ fn sanitize_entry(mut entry: BackupActivityEntry) -> BackupActivityEntry {
             if sanitized != *fname {
                 metrics.failed_file_name = Some(sanitized);
             }
+        }
+        if let Some(ref anomaly_codes) = metrics.anomaly_codes {
+            metrics.anomaly_codes = Some(
+                anomaly_codes
+                    .iter()
+                    .map(|code| sanitize_message(code))
+                    .collect(),
+            );
         }
     }
 
@@ -806,8 +866,7 @@ pub async fn backup_activity_append(
     // 确保父目录存在（首次安装时配置目录可能尚未创建）
     if let Some(parent) = path.parent() {
         if !parent.exists() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建日志目录失败: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建日志目录失败: {e}"))?;
         }
     }
 
@@ -862,8 +921,7 @@ pub async fn backup_activity_clear(app: tauri::AppHandle) -> Result<(), String> 
     // 确保父目录存在
     if let Some(parent) = path.parent() {
         if !parent.exists() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建日志目录失败: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建日志目录失败: {e}"))?;
         }
     }
 
@@ -972,9 +1030,7 @@ mod tests {
 
         let result = load_log_from_path(&path);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("解析备份活动日志文件失败"));
+        assert!(result.unwrap_err().contains("解析备份活动日志文件失败"));
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -1103,23 +1159,18 @@ mod tests {
     #[test]
     fn sanitize_message_replaces_sensitive_keywords() {
         // keyword=value 模式
-        assert_eq!(
-            sanitize_message("password=abc123"),
-            "password=[REDACTED]"
-        );
-        assert_eq!(
-            sanitize_message("token: xyz"),
-            "token=[REDACTED]"
-        );
-        // 独立 keyword 模式
+        assert_eq!(sanitize_message("password=abc123"), "password=[REDACTED]");
+        assert_eq!(sanitize_message("token: xyz"), "token=[REDACTED]");
         assert_eq!(
             sanitize_message("password is abc123"),
-            "password=[REDACTED] is abc123"
+            "password is [REDACTED]"
         );
         assert_eq!(
-            sanitize_message("secret key"),
-            "secret=[REDACTED] key"
+            sanitize_message("密码是 hunter2，请检查"),
+            "密码是 [REDACTED]，请检查"
         );
+        assert_eq!(sanitize_message("password"), "password=[REDACTED]");
+        assert_eq!(sanitize_message("secret key"), "secret=[REDACTED] key");
         // keyword_something 模式
         assert_eq!(
             sanitize_message("my_password_value"),
@@ -1183,7 +1234,10 @@ mod tests {
     fn remove_url_userinfo_strips_multiple_credentials() {
         let msg = "upload https://u:p@host1.com/a and https://u2:p2@host2.com/b done";
         let result = remove_url_userinfo(msg);
-        assert_eq!(result, "upload https://host1.com/a and https://host2.com/b done");
+        assert_eq!(
+            result,
+            "upload https://host1.com/a and https://host2.com/b done"
+        );
     }
 
     #[test]
@@ -1220,17 +1274,26 @@ mod tests {
 
     #[test]
     fn redact_local_paths_windows_path() {
-        assert_eq!(redact_local_paths("failed C:\\Users\\test\\backup.zip"), "failed [REDACTED]");
+        assert_eq!(
+            redact_local_paths("failed C:\\Users\\test\\backup.zip"),
+            "failed [REDACTED]"
+        );
     }
 
     #[test]
     fn redact_local_paths_windows_path_forward_slash() {
-        assert_eq!(redact_local_paths("path D:/backups/file.zip end"), "path [REDACTED] end");
+        assert_eq!(
+            redact_local_paths("path D:/backups/file.zip end"),
+            "path [REDACTED] end"
+        );
     }
 
     #[test]
     fn redact_local_paths_unix_path() {
-        assert_eq!(redact_local_paths("error /home/user/backups/test.zip"), "error [REDACTED]");
+        assert_eq!(
+            redact_local_paths("error /home/user/backups/test.zip"),
+            "error [REDACTED]"
+        );
     }
 
     #[test]
@@ -1268,9 +1331,14 @@ mod tests {
         let uuid = generate_uuid();
         assert_eq!(uuid.len(), 36);
         assert_eq!(uuid.chars().nth(14), Some('4')); // version 4
-        // variant bit
+                                                     // variant bit
         let variant_char = uuid.chars().nth(19).unwrap();
-        assert!(variant_char == '8' || variant_char == '9' || variant_char == 'a' || variant_char == 'b');
+        assert!(
+            variant_char == '8'
+                || variant_char == '9'
+                || variant_char == 'a'
+                || variant_char == 'b'
+        );
     }
 
     #[test]
@@ -1458,12 +1526,17 @@ mod tests {
             error_code: None,
             message: None,
             remote_file_name: None,
-            local_file_name: Some("C:\\Users\\test\\backups\\SoNotes_Backup_20260626120000.zip".into()),
+            local_file_name: Some(
+                "C:\\Users\\test\\backups\\SoNotes_Backup_20260626120000.zip".into(),
+            ),
             summary: None,
             metrics: None,
         };
         let sanitized = sanitize_entry(entry);
-        assert_eq!(sanitized.local_file_name.as_deref(), Some("SoNotes_Backup_20260626120000.zip"));
+        assert_eq!(
+            sanitized.local_file_name.as_deref(),
+            Some("SoNotes_Backup_20260626120000.zip")
+        );
     }
 
     #[test]
@@ -1486,7 +1559,10 @@ mod tests {
             metrics: None,
         };
         let sanitized = sanitize_entry(entry);
-        assert_eq!(sanitized.remote_file_name.as_deref(), Some("SoNotes_Backup_20260626120000.zip"));
+        assert_eq!(
+            sanitized.remote_file_name.as_deref(),
+            Some("SoNotes_Backup_20260626120000.zip")
+        );
     }
 
     #[test]
@@ -1509,7 +1585,56 @@ mod tests {
             metrics: None,
         };
         let sanitized = sanitize_entry(entry);
-        assert_eq!(sanitized.message.as_deref(), Some("password=[REDACTED] 连接失败"));
+        assert_eq!(
+            sanitized.message.as_deref(),
+            Some("password=[REDACTED] 连接失败")
+        );
+    }
+
+    #[test]
+    fn sanitize_entry_processes_free_form_fields_through_sanitize_message() {
+        let mut entry = make_test_entry("test");
+        entry.trigger = Some("manual password is hunter2".into());
+        entry.stage = Some("upload https://example.com/path?token=abc".into());
+        entry.reason_code = Some("token is abc123".into());
+        entry.error_code = Some("secret: abc123".into());
+        entry.metrics = Some(BackupActivityMetrics {
+            deleted_count: None,
+            retained_count: None,
+            missing_count: None,
+            attempted_count: None,
+            failed_file_name: None,
+            anomaly_codes: Some(vec![
+                "password is hunter2".into(),
+                "https://host/path".into(),
+            ]),
+        });
+
+        let sanitized = sanitize_entry(entry);
+
+        assert_eq!(
+            sanitized.trigger.as_deref(),
+            Some("manual password is [REDACTED]")
+        );
+        assert_eq!(sanitized.stage.as_deref(), Some("upload [URL_REDACTED]"));
+        assert_eq!(
+            sanitized.reason_code.as_deref(),
+            Some("token is [REDACTED]")
+        );
+        assert_eq!(sanitized.error_code.as_deref(), Some("secret=[REDACTED]"));
+        assert_eq!(
+            sanitized
+                .metrics
+                .as_ref()
+                .unwrap()
+                .anomaly_codes
+                .as_ref()
+                .unwrap(),
+            &vec![
+                "password is [REDACTED]".to_string(),
+                "[URL_REDACTED]".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -1534,13 +1659,20 @@ mod tests {
                 retained_count: Some(5),
                 missing_count: None,
                 attempted_count: None,
-                failed_file_name: Some("/backups/old/user:pass@server/SoNotes_Old_20260101.zip".into()),
+                failed_file_name: Some(
+                    "/backups/old/user:pass@server/SoNotes_Old_20260101.zip".into(),
+                ),
                 anomaly_codes: None,
             }),
         };
         let sanitized = sanitize_entry(entry);
         assert_eq!(
-            sanitized.metrics.as_ref().unwrap().failed_file_name.as_deref(),
+            sanitized
+                .metrics
+                .as_ref()
+                .unwrap()
+                .failed_file_name
+                .as_deref(),
             Some("SoNotes_Old_20260101.zip")
         );
     }
@@ -1559,7 +1691,9 @@ mod tests {
             reason_code: None,
             error_code: Some("file_not_found".into()),
             message: Some("Bearer abc123 token 无效，C:\\Users\\test\\error.log 路径".into()),
-            remote_file_name: Some("https://user:secret@example.com/dav/SoNotes_Backup_20260626.zip".into()),
+            remote_file_name: Some(
+                "https://user:secret@example.com/dav/SoNotes_Backup_20260626.zip".into(),
+            ),
             local_file_name: Some("D:\\Backups\\SoNotes_Backup_20260626.zip".into()),
             summary: None,
             metrics: Some(BackupActivityMetrics {
@@ -1574,10 +1708,21 @@ mod tests {
         let sanitized = sanitize_entry(entry);
         assert!(sanitized.message.as_deref().unwrap().contains("[REDACTED]"));
         assert!(!sanitized.message.as_deref().unwrap().contains("abc123"));
-        assert_eq!(sanitized.remote_file_name.as_deref(), Some("SoNotes_Backup_20260626.zip"));
-        assert_eq!(sanitized.local_file_name.as_deref(), Some("SoNotes_Backup_20260626.zip"));
         assert_eq!(
-            sanitized.metrics.as_ref().unwrap().failed_file_name.as_deref(),
+            sanitized.remote_file_name.as_deref(),
+            Some("SoNotes_Backup_20260626.zip")
+        );
+        assert_eq!(
+            sanitized.local_file_name.as_deref(),
+            Some("SoNotes_Backup_20260626.zip")
+        );
+        assert_eq!(
+            sanitized
+                .metrics
+                .as_ref()
+                .unwrap()
+                .failed_file_name
+                .as_deref(),
             Some("failed.zip")
         );
     }
@@ -1635,18 +1780,27 @@ mod tests {
 
     #[test]
     fn redact_urls_replaces_http_url() {
-        assert_eq!(redact_urls("visit http://example.com/path"), "visit [URL_REDACTED]");
+        assert_eq!(
+            redact_urls("visit http://example.com/path"),
+            "visit [URL_REDACTED]"
+        );
     }
 
     #[test]
     fn redact_urls_replaces_https_url() {
-        assert_eq!(redact_urls("see https://host.com/a?b=c end"), "see [URL_REDACTED] end");
+        assert_eq!(
+            redact_urls("see https://host.com/a?b=c end"),
+            "see [URL_REDACTED] end"
+        );
     }
 
     #[test]
     fn redact_urls_replaces_multiple_urls() {
         let msg = "first https://a.com/x second http://b.com/y";
-        assert_eq!(redact_urls(msg), "first [URL_REDACTED] second [URL_REDACTED]");
+        assert_eq!(
+            redact_urls(msg),
+            "first [URL_REDACTED] second [URL_REDACTED]"
+        );
     }
 
     #[test]
@@ -1670,8 +1824,14 @@ mod tests {
     fn sanitize_message_redacts_full_url() {
         let msg = "upload to https://user:pass@host.com/webdav/file.zip failed";
         let result = sanitize_message(msg);
-        assert!(!result.contains("host.com"), "host should be redacted: {result}");
-        assert!(result.contains("[URL_REDACTED]"), "should contain [URL_REDACTED]: {result}");
+        assert!(
+            !result.contains("host.com"),
+            "host should be redacted: {result}"
+        );
+        assert!(
+            result.contains("[URL_REDACTED]"),
+            "should contain [URL_REDACTED]: {result}"
+        );
     }
 
     #[test]
