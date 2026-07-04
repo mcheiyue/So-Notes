@@ -239,6 +239,9 @@ const SENSITIVE_KEYWORDS: &[&str] = &[
     "token",
     "authorization",
     "secret",
+    "username",
+    "serverurl",
+    "url",
     "密码",
     "令牌",
 ];
@@ -325,6 +328,12 @@ fn redact_sensitive_keywords(line: &str) -> String {
             }
             let candidate = &lower[cursor..after];
             if candidate != kw_lower {
+                continue;
+            }
+            if cursor > 0
+                && bytes[cursor - 1] == b'['
+                && line[cursor..].starts_with("URL_REDACTED]")
+            {
                 continue;
             }
             // 检查后面紧跟的字符
@@ -689,6 +698,14 @@ fn extract_basename(name: &str) -> &str {
 
 /// 对 entry 进行脱敏处理，返回脱敏后的副本。
 fn sanitize_entry(mut entry: BackupActivityEntry) -> BackupActivityEntry {
+    if entry
+        .id
+        .as_deref()
+        .is_some_and(|id| !id.is_empty() && !is_valid_uuid_v4(id))
+    {
+        entry.id = Some(generate_uuid());
+    }
+
     if !VALID_OPERATIONS.contains(&entry.operation.as_str()) {
         entry.operation = "unknown".to_string();
     }
@@ -775,6 +792,26 @@ fn generate_uuid() -> String {
     )
 }
 
+fn is_valid_uuid_v4(id: &str) -> bool {
+    if id.len() != 36 {
+        return false;
+    }
+    let bytes = id.as_bytes();
+    if bytes[8] != b'-' || bytes[13] != b'-' || bytes[18] != b'-' || bytes[23] != b'-' {
+        return false;
+    }
+    if bytes[14] != b'4' {
+        return false;
+    }
+    if !matches!(bytes[19], b'8' | b'9' | b'a' | b'b' | b'A' | b'B') {
+        return false;
+    }
+    bytes
+        .iter()
+        .enumerate()
+        .all(|(idx, byte)| matches!(idx, 8 | 13 | 18 | 23) || byte.is_ascii_hexdigit())
+}
+
 // ---------------------------------------------------------------------------
 // 文件读写
 // ---------------------------------------------------------------------------
@@ -848,6 +885,25 @@ pub async fn backup_activity_list(
     limit: Option<usize>,
 ) -> Result<Vec<BackupActivityEntry>, String> {
     let path = log_file_path(&app)?;
+    let lock_path = lock_file_path(&app)?;
+
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建日志目录失败: {e}"))?;
+        }
+    }
+
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|e| format!("打开锁文件失败: {e}"))?;
+
+    lock_file
+        .lock_exclusive()
+        .map_err(|e| format!("获取日志文件锁失败: {e}"))?;
+
     let log = load_log_from_path(&path)?;
 
     let entries = match limit {
@@ -862,6 +918,8 @@ pub async fn backup_activity_list(
         }
         None => log.entries,
     };
+
+    drop(lock_file);
 
     Ok(entries)
 }
@@ -1200,6 +1258,15 @@ mod tests {
         // keyword=value 模式
         assert_eq!(sanitize_message("password=abc123"), "password=[REDACTED]");
         assert_eq!(sanitize_message("token: xyz"), "token=[REDACTED]");
+        assert_eq!(sanitize_message("username=alice"), "username=[REDACTED]");
+        assert_eq!(
+            sanitize_message("serverUrl=https://dav.example.com"),
+            "serverUrl=[REDACTED]"
+        );
+        assert_eq!(
+            sanitize_message("url=https://dav.example.com"),
+            "url=[REDACTED]"
+        );
         assert_eq!(
             sanitize_message("password is abc123"),
             "password is [REDACTED]"
@@ -1673,6 +1740,21 @@ mod tests {
                 "password is [REDACTED]".to_string(),
                 "[URL_REDACTED]".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn sanitize_entry_regenerates_invalid_id() {
+        let mut entry = make_test_entry("../../evil\n<script>");
+        let sanitized = sanitize_entry(entry.clone());
+        assert_ne!(sanitized.id, entry.id);
+        assert!(is_valid_uuid_v4(sanitized.id.as_deref().unwrap()));
+
+        entry.id = Some("550e8400-e29b-41d4-a716-446655440000".to_string());
+        let sanitized = sanitize_entry(entry);
+        assert_eq!(
+            sanitized.id.as_deref(),
+            Some("550e8400-e29b-41d4-a716-446655440000")
         );
     }
 
