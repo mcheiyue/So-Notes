@@ -683,7 +683,11 @@ export const BoardDock = () => {
     }
     localStorage.setItem('theme', theme);
 
-    await db.clearWAL();
+    try {
+      await db.clearWAL();
+    } catch {
+      return false;
+    }
     return true;
   };
 

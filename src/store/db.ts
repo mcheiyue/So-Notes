@@ -27,10 +27,6 @@ export const db = {
 
   // Clear WAL (after successful disk flush)
   clearWAL: async () => {
-    try {
-      await del(DB_KEY);
-    } catch (e) {
-      console.error('WAL Clear Error:', e);
-    }
+    await del(DB_KEY);
   }
 };
