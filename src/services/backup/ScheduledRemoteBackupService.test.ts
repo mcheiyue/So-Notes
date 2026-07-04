@@ -2357,6 +2357,41 @@ describe('ScheduledRemoteBackupService', () => {
       service.stop();
     });
 
+    it('保留策略清理前置异常记录 retention-cleanup failed 活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 10 },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+      mockOrchestrateRetentionCleanup.mockResolvedValue({
+        lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupDeletedCount: 0,
+        lastRetentionCleanupFailedFileName: null,
+        lastRetentionCleanupError: 'PROPFIND failed',
+        lastRetentionCleanupAt: ctx.now,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'retention-cleanup',
+          status: 'failed',
+          level: 'error',
+          metrics: expect.objectContaining({
+            failedFileName: null,
+            deletedCount: 0,
+          }),
+        }),
+      );
+
+      service.stop();
+    });
+
     it('断崖保护触发记录 retention-cliff-drop skipped 活动', async () => {
       const ctx = createTestContext({
         config: { enabled: false, retentionEnabled: true, retentionCount: 10 },

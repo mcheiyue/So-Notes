@@ -31,7 +31,12 @@ import type {
 } from './WebDavBackupService';
 import type { StorageData } from '../../store/types';
 import { orchestratePostBackupRetentionCleanup } from './RetentionCleanupOrchestrator';
-import type { BackupActivityAppendInput, BackupActivityOperation } from './BackupActivityLogService';
+import type {
+  BackupActivityAppendInput,
+  BackupActivityLevel,
+  BackupActivityOperation,
+  BackupActivityStatus,
+} from './BackupActivityLogService';
 
 // ---------------------------------------------------------------------------
 // 模块级服务实例 accessor
@@ -603,10 +608,23 @@ export function createScheduledRemoteBackupService(
               });
             } else if (!retentionPatch.lastRetentionCleanupSkipped) {
               const hasError = retentionPatch.lastRetentionCleanupError != null;
+              const cleanupMadeProgress =
+                (retentionPatch.lastRetentionCleanupDeletedCount ?? 0) > 0 ||
+                retentionPatch.lastRetentionCleanupFailedFileName != null;
+              const retentionStatus: BackupActivityStatus = hasError
+                ? cleanupMadeProgress
+                  ? 'partial'
+                  : 'failed'
+                : 'success';
+              const retentionLevel: BackupActivityLevel = hasError
+                ? cleanupMadeProgress
+                  ? 'warning'
+                  : 'error'
+                : 'info';
               await safeAppendActivity({
                 operation: 'retention-cleanup',
-                status: hasError ? 'partial' : 'success',
-                level: hasError ? 'warning' : 'info',
+                status: retentionStatus,
+                level: retentionLevel,
                 startedAt: startNow,
                 finishedAt: deps.clock(),
                 remoteFileName: result.remoteFileName ?? null,
