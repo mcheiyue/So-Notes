@@ -5,8 +5,9 @@ import { LAYOUT } from '../constants/layout';
  *
  * 算法：
  * 1. 无原始尺寸时回退到默认常量。
- * 2. 按原始比例缩放至最大边界内（优先适配宽度，再适配高度）。
- * 3. 任一维度低于最小边界时强制钳位（极端比例图片会轻微拉伸）。
+ * 2. 宽高比钳位到 [ASPECT_RATIO_MIN, ASPECT_RATIO_MAX] 范围。
+ * 3. 按钳位后比例缩放至最大边界内（优先适配宽度，再适配高度）。
+ * 4. 任一维度低于最小边界时强制钳位。
  *
  * @returns 始终返回有效的正整数尺寸。
  */
@@ -21,6 +22,8 @@ export function computeImageNoteSize(
     IMAGE_NOTE_MAX_WIDTH,
     IMAGE_NOTE_MIN_HEIGHT,
     IMAGE_NOTE_MAX_HEIGHT,
+    IMAGE_NOTE_ASPECT_RATIO_MIN,
+    IMAGE_NOTE_ASPECT_RATIO_MAX,
   } = LAYOUT;
 
   if (
@@ -35,7 +38,11 @@ export function computeImageNoteSize(
     };
   }
 
-  const aspectRatio = originalWidth / originalHeight;
+  const rawAspectRatio = originalWidth / originalHeight;
+  const aspectRatio = Math.max(
+    IMAGE_NOTE_ASPECT_RATIO_MIN,
+    Math.min(IMAGE_NOTE_ASPECT_RATIO_MAX, rawAspectRatio),
+  );
 
   // 按比例缩放到最大边界内
   let width = originalWidth;

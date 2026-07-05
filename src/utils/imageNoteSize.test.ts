@@ -10,6 +10,8 @@ describe('computeImageNoteSize', () => {
     IMAGE_NOTE_MAX_WIDTH,
     IMAGE_NOTE_MIN_HEIGHT,
     IMAGE_NOTE_MAX_HEIGHT,
+    IMAGE_NOTE_ASPECT_RATIO_MIN,
+    IMAGE_NOTE_ASPECT_RATIO_MAX,
   } = LAYOUT;
 
   it('无原始尺寸时回退到默认值', () => {
@@ -67,18 +69,52 @@ describe('computeImageNoteSize', () => {
     expect(editingHeight).toBeGreaterThanOrEqual(IMAGE_NOTE_MIN_HEIGHT);
   });
 
-  it('极宽图片（8000×100）宽度钳位到最大，高度按比例后被最小边界钳位', () => {
+  it('极宽图片（8000×100）宽高比钳位到 3，宽度钳位到最大，高度按钳位比例计算', () => {
     const { editingWidth, editingHeight } = computeImageNoteSize(8000, 100);
     expect(editingWidth).toBe(IMAGE_NOTE_MAX_WIDTH);
-    // 800 / 80 = 10，低于 IMAGE_NOTE_MIN_HEIGHT=100，被钳位
-    expect(editingHeight).toBe(IMAGE_NOTE_MIN_HEIGHT);
+    // 宽高比 80 被钳位到 3 → 800 / 3 ≈ 266.67 → 267
+    expect(editingHeight).toBe(Math.round(IMAGE_NOTE_MAX_WIDTH / IMAGE_NOTE_ASPECT_RATIO_MAX));
+    expect(editingHeight).toBeGreaterThanOrEqual(IMAGE_NOTE_MIN_HEIGHT);
   });
 
-  it('极窄图片（50×2000）高度钳位到最大，宽度被最小边界钳位', () => {
+  it('极窄图片（50×2000）宽高比钳位到 1/3，高度钳位到最大，宽度按钳位比例计算', () => {
     const { editingWidth, editingHeight } = computeImageNoteSize(50, 2000);
     expect(editingHeight).toBe(IMAGE_NOTE_MAX_HEIGHT);
-    // 600 * (50/2000) = 15，低于 IMAGE_NOTE_MIN_WIDTH=120，被钳位
-    expect(editingWidth).toBe(IMAGE_NOTE_MIN_WIDTH);
+    // 宽高比 0.025 被钳位到 1/3 → 600 * (1/3) = 200
+    expect(editingWidth).toBe(Math.round(IMAGE_NOTE_MAX_HEIGHT * IMAGE_NOTE_ASPECT_RATIO_MIN));
+    expect(editingWidth).toBeGreaterThanOrEqual(IMAGE_NOTE_MIN_WIDTH);
+  });
+
+  it('近边界宽图（2900×1000，比例 2.9）保持原始比例缩放', () => {
+    const { editingWidth, editingHeight } = computeImageNoteSize(2900, 1000);
+    expect(editingWidth).toBe(IMAGE_NOTE_MAX_WIDTH);
+    // 比例 2.9 在 [1/3, 3] 内 → 800 / 2.9 ≈ 275.86 → 276
+    expect(editingHeight).toBe(Math.round(IMAGE_NOTE_MAX_WIDTH / 2.9));
+  });
+
+  it('超边界宽图（5000×1000，比例 5）宽高比钳位到 3', () => {
+    const { editingWidth, editingHeight } = computeImageNoteSize(5000, 1000);
+    expect(editingWidth).toBe(IMAGE_NOTE_MAX_WIDTH);
+    // 比例 5 被钳位到 3 → 800 / 3 ≈ 266.67 → 267
+    expect(editingHeight).toBe(Math.round(IMAGE_NOTE_MAX_WIDTH / IMAGE_NOTE_ASPECT_RATIO_MAX));
+    // 与近边界测试对比：钳位后高度更小（267 < 276）
+    expect(editingHeight).toBeLessThan(Math.round(IMAGE_NOTE_MAX_WIDTH / 2.9));
+  });
+
+  it('近边界窄图（350×1000，比例 0.35）保持原始比例缩放', () => {
+    const { editingWidth, editingHeight } = computeImageNoteSize(350, 1000);
+    expect(editingHeight).toBe(IMAGE_NOTE_MAX_HEIGHT);
+    // 比例 0.35 在 [1/3, 3] 内 → 600 * 0.35 = 210
+    expect(editingWidth).toBe(Math.round(IMAGE_NOTE_MAX_HEIGHT * 0.35));
+  });
+
+  it('超边界窄图（200×1000，比例 0.2）宽高比钳位到 1/3', () => {
+    const { editingWidth, editingHeight } = computeImageNoteSize(200, 1000);
+    expect(editingHeight).toBe(IMAGE_NOTE_MAX_HEIGHT);
+    // 比例 0.2 被钳位到 1/3 → 600 * (1/3) = 200
+    expect(editingWidth).toBe(Math.round(IMAGE_NOTE_MAX_HEIGHT * IMAGE_NOTE_ASPECT_RATIO_MIN));
+    // 与近边界测试对比：钳位后宽度更小（200 < 210）
+    expect(editingWidth).toBeLessThan(Math.round(IMAGE_NOTE_MAX_HEIGHT * 0.35));
   });
 
   it('返回值始终为正整数', () => {

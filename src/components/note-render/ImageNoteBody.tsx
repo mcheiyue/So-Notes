@@ -77,14 +77,14 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, i
   }, [isPreviewOpen]);
 
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center px-3 pb-3">
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden px-3 pb-3">
       {state.status === "ready" && (
         <>
           <button
             type="button"
             data-testid="image-note-preview-trigger"
             className={cn(
-              "h-full min-h-40 w-full overflow-hidden rounded-xl border border-border-subtle bg-black/5 text-left shadow-sm dark:bg-white/5",
+              "h-full w-full overflow-hidden rounded-xl border border-border-subtle bg-black/5 text-left shadow-sm dark:bg-white/5",
               isFocused ? "cursor-zoom-in" : "cursor-default",
             )}
             onPointerDown={() => {
@@ -103,7 +103,7 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, i
               src={state.assetUrl}
               alt={alt}
               className={cn(
-                "h-full min-h-40 w-full object-contain",
+                "h-full w-full object-contain",
                 "bg-black/5 dark:bg-white/5",
               )}
               loading="lazy"
@@ -135,13 +135,13 @@ export const ImageNoteBody: React.FC<ImageNoteBodyProps> = ({ attachment, alt, i
       )}
 
       {state.status === "loading" && (
-        <div className="flex h-full min-h-40 w-full items-center justify-center rounded-lg border border-border-subtle bg-black/5 text-text-tertiary dark:bg-white/5">
+        <div className="flex h-full w-full items-center justify-center rounded-lg border border-border-subtle bg-black/5 text-text-tertiary dark:bg-white/5">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-text-tertiary/30 border-t-text-secondary" />
         </div>
       )}
 
       {state.status === "missing" && (
-        <div className="flex h-full min-h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-text-tertiary/30 bg-black/5 text-text-tertiary dark:bg-white/5">
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-text-tertiary/30 bg-black/5 text-text-tertiary dark:bg-white/5">
           <ImageIcon className="h-7 w-7 opacity-60" />
           <span className="text-xs">图片不可用</span>
         </div>
