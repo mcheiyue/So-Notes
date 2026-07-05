@@ -116,6 +116,11 @@ const formatImportHighlights = (summary: NonNullable<ImportFeedback['summary']>)
   return highlights;
 };
 
+export const shouldCommitActivityRefresh = (
+  requestId: number,
+  latestRequestId: number,
+): boolean => requestId === latestRequestId;
+
 const formatUnknownError = (err: unknown): string => {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
@@ -249,6 +254,20 @@ export const BoardDock = () => {
   const [activityError, setActivityError] = useState<string | null>(null);
   const [activityClearing, setActivityClearing] = useState(false);
   const activityEntriesRef = useRef<BackupActivityEntry[]>([]);
+  const activityRefreshRequestIdRef = useRef(0);
+
+  const beginActivityRefresh = useCallback(() => {
+    activityRefreshRequestIdRef.current += 1;
+    return activityRefreshRequestIdRef.current;
+  }, []);
+
+  const commitActivityEntries = useCallback((entries: BackupActivityEntry[] | null | undefined, requestId: number) => {
+    if (!shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) return false;
+    const safeEntries = entries ?? [];
+    activityEntriesRef.current = safeEntries;
+    setActivityEntries(safeEntries);
+    return true;
+  }, []);
 
   const logActivityAndRefresh = useCallback(async (input: BackupActivityAppendInput) => {
     try {
@@ -257,16 +276,18 @@ export const BoardDock = () => {
       console.warn('[BackupActivityLog] append failed:', err);
       return;
     }
+    const requestId = beginActivityRefresh();
     try {
       const entries = await loadRecentActivities(10);
-      const safeEntries = entries ?? [];
-      activityEntriesRef.current = safeEntries;
-      setActivityEntries(safeEntries);
-      setActivityError(null);
+      if (commitActivityEntries(entries, requestId)) {
+        setActivityError(null);
+      }
     } catch (err) {
-          setActivityError(`刷新失败：${sanitizeErrorMessage(err)}`);
+      if (shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) {
+        setActivityError(`刷新失败：${sanitizeErrorMessage(err)}`);
+      }
     }
-  }, []);
+  }, [beginActivityRefresh, commitActivityEntries]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -409,16 +430,15 @@ export const BoardDock = () => {
     if (settingsView !== 'WEBDAV' && settingsView !== 'DATA') return;
     let cancelled = false;
     (async () => {
+      const requestId = beginActivityRefresh();
       setActivityLoading(true);
       setActivityError(null);
       try {
         const entries = await loadRecentActivities(10);
         if (cancelled) return;
-        const safeEntries = entries ?? [];
-        activityEntriesRef.current = safeEntries;
-        setActivityEntries(safeEntries);
+        commitActivityEntries(entries, requestId);
       } catch (err) {
-        if (!cancelled) {
+        if (!cancelled && shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) {
           setActivityError(sanitizeErrorMessage(err));
         }
       } finally {
@@ -426,7 +446,7 @@ export const BoardDock = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [settingsView]);
+  }, [beginActivityRefresh, commitActivityEntries, settingsView]);
 
   useEffect(() => {
     if (settingsView !== 'WEBDAV') return;
@@ -444,19 +464,21 @@ export const BoardDock = () => {
   useEffect(() => {
     if (settingsView !== 'WEBDAV' && settingsView !== 'DATA') return;
     const intervalId = window.setInterval(async () => {
+      const requestId = beginActivityRefresh();
       try {
         const entries = await loadRecentActivities(10);
         const safeEntries = entries ?? [];
         const prev = activityEntriesRef.current;
         if (safeEntries.length !== prev.length || safeEntries.some((e, i) => e.id !== prev[i]?.id)) {
-          activityEntriesRef.current = safeEntries;
-          setActivityEntries(safeEntries);
+          commitActivityEntries(safeEntries, requestId);
         }
-        setActivityError(null);
+        if (shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) {
+          setActivityError(null);
+        }
       } catch { /* 轮询失败静默忽略 */ }
     }, 5000);
     return () => { window.clearInterval(intervalId); };
-  }, [settingsView]);
+  }, [beginActivityRefresh, commitActivityEntries, settingsView]);
 
   useEffect(() => {
     if (!scheduledConfig.exitPromptEnabled || !webdavPasswordSaved) {
@@ -1974,15 +1996,16 @@ export const BoardDock = () => {
   };
 
   const refreshActivities = async () => {
+    const requestId = beginActivityRefresh();
     setActivityLoading(true);
     setActivityError(null);
     try {
       const entries = await loadRecentActivities(10);
-      const safeEntries = entries ?? [];
-      activityEntriesRef.current = safeEntries;
-      setActivityEntries(safeEntries);
+      commitActivityEntries(entries, requestId);
     } catch (err) {
-      setActivityError(sanitizeErrorMessage(err));
+      if (shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) {
+        setActivityError(sanitizeErrorMessage(err));
+      }
     } finally {
       setActivityLoading(false);
     }
@@ -1997,6 +2020,7 @@ export const BoardDock = () => {
 
     setActivityClearing(true);
     try {
+      beginActivityRefresh();
       await clearBackupActivities();
       activityEntriesRef.current = [];
       setActivityEntries([]);
@@ -3128,6 +3152,11 @@ export const BoardDock = () => {
                                                 {(entry.status === 'failed' || entry.status === 'partial') && (entry.message || entry.stage) && (
                                                     <p className="text-red-400 dark:text-red-500 truncate" title={entry.message ?? entry.stage ?? undefined}>
                                                         {entry.stage ? `[${entry.stage}] ` : ''}{entry.message ?? ''}
+                                                    </p>
+                                                )}
+                                                {(entry.status === 'failed' || entry.status === 'partial') && entry.metrics?.failedFileName && (
+                                                    <p className="text-text-tertiary truncate" title={entry.metrics.failedFileName}>
+                                                        失败文件：{entry.metrics.failedFileName}
                                                     </p>
                                                 )}
                                                 {entry.status === 'skipped' && (entry.reasonCode || entry.stage) && (

@@ -209,7 +209,7 @@ vi.mock('../services/backup/ScheduledRemoteBackupConfigService', () => ({
   redactStateBeforeSave: vi.fn((s) => s),
 }));
 
-import { BoardDock } from './BoardDock';
+import { BoardDock, shouldCommitActivityRefresh } from './BoardDock';
 import { confirm } from '../store/confirmStore';
 import { Z_INDEX } from '../constants/layout';
 import { createEmptyNormalizedNotesState, normalizeNotes } from '../store/normalization';
@@ -3416,6 +3416,35 @@ describe('BoardDock 定时远端备份 UI', () => {
     );
   });
 
+  it('partial 活动条目展示 failedFileName basename', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'backup_activity_list') {
+        return [
+          {
+            id: 'activity-1',
+            operation: 'retention-cleanup',
+            status: 'partial',
+            level: 'warning',
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+            message: '清理部分完成：423 Locked',
+            metrics: {
+              failedFileName: 'SoNotes_Backup_20260101000000.zip',
+            },
+          },
+        ];
+      }
+      return null;
+    });
+
+    await openDataSettings();
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="activity-list"]')).not.toBeNull());
+
+    const activityList = container.querySelector('[data-testid="activity-list"]');
+    expect(activityList?.textContent).toContain('失败文件：SoNotes_Backup_20260101000000.zip');
+  });
+
   it('清除断崖警告记录 skipped 和 warning_dismissed reasonCode', async () => {
     const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
@@ -3455,5 +3484,10 @@ describe('BoardDock 定时远端备份 UI', () => {
         }),
       }),
     );
+  });
+
+  it('活动刷新只接纳最新 request id', () => {
+    expect(shouldCommitActivityRefresh(3, 3)).toBe(true);
+    expect(shouldCommitActivityRefresh(2, 3)).toBe(false);
   });
 });

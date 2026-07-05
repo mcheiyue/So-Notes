@@ -163,7 +163,7 @@ describe('RemoteBackupRunner', () => {
       expect(deps.createRemoteBackup).not.toHaveBeenCalled();
     });
 
-    it('flushNow 抛出异常时返回 { success: false, error: "Flush failed" }', async () => {
+    it('flushNow 抛出异常时返回脱敏后的原始错误', async () => {
       const deps = makeDeps({
         flushNow: vi.fn(async () => {
           throw new Error('disk write error');
@@ -173,9 +173,24 @@ describe('RemoteBackupRunner', () => {
       const result = await runRemoteBackup(deps, makeConfig());
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Flush failed');
+      expect(result.error).toBe('disk write error');
       expect(result.errorStage).toBe(RemoteBackupErrorStage.Flush);
       expect(deps.createRemoteBackup).not.toHaveBeenCalled();
+    });
+
+    it('flushNow 抛出包含敏感 URL 的异常时返回脱敏文案', async () => {
+      const deps = makeDeps({
+        flushNow: vi.fn(async () => {
+          throw new Error('flush failed at https://dav.example.com/remote.php/dav/files/user1');
+        }),
+      });
+
+      const result = await runRemoteBackup(deps, makeConfig());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('[URL_REDACTED]');
+      expect(result.error).not.toContain('dav.example.com');
+      expect(result.errorStage).toBe(RemoteBackupErrorStage.Flush);
     });
   });
 

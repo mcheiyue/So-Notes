@@ -7,6 +7,7 @@
  */
 
 import type { BackupJobKind, BackupJobHandle } from './BackupJobCoordinator';
+import { sanitizeActivityInput } from './BackupActivityLogService';
 import type { WebDavConfig, WebDavUploadResult } from './WebDavBackupService';
 import type { StorageData } from '../../store/types';
 
@@ -70,6 +71,19 @@ export const RemoteBackupErrorStage: Record<string, RemoteBackupStage> = {
   Unknown: 'unknown',
 } as const;
 
+function sanitizeBackupErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const sanitized = sanitizeActivityInput({
+    operation: 'remote-backup',
+    status: 'failed',
+    level: 'error',
+    startedAt: 0,
+    finishedAt: 0,
+    message: raw,
+  });
+  return sanitized.message ?? '未知错误';
+}
+
 // ---------------------------------------------------------------------------
 // 运行入口
 // ---------------------------------------------------------------------------
@@ -105,8 +119,14 @@ export async function runRemoteBackup(
     let flushed = false;
     try {
       flushed = await deps.flushNow();
-    } catch {
-      flushed = false;
+    } catch (err: unknown) {
+      return {
+        success: false,
+        error: sanitizeBackupErrorMessage(err),
+        errorStage: RemoteBackupErrorStage.Flush,
+        summary: null,
+        zipSizeBytes: null,
+      };
     }
     if (!flushed) {
       return {
@@ -133,8 +153,7 @@ export async function runRemoteBackup(
     const result = await deps.createRemoteBackup(config);
     return { ...result, capturedStorageUpdatedAt };
   } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : String(err);
+    const message = sanitizeBackupErrorMessage(err);
     return {
       success: false,
       error: message,
