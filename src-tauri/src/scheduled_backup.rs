@@ -653,40 +653,65 @@ pub async fn scheduled_backup_save_state(
 /// 当前状态结构体本身不包含密码字段，此函数作为防御性检查，
 /// 确保未来扩展时不会意外引入敏感字段。
 fn validate_state_no_secrets(state: &ScheduledRemoteBackupState) -> Result<(), String> {
-    // 检查 last_failure_reason 不包含密码/令牌模式
-    if let Some(ref reason) = state.last_failure_reason {
-        let lower = reason.to_lowercase();
-        if lower.contains("password")
-            || lower.contains("token")
-            || lower.contains("authorization")
-            || lower.contains("密码")
-            || lower.contains("令牌")
-        {
-            // 检测疑似密钥的长连续字符序列（base64/hex 形式，> 20 字符）
-            let mut max_run: usize = 0;
-            let mut current_run: usize = 0;
-            for ch in reason.chars() {
-                if ch.is_ascii_alphanumeric()
-                    || ch == '+'
-                    || ch == '/'
-                    || ch == '='
-                    || ch == '_'
-                    || ch == '-'
-                {
-                    current_run += 1;
-                    if current_run > max_run {
-                        max_run = current_run;
-                    }
-                } else {
-                    current_run = 0;
-                }
-            }
-            if max_run > 20 {
-                return Err("状态文件可能包含敏感信息（疑似密钥或令牌）".to_string());
-            }
+    validate_state_text_field(state.last_failure_reason.as_deref())?;
+    validate_state_text_field(state.last_remote_file_name.as_deref())?;
+    validate_state_text_field(state.baseline_confirmed_remote_file_name.as_deref())?;
+    validate_state_text_field(state.cliff_drop_latest_remote_file_name.as_deref())?;
+    validate_state_text_field(state.last_retention_cleanup_failed_file_name.as_deref())?;
+    validate_state_text_field(state.last_retention_cleanup_error.as_deref())?;
+    if let Some(codes) = state.cliff_drop_latest_anomaly_codes.as_ref() {
+        for code in codes {
+            validate_state_text_field(Some(code))?;
         }
     }
     Ok(())
+}
+
+fn validate_state_text_field(value: Option<&str>) -> Result<(), String> {
+    let Some(text) = value else {
+        return Ok(());
+    };
+    if contains_state_secret_pattern(text) {
+        return Err("状态文件可能包含敏感信息".to_string());
+    }
+    Ok(())
+}
+
+fn contains_state_secret_pattern(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    for keyword in ["password", "token", "authorization", "secret", "密码", "令牌"] {
+        let mut search_from = 0;
+        while let Some(offset) = lower[search_from..].find(keyword) {
+            let after_start = search_from + offset + keyword.len();
+            let Some(after_keyword) = text.get(after_start..) else {
+                break;
+            };
+            if sensitive_state_value_follows(keyword, after_keyword) {
+                return true;
+            }
+            search_from = after_start;
+        }
+    }
+    false
+}
+
+fn sensitive_state_value_follows(keyword: &str, after_keyword: &str) -> bool {
+    let trimmed = after_keyword.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with('=') || trimmed.starts_with(':') || trimmed.starts_with('：') {
+        return true;
+    }
+    if trimmed.starts_with('是') {
+        return true;
+    }
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("is ") || lower.starts_with("was ") {
+        return true;
+    }
+    matches!(keyword, "密码" | "令牌")
+        && trimmed.chars().next().is_some_and(|ch| ch.is_ascii_alphanumeric())
 }
 
 // ===========================================================================
@@ -1003,6 +1028,39 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_state_no_secrets(&state).is_ok());
+    }
+
+    #[test]
+    fn validate_state_no_secrets_rejects_short_password_assignment() {
+        let state = ScheduledRemoteBackupState {
+            last_failure_reason: Some("upload failed: password=abc123".to_string()),
+            ..Default::default()
+        };
+
+        let err = validate_state_no_secrets(&state).unwrap_err();
+        assert!(err.contains("敏感信息"));
+    }
+
+    #[test]
+    fn validate_state_no_secrets_rejects_retention_cleanup_error_secret() {
+        let state = ScheduledRemoteBackupState {
+            last_retention_cleanup_error: Some("PROPFIND failed: token: abc123".to_string()),
+            ..Default::default()
+        };
+
+        let err = validate_state_no_secrets(&state).unwrap_err();
+        assert!(err.contains("敏感信息"));
+    }
+
+    #[test]
+    fn validate_state_no_secrets_rejects_anomaly_code_secret() {
+        let state = ScheduledRemoteBackupState {
+            cliff_drop_latest_anomaly_codes: Some(vec!["secret is abc123".to_string()]),
+            ..Default::default()
+        };
+
+        let err = validate_state_no_secrets(&state).unwrap_err();
+        assert!(err.contains("敏感信息"));
     }
 
     // -----------------------------------------------------------------------
