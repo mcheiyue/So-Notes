@@ -27,6 +27,9 @@ const LOG_VERSION: u32 = 1;
 
 /// 最大条目数。
 const MAX_ENTRIES: usize = 100;
+const MAX_FILENAME_LEN: usize = 256;
+const MAX_ANOMALY_CODES: usize = 10;
+const MAX_ANOMALY_CODE_LEN: usize = 120;
 
 // ---------------------------------------------------------------------------
 // 数据结构
@@ -316,7 +319,8 @@ fn keyword_matches_at(line: &str, start: usize, keyword: &str) -> bool {
         return ascii_bytes_match_at(line.as_bytes(), start, keyword.as_bytes());
     }
 
-    line.get(start..).is_some_and(|rest| rest.starts_with(keyword))
+    line.get(start..)
+        .is_some_and(|rest| rest.starts_with(keyword))
 }
 
 fn find_http_url_start(s: &str, start: usize) -> Option<usize> {
@@ -473,6 +477,17 @@ fn sanitize_message(message: &str) -> String {
     }
 
     result
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
+}
+
+fn sanitize_file_name_field(name: &str) -> String {
+    let without_userinfo = remove_url_userinfo(name);
+    let basename = extract_basename(&without_userinfo);
+    let keyword_redacted = redact_sensitive_keywords(basename);
+    truncate_chars(&keyword_redacted, MAX_FILENAME_LEN)
 }
 
 /// 移除 URL 中的 userinfo 部分（全局扫描替换）。
@@ -756,17 +771,13 @@ fn sanitize_entry(mut entry: BackupActivityEntry) -> BackupActivityEntry {
     }
 
     if let Some(ref name) = entry.remote_file_name {
-        let without_userinfo = remove_url_userinfo(name);
-        let basename = extract_basename(&without_userinfo);
-        let sanitized = basename.to_string();
+        let sanitized = sanitize_file_name_field(name);
         if sanitized != *name {
             entry.remote_file_name = Some(sanitized);
         }
     }
     if let Some(ref name) = entry.local_file_name {
-        let without_userinfo = remove_url_userinfo(name);
-        let basename = extract_basename(&without_userinfo);
-        let sanitized = basename.to_string();
+        let sanitized = sanitize_file_name_field(name);
         if sanitized != *name {
             entry.local_file_name = Some(sanitized);
         }
@@ -775,9 +786,7 @@ fn sanitize_entry(mut entry: BackupActivityEntry) -> BackupActivityEntry {
     // metrics.failedFileName 也可能包含绝对路径或 URL 凭证
     if let Some(ref mut metrics) = entry.metrics {
         if let Some(ref fname) = metrics.failed_file_name {
-            let without_userinfo = remove_url_userinfo(fname);
-            let basename = extract_basename(&without_userinfo);
-            let sanitized = basename.to_string();
+            let sanitized = sanitize_file_name_field(fname);
             if sanitized != *fname {
                 metrics.failed_file_name = Some(sanitized);
             }
@@ -786,7 +795,9 @@ fn sanitize_entry(mut entry: BackupActivityEntry) -> BackupActivityEntry {
             metrics.anomaly_codes = Some(
                 anomaly_codes
                     .iter()
+                    .take(MAX_ANOMALY_CODES)
                     .map(|code| sanitize_message(code))
+                    .map(|code| truncate_chars(&code, MAX_ANOMALY_CODE_LEN))
                     .collect(),
             );
         }
@@ -1739,6 +1750,90 @@ mod tests {
             sanitized.message.as_deref(),
             Some("password=[REDACTED] 连接失败")
         );
+    }
+
+    #[test]
+    fn sanitize_entry_redacts_sensitive_keywords_in_file_names() {
+        let mut entry = make_test_entry("test");
+        entry.remote_file_name = Some("/dav/token=abc123.zip".into());
+        entry.local_file_name = Some("C:\\Backups\\secret_backup.zip".into());
+        entry.metrics = Some(BackupActivityMetrics {
+            deleted_count: None,
+            retained_count: None,
+            missing_count: None,
+            attempted_count: None,
+            failed_file_name: Some("password=hunter2.zip".into()),
+            anomaly_codes: None,
+        });
+
+        let sanitized = sanitize_entry(entry);
+
+        assert_eq!(
+            sanitized.remote_file_name.as_deref(),
+            Some("token=[REDACTED]")
+        );
+        assert_eq!(
+            sanitized.local_file_name.as_deref(),
+            Some("secret=[REDACTED]")
+        );
+        assert_eq!(
+            sanitized
+                .metrics
+                .as_ref()
+                .unwrap()
+                .failed_file_name
+                .as_deref(),
+            Some("password=[REDACTED]")
+        );
+    }
+
+    #[test]
+    fn sanitize_entry_limits_file_name_length() {
+        let mut entry = make_test_entry("test");
+        entry.remote_file_name = Some(format!("{}.zip", "a".repeat(MAX_FILENAME_LEN + 100)));
+
+        let sanitized = sanitize_entry(entry);
+
+        assert_eq!(
+            sanitized
+                .remote_file_name
+                .as_deref()
+                .unwrap()
+                .chars()
+                .count(),
+            MAX_FILENAME_LEN
+        );
+    }
+
+    #[test]
+    fn sanitize_entry_limits_anomaly_codes_count_and_item_length() {
+        let mut entry = make_test_entry("test");
+        entry.metrics = Some(BackupActivityMetrics {
+            deleted_count: None,
+            retained_count: None,
+            missing_count: None,
+            attempted_count: None,
+            failed_file_name: None,
+            anomaly_codes: Some(
+                (0..MAX_ANOMALY_CODES + 5)
+                    .map(|idx| format!("code-{idx}-{}", "x".repeat(MAX_ANOMALY_CODE_LEN + 50)))
+                    .collect(),
+            ),
+        });
+
+        let sanitized = sanitize_entry(entry);
+        let anomaly_codes = sanitized
+            .metrics
+            .as_ref()
+            .unwrap()
+            .anomaly_codes
+            .as_ref()
+            .unwrap();
+
+        assert_eq!(anomaly_codes.len(), MAX_ANOMALY_CODES);
+        assert!(anomaly_codes
+            .iter()
+            .all(|code| code.chars().count() == MAX_ANOMALY_CODE_LEN));
     }
 
     #[test]
