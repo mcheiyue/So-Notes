@@ -1178,13 +1178,14 @@ export const BoardDock = () => {
         try {
           const backups = await WebDavBackupService.listBackups(config);
           setWebdavBackups(backups);
-        } catch {
+        } catch (err) {
           // list refresh failure is non-critical
           void logActivityAndRefresh({
             operation: 'remote-list',
             status: 'failed',
             level: 'error',
             stage: 'list-refresh',
+            message: formatWebdavError(formatUnknownError(err)),
             startedAt,
             finishedAt: Date.now(),
           });

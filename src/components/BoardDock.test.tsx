@@ -1662,6 +1662,34 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(feedback?.textContent).toContain('远端备份已创建');
   });
 
+  it('手动远端备份成功后列表刷新失败时记录带脱敏 message 的 remote-list 活动', async () => {
+    const { createRemoteBackup, loadConfig, listBackups } = await import('../services/backup/WebDavBackupService');
+    const { flushNow } = await import('../services/storage/PersistenceFacade');
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+    vi.mocked(createRemoteBackup).mockResolvedValue({ success: true, remoteFileName: 'backup-2026.zip', summary: null, zipSizeBytes: null });
+    vi.mocked(listBackups).mockRejectedValue(new Error('GET https://dav.example.com/remote.php/dav timeout'));
+    vi.mocked(flushNow).mockResolvedValue(true);
+
+    await openWebdavView();
+    await clickElement(findButtonByText('创建远端备份'));
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      'backup_activity_append',
+      expect.objectContaining({
+        entry: expect.objectContaining({
+          operation: 'remote-list',
+          status: 'failed',
+          level: 'error',
+          stage: 'list-refresh',
+          message: 'GET [REDACTED] timeout',
+        }),
+      }),
+    );
+  });
+
   it('手动远端备份成功后使用 runner 捕获的 flush 后时间戳更新最近成功快照', async () => {
     const { createRemoteBackup, loadConfig, listBackups } = await import('../services/backup/WebDavBackupService');
     const { flushNow } = await import('../services/storage/PersistenceFacade');
