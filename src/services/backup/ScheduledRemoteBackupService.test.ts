@@ -402,6 +402,66 @@ describe('ScheduledRemoteBackupService', () => {
       expect(savedState!.lastFailureReason).toBe('未保存 WebDAV 凭据');
       expect(savedState!.lastFailureStage).toBe('credential');
       expect(savedState!.lastAttemptCapturedStorageUpdatedAt).toBe(9000);
+      expect(savedState!.consecutiveCredentialFailures).toBe(1);
+      expect(savedState!.credentialActionRequired).toBe(false);
+    });
+
+    it('passwordSaved 连续失败达到阈值时设置 credentialActionRequired', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { consecutiveCredentialFailures: 2 },
+      });
+      ctx.loadWebDavConfig.mockResolvedValueOnce({
+        success: true,
+        serverUrl: 'https://example.com/dav',
+        username: 'user',
+        passwordSaved: false,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.consecutiveCredentialFailures).toBe(3);
+      expect(savedState!.credentialActionRequired).toBe(true);
+    });
+
+    it('username 为空时在 config 阶段失败并记录活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+      ctx.loadWebDavConfig.mockResolvedValueOnce({
+        success: true,
+        serverUrl: 'https://example.com/dav',
+        username: '',
+        passwordSaved: true,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(mockRunRemoteBackup).not.toHaveBeenCalled();
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'remote-backup',
+          status: 'failed',
+          level: 'error',
+          stage: 'config',
+          message: 'WebDAV 配置缺少用户名',
+        }),
+      );
+
+      const savedState = ctx.saveScheduledState.mock.calls[0]?.[0] as
+        | ScheduledRemoteBackupState
+        | undefined;
+      expect(savedState).toBeDefined();
+      expect(savedState!.lastFailureReason).toBe('WebDAV 配置缺少用户名');
+      expect(savedState!.lastFailureStage).toBe('config');
     });
   });
 
@@ -1268,6 +1328,23 @@ describe('ScheduledRemoteBackupService', () => {
       const service = createScheduledRemoteBackupService(ctx.deps);
       await service.initialize();
       await expect(service.runBeforeExit()).rejects.toThrow('未保存 WebDAV 凭据');
+    });
+
+    it('username 为空时 runBeforeExit reject', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+        state: { lastSuccessfulStorageUpdatedAt: null },
+      });
+      ctx.loadWebDavConfig.mockResolvedValue({
+        success: true,
+        serverUrl: 'https://dav.example.com',
+        username: '',
+        passwordSaved: true,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await expect(service.runBeforeExit()).rejects.toThrow('WebDAV 配置缺少用户名');
     });
 
     it('flush 失败时 runBeforeExit reject', async () => {

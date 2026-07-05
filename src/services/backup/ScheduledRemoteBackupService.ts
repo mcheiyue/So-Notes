@@ -396,10 +396,40 @@ export function createScheduledRemoteBackupService(
         return;
       }
 
+      if (!webdavResult.username) {
+        const diskTs = await getCurrentDiskTimestamp();
+        const now = deps.clock();
+        patchState({
+          lastFinishedAt: now,
+          lastTrigger: trigger,
+          lastFailureAt: now,
+          lastFailureReason: 'WebDAV 配置缺少用户名',
+          lastFailureStage: 'config',
+          lastAttemptCapturedStorageUpdatedAt: diskTs,
+          nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
+        });
+        await safeAppendActivity({
+          operation: backupOperationForTrigger(trigger),
+          status: 'failed',
+          level: 'error',
+          startedAt: startNow,
+          finishedAt: now,
+          trigger,
+          stage: 'config',
+          message: 'WebDAV 配置缺少用户名',
+        });
+        await deps.saveScheduledState(internalState);
+        if (trigger === 'before-exit') {
+          beforeExitError = new Error('WebDAV 配置缺少用户名');
+        }
+        return;
+      }
+
       // 2. 检查凭据是否已保存
       if (!webdavResult.passwordSaved) {
         const diskTs = await getCurrentDiskTimestamp();
         const now = deps.clock();
+        const newCount = internalState.consecutiveCredentialFailures + 1;
         patchState({
           lastFinishedAt: now,
           lastTrigger: trigger,
@@ -408,6 +438,8 @@ export function createScheduledRemoteBackupService(
           lastFailureStage: 'credential',
           lastAttemptCapturedStorageUpdatedAt: diskTs,
           nextRunAt: now + FREQUENCY_MS[serviceState.config.frequency],
+          consecutiveCredentialFailures: newCount,
+          credentialActionRequired: newCount >= CREDENTIAL_FAILURE_THRESHOLD,
         });
         await safeAppendActivity({
           operation: backupOperationForTrigger(trigger),
