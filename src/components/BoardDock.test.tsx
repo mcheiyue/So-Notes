@@ -209,7 +209,8 @@ vi.mock('../services/backup/ScheduledRemoteBackupConfigService', () => ({
   redactStateBeforeSave: vi.fn((s) => s),
 }));
 
-import { BoardDock, shouldCommitActivityRefresh } from './BoardDock';
+import { BoardDock } from './BoardDock';
+import { shouldCommitActivityRefresh } from './boardDockActivityRefresh';
 import { confirm } from '../store/confirmStore';
 import { Z_INDEX } from '../constants/layout';
 import { createEmptyNormalizedNotesState, normalizeNotes } from '../store/normalization';

@@ -32,6 +32,7 @@ import {
   sanitizeActivityInput,
 } from "../services/backup/BackupActivityLogService";
 import type { BackupActivityAppendInput, BackupActivityEntry } from "../services/backup/BackupActivityLogService";
+import { shouldCommitActivityRefresh } from './boardDockActivityRefresh';
 
 type RestoreApplyResult =
   | { readonly success: true }
@@ -115,11 +116,6 @@ const formatImportHighlights = (summary: NonNullable<ImportFeedback['summary']>)
 
   return highlights;
 };
-
-export const shouldCommitActivityRefresh = (
-  requestId: number,
-  latestRequestId: number,
-): boolean => requestId === latestRequestId;
 
 const formatUnknownError = (err: unknown): string => {
   if (err instanceof Error) return err.message;
