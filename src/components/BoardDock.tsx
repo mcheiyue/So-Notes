@@ -1778,6 +1778,8 @@ export const BoardDock = () => {
         candidateFileNames: preview?.candidates,
         keepCount: preview?.keep.length,
       });
+      const cleanupSkippedByBusy = result.error === 'busy' && result.attemptedCount === 0;
+      const cleanupMadeProgress = result.deletedCount + result.missingCount > 0;
       if (result.success) {
         setRetentionFeedback({
           status: 'success',
@@ -1795,19 +1797,35 @@ export const BoardDock = () => {
             missingCount: result.missingCount,
           },
         });
+      } else if (cleanupSkippedByBusy) {
+        setRetentionFeedback({
+          status: 'info',
+          message: '已有备份或清理任务正在运行，本次保留清理已跳过。',
+        });
+        void logActivityAndRefresh({
+          operation: 'retention-cleanup',
+          status: 'skipped',
+          level: 'info',
+          reasonCode: 'already_running',
+          message: '已有任务正在运行',
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+        });
       } else {
         const detail = result.failedFileName
           ? `删除 ${result.failedFileName} 时失败：${result.error ?? '未知错误'}`
           : (result.error ? `原因：${result.error}` : '');
         setRetentionFeedback({
           status: 'error',
-          message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个${result.missingCount > 0 ? `，${result.missingCount} 个已不存在` : ''}。${detail}`,
+          message: `${cleanupMadeProgress ? '清理部分完成' : '清理失败'}：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个${result.missingCount > 0 ? `，${result.missingCount} 个已不存在` : ''}。${detail}`,
         });
         void logActivityAndRefresh({
           operation: 'retention-cleanup',
-          status: 'partial',
-          level: 'warning',
-          message: result.error ? `清理部分完成：${result.error}` : '清理部分完成',
+          status: cleanupMadeProgress ? 'partial' : 'failed',
+          level: cleanupMadeProgress ? 'warning' : 'error',
+          message: result.error
+            ? `${cleanupMadeProgress ? '清理部分完成' : '清理失败'}：${result.error}`
+            : (cleanupMadeProgress ? '清理部分完成' : '清理失败'),
           startedAt: Date.now(),
           finishedAt: Date.now(),
           metrics: {
@@ -1821,11 +1839,11 @@ export const BoardDock = () => {
       }
 
       const retentionStatePatch: Partial<ScheduledRemoteBackupState> = {
-        lastRetentionCleanupDeletedCount: result.deletedCount,
-        lastRetentionCleanupMissingCount: result.missingCount,
-        lastRetentionCleanupFailedFileName: result.failedFileName ?? null,
-        lastRetentionCleanupError: result.error ?? null,
-        lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupDeletedCount: cleanupSkippedByBusy ? 0 : result.deletedCount,
+        lastRetentionCleanupMissingCount: cleanupSkippedByBusy ? 0 : result.missingCount,
+        lastRetentionCleanupFailedFileName: cleanupSkippedByBusy ? null : (result.failedFileName ?? null),
+        lastRetentionCleanupError: cleanupSkippedByBusy ? null : (result.error ?? null),
+        lastRetentionCleanupSkipped: cleanupSkippedByBusy,
         lastRetentionCleanupAt: Date.now(),
       };
       let updatedState: ScheduledRemoteBackupState;

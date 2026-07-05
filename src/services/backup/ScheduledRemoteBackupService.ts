@@ -642,7 +642,7 @@ export function createScheduledRemoteBackupService(
               const hasError = retentionPatch.lastRetentionCleanupError != null;
               const cleanupMadeProgress =
                 (retentionPatch.lastRetentionCleanupDeletedCount ?? 0) > 0 ||
-                retentionPatch.lastRetentionCleanupFailedFileName != null;
+                (retentionPatch.lastRetentionCleanupMissingCount ?? 0) > 0;
               const retentionStatus: BackupActivityStatus = hasError
                 ? cleanupMadeProgress
                   ? 'partial'

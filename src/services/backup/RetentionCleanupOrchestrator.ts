@@ -48,6 +48,11 @@ const AUTOMATIC_TRIGGERS: ReadonlySet<RemoteBackupTrigger> = new Set([
   'quiet-period',
 ]);
 
+const isBusyCleanupResult = (result: {
+  readonly attemptedCount?: number;
+  readonly error?: string | null;
+}): boolean => result.error === 'busy' && (result.attemptedCount ?? 0) === 0;
+
 // ---------------------------------------------------------------------------
 // orchestratePostBackupRetentionCleanup
 // ---------------------------------------------------------------------------
@@ -205,6 +210,17 @@ export async function orchestratePostBackupRetentionCleanup(
         })(),
       });
 
+      if (isBusyCleanupResult(cleanupResult)) {
+        return {
+          lastRetentionCleanupDeletedCount: 0,
+          lastRetentionCleanupMissingCount: 0,
+          lastRetentionCleanupFailedFileName: null,
+          lastRetentionCleanupError: null,
+          lastRetentionCleanupSkipped: true,
+          lastRetentionCleanupAt: clock(),
+        };
+      }
+
       return {
         pendingCleanupTargetCount: cleanupResult.retainedCount,
         lastRetentionCleanupDeletedCount: cleanupResult.deletedCount,
@@ -271,6 +287,18 @@ export async function orchestratePostBackupRetentionCleanup(
         return names;
       })(),
     });
+
+    if (isBusyCleanupResult(cleanupResult)) {
+      return {
+        ...baselineUpdate,
+        lastRetentionCleanupDeletedCount: 0,
+        lastRetentionCleanupMissingCount: 0,
+        lastRetentionCleanupFailedFileName: null,
+        lastRetentionCleanupError: null,
+        lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupAt: clock(),
+      };
+    }
 
     // 返回清理结果到 state（清理失败不改变备份成功状态，仅记录信息）
     return {

@@ -796,5 +796,33 @@ describe('RetentionCleanupOrchestrator', () => {
         lastRetentionCleanupAt: 1700000000000,
       });
     });
+
+    it('清理任务忙碌时记录为跳过而非执行失败', async () => {
+      detectBackupCliffDropMock.mockReturnValue(null);
+      executeRetentionCleanupMock.mockResolvedValue({
+        retainedCount: 0,
+        deletedCount: 0,
+        missingCount: 0,
+        attemptedCount: 0,
+        failedFileName: null,
+        error: 'busy',
+      });
+      const input = makeInput({
+        state: {
+          ...DEFAULT_STATE,
+          baselineConfirmedRemoteCount: 12,
+        },
+      });
+
+      const result = await orchestratePostBackupRetentionCleanup(input);
+
+      expect(result).toEqual(expect.objectContaining({
+        lastRetentionCleanupDeletedCount: 0,
+        lastRetentionCleanupMissingCount: 0,
+        lastRetentionCleanupFailedFileName: null,
+        lastRetentionCleanupError: null,
+        lastRetentionCleanupSkipped: true,
+      }));
+    });
   });
 });
