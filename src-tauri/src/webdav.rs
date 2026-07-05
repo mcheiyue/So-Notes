@@ -763,21 +763,21 @@ fn delete_replaced_credential_after_config_write(
     store: &impl WebDavCredentialStore,
     old_credential_key: Option<&str>,
     new_key: &str,
-) -> Result<(), String> {
+) -> Option<String> {
     let Some(old_key_str) = old_credential_key else {
-        return Ok(());
+        return None;
     };
     if old_key_str == new_key {
-        return Ok(());
+        return None;
     }
 
     let old_cred_key = WebDavCredentialKey {
         service: "SoNotes.WebDAV".to_string(),
         account: old_key_str.to_string(),
     };
-    store
-        .delete(&old_cred_key)
-        .map_err(|e| format!("删除旧凭据失败: {e}"))
+    store.delete(&old_cred_key).err().map(|_e| {
+        "新配置已保存，但旧凭据可能需要手动删除".to_string()
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -910,15 +910,15 @@ pub async fn webdav_save_config(
             return Err(format!("写入 WebDAV 配置文件失败: {e}"));
         }
 
-        delete_replaced_credential_after_config_write(
+        let warning = delete_replaced_credential_after_config_write(
             &store,
             old_credential_key.as_deref(),
             new_key,
-        )?;
+        );
 
         return Ok(WebDavConfigSaveResult {
             success: true,
-            warning: None,
+            warning,
             error: None,
         });
     }
@@ -7533,12 +7533,12 @@ mod tests {
             )
             .unwrap();
 
-        delete_replaced_credential_after_config_write(
+        let warning = delete_replaced_credential_after_config_write(
             &store,
             old_credential_key.as_deref(),
             new_key,
-        )
-        .unwrap();
+        );
+        assert_eq!(warning, None);
 
         assert!(
             store.load(&WebDavCredentialKey {
@@ -7566,10 +7566,27 @@ mod tests {
         };
         store.save(&old_key, "old-password").unwrap();
 
-        delete_replaced_credential_after_config_write(&store, Some(old_key_str), old_key_str)
-            .unwrap();
+        let warning =
+            delete_replaced_credential_after_config_write(&store, Some(old_key_str), old_key_str);
+        assert_eq!(warning, None);
 
         assert_eq!(store.load(&old_key).unwrap(), "old-password");
+    }
+
+    #[test]
+    fn config_save_credential_key_change_delete_failure_returns_warning() {
+        let store = FailingDeleteCredentialStore::new();
+
+        let warning = delete_replaced_credential_after_config_write(
+            &store,
+            Some("old-key-hash-value-12345678"),
+            "new-key-hash-value-87654321",
+        );
+
+        assert_eq!(
+            warning,
+            Some("新配置已保存，但旧凭据可能需要手动删除".to_string())
+        );
     }
 
     #[test]
