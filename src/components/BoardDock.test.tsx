@@ -3586,6 +3586,60 @@ describe('BoardDock 定时远端备份 UI', () => {
     expect(activityList?.textContent).toContain('失败文件：SoNotes_Backup_20260101000000.zip');
   });
 
+  it('断崖保护延迟活动展示中文 reasonCode 标签', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'backup_activity_list') {
+        return [
+          {
+            id: 'activity-1',
+            operation: 'retention-cliff-drop',
+            status: 'skipped',
+            level: 'warning',
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+            reasonCode: 'cliff_drop_deferred',
+          },
+        ];
+      }
+      return null;
+    });
+
+    await openDataSettings();
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="activity-list"]')).not.toBeNull());
+
+    const activityList = container.querySelector('[data-testid="activity-list"]');
+    expect(activityList?.textContent).toContain('断崖保护已延迟');
+    expect(activityList?.textContent).not.toContain('cliff_drop_deferred');
+  });
+
+  it('基线确认成功活动展示中文 message 语义', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'backup_activity_list') {
+        return [
+          {
+            id: 'activity-1',
+            operation: 'retention-cliff-drop',
+            status: 'success',
+            level: 'info',
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+            message: 'baseline_confirmed',
+          },
+        ];
+      }
+      return null;
+    });
+
+    await openDataSettings();
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="activity-list"]')).not.toBeNull());
+
+    const activityList = container.querySelector('[data-testid="activity-list"]');
+    expect(activityList?.textContent).toContain('基线已确认');
+    expect(activityList?.textContent).not.toContain('baseline_confirmed');
+  });
+
   it('清除断崖警告记录 skipped 和 warning_dismissed reasonCode', async () => {
     const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');

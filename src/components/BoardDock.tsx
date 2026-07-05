@@ -2000,6 +2000,11 @@ export const BoardDock = () => {
     'credential_action_required': '凭据需要操作',
     'retention_condition_not_met': '保留条件未满足',
     'baseline_established': '基线已建立',
+    'baseline_confirmed': '基线已确认',
+    'cliff_drop_deferred': '断崖保护已延迟',
+    'summary_unavailable': '摘要不可用',
+    'apply_failed': '数据应用失败',
+    'wal_clear_failed': 'WAL 清理失败',
     'warning_dismissed': '警告已清除',
     'quiet_period': '静默期',
   };
@@ -3177,6 +3182,11 @@ export const BoardDock = () => {
                                                 {entry.status === 'skipped' && (entry.reasonCode || entry.stage) && (
                                                     <p className="text-text-tertiary truncate" title={entry.reasonCode ?? entry.stage ?? undefined}>
                                                         {entry.stage ? `[${entry.stage}] ` : ''}{ACTIVITY_REASON_LABELS[entry.reasonCode ?? ''] ?? entry.reasonCode ?? ''}
+                                                    </p>
+                                                )}
+                                                {entry.status === 'success' && entry.message && (
+                                                    <p className="text-text-tertiary truncate" title={entry.message}>
+                                                        {ACTIVITY_REASON_LABELS[entry.message] ?? entry.message}
                                                     </p>
                                                 )}
                                                 {entry.status === 'success' && entry.metrics && (
