@@ -70,6 +70,28 @@ vi.mock('../services/backup/WebDavBackupService', () => ({
   cleanupDownloadedBackup: vi.fn(async () => ({ success: true })),
 }));
 
+vi.mock('../services/backup/RemoteBackupRetentionService', () => ({
+  previewRetentionCleanup: vi.fn(async () => ({
+    candidates: [],
+    keep: [],
+    protectedCount: 0,
+    cliffDropDetected: false,
+    oldestCandidateTime: null,
+    newestKeepTime: null,
+  })),
+  executeRetentionCleanup: vi.fn(async () => ({
+    success: true,
+    policy: { retentionEnabled: true, retentionCount: 5 },
+    attemptedCount: 0,
+    deletedCount: 0,
+    missingCount: 0,
+    retainedCount: 0,
+    stoppedAtFileName: null,
+    failedFileName: null,
+    error: null,
+  })),
+}));
+
 vi.mock('../services/storage/PersistenceFacade', () => ({
   attach: vi.fn(),
   detach: vi.fn(),
@@ -3330,6 +3352,107 @@ describe('BoardDock 定时远端备份 UI', () => {
         lastStartedAt: expect.any(Number),
         lastAttemptCapturedStorageUpdatedAt: 1234,
         lastFailureStage: 'credential',
+      }),
+    );
+  });
+
+  it('手动保留清理部分失败时活动日志写入结构化 metrics', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    const { previewRetentionCleanup, executeRetentionCleanup } = await import('../services/backup/RemoteBackupRetentionService');
+    const { invoke } = await import('@tauri-apps/api/core');
+    const oldFile = { fileName: 'SoNotes_Backup_20260101000000.zip', sortTime: new Date('2026-01-01T00:00:00Z') };
+    const keepFile = { fileName: 'SoNotes_Backup_20260201000000.zip', sortTime: new Date('2026-02-01T00:00:00Z') };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true,
+      config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, retentionEnabled: true, retentionCount: 1 },
+      error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+    vi.mocked(previewRetentionCleanup).mockResolvedValue({
+      candidates: [oldFile],
+      keep: [keepFile],
+      protectedCount: 0,
+      cliffDropDetected: false,
+      oldestCandidateTime: oldFile.sortTime,
+      newestKeepTime: keepFile.sortTime,
+    });
+    vi.mocked(executeRetentionCleanup).mockResolvedValue({
+      success: false,
+      policy: { retentionEnabled: true, retentionCount: 1 },
+      attemptedCount: 2,
+      deletedCount: 1,
+      missingCount: 1,
+      retainedCount: 1,
+      stoppedAtFileName: 'SoNotes_Backup_20260101000000.zip',
+      failedFileName: 'C:\\Backups\\SoNotes_Backup_20260101000000.zip',
+      error: '423 Locked',
+    });
+
+    await openWebdavView();
+    await clickElement(container.querySelector('[data-testid="retention-preview-button"]'));
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="retention-execute-button"]')).not.toBeNull());
+    await clickElement(container.querySelector('[data-testid="retention-execute-button"]'));
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      'backup_activity_append',
+      expect.objectContaining({
+        entry: expect.objectContaining({
+          operation: 'retention-cleanup',
+          status: 'partial',
+          level: 'warning',
+          message: '清理部分完成：423 Locked',
+          metrics: expect.objectContaining({
+            deletedCount: 1,
+            retainedCount: 1,
+            missingCount: 1,
+            attemptedCount: 2,
+            failedFileName: 'SoNotes_Backup_20260101000000.zip',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('清除断崖警告记录 skipped 和 warning_dismissed reasonCode', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    const { invoke } = await import('@tauri-apps/api/core');
+    mockScheduledStateRef.current = {
+      ...DEFAULT_SCHEDULED_BACKUP_STATE,
+      cliffDropDeferred: true,
+      cliffDropDetectedAt: Date.now(),
+      cliffDropLatestSummaryNoteCount: 1,
+      cliffDropLatestSummaryBoardCount: 1,
+      cliffDropLatestSummaryImageNoteCount: 0,
+      cliffDropLatestSummaryImageFileCount: 0,
+      cliffDropLatestSummaryImageFileTotalBytes: 0,
+      cliffDropLatestRemoteFileName: 'SoNotes_Backup_20260101000000.zip',
+      cliffDropLatestZipSizeBytes: 1024,
+    };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true,
+      config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, retentionEnabled: true, retentionCount: 5 },
+      error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+    await clickElement(container.querySelector('[data-testid="dismiss-cliff-warning-button"]'));
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      'backup_activity_append',
+      expect.objectContaining({
+        entry: expect.objectContaining({
+          operation: 'retention-cliff-drop',
+          status: 'skipped',
+          level: 'info',
+          reasonCode: 'warning_dismissed',
+        }),
       }),
     );
   });

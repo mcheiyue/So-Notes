@@ -1784,7 +1784,21 @@ export const BoardDock = () => {
           status: 'error',
           message: `清理部分完成：已删除 ${result.deletedCount} 个，保留 ${result.retainedCount} 个${result.missingCount > 0 ? `，${result.missingCount} 个已不存在` : ''}。${detail}`,
         });
-        void logActivityAndRefresh({ operation: 'retention-cleanup', status: 'partial', level: 'warning', message: `deleted=${result.deletedCount} retained=${result.retainedCount} missing=${result.missingCount}${result.failedFileName ? ` failed=${result.failedFileName}` : ''}${result.error ? ` error=${result.error}` : ''}`, startedAt: Date.now(), finishedAt: Date.now() });
+        void logActivityAndRefresh({
+          operation: 'retention-cleanup',
+          status: 'partial',
+          level: 'warning',
+          message: result.error ? `清理部分完成：${result.error}` : '清理部分完成',
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+          metrics: {
+            deletedCount: result.deletedCount,
+            retainedCount: result.retainedCount,
+            missingCount: result.missingCount,
+            attemptedCount: result.attemptedCount,
+            failedFileName: result.failedFileName ?? null,
+          },
+        });
       }
 
       const retentionStatePatch: Partial<ScheduledRemoteBackupState> = {
@@ -1903,7 +1917,7 @@ export const BoardDock = () => {
     try {
       await ScheduledRemoteBackupConfigService.saveState(updated);
       await getSchedulerService()?.reloadState();
-      void logActivityAndRefresh({ operation: 'retention-cliff-drop', status: 'success', level: 'info', message: 'warning_dismissed', startedAt: Date.now(), finishedAt: Date.now() });
+      void logActivityAndRefresh({ operation: 'retention-cliff-drop', status: 'skipped', level: 'info', reasonCode: 'warning_dismissed', message: '断崖警告已清除', startedAt: Date.now(), finishedAt: Date.now() });
     } catch (err) {
       setScheduledState(scheduledState);
       setRetentionFeedback({ status: 'error', message: `清除警告失败：${formatUnknownError(err)}` });
@@ -1949,6 +1963,7 @@ export const BoardDock = () => {
     'credential_action_required': '凭据需要操作',
     'retention_condition_not_met': '保留条件未满足',
     'baseline_established': '基线已建立',
+    'warning_dismissed': '警告已清除',
     'quiet_period': '静默期',
   };
 
