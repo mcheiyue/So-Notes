@@ -739,6 +739,23 @@ fn replace_webdav_config_file(tmp_path: &Path, path: &Path) -> Result<(), String
     std::fs::rename(tmp_path, path).map_err(|e| format!("替换 WebDAV 配置文件失败: {e}"))
 }
 
+#[cfg(windows)]
+fn recover_orphaned_webdav_config_backup_if_missing(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        return Ok(());
+    }
+    let backup_path = webdav_config_backup_path(path)?;
+    if !backup_path.exists() {
+        return Ok(());
+    }
+    std::fs::rename(&backup_path, path).map_err(|e| format!("恢复 WebDAV 配置文件 .bak 失败: {e}"))
+}
+
+#[cfg(not(windows))]
+fn recover_orphaned_webdav_config_backup_if_missing(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
 fn write_webdav_config_atomic(path: &Path, content: &str) -> Result<(), String> {
     let tmp_path = webdav_config_temp_path(path)?;
     let mut guard = WebDavTempFileGuard::new(tmp_path.clone());
@@ -791,6 +808,8 @@ fn delete_replaced_credential_after_config_write(
 #[tauri::command]
 pub async fn webdav_load_config(app: tauri::AppHandle) -> Result<WebDavConfigLoadResult, String> {
     let path = config_file_path(&app)?;
+
+    recover_orphaned_webdav_config_backup_if_missing(&path)?;
 
     if !path.exists() {
         return Ok(WebDavConfigLoadResult {
@@ -3466,6 +3485,24 @@ mod tests {
         write_webdav_config_atomic(&path, "new").unwrap();
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn recover_orphaned_webdav_config_backup_if_missing_restores_backup_file() {
+        let dir = test_config_dir("recover-orphaned-bak");
+        let path = dir.join(CONFIG_FILENAME);
+        let backup_path = webdav_config_backup_path(&path).unwrap();
+        let json = r#"{"server_url":"https://example.com/dav","username":"user1","remote_dir":"Backups/","password_saved":false,"credential_key":null}"#;
+
+        std::fs::write(&backup_path, json).unwrap();
+
+        recover_orphaned_webdav_config_backup_if_missing(&path).unwrap();
+
+        assert!(path.exists());
+        assert!(!backup_path.exists());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), json);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
