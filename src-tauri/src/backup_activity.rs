@@ -305,13 +305,44 @@ fn natural_language_value_start(line: &str, after_keyword: usize) -> Option<usiz
     None
 }
 
+fn ascii_bytes_match_at(bytes: &[u8], start: usize, needle: &[u8]) -> bool {
+    bytes
+        .get(start..start + needle.len())
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(needle))
+}
+
+fn keyword_matches_at(line: &str, start: usize, keyword: &str) -> bool {
+    if keyword.is_ascii() {
+        return ascii_bytes_match_at(line.as_bytes(), start, keyword.as_bytes());
+    }
+
+    line.get(start..).is_some_and(|rest| rest.starts_with(keyword))
+}
+
+fn find_http_url_start(s: &str, start: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut idx = start;
+
+    while idx < bytes.len() {
+        let b = bytes[idx];
+        if (b == b'h' || b == b'H')
+            && (ascii_bytes_match_at(bytes, idx, b"http://")
+                || ascii_bytes_match_at(bytes, idx, b"https://"))
+        {
+            return Some(idx);
+        }
+        idx += 1;
+    }
+
+    None
+}
+
 /// 对单行文本进行精确敏感词替换（与 TS 侧 SENSITIVE_PATTERN 行为对齐）：
 /// - `keyword=value` 或 `keyword: value` → `keyword=[REDACTED]`
 /// - `keyword_something` → `keyword=[REDACTED]`
 /// - 独立 keyword（后跟空格/逗号/结尾）→ `keyword=[REDACTED]`
 fn redact_sensitive_keywords(line: &str) -> String {
     let mut result = String::with_capacity(line.len());
-    let lower = line.to_lowercase();
     let bytes = line.as_bytes();
     let mut cursor = 0;
 
@@ -322,12 +353,10 @@ fn redact_sensitive_keywords(line: &str) -> String {
             let kw_lower = *kw;
             let kw_len = kw_lower.len();
             let after = cursor + kw_len;
-            // 边界检查：确保 after 在字符边界上，避免截断多字节字符
-            if after > line.len() || !line.is_char_boundary(after) {
+            if after > line.len() {
                 continue;
             }
-            let candidate = &lower[cursor..after];
-            if candidate != kw_lower {
+            if !keyword_matches_at(line, cursor, kw_lower) {
                 continue;
             }
             if cursor > 0
@@ -481,14 +510,8 @@ fn remove_url_userinfo(s: &str) -> String {
 fn redact_urls(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut cursor = 0;
-    let lower = s.to_lowercase();
     while cursor < s.len() {
-        let pos_http = lower[cursor..].find("http://").map(|r| cursor + r);
-        let pos_https = lower[cursor..].find("https://").map(|r| cursor + r);
-        let abs = match (pos_http, pos_https) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
+        let abs = find_http_url_start(s, cursor);
         if let Some(abs) = abs {
             let url_start = abs;
             let mut url_end = abs;
@@ -1372,6 +1395,27 @@ mod tests {
         assert!(result.contains("line1 is safe"));
         assert!(result.contains("[REDACTED]"));
         assert!(result.contains("line3 is safe"));
+    }
+
+    #[test]
+    fn redact_urls_handles_unicode_casefold_expansion() {
+        let msg = "İstanbul https://example.com/path";
+        let result = redact_urls(msg);
+        assert_eq!(result, "İstanbul [URL_REDACTED]");
+    }
+
+    #[test]
+    fn redact_sensitive_keywords_handles_unicode_casefold_expansion() {
+        let msg = "İ password=secret123";
+        let result = redact_sensitive_keywords(msg);
+        assert_eq!(result, "İ password=[REDACTED]");
+    }
+
+    #[test]
+    fn sanitize_message_handles_unicode_casefold_expansion() {
+        let msg = "İstanbul password=secret123 https://example.com/path";
+        let result = sanitize_message(msg);
+        assert_eq!(result, "İstanbul password=[REDACTED] [URL_REDACTED]");
     }
 
     // -----------------------------------------------------------------------
