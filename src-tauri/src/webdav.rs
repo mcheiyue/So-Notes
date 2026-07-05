@@ -529,6 +529,10 @@ pub fn normalize_remote_dir(input: &str) -> Result<String, String> {
         return Err("远端目录名不能包含冒号".to_string());
     }
 
+    if name.contains('?') || name.contains('#') {
+        return Err("远端目录名不能包含 ? 或 #".to_string());
+    }
+
     Ok(format!("{name}/"))
 }
 
@@ -694,6 +698,47 @@ fn webdav_config_temp_path(path: &Path) -> Result<PathBuf, String> {
     )))
 }
 
+#[cfg(windows)]
+fn webdav_config_backup_path(path: &Path) -> Result<PathBuf, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "WebDAV 配置文件路径缺少父目录".to_string())?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "WebDAV 配置文件名无效".to_string())?;
+    Ok(parent.join(format!("{file_name}.bak")))
+}
+
+#[cfg(windows)]
+fn replace_webdav_config_file(tmp_path: &Path, path: &Path) -> Result<(), String> {
+    let backup_path = webdav_config_backup_path(path)?;
+    let _ = std::fs::remove_file(&backup_path);
+
+    if path.exists() {
+        std::fs::rename(path, &backup_path)
+            .map_err(|e| format!("备份旧 WebDAV 配置文件失败: {e}"))?;
+    }
+
+    match std::fs::rename(tmp_path, path) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&backup_path);
+            Ok(())
+        }
+        Err(e) => {
+            if backup_path.exists() {
+                let _ = std::fs::rename(&backup_path, path);
+            }
+            Err(format!("替换 WebDAV 配置文件失败: {e}"))
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_webdav_config_file(tmp_path: &Path, path: &Path) -> Result<(), String> {
+    std::fs::rename(tmp_path, path).map_err(|e| format!("替换 WebDAV 配置文件失败: {e}"))
+}
+
 fn write_webdav_config_atomic(path: &Path, content: &str) -> Result<(), String> {
     let tmp_path = webdav_config_temp_path(path)?;
     let mut guard = WebDavTempFileGuard::new(tmp_path.clone());
@@ -709,9 +754,30 @@ fn write_webdav_config_atomic(path: &Path, content: &str) -> Result<(), String> 
         .map_err(|e| format!("同步 WebDAV 配置临时文件失败: {e}"))?;
     drop(file);
 
-    std::fs::rename(&tmp_path, path).map_err(|e| format!("替换 WebDAV 配置文件失败: {e}"))?;
+    replace_webdav_config_file(&tmp_path, path)?;
     guard.disarm();
     Ok(())
+}
+
+fn delete_replaced_credential_after_config_write(
+    store: &impl WebDavCredentialStore,
+    old_credential_key: Option<&str>,
+    new_key: &str,
+) -> Result<(), String> {
+    let Some(old_key_str) = old_credential_key else {
+        return Ok(());
+    };
+    if old_key_str == new_key {
+        return Ok(());
+    }
+
+    let old_cred_key = WebDavCredentialKey {
+        service: "SoNotes.WebDAV".to_string(),
+        account: old_key_str.to_string(),
+    };
+    store
+        .delete(&old_cred_key)
+        .map_err(|e| format!("删除旧凭据失败: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -823,19 +889,6 @@ pub async fn webdav_save_config(
         let new_key = config.credential_key.as_ref().unwrap();
         let store = SystemWebDavCredentialStore::new();
 
-        // 旧 key 与新 key 不同时，先删除旧 secret
-        if let Some(ref old_key_str) = old_credential_key {
-            if old_key_str != new_key {
-                let old_cred_key = WebDavCredentialKey {
-                    service: "SoNotes.WebDAV".to_string(),
-                    account: old_key_str.clone(),
-                };
-                store
-                    .delete(&old_cred_key)
-                    .map_err(|e| format!("删除旧凭据失败: {e}"))?;
-            }
-        }
-
         let new_cred_key = WebDavCredentialKey {
             service: "SoNotes.WebDAV".to_string(),
             account: new_key.clone(),
@@ -856,6 +909,12 @@ pub async fn webdav_save_config(
             let _ = store.delete(&new_cred_key);
             return Err(format!("写入 WebDAV 配置文件失败: {e}"));
         }
+
+        delete_replaced_credential_after_config_write(
+            &store,
+            old_credential_key.as_deref(),
+            new_key,
+        )?;
 
         return Ok(WebDavConfigSaveResult {
             success: true,
@@ -3122,6 +3181,18 @@ mod tests {
     fn dir_norm_rejects_colon() {
         let err = normalize_remote_dir("backup:data").unwrap_err();
         assert!(err.contains("冒号"));
+    }
+
+    #[test]
+    fn dir_norm_rejects_question_mark() {
+        let err = normalize_remote_dir("Backups?token=abc").unwrap_err();
+        assert!(err.contains("? 或 #"));
+    }
+
+    #[test]
+    fn dir_norm_rejects_hash() {
+        let err = normalize_remote_dir("Backups#fragment").unwrap_err();
+        assert!(err.contains("? 或 #"));
     }
 
     #[test]
@@ -7462,10 +7533,12 @@ mod tests {
             )
             .unwrap();
 
-        let _ = store.delete(&WebDavCredentialKey {
-            service: "SoNotes.WebDAV".to_string(),
-            account: old_key_str.to_string(),
-        });
+        delete_replaced_credential_after_config_write(
+            &store,
+            old_credential_key.as_deref(),
+            new_key,
+        )
+        .unwrap();
 
         assert!(
             store.load(&WebDavCredentialKey {
@@ -7481,6 +7554,22 @@ mod tests {
             }).unwrap(),
             "new-password"
         );
+    }
+
+    #[test]
+    fn config_save_same_credential_key_keeps_old_secret() {
+        let store = MemoryWebDavCredentialStore::new();
+        let old_key_str = "same-key-hash-value-12345678";
+        let old_key = WebDavCredentialKey {
+            service: "SoNotes.WebDAV".to_string(),
+            account: old_key_str.to_string(),
+        };
+        store.save(&old_key, "old-password").unwrap();
+
+        delete_replaced_credential_after_config_write(&store, Some(old_key_str), old_key_str)
+            .unwrap();
+
+        assert_eq!(store.load(&old_key).unwrap(), "old-password");
     }
 
     #[test]
