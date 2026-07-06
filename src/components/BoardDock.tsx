@@ -1535,6 +1535,19 @@ export const BoardDock = () => {
         startedAt,
         finishedAt: Date.now(),
       });
+
+      try {
+        const stateResult = await ScheduledRemoteBackupConfigService.loadState();
+        if (stateResult.success && stateResult.state) {
+          await ScheduledRemoteBackupConfigService.saveState({
+            ...stateResult.state,
+            lastSuccessfulStorageUpdatedAt: null,
+          });
+          setScheduledState(prev => ({ ...prev, lastSuccessfulStorageUpdatedAt: null }));
+        }
+      } catch (resetError) {
+        console.warn('远端恢复后重置自动备份状态失败:', resetError);
+      }
     } catch (err) {
       setWebdavFeedback({ status: 'error', message: `恢复失败：${formatWebdavError(formatUnknownError(err))}` });
       void logActivityAndRefresh({

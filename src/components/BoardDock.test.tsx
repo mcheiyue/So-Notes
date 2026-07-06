@@ -1871,6 +1871,7 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
     const { resolveAttachmentAssetUrlCached } = await import('../services/storage/attachmentPersistence');
     const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
+    const { saveState } = await import('../services/backup/ScheduledRemoteBackupConfigService');
 
     vi.mocked(loadConfig).mockResolvedValue({
       success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
@@ -1956,6 +1957,9 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(state.notesById['r1'].content).toBe('恢复便签');
     expect(state.notesById['r-image']).toBeDefined();
     expect(resolveAttachmentAssetUrlCached).toHaveBeenCalledWith('attachments/remote.png');
+    expect(saveState).toHaveBeenCalledWith(
+      expect.objectContaining({ lastSuccessfulStorageUpdatedAt: null }),
+    );
   });
 
   it('远端恢复验证失败时 cleanup token 并显示错误', async () => {
