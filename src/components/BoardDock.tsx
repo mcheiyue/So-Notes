@@ -2056,6 +2056,7 @@ export const BoardDock = () => {
     try {
       beginActivityRefresh();
       await clearBackupActivities();
+      beginActivityRefresh();
       activityEntriesRef.current = [];
       setActivityEntries([]);
       setActivityError(null);

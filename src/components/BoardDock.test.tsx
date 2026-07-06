@@ -3746,6 +3746,83 @@ describe('BoardDock 定时远端备份 UI', () => {
     expect(clearButton?.getAttribute('title')).toBe('清空最近活动');
   });
 
+  it('清空活动期间启动的轮询在清空完成后不会写回旧条目', async () => {
+    vi.useFakeTimers();
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      let resolveClear: (() => void) | null = null;
+      let resolvePoll: (() => void) | null = null;
+      let listCallCount = 0;
+
+      vi.mocked(invoke).mockImplementation(async (command) => {
+        if (command === 'backup_activity_list') {
+          listCallCount += 1;
+          if (listCallCount === 1) {
+            return [
+              {
+                id: 'activity-initial',
+                operation: 'remote-list',
+                status: 'success',
+                level: 'info',
+                startedAt: Date.now(),
+                finishedAt: Date.now(),
+                remoteFileName: 'stale.zip',
+              },
+            ];
+          }
+          if (listCallCount === 2) {
+            return await new Promise((resolve) => {
+              resolvePoll = () => resolve([
+                {
+                  id: 'activity-stale',
+                  operation: 'remote-list',
+                  status: 'success',
+                  level: 'info',
+                  startedAt: Date.now(),
+                  finishedAt: Date.now(),
+                  remoteFileName: 'stale.zip',
+                },
+              ]);
+            });
+          }
+          return [];
+        }
+        if (command === 'backup_activity_clear') {
+          return await new Promise((resolve) => {
+            resolveClear = () => resolve(null);
+          });
+        }
+        return null;
+      });
+
+      await openDataSettings();
+      await vi.waitFor(() => expect(container.querySelector('[data-testid="activity-list"]')).not.toBeNull());
+
+      await clickElement(container.querySelector('[data-testid="activity-clear-button"]'));
+      await vi.advanceTimersByTimeAsync(5000);
+
+      await act(async () => {
+        resolveClear?.();
+        await Promise.resolve();
+      });
+
+      await vi.waitFor(() => {
+        const empty = container.querySelector('[data-testid="activity-empty"]');
+        expect(empty).not.toBeNull();
+      });
+
+      await act(async () => {
+        resolvePoll?.();
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('[data-testid="activity-empty"]')?.textContent ?? '').toContain('暂无备份活动');
+      expect(container.querySelector('[data-testid="activity-list"]')?.textContent ?? '').not.toContain('stale.zip');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('清除断崖警告记录 skipped 和 warning_dismissed reasonCode', async () => {
     const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
