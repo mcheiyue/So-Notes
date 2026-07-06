@@ -3645,6 +3645,107 @@ describe('BoardDock 定时远端备份 UI', () => {
     expect(activityList?.textContent).not.toContain('baseline_confirmed');
   });
 
+  it('关闭设置后旧活动请求 resolve 不会把过期条目写回', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    let resolveFirstList: ((value: unknown) => void) | null = null;
+    let listCallCount = 0;
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'backup_activity_list') {
+        listCallCount += 1;
+        if (listCallCount === 1) {
+          return await new Promise((resolve) => {
+            resolveFirstList = resolve;
+          });
+        }
+        return await new Promise(() => {});
+      }
+      return null;
+    });
+
+    await openDataSettings();
+
+    const backdrop = container.querySelector('button[aria-label="关闭浮层"]');
+    await clickElement(backdrop);
+
+    await act(async () => {
+      resolveFirstList?.([
+        {
+          id: 'stale-activity',
+          operation: 'remote-list',
+          status: 'success',
+          level: 'info',
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+          metrics: { retainedCount: 3 },
+        },
+      ]);
+      await Promise.resolve();
+    });
+
+    await clickElement(getSettingsButton());
+    await clickElement(findButtonByText('数据管理'));
+
+    expect(container.querySelector('[data-testid="activity-list"]')).toBeNull();
+    expect(container.querySelector('[data-testid="activity-loading"]')).not.toBeNull();
+  });
+
+  it('remote-list 成功活动只有 retainedCount 时不显示前导分隔符', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'backup_activity_list') {
+        return [
+          {
+            id: 'activity-1',
+            operation: 'remote-list',
+            status: 'success',
+            level: 'info',
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+            metrics: { retainedCount: 3 },
+          },
+        ];
+      }
+      return null;
+    });
+
+    await openDataSettings();
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="activity-list"]')).not.toBeNull());
+
+    const activityList = container.querySelector('[data-testid="activity-list"]');
+    expect(activityList?.textContent).toContain('找到 3');
+    expect(activityList?.textContent).not.toContain('· 找到 3');
+  });
+
+  it('活动刷新和清空按钮提供可访问名称', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'backup_activity_list') {
+        return [
+          {
+            id: 'activity-1',
+            operation: 'remote-list',
+            status: 'success',
+            level: 'info',
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+          },
+        ];
+      }
+      return null;
+    });
+
+    await openDataSettings();
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="activity-list"]')).not.toBeNull());
+
+    const refreshButton = container.querySelector('[data-testid="activity-refresh-button"]');
+    const clearButton = container.querySelector('[data-testid="activity-clear-button"]');
+
+    expect(refreshButton?.getAttribute('aria-label')).toBe('刷新最近活动');
+    expect(refreshButton?.getAttribute('title')).toBe('刷新最近活动');
+    expect(clearButton?.getAttribute('aria-label')).toBe('清空最近活动');
+    expect(clearButton?.getAttribute('title')).toBe('清空最近活动');
+  });
+
   it('清除断崖警告记录 skipped 和 warning_dismissed reasonCode', async () => {
     const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');

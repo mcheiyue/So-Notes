@@ -342,6 +342,7 @@ export const BoardDock = () => {
   // Reset settings view when closed
   useEffect(() => {
       if (!showSettings) {
+          activityRefreshRequestIdRef.current += 1;
           setImportFeedback(null);
           setZipFeedback(null);
           setZipOperation('idle');
@@ -3098,6 +3099,8 @@ export const BoardDock = () => {
                                         type="button"
                                         onClick={refreshActivities}
                                         disabled={activityLoading || activityClearing}
+                                        aria-label="刷新最近活动"
+                                        title="刷新最近活动"
                                         className="p-1 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded text-text-tertiary hover:text-text-secondary transition-colors disabled:opacity-50"
                                         data-testid="activity-refresh-button"
                                     >
@@ -3108,6 +3111,8 @@ export const BoardDock = () => {
                                             type="button"
                                             onClick={onClearActivities}
                                             disabled={activityLoading || activityClearing}
+                                            aria-label="清空最近活动"
+                                            title="清空最近活动"
                                             className="p-1 hover:bg-red-50 dark:hover:bg-red-950/30 rounded text-text-tertiary hover:text-red-500 transition-colors disabled:opacity-50"
                                             data-testid="activity-clear-button"
                                         >
@@ -3204,9 +3209,17 @@ export const BoardDock = () => {
                                                 )}
                                                 {entry.status === 'success' && entry.metrics && (
                                                     <p className="text-text-tertiary truncate">
-                                                        {entry.metrics.deletedCount != null && `删除 ${entry.metrics.deletedCount}`}
-                                                        {entry.metrics.retainedCount != null && (entry.operation === 'remote-list' ? ` · 找到 ${entry.metrics.retainedCount}` : ` · 保留 ${entry.metrics.retainedCount}`)}
-                                                        {entry.metrics.missingCount != null && entry.metrics.missingCount > 0 && ` · 缺失 ${entry.metrics.missingCount}`}
+                                                        {[
+                                                            entry.metrics.deletedCount != null ? `删除 ${entry.metrics.deletedCount}` : null,
+                                                            entry.metrics.retainedCount != null
+                                                                ? entry.operation === 'remote-list'
+                                                                    ? `找到 ${entry.metrics.retainedCount}`
+                                                                    : `保留 ${entry.metrics.retainedCount}`
+                                                                : null,
+                                                            entry.metrics.missingCount != null && entry.metrics.missingCount > 0
+                                                                ? `缺失 ${entry.metrics.missingCount}`
+                                                                : null,
+                                                        ].filter(Boolean).join(' · ')}
                                                     </p>
                                                 )}
                                             </div>
