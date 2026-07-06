@@ -2594,6 +2594,33 @@ describe('ScheduledRemoteBackupService', () => {
       service.stop();
     });
 
+    it('before-exit 备份失败后 save-state 失败时仍抛出原始备份错误', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: false,
+        error: '上传失败',
+        errorStage: 'upload',
+      });
+      ctx.saveScheduledState.mockRejectedValueOnce(new Error('状态保存失败'));
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await expect(service.runBeforeExit()).rejects.toThrow('上传失败');
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'scheduled-remote-backup',
+          status: 'failed',
+          stage: 'save-state',
+          message: '状态保存失败',
+        }),
+      );
+
+      service.stop();
+    });
+
     it('appendActivity 失败不影响备份流程', async () => {
       const ctx = createTestContext({
         config: { enabled: true, frequency: 'daily', quietPeriodMinutes: 0 },

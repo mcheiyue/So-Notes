@@ -773,6 +773,7 @@ export function createScheduledRemoteBackupService(
       try {
         await deps.saveScheduledState(internalState);
       } catch (saveErr: unknown) {
+        const normalizedSaveError = saveErr instanceof Error ? saveErr : new Error(String(saveErr));
         await safeAppendActivity({
           operation: backupOperationForTrigger(trigger),
           status: 'failed',
@@ -781,10 +782,13 @@ export function createScheduledRemoteBackupService(
           finishedAt: deps.clock(),
           trigger,
           stage: 'save-state',
-          message: saveErr instanceof Error ? saveErr.message : String(saveErr),
+          message: normalizedSaveError.message,
         });
         if (trigger === 'before-exit') {
-          throw saveErr;
+          if (beforeExitError === null) {
+            beforeExitError = normalizedSaveError;
+          }
+          return;
         }
       }
     } catch (err: unknown) {
