@@ -1307,6 +1307,7 @@ describe('ScheduledRemoteBackupService', () => {
         success: false,
         error: 'no config',
       });
+      ctx.saveScheduledState.mockRejectedValueOnce(new Error('状态保存失败'));
 
       const service = createScheduledRemoteBackupService(ctx.deps);
       await service.initialize();
@@ -1324,6 +1325,7 @@ describe('ScheduledRemoteBackupService', () => {
         username: 'user',
         passwordSaved: false,
       });
+      ctx.saveScheduledState.mockRejectedValueOnce(new Error('状态保存失败'));
 
       const service = createScheduledRemoteBackupService(ctx.deps);
       await service.initialize();
@@ -1341,6 +1343,7 @@ describe('ScheduledRemoteBackupService', () => {
         username: '',
         passwordSaved: true,
       });
+      ctx.saveScheduledState.mockRejectedValueOnce(new Error('状态保存失败'));
 
       const service = createScheduledRemoteBackupService(ctx.deps);
       await service.initialize();
@@ -1353,6 +1356,7 @@ describe('ScheduledRemoteBackupService', () => {
         state: { lastSuccessfulStorageUpdatedAt: null },
       });
       ctx.runnerDeps.flushNow.mockResolvedValue(false);
+      ctx.saveScheduledState.mockRejectedValueOnce(new Error('状态保存失败'));
 
       const service = createScheduledRemoteBackupService(ctx.deps);
       await service.initialize();
@@ -1370,6 +1374,7 @@ describe('ScheduledRemoteBackupService', () => {
           consecutiveCredentialFailures: 3,
         },
       });
+      ctx.saveScheduledState.mockRejectedValueOnce(new Error('状态保存失败'));
 
       const service = createScheduledRemoteBackupService(ctx.deps);
       await service.initialize();
@@ -1634,6 +1639,7 @@ describe('ScheduledRemoteBackupService', () => {
       const ctx = createTestContext({
         config: { enabled: false },
       });
+      ctx.saveScheduledState.mockRejectedValueOnce(new Error('状态保存失败'));
 
       let resolveFirst: (() => void) | undefined;
       mockRunRemoteBackup.mockImplementation(

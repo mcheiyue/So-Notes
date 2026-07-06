@@ -334,6 +334,10 @@ export function createScheduledRemoteBackupService(
   ): Promise<void> {
     if (serviceState.isRunning) {
       const now = deps.clock();
+      const beforeExitBusyError =
+        trigger === 'before-exit'
+          ? new Error('备份任务正在运行中，请稍候再试')
+          : null;
       patchState({
         lastTrigger: trigger,
         lastFinishedAt: now,
@@ -341,7 +345,25 @@ export function createScheduledRemoteBackupService(
         lastFailureReason: 'already_running',
         lastFailureStage: 'single-flight',
       });
-      await deps.saveScheduledState(internalState);
+      try {
+        await deps.saveScheduledState(internalState);
+      } catch (saveErr: unknown) {
+        const normalizedSaveError = saveErr instanceof Error ? saveErr : new Error(String(saveErr));
+        await safeAppendActivity({
+          operation: backupOperationForTrigger(trigger),
+          status: 'failed',
+          level: 'error',
+          startedAt: now,
+          finishedAt: deps.clock(),
+          trigger,
+          stage: 'save-state',
+          message: normalizedSaveError.message,
+        });
+        if (beforeExitBusyError) {
+          throw beforeExitBusyError;
+        }
+        throw normalizedSaveError;
+      }
       await safeAppendActivity({
         operation: backupOperationForTrigger(trigger),
         status: 'skipped',
@@ -353,8 +375,8 @@ export function createScheduledRemoteBackupService(
         reasonCode: 'already_running',
         message: '备份任务正在运行中',
       });
-      if (trigger === 'before-exit') {
-        throw new Error('备份任务正在运行中，请稍候再试');
+      if (beforeExitBusyError) {
+        throw beforeExitBusyError;
       }
       return;
     }
@@ -363,6 +385,35 @@ export function createScheduledRemoteBackupService(
     patchState({ lastStartedAt: startNow });
 
     let beforeExitError: Error | null = null;
+
+    const persistEarlyReturnState = async (
+      originalBeforeExitMessage: string | null,
+      finishedAt: number,
+    ): Promise<void> => {
+      try {
+        await deps.saveScheduledState(internalState);
+      } catch (saveErr: unknown) {
+        const normalizedSaveError = saveErr instanceof Error ? saveErr : new Error(String(saveErr));
+        await safeAppendActivity({
+          operation: backupOperationForTrigger(trigger),
+          status: 'failed',
+          level: 'error',
+          startedAt: startNow,
+          finishedAt,
+          trigger,
+          stage: 'save-state',
+          message: normalizedSaveError.message,
+        });
+        if (originalBeforeExitMessage !== null) {
+          beforeExitError = new Error(originalBeforeExitMessage);
+          return;
+        }
+        throw normalizedSaveError;
+      }
+      if (originalBeforeExitMessage !== null) {
+        beforeExitError = new Error(originalBeforeExitMessage);
+      }
+    };
 
     try {
       // 1. 加载 WebDAV 配置
@@ -389,10 +440,10 @@ export function createScheduledRemoteBackupService(
           stage: 'config',
           message: '缺少 WebDAV 配置',
         });
-        await deps.saveScheduledState(internalState);
-        if (trigger === 'before-exit') {
-          beforeExitError = new Error('缺少 WebDAV 配置');
-        }
+        await persistEarlyReturnState(
+          trigger === 'before-exit' ? '缺少 WebDAV 配置' : null,
+          now,
+        );
         return;
       }
 
@@ -418,10 +469,10 @@ export function createScheduledRemoteBackupService(
           stage: 'config',
           message: 'WebDAV 配置缺少用户名',
         });
-        await deps.saveScheduledState(internalState);
-        if (trigger === 'before-exit') {
-          beforeExitError = new Error('WebDAV 配置缺少用户名');
-        }
+        await persistEarlyReturnState(
+          trigger === 'before-exit' ? 'WebDAV 配置缺少用户名' : null,
+          now,
+        );
         return;
       }
 
@@ -451,10 +502,10 @@ export function createScheduledRemoteBackupService(
           stage: 'credential',
           message: '未保存 WebDAV 凭据',
         });
-        await deps.saveScheduledState(internalState);
-        if (trigger === 'before-exit') {
-          beforeExitError = new Error('未保存 WebDAV 凭据');
-        }
+        await persistEarlyReturnState(
+          trigger === 'before-exit' ? '未保存 WebDAV 凭据' : null,
+          now,
+        );
         return;
       }
 
@@ -479,10 +530,10 @@ export function createScheduledRemoteBackupService(
           trigger,
           reasonCode: 'credential_action_required',
         });
-        await deps.saveScheduledState(internalState);
-        if (trigger === 'before-exit') {
-          beforeExitError = new Error('凭据失败次数过多，请重新保存密码');
-        }
+        await persistEarlyReturnState(
+          trigger === 'before-exit' ? '凭据失败次数过多，请重新保存密码' : null,
+          now,
+        );
         return;
       }
 
@@ -517,10 +568,10 @@ export function createScheduledRemoteBackupService(
             stage: 'flush',
             message: '当前数据尚未成功写入磁盘',
           });
-          await deps.saveScheduledState(internalState);
-          if (trigger === 'before-exit') {
-            beforeExitError = new Error('当前数据尚未成功写入磁盘');
-          }
+          await persistEarlyReturnState(
+            trigger === 'before-exit' ? '当前数据尚未成功写入磁盘' : null,
+            now,
+          );
           return;
         }
       }
