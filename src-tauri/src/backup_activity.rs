@@ -343,7 +343,7 @@ fn find_http_url_start(s: &str, start: usize) -> Option<usize> {
 
 /// 对单行文本进行精确敏感词替换（与 TS 侧 SENSITIVE_PATTERN 行为对齐）：
 /// - `keyword=value` 或 `keyword: value` → `keyword=[REDACTED]`
-/// - `keyword_something` → `keyword=[REDACTED]`
+/// - `keyword_something` / `keyword-something` / `keyword.something` / `keyword(something)` → `keyword=[REDACTED]`
 /// - 独立 keyword（后跟空格/逗号/结尾）→ `keyword=[REDACTED]`
 fn redact_sensitive_keywords(line: &str) -> String {
     let mut result = String::with_capacity(line.len());
@@ -393,11 +393,11 @@ fn redact_sensitive_keywords(line: &str) -> String {
                     found = true;
                     break;
                 }
-                // `keyword_something`
-                if next_char == b'_' {
-                    let val_end = line[after + 1..]
+                if matches!(next_char, b'_' | b'-' | b'.' | b'(') {
+                    let val_start = after + 1;
+                    let val_end = line[val_start..]
                         .find(|c: char| c.is_whitespace() || c == ',')
-                        .map(|i| after + 1 + i)
+                        .map(|i| val_start + i)
                         .unwrap_or(line.len());
                     result.push_str(&line[cursor..after]);
                     result.push_str("=[REDACTED]");
@@ -1784,6 +1784,41 @@ mod tests {
                 .failed_file_name
                 .as_deref(),
             Some("password=[REDACTED]")
+        );
+    }
+
+    #[test]
+    fn sanitize_entry_redacts_sensitive_keywords_with_filename_separators() {
+        let mut entry = make_test_entry("test");
+        entry.remote_file_name = Some("/dav/token-abc123.zip".into());
+        entry.local_file_name = Some("C:\\Backups\\password.hunter2.zip".into());
+        entry.metrics = Some(BackupActivityMetrics {
+            deleted_count: None,
+            retained_count: None,
+            missing_count: None,
+            attempted_count: None,
+            failed_file_name: Some("secret(abc).zip".into()),
+            anomaly_codes: None,
+        });
+
+        let sanitized = sanitize_entry(entry);
+
+        assert_eq!(
+            sanitized.remote_file_name.as_deref(),
+            Some("token=[REDACTED]")
+        );
+        assert_eq!(
+            sanitized.local_file_name.as_deref(),
+            Some("password=[REDACTED]")
+        );
+        assert_eq!(
+            sanitized
+                .metrics
+                .as_ref()
+                .unwrap()
+                .failed_file_name
+                .as_deref(),
+            Some("secret=[REDACTED]")
         );
     }
 
