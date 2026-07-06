@@ -910,6 +910,16 @@ fn save_log_to_path(path: &Path, log: &BackupActivityLogFile) -> Result<(), Stri
     write_atomic(path, &content)
 }
 
+fn clear_log_to_path(path: &Path) -> Result<(), String> {
+    let _ = std::fs::remove_file(backup_file_path(path));
+
+    let cleared = BackupActivityLogFile {
+        version: LOG_VERSION,
+        entries: Vec::new(),
+    };
+    save_log_to_path(path, &cleared)
+}
+
 // ---------------------------------------------------------------------------
 // Tauri 命令
 // ---------------------------------------------------------------------------
@@ -1052,11 +1062,7 @@ pub async fn backup_activity_clear(app: tauri::AppHandle) -> Result<(), String> 
         .lock_exclusive()
         .map_err(|e| format!("获取日志文件锁失败: {e}"))?;
 
-    let log = BackupActivityLogFile {
-        version: LOG_VERSION,
-        entries: Vec::new(),
-    };
-    let result = save_log_to_path(&path, &log);
+    let result = clear_log_to_path(&path);
 
     drop(lock_file);
     result
@@ -1281,6 +1287,34 @@ mod tests {
             entries: Vec::new(),
         };
         save_log_to_path(&path, &cleared).unwrap();
+
+        let loaded = load_log_from_path(&path).unwrap();
+        assert!(loaded.entries.is_empty());
+        assert_eq!(loaded.version, LOG_VERSION);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clear_log_removes_orphaned_backup_file() {
+        let dir = test_dir();
+        let path = dir.join(LOG_FILENAME);
+        let backup_path = path.with_extension("json.bak");
+
+        let orphaned_log = BackupActivityLogFile {
+            version: LOG_VERSION,
+            entries: vec![make_test_entry("orphaned")],
+        };
+        fs::write(
+            &backup_path,
+            serde_json::to_string_pretty(&orphaned_log).unwrap(),
+        )
+        .unwrap();
+
+        clear_log_to_path(&path).unwrap();
+
+        assert!(path.exists());
+        assert!(!backup_path.exists());
 
         let loaded = load_log_from_path(&path).unwrap();
         assert!(loaded.entries.is_empty());
