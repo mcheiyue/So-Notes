@@ -776,6 +776,20 @@ fn write_webdav_config_atomic(path: &Path, content: &str) -> Result<(), String> 
     Ok(())
 }
 
+fn load_existing_webdav_config_for_save(path: &Path) -> Result<Option<WebDavConfigFile>, String> {
+    recover_orphaned_webdav_config_backup_if_missing(path)?;
+
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("读取 WebDAV 配置文件失败: {e}"))?;
+    let config = serde_json::from_str::<WebDavConfigFile>(&content)
+        .map_err(|e| format!("解析 WebDAV 配置文件失败: {e}"))?;
+    Ok(Some(config))
+}
+
 fn delete_replaced_credential_after_config_write(
     store: &impl WebDavCredentialStore,
     old_credential_key: Option<&str>,
@@ -891,15 +905,7 @@ pub async fn webdav_save_config(
 ) -> Result<WebDavConfigSaveResult, String> {
     let path = config_file_path(&app)?;
 
-    let old_config = if path.exists() {
-        let content =
-            std::fs::read_to_string(&path).map_err(|e| format!("读取 WebDAV 配置文件失败: {e}"))?;
-        serde_json::from_str::<WebDavConfigFile>(&content)
-            .map_err(|e| format!("解析 WebDAV 配置文件失败: {e}"))?
-            .into()
-    } else {
-        None
-    };
+    let old_config = load_existing_webdav_config_for_save(&path)?;
 
     let (config, old_credential_key) = prepare_config_save(&request, old_config.as_ref())?;
 
@@ -3489,6 +3495,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(windows)]
     #[test]
     fn recover_orphaned_webdav_config_backup_if_missing_restores_backup_file() {
         let dir = test_config_dir("recover-orphaned-bak");
@@ -3503,6 +3510,29 @@ mod tests {
         assert!(path.exists());
         assert!(!backup_path.exists());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), json);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn load_existing_webdav_config_for_save_recovers_orphaned_backup_before_read() {
+        let dir = test_config_dir("save-load-orphaned-bak");
+        let path = dir.join(CONFIG_FILENAME);
+        let backup_path = webdav_config_backup_path(&path).unwrap();
+        let json = r#"{"server_url":"https://example.com/dav","username":"user1","remote_dir":"Backups/","password_saved":true,"credential_key":"old-key"}"#;
+
+        std::fs::write(&backup_path, json).unwrap();
+
+        let config = load_existing_webdav_config_for_save(&path).unwrap().unwrap();
+
+        assert!(path.exists());
+        assert!(!backup_path.exists());
+        assert_eq!(config.server_url, "https://example.com/dav");
+        assert_eq!(config.username, "user1");
+        assert_eq!(config.remote_dir, "Backups/");
+        assert!(config.password_saved);
+        assert_eq!(config.credential_key.as_deref(), Some("old-key"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
