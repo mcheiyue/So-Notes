@@ -95,6 +95,7 @@ describe('ScheduledRemoteBackupConfigService', () => {
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupFailedFileName).toBeNull();
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupError).toBeNull();
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupSkipped).toBeNull();
+      expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupBusy).toBeNull();
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupMissingCount).toBeNull();
       expect(DEFAULT_SCHEDULED_BACKUP_STATE.lastRetentionCleanupAt).toBeNull();
     });

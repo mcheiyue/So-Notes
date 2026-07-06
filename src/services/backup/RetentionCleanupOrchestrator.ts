@@ -214,9 +214,10 @@ export async function orchestratePostBackupRetentionCleanup(
         return {
           lastRetentionCleanupDeletedCount: 0,
           lastRetentionCleanupMissingCount: 0,
-          lastRetentionCleanupFailedFileName: null,
-          lastRetentionCleanupError: null,
+          lastRetentionCleanupFailedFileName: state.lastRetentionCleanupFailedFileName,
+          lastRetentionCleanupError: state.lastRetentionCleanupError,
           lastRetentionCleanupSkipped: true,
+          lastRetentionCleanupBusy: true,
           lastRetentionCleanupAt: clock(),
         };
       }
@@ -228,6 +229,7 @@ export async function orchestratePostBackupRetentionCleanup(
         lastRetentionCleanupFailedFileName: cleanupResult.failedFileName,
         lastRetentionCleanupError: cleanupResult.error,
         lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupBusy: false,
         lastRetentionCleanupAt: clock(),
       };
     } catch (error) {
@@ -237,6 +239,7 @@ export async function orchestratePostBackupRetentionCleanup(
         lastRetentionCleanupFailedFileName: null,
         lastRetentionCleanupError: error instanceof Error ? error.message : String(error),
         lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupBusy: false,
         lastRetentionCleanupAt: clock(),
       };
     }
@@ -293,9 +296,10 @@ export async function orchestratePostBackupRetentionCleanup(
         ...baselineUpdate,
         lastRetentionCleanupDeletedCount: 0,
         lastRetentionCleanupMissingCount: 0,
-        lastRetentionCleanupFailedFileName: null,
-        lastRetentionCleanupError: null,
+        lastRetentionCleanupFailedFileName: state.lastRetentionCleanupFailedFileName,
+        lastRetentionCleanupError: state.lastRetentionCleanupError,
         lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupBusy: true,
         lastRetentionCleanupAt: clock(),
       };
     }
@@ -309,6 +313,7 @@ export async function orchestratePostBackupRetentionCleanup(
       lastRetentionCleanupFailedFileName: cleanupResult.failedFileName,
       lastRetentionCleanupError: cleanupResult.error,
       lastRetentionCleanupSkipped: false,
+      lastRetentionCleanupBusy: false,
       lastRetentionCleanupAt: clock(),
     };
   } catch (error) {
@@ -321,6 +326,7 @@ export async function orchestratePostBackupRetentionCleanup(
       lastRetentionCleanupFailedFileName: null,
       lastRetentionCleanupError: error instanceof Error ? error.message : String(error),
       lastRetentionCleanupSkipped: false,
+      lastRetentionCleanupBusy: false,
       lastRetentionCleanupAt: clock(),
     };
   }

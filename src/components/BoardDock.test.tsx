@@ -183,6 +183,7 @@ const { DEFAULT_SCHEDULED_BACKUP_CONFIG, DEFAULT_SCHEDULED_BACKUP_STATE, mockSch
     lastRetentionCleanupFailedFileName: null as string | null,
     lastRetentionCleanupError: null as string | null,
     lastRetentionCleanupSkipped: null as boolean | null,
+    lastRetentionCleanupBusy: null as boolean | null,
     lastRetentionCleanupAt: null as number | null,
   };
   return {

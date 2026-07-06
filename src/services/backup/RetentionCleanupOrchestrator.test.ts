@@ -77,6 +77,7 @@ const DEFAULT_STATE: ScheduledRemoteBackupState = {
   lastRetentionCleanupFailedFileName: null,
   lastRetentionCleanupError: null,
   lastRetentionCleanupSkipped: null,
+  lastRetentionCleanupBusy: null,
   lastRetentionCleanupAt: null,
 };
 
@@ -371,6 +372,7 @@ describe('RetentionCleanupOrchestrator', () => {
         lastRetentionCleanupFailedFileName: null,
         lastRetentionCleanupError: null,
         lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupBusy: false,
         lastRetentionCleanupAt: 1700000000000,
       });
     });
@@ -479,6 +481,7 @@ describe('RetentionCleanupOrchestrator', () => {
         lastRetentionCleanupFailedFileName: 'SoNotes_Backup_20250610120000.zip',
         lastRetentionCleanupError: '401 Unauthorized',
         lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupBusy: false,
         lastRetentionCleanupAt: 1700000000000,
       });
     });
@@ -793,6 +796,7 @@ describe('RetentionCleanupOrchestrator', () => {
         lastRetentionCleanupFailedFileName: null,
         lastRetentionCleanupError: null,
         lastRetentionCleanupSkipped: false,
+        lastRetentionCleanupBusy: false,
         lastRetentionCleanupAt: 1700000000000,
       });
     });
@@ -811,6 +815,8 @@ describe('RetentionCleanupOrchestrator', () => {
         state: {
           ...DEFAULT_STATE,
           baselineConfirmedRemoteCount: 12,
+          lastRetentionCleanupFailedFileName: 'old.zip',
+          lastRetentionCleanupError: 'WebDAV 409',
         },
       });
 
@@ -819,9 +825,10 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(result).toEqual(expect.objectContaining({
         lastRetentionCleanupDeletedCount: 0,
         lastRetentionCleanupMissingCount: 0,
-        lastRetentionCleanupFailedFileName: null,
-        lastRetentionCleanupError: null,
+        lastRetentionCleanupFailedFileName: 'old.zip',
+        lastRetentionCleanupError: 'WebDAV 409',
         lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupBusy: true,
       }));
     });
   });

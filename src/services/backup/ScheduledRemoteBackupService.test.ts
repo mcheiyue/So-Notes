@@ -1549,7 +1549,7 @@ describe('ScheduledRemoteBackupService', () => {
       expect(savedState!.lastTrigger).toBe('manual');
       expect(savedState!.lastFinishedAt).toBe(ctx.now);
       expect(savedState!.lastFailureAt).toBe(ctx.now);
-      expect(savedState!.lastFailureReason).toBe('备份任务正在运行中');
+      expect(savedState!.lastFailureReason).toBe('already_running');
       expect(savedState!.lastFailureStage).toBe('single-flight');
 
       expect(mockRunRemoteBackup).toHaveBeenCalledTimes(1);
@@ -1589,7 +1589,7 @@ describe('ScheduledRemoteBackupService', () => {
       expect(savedState!.lastTrigger).toBe('manual');
       expect(savedState!.lastFinishedAt).toBe(ctx.now);
       expect(savedState!.lastFailureAt).toBe(ctx.now);
-      expect(savedState!.lastFailureReason).toBe('备份任务正在运行中');
+      expect(savedState!.lastFailureReason).toBe('already_running');
       expect(savedState!.lastFailureStage).toBe('single-flight');
 
       resolveFirst!();
@@ -1661,7 +1661,7 @@ describe('ScheduledRemoteBackupService', () => {
       expect(savedState!.lastTrigger).toBe('before-exit');
       expect(savedState!.lastFinishedAt).toBe(ctx.now);
       expect(savedState!.lastFailureAt).toBe(ctx.now);
-      expect(savedState!.lastFailureReason).toBe('备份任务正在运行中');
+      expect(savedState!.lastFailureReason).toBe('already_running');
       expect(savedState!.lastFailureStage).toBe('single-flight');
 
       resolveFirst!();
@@ -2500,6 +2500,36 @@ describe('ScheduledRemoteBackupService', () => {
             failedFileName: null,
             deletedCount: 0,
           }),
+        }),
+      );
+
+      service.stop();
+    });
+
+    it('保留策略清理忙碌时记录 already_running 跳过活动', async () => {
+      const ctx = createTestContext({
+        config: { enabled: false, retentionEnabled: true, retentionCount: 10 },
+      });
+      mockRunRemoteBackup.mockResolvedValue({
+        success: true,
+        remoteFileName: 'backup.zip',
+      });
+      mockOrchestrateRetentionCleanup.mockResolvedValue({
+        lastRetentionCleanupSkipped: true,
+        lastRetentionCleanupBusy: true,
+        lastRetentionCleanupAt: ctx.now,
+      });
+
+      const service = createScheduledRemoteBackupService(ctx.deps);
+      await service.initialize();
+      await service.runNow();
+
+      expect(ctx.mockAppendActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'retention-cleanup',
+          status: 'skipped',
+          level: 'info',
+          reasonCode: 'already_running',
         }),
       );
 

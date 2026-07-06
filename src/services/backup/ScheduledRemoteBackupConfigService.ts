@@ -76,6 +76,7 @@ export interface ScheduledRemoteBackupState {
   readonly lastRetentionCleanupFailedFileName: string | null;
   readonly lastRetentionCleanupError: string | null;
   readonly lastRetentionCleanupSkipped: boolean | null;
+  readonly lastRetentionCleanupBusy: boolean | null;
   readonly lastRetentionCleanupAt: number | null;
 }
 
@@ -168,6 +169,7 @@ export const DEFAULT_SCHEDULED_BACKUP_STATE: Readonly<ScheduledRemoteBackupState
   lastRetentionCleanupFailedFileName: null,
   lastRetentionCleanupError: null,
   lastRetentionCleanupSkipped: null,
+  lastRetentionCleanupBusy: null,
   lastRetentionCleanupAt: null,
 } as const;
 

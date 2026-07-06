@@ -338,7 +338,7 @@ export function createScheduledRemoteBackupService(
         lastTrigger: trigger,
         lastFinishedAt: now,
         lastFailureAt: now,
-        lastFailureReason: '备份任务正在运行中',
+        lastFailureReason: 'already_running',
         lastFailureStage: 'single-flight',
       });
       await deps.saveScheduledState(internalState);
@@ -679,13 +679,18 @@ export function createScheduledRemoteBackupService(
                     }),
               });
             } else {
+              const skippedReason = retentionPatch.lastRetentionCleanupBusy
+                ? 'already_running'
+                : retentionPatch.baselineConfirmedRemoteCount != null
+                  ? 'baseline_established'
+                  : 'retention_condition_not_met';
               await safeAppendActivity({
                 operation: 'retention-cleanup',
                 status: 'skipped',
                 level: 'info',
                 startedAt: startNow,
                 finishedAt: deps.clock(),
-                reasonCode: retentionPatch.baselineConfirmedRemoteCount != null ? 'baseline_established' : 'retention_condition_not_met',
+                reasonCode: skippedReason,
               });
             }
           }
