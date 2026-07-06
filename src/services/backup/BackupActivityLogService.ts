@@ -91,7 +91,7 @@ export interface BackupActivityAppendInput {
 
 /** 敏感词模式：keyword 后跟 :=/_ 分隔符和值，或 keyword 独立出现（后跟空格/逗号/结尾） */
 const SENSITIVE_PATTERN =
-  /(password|token|authorization|secret|密码|令牌)[=:]\s*\S+|(password|token|authorization|secret|密码|令牌)_\S+|(password|token|authorization|secret|密码|令牌)(?=[\s,;)}\]]|$)/gi;
+  /(password|token|authorization|secret|密码|令牌)[=:：]\s*\S+|(password|token|authorization|secret|密码|令牌)_\S+|(password|token|authorization|secret|密码|令牌)(?=[\s,;)}\]]|$)/gi;
 
 /** Bearer/Basic token 模式：匹配 Bearer 或 Basic 后面的 token 值 */
 const BEARER_TOKEN_PATTERN = /((?:Bearer|Basic)\s+)[^\s,;)}\]]{1,100}/gi;

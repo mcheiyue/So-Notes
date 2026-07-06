@@ -373,8 +373,14 @@ fn redact_sensitive_keywords(line: &str) -> String {
             if after < line.len() {
                 let next_char = bytes[after];
                 // `keyword=value` 或 `keyword: value`
-                if next_char == b'=' || next_char == b':' {
-                    let val_start = after + 1;
+                let uses_fullwidth_colon = line[after..].starts_with('：');
+                if next_char == b'=' || next_char == b':' || uses_fullwidth_colon {
+                    let separator_len = if uses_fullwidth_colon {
+                        '：'.len_utf8()
+                    } else {
+                        1
+                    };
+                    let val_start = after + separator_len;
                     let val_start = line[val_start..]
                         .find(|c: char| !c.is_whitespace())
                         .map(|i| val_start + i)
@@ -1309,6 +1315,9 @@ mod tests {
             sanitize_message("密码是 hunter2，请检查"),
             "密码是 [REDACTED]，请检查"
         );
+        assert_eq!(sanitize_message("密码：hunter2"), "密码=[REDACTED]");
+        assert_eq!(sanitize_message("令牌：abc"), "令牌=[REDACTED]");
+        assert_eq!(sanitize_message("token：abc"), "token=[REDACTED]");
         assert_eq!(sanitize_message("password"), "password=[REDACTED]");
         assert_eq!(sanitize_message("secret key"), "secret=[REDACTED] key");
         // keyword_something 模式

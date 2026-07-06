@@ -192,6 +192,16 @@ describe('BackupActivityLogService', () => {
       expect(result.message).toBe('token=[REDACTED] expired');
     });
 
+    it('替换 message 中全角冒号分隔的敏感词', () => {
+      const result = sanitizeActivityInput({
+        ...baseInput,
+        message: '密码：hunter2，令牌：abc，token：abc',
+      });
+      expect(result.message).toBe(
+        '密码=[REDACTED]，令牌=[REDACTED]，token=[REDACTED]',
+      );
+    });
+
     it('替换 message 中的 authorization 关键词', () => {
       const result = sanitizeActivityInput({
         ...baseInput,
