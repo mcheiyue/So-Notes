@@ -2,9 +2,10 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { confirm } from "../store/confirmStore";
 import { useStore } from "../store/useStore";
 import { cn } from "../utils/cn";
-import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, ChevronLeft, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw, Cloud, Wifi, RefreshCw, Save, Clock, Shield, Eye, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw, Cloud, Wifi, RefreshCw, Save, Clock, Shield, Eye, AlertTriangle } from "lucide-react";
 import { Z_INDEX } from "../constants/layout";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
+import { SettingsPanelShell } from "./SettingsPanelShell";
 import { appController } from "../controllers/appController";
 import { listAttachmentFiles, deleteAttachmentFile, attachmentExists, invalidateAttachmentPathCache, resolveAttachmentAssetUrlCached } from "../services/storage/attachmentPersistence";
 import { detectMissingReferences, detectOrphanAttachments } from "../services/storage/attachmentConsistency";
@@ -2185,6 +2186,17 @@ export const BoardDock = () => {
   const showOverlay = (isDockVisible && viewMode === 'BOARD') || hasDockPopoverOpen;
   const dockLayerZIndex = hasDockPopoverOpen ? Z_INDEX.MENU : Z_INDEX.DOCK;
 
+  const settingsPanelHeader: { title: string; onBack?: () => void } =
+    settingsView === 'MAIN'
+      ? { title: '设置' }
+      : settingsView === 'THEME'
+        ? { title: '主题模式', onBack: () => setSettingsView('MAIN') }
+        : settingsView === 'DATA'
+          ? { title: '数据管理', onBack: () => setSettingsView('MAIN') }
+          : settingsView === 'WEBDAV'
+            ? { title: '远端备份/恢复 (WebDAV)', onBack: () => setSettingsView('DATA') }
+            : { title: '性能诊断', onBack: () => setSettingsView('DATA') };
+
   return (
     <>
       {/* 1. Full-screen transparent overlay for "Click outside to close" */}
@@ -2257,15 +2269,13 @@ export const BoardDock = () => {
 
         {/* Settings Menu */}
         {showSettings && (
-            <div 
+            <div
                 className="absolute bottom-full mb-2 bg-secondary-bg rounded-lg shadow-xl border border-border-subtle overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom min-w-[200px]"
                 style={{ zIndex: Z_INDEX.MENU }}
             >
+              <SettingsPanelShell title={settingsPanelHeader.title} onBack={settingsPanelHeader.onBack}>
                 {settingsView === 'MAIN' && (
                     <div className="py-1">
-                        <div className="px-3 py-2 text-xs text-text-tertiary font-medium border-b border-border-subtle mb-1 mx-1">
-                            设置
-                        </div>
                         <button
                             type="button"
                             onClick={() => setSettingsView('THEME')}
@@ -2298,16 +2308,6 @@ export const BoardDock = () => {
 
                 {settingsView === 'THEME' && (
                     <div className="py-1">
-                        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border-subtle mb-1">
-                            <button 
-                                type="button"
-                                onClick={() => setSettingsView('MAIN')}
-                                className="p-1 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded text-text-secondary hover:text-text-primary transition-colors"
-                            >
-                                <ChevronLeft className="w-4 h-4" />
-                            </button>
-                            <span className="text-xs text-text-tertiary font-medium">主题模式</span>
-                        </div>
                         {[
                             { id: 'light', label: '浅色', icon: Sun },
                             { id: 'dark', label: '深色', icon: Moon },
@@ -2331,17 +2331,6 @@ export const BoardDock = () => {
 
                 {settingsView === 'DATA' && (
                     <div className="py-1">
-                        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border-subtle mb-1">
-                            <button 
-                                type="button"
-                                onClick={() => setSettingsView('MAIN')}
-                                className="p-1 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded text-text-secondary hover:text-text-primary transition-colors"
-                            >
-                                <ChevronLeft className="w-4 h-4" />
-                            </button>
-                            <span className="text-xs text-text-tertiary font-medium">数据管理</span>
-                        </div>
-                        
                         <button
                             type="button"
                             onClick={onExportClick}
@@ -2541,17 +2530,6 @@ export const BoardDock = () => {
 
                 {settingsView === 'WEBDAV' && (
                     <div className="py-1 min-w-[320px]">
-                        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border-subtle mb-1">
-                            <button
-                                type="button"
-                                onClick={() => setSettingsView('DATA')}
-                                className="p-1 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded text-text-secondary hover:text-text-primary transition-colors"
-                            >
-                                <ChevronLeft className="w-4 h-4" />
-                            </button>
-                            <span className="text-xs text-text-tertiary font-medium">远端备份/恢复 (WebDAV)</span>
-                        </div>
-
                         <div className="px-3 py-2 space-y-2">
                             <input
                                 type="text"
@@ -3240,19 +3218,10 @@ export const BoardDock = () => {
 
                 {settingsView === 'DIAGNOSTICS' && (
                     <div className="py-1">
-                        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border-subtle mb-1">
-                            <button
-                                type="button"
-                                onClick={() => setSettingsView('DATA')}
-                                className="p-1 hover:bg-secondary-bg/50 dark:hover:bg-white/5 rounded text-text-secondary hover:text-text-primary transition-colors"
-                            >
-                                <ChevronLeft className="w-4 h-4" />
-                            </button>
-                            <span className="text-xs text-text-tertiary font-medium">性能诊断</span>
-                        </div>
                         <DiagnosticsPanel />
                     </div>
                 )}
+              </SettingsPanelShell>
             </div>
         )}
 
