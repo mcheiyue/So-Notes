@@ -686,8 +686,12 @@ fn contains_state_secret_pattern(text: &str) -> bool {
     for keyword in ["password", "token", "authorization", "secret", "密码", "令牌"] {
         let mut search_from = 0;
         while let Some(offset) = lower[search_from..].find(keyword) {
-            let after_start = search_from + offset + keyword.len();
-            let Some(after_keyword) = text.get(after_start..) else {
+            // 使用 char_indices 进行正确的 Unicode 感知索引
+            let lower_start = search_from + offset;
+            let after_start = lower_start + keyword.len();
+            // 通过 char_indices 将 lower 的字节偏移转换为 text 的字节偏移
+            let text_after_start = lower_to_text_byte_offset(&lower, text, after_start);
+            let Some(after_keyword) = text.get(text_after_start..) else {
                 break;
             };
             if sensitive_state_value_follows(keyword, after_keyword) {
@@ -697,6 +701,20 @@ fn contains_state_secret_pattern(text: &str) -> bool {
         }
     }
     false
+}
+
+fn lower_to_text_byte_offset(_lower: &str, text: &str, lower_offset: usize) -> usize {
+    let mut text_offset = 0;
+    let mut lower_current = 0;
+    for (text_pos, ch) in text.char_indices() {
+        let lower_len = ch.to_lowercase().map(|c| c.len_utf8()).sum::<usize>();
+        if lower_current + lower_len > lower_offset {
+            return text_pos;
+        }
+        lower_current += lower_len;
+        text_offset = text_pos + ch.len_utf8();
+    }
+    text_offset
 }
 
 fn sensitive_state_value_follows(keyword: &str, after_keyword: &str) -> bool {
@@ -1062,6 +1080,19 @@ mod tests {
     fn validate_state_no_secrets_rejects_anomaly_code_secret() {
         let state = ScheduledRemoteBackupState {
             cliff_drop_latest_anomaly_codes: Some(vec!["secret is abc123".to_string()]),
+            ..Default::default()
+        };
+
+        let err = validate_state_no_secrets(&state).unwrap_err();
+        assert!(err.contains("敏感信息"));
+    }
+
+    #[test]
+    fn validate_state_no_secrets_rejects_unicode_expansion_case_bypass() {
+        // İ (U+0130) 转小写后变成 i̇ (两个字符)，字节数增加
+        // 如果用 lower 的 offset 去索引 text，会导致错位绕过检测
+        let state = ScheduledRemoteBackupState {
+            last_failure_reason: Some("İpassword=abc123".to_string()),
             ..Default::default()
         };
 
