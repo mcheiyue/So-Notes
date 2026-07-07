@@ -698,7 +698,6 @@ fn webdav_config_temp_path(path: &Path) -> Result<PathBuf, String> {
     )))
 }
 
-#[cfg(windows)]
 fn webdav_config_backup_path(path: &Path) -> Result<PathBuf, String> {
     let parent = path
         .parent()
@@ -811,6 +810,176 @@ fn delete_replaced_credential_after_config_write(
     })
 }
 
+fn rollback_saved_credential_after_config_write_failure(
+    store: &impl WebDavCredentialStore,
+    old_credential_key: Option<&str>,
+    new_key: &str,
+    previous_same_key_secret: Option<String>,
+) {
+    let new_cred_key = WebDavCredentialKey {
+        service: CREDENTIAL_SERVICE.to_string(),
+        account: new_key.to_string(),
+    };
+
+    if old_credential_key == Some(new_key) {
+        if let Some(secret) = previous_same_key_secret {
+            let _ = store.save(&new_cred_key, &secret);
+        }
+        return;
+    }
+
+    let _ = store.delete(&new_cred_key);
+}
+
+fn save_webdav_config_to_path(
+    path: &Path,
+    request: &WebDavConfigSaveRequest,
+    old_config: Option<&WebDavConfigFile>,
+    store: &impl WebDavCredentialStore,
+) -> Result<WebDavConfigSaveResult, String> {
+    save_webdav_config_to_path_with_writer(
+        path,
+        request,
+        old_config,
+        store,
+        write_webdav_config_atomic,
+    )
+}
+
+fn save_webdav_config_to_path_with_writer(
+    path: &Path,
+    request: &WebDavConfigSaveRequest,
+    old_config: Option<&WebDavConfigFile>,
+    store: &impl WebDavCredentialStore,
+    write_config: impl Fn(&Path, &str) -> Result<(), String>,
+) -> Result<WebDavConfigSaveResult, String> {
+    let (config, old_credential_key) = prepare_config_save(request, old_config)?;
+    let json = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("序列化 WebDAV 配置失败: {e}"))?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建 WebDAV 配置目录失败: {e}"))?;
+    }
+
+    if request.remember_password {
+        let password = request.password.as_deref().unwrap_or("");
+        let new_key = config.credential_key.as_ref().unwrap();
+        let new_cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: new_key.clone(),
+        };
+        let previous_same_key_secret = if old_credential_key.as_deref() == Some(new_key) {
+            store.load(&new_cred_key).ok()
+        } else {
+            None
+        };
+
+        store
+            .save(&new_cred_key, password)
+            .map_err(|e| format!("保存密码到系统凭据失败: {e}"))?;
+
+        if let Err(e) = write_config(path, &json) {
+            rollback_saved_credential_after_config_write_failure(
+                store,
+                old_credential_key.as_deref(),
+                new_key,
+                previous_same_key_secret,
+            );
+            return Err(format!("写入 WebDAV 配置文件失败: {e}"));
+        }
+
+        let warning = delete_replaced_credential_after_config_write(
+            store,
+            old_credential_key.as_deref(),
+            new_key,
+        );
+
+        return Ok(WebDavConfigSaveResult {
+            success: true,
+            warning,
+            error: None,
+        });
+    }
+
+    write_config(path, &json)?;
+
+    let warning = if let Some(ref old_key_str) = old_credential_key {
+        let old_cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: old_key_str.clone(),
+        };
+        store.delete(&old_cred_key).err().map(|_e| {
+            "配置已更新，但系统凭据可能需要手动删除".to_string()
+        })
+    } else {
+        None
+    };
+
+    Ok(WebDavConfigSaveResult {
+        success: true,
+        warning,
+        error: None,
+    })
+}
+
+fn remove_webdav_config_backup_if_exists(path: &Path) -> Result<(), String> {
+    let backup_path = webdav_config_backup_path(path)?;
+    if backup_path.exists() {
+        std::fs::remove_file(&backup_path)
+            .map_err(|e| format!("删除 WebDAV 配置备份文件失败: {e}"))?;
+    }
+    Ok(())
+}
+
+fn clear_webdav_config_from_path(
+    path: &Path,
+    store: &impl WebDavCredentialStore,
+) -> Result<WebDavConfigClearResult, String> {
+    recover_orphaned_webdav_config_backup_if_missing(path)?;
+
+    let old_credential_key = if path.exists() {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<WebDavConfigFile>(&content).ok())
+            .and_then(|config_file| config_file.credential_key)
+    } else {
+        None
+    };
+
+    if path.exists() {
+        std::fs::remove_file(path).map_err(|e| format!("删除 WebDAV 配置文件失败: {e}"))?;
+    }
+    remove_webdav_config_backup_if_exists(path)?;
+
+    let mut secret_cleanup_warning = None;
+    if let Some(key_str) = old_credential_key {
+        let cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: key_str,
+        };
+        if let Err(e) = store.delete(&cred_key) {
+            secret_cleanup_warning =
+                Some(format!("配置文件已删除，但密钥链 secret 未清理: {e}"));
+        }
+    }
+
+    Ok(WebDavConfigClearResult {
+        success: true,
+        error: None,
+        secret_cleanup_warning,
+    })
+}
+
+fn resolve_operation_secret_from_path(
+    path: &Path,
+    config: &WebDavConfig,
+    store: &dyn WebDavCredentialStore,
+) -> Result<String, String> {
+    recover_orphaned_webdav_config_backup_if_missing(path)?;
+    resolve_operation_secret_core(Some(path), config, store)
+}
+
 // ---------------------------------------------------------------------------
 // Tauri 命令
 // ---------------------------------------------------------------------------
@@ -906,75 +1075,8 @@ pub async fn webdav_save_config(
     let path = config_file_path(&app)?;
 
     let old_config = load_existing_webdav_config_for_save(&path)?;
-
-    let (config, old_credential_key) = prepare_config_save(&request, old_config.as_ref())?;
-
-    if request.remember_password {
-        let password = request.password.as_deref().unwrap_or("");
-        let new_key = config.credential_key.as_ref().unwrap();
-        let store = SystemWebDavCredentialStore::new();
-
-        let new_cred_key = WebDavCredentialKey {
-            service: "SoNotes.WebDAV".to_string(),
-            account: new_key.clone(),
-        };
-        store
-            .save(&new_cred_key, password)
-            .map_err(|e| format!("保存密码到系统凭据失败: {e}"))?;
-
-        let json = serde_json::to_string_pretty(&config)
-            .map_err(|e| format!("序列化 WebDAV 配置失败: {e}"))?;
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建 WebDAV 配置目录失败: {e}"))?;
-        }
-
-        if let Err(e) = write_webdav_config_atomic(&path, &json) {
-            let _ = store.delete(&new_cred_key);
-            return Err(format!("写入 WebDAV 配置文件失败: {e}"));
-        }
-
-        let warning = delete_replaced_credential_after_config_write(
-            &store,
-            old_credential_key.as_deref(),
-            new_key,
-        );
-
-        return Ok(WebDavConfigSaveResult {
-            success: true,
-            warning,
-            error: None,
-        });
-    }
-
-    // remember_password=false：尝试删除旧 secret
-    let mut warning = None;
-    if let Some(ref old_key_str) = old_credential_key {
-        let old_cred_key = WebDavCredentialKey {
-            service: "SoNotes.WebDAV".to_string(),
-            account: old_key_str.clone(),
-        };
-        if let Err(_e) = SystemWebDavCredentialStore::new().delete(&old_cred_key) {
-            warning = Some("配置已更新，但系统凭据可能需要手动删除".to_string());
-        }
-    }
-
-    let json = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("序列化 WebDAV 配置失败: {e}"))?;
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("创建 WebDAV 配置目录失败: {e}"))?;
-    }
-
-    write_webdav_config_atomic(&path, &json)?;
-
-    Ok(WebDavConfigSaveResult {
-        success: true,
-        warning,
-        error: None,
-    })
+    let store = SystemWebDavCredentialStore::new();
+    save_webdav_config_to_path(&path, &request, old_config.as_ref(), &store)
 }
 
 /// 清除 WebDAV 配置。
@@ -984,40 +1086,8 @@ pub async fn webdav_save_config(
 #[tauri::command]
 pub async fn webdav_clear_config(app: tauri::AppHandle) -> Result<WebDavConfigClearResult, String> {
     let path = config_file_path(&app)?;
-
-    if !path.exists() {
-        return Ok(WebDavConfigClearResult {
-            success: true,
-            error: None,
-            secret_cleanup_warning: None,
-        });
-    }
-
-    // 读取旧配置以获取 credential_key（先于删除）
-    let old_credential_key = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<WebDavConfigFile>(&content).ok())
-        .and_then(|config_file| config_file.credential_key);
-
-    std::fs::remove_file(&path).map_err(|e| format!("删除 WebDAV 配置文件失败: {e}"))?;
-
-    let mut secret_cleanup_warning = None;
-    if let Some(key_str) = old_credential_key {
-        let cred_key = WebDavCredentialKey {
-            service: CREDENTIAL_SERVICE.to_string(),
-            account: key_str,
-        };
-        if let Err(e) = SystemWebDavCredentialStore::new().delete(&cred_key) {
-            secret_cleanup_warning =
-                Some(format!("配置文件已删除，但密钥链 secret 未清理: {e}"));
-        }
-    }
-
-    Ok(WebDavConfigClearResult {
-        success: true,
-        error: None,
-        secret_cleanup_warning,
-    })
+    let store = SystemWebDavCredentialStore::new();
+    clear_webdav_config_from_path(&path, &store)
 }
 
 // ---------------------------------------------------------------------------
@@ -1165,7 +1235,7 @@ fn resolve_webdav_operation_secret(
     store: &dyn WebDavCredentialStore,
 ) -> Result<String, String> {
     let path = config_file_path(app)?;
-    resolve_operation_secret_core(Some(&path), config, store)
+    resolve_operation_secret_from_path(&path, config, store)
 }
 
 // ---------------------------------------------------------------------------
@@ -3533,6 +3603,93 @@ mod tests {
         assert_eq!(config.remote_dir, "Backups/");
         assert!(config.password_saved);
         assert_eq!(config.credential_key.as_deref(), Some("old-key"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn clear_webdav_config_from_path_removes_orphaned_backup_and_secret() {
+        let dir = test_config_dir("clear-orphaned-bak");
+        let path = dir.join(CONFIG_FILENAME);
+        let backup_path = webdav_config_backup_path(&path).unwrap();
+        let store = MemoryWebDavCredentialStore::new();
+        let cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: "old-key".to_string(),
+        };
+        store.save(&cred_key, "old-password").unwrap();
+        let json = r#"{"server_url":"https://example.com/dav","username":"user1","remote_dir":"Backups/","password_saved":true,"credential_key":"old-key"}"#;
+        std::fs::write(&backup_path, json).unwrap();
+
+        let result = clear_webdav_config_from_path(&path, &store).unwrap();
+
+        assert!(result.success);
+        assert!(!path.exists());
+        assert!(!backup_path.exists());
+        assert!(store.load(&cred_key).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn clear_webdav_config_from_path_removes_stale_backup_with_main_file() {
+        let dir = test_config_dir("clear-main-and-stale-bak");
+        let path = dir.join(CONFIG_FILENAME);
+        let backup_path = webdav_config_backup_path(&path).unwrap();
+        let store = MemoryWebDavCredentialStore::new();
+        let main_json = r#"{"server_url":"https://example.com/dav","username":"user1","remote_dir":"Backups/","password_saved":false,"credential_key":null}"#;
+        let stale_json = r#"{"server_url":"https://stale.example.com/dav","username":"old","remote_dir":"Backups/","password_saved":true,"credential_key":"stale-key"}"#;
+        std::fs::write(&path, main_json).unwrap();
+        std::fs::write(&backup_path, stale_json).unwrap();
+
+        let result = clear_webdav_config_from_path(&path, &store).unwrap();
+
+        assert!(result.success);
+        assert!(!path.exists());
+        assert!(!backup_path.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_operation_secret_from_path_recovers_orphaned_backup() {
+        let dir = test_config_dir("resolve-orphaned-bak");
+        let path = dir.join(CONFIG_FILENAME);
+        let backup_path = webdav_config_backup_path(&path).unwrap();
+        let store = MemoryWebDavCredentialStore::new();
+        let config = WebDavConfig {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            password: None,
+        };
+        let key = compute_credential_key(
+            &normalize_webdav_url(&config.server_url).unwrap(),
+            &config.username,
+            &normalize_remote_dir(config.remote_dir.as_deref().unwrap()).unwrap(),
+        );
+        let cred_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: key.clone(),
+        };
+        store.save(&cred_key, "saved-password").unwrap();
+        let config_file = WebDavConfigFile {
+            server_url: normalize_webdav_url(&config.server_url).unwrap(),
+            username: config.username.clone(),
+            remote_dir: normalize_remote_dir(config.remote_dir.as_deref().unwrap()).unwrap(),
+            password_saved: true,
+            credential_key: Some(key),
+        };
+        std::fs::write(&backup_path, serde_json::to_string(&config_file).unwrap()).unwrap();
+
+        let secret = resolve_operation_secret_from_path(&path, &config, &store).unwrap();
+
+        assert_eq!(secret, "saved-password");
+        assert!(path.exists());
+        assert!(!backup_path.exists());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -7638,6 +7795,94 @@ mod tests {
         assert_eq!(warning, None);
 
         assert_eq!(store.load(&old_key).unwrap(), "old-password");
+    }
+
+    #[test]
+    fn config_save_write_failure_deletes_new_credential() {
+        let dir = test_config_dir("save-write-failure-new-key");
+        let path = dir.join(CONFIG_FILENAME);
+        let store = MemoryWebDavCredentialStore::new();
+        let old_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: "old-key-hash-value-12345678".to_string(),
+        };
+        store.save(&old_key, "old-password").unwrap();
+        let old_config = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some(old_key.account.clone()),
+        };
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://different-server.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: true,
+            password: Some("new-password".to_string()),
+        };
+        let (new_config, _) = prepare_config_save(&request, Some(&old_config)).unwrap();
+        let new_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: new_config.credential_key.unwrap(),
+        };
+
+        let result = save_webdav_config_to_path_with_writer(
+            &path,
+            &request,
+            Some(&old_config),
+            &store,
+            |_, _| Err("disk full".to_string()),
+        );
+
+        assert!(result.unwrap_err().contains("写入 WebDAV 配置文件失败"));
+        assert!(store.load(&new_key).is_err(), "新 secret 应在写失败后回滚");
+        assert_eq!(store.load(&old_key).unwrap(), "old-password");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_save_write_failure_restores_same_key_old_secret() {
+        let dir = test_config_dir("save-write-failure-same-key");
+        let path = dir.join(CONFIG_FILENAME);
+        let store = MemoryWebDavCredentialStore::new();
+        let old_config = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some(compute_credential_key(
+                "https://example.com/dav",
+                "user1",
+                "Backups/",
+            )),
+        };
+        let same_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: old_config.credential_key.clone().unwrap(),
+        };
+        store.save(&same_key, "old-password").unwrap();
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: true,
+            password: Some("new-password".to_string()),
+        };
+
+        let result = save_webdav_config_to_path_with_writer(
+            &path,
+            &request,
+            Some(&old_config),
+            &store,
+            |_, _| Err("disk full".to_string()),
+        );
+
+        assert!(result.unwrap_err().contains("写入 WebDAV 配置文件失败"));
+        assert_eq!(store.load(&same_key).unwrap(), "old-password");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
