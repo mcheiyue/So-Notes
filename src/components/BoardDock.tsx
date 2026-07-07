@@ -2044,7 +2044,9 @@ export const BoardDock = () => {
         setActivityError(sanitizeErrorMessage(err));
       }
     } finally {
-      setActivityLoading(false);
+      if (shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) {
+        setActivityLoading(false);
+      }
     }
   };
 
@@ -2800,7 +2802,7 @@ export const BoardDock = () => {
                                         scheduledState.lastFinishedAt == null || scheduledState.lastFailureAt >= scheduledState.lastFinishedAt
                                     ) && (
                                         <p className="text-red-500 dark:text-red-400">
-                                            最近失败：{scheduledState.lastFailureReason}
+                                            最近失败：{scheduledState.lastFailureReason === 'already_running' ? '已有备份运行中' : scheduledState.lastFailureReason}
                                         </p>
                                     )}
                                     {scheduledState.lastFinishedAt != null && scheduledState.lastTrigger && (
