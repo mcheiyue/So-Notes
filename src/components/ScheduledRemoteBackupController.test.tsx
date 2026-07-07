@@ -399,10 +399,8 @@ describe('ScheduledRemoteBackupController', () => {
       remoteFileName: 'backup.zip',
       summary: null,
       zipSizeBytes: null,
+      capturedStorageUpdatedAt: 12345,
     });
-    const storageData = { storageUpdatedAt: 12345 };
-    mockReadDiskStorageData.mockResolvedValue(storageData);
-    mockGetLatestUpdateTimestamp.mockReturnValue(12345);
 
     await act(async () => {
       root.render(<ScheduledRemoteBackupController />);
@@ -428,11 +426,63 @@ describe('ScheduledRemoteBackupController', () => {
 
     await passedRunBeforeExit!();
 
-    expect(mockReadDiskStorageData).toHaveBeenCalled();
-    expect(mockGetLatestUpdateTimestamp).toHaveBeenCalledWith(storageData);
     expect(mockSaveScheduledState).toHaveBeenCalledWith(
       expect.objectContaining({
         lastSuccessfulStorageUpdatedAt: 12345,
+      }),
+    );
+  });
+
+  it('退出前 fallback 备份成功后使用 capturedStorageUpdatedAt 而非重新读取时间戳', async () => {
+    const serviceInstance = {
+      ...stubService(),
+      initialize: vi.fn().mockRejectedValue(new Error('初始化失败')),
+    };
+    mockCreateService.mockReturnValue(serviceInstance);
+    mockLoadWebDavConfig.mockResolvedValue({
+      success: true,
+      serverUrl: 'https://dav.example.com',
+      username: 'user1',
+      remoteDir: 'SoNotes_Backups/',
+      passwordSaved: true,
+    });
+    mockRunRemoteBackup.mockResolvedValue({
+      success: true,
+      remoteFileName: 'backup.zip',
+      summary: null,
+      zipSizeBytes: null,
+      capturedStorageUpdatedAt: 5000,
+    });
+    mockReadDiskStorageData.mockResolvedValue({ storageUpdatedAt: 9999 });
+    mockGetLatestUpdateTimestamp.mockReturnValue(9999);
+
+    await act(async () => {
+      root.render(<ScheduledRemoteBackupController />);
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const listener = mockListen.mock.calls.find(
+      ([event]) => event === 'remote-backup-before-quit-requested',
+    )?.[1] as (() => Promise<void>) | undefined;
+
+    expect(listener).toBeDefined();
+
+    await act(async () => {
+      await listener!();
+    });
+
+    const { calls: quitCallsRetry } = vi.mocked(handleQuitRequest).mock;
+    const passedRunBeforeExit = quitCallsRetry[quitCallsRetry.length - 1]?.[0];
+    expect(passedRunBeforeExit).toBeDefined();
+
+    await passedRunBeforeExit!();
+
+    expect(mockSaveScheduledState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastSuccessfulStorageUpdatedAt: 5000,
       }),
     );
   });

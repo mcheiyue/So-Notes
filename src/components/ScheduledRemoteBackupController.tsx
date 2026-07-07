@@ -126,8 +126,6 @@ export const ScheduledRemoteBackupController = () => {
           const webdavConfig = { serverUrl: config.serverUrl, username: config.username, remoteDir: config.remoteDir ?? undefined };
           const result = await runRemoteBackup(runnerDepsRef.current, webdavConfig, { jobKind: 'before-exit-remote-backup' });
           const now = Date.now();
-          const storageData = result.success ? await readDiskStorageData(STORAGE_FILENAME) : null;
-          const successfulStorageUpdatedAt = storageData ? getLatestUpdateTimestamp(storageData) : null;
           const stateResult = await loadScheduledState();
           const prev = stateResult.success && stateResult.state ? stateResult.state : DEFAULT_SCHEDULED_BACKUP_STATE;
           const schedConfigResult = await loadScheduledConfig();
@@ -144,8 +142,8 @@ export const ScheduledRemoteBackupController = () => {
               ? {
                   lastAutomaticSuccessAt: now,
                   lastRemoteFileName: result.remoteFileName ?? null,
-                  ...(successfulStorageUpdatedAt !== null
-                    ? { lastSuccessfulStorageUpdatedAt: successfulStorageUpdatedAt }
+                  ...(result.capturedStorageUpdatedAt != null
+                    ? { lastSuccessfulStorageUpdatedAt: result.capturedStorageUpdatedAt }
                     : {}),
                   lastFailureReason: null,
                   lastFailureAt: null,
