@@ -210,7 +210,12 @@ vi.mock('../services/backup/ScheduledRemoteBackupConfigService', () => ({
   redactStateBeforeSave: vi.fn((s) => s),
 }));
 
+const { mockReloadState } = vi.hoisted(() => ({
+  mockReloadState: vi.fn(async () => {}),
+}));
+
 import { BoardDock } from './BoardDock';
+import * as ScheduledRemoteBackupServiceModule from '../services/backup/ScheduledRemoteBackupService';
 import { shouldCommitActivityRefresh } from './boardDockActivityRefresh';
 import { confirm } from '../store/confirmStore';
 import { Z_INDEX } from '../constants/layout';
@@ -814,6 +819,50 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(state.domainHistory.undoStack).toHaveLength(0);
     expect(invalidateAttachmentPathCache).toHaveBeenCalled();
     expect(resolveAttachmentAssetUrlCached).toHaveBeenCalledWith('attachments/photo.png');
+  });
+
+  it('本地恢复成功后 reload scheduler 内存态', async () => {
+    const spy = vi.spyOn(ScheduledRemoteBackupServiceModule, 'getSchedulerService').mockReturnValue({ reloadState: mockReloadState } as never);
+    try {
+      const { openZipDialog } = await import('../utils/fileSystem');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
+    const { flushNow } = await import('../services/storage/PersistenceFacade');
+    const { saveState } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+
+    vi.mocked(openZipDialog).mockResolvedValue('/backups/test.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: Date.now(),
+        noteCount: 1, boardCount: 1, textNoteCount: 1, imageNoteCount: 0, trashNoteCount: 0,
+        imageFileCount: 0, imageFileTotalBytes: 0,
+      },
+      errors: [], warnings: [],
+    });
+    vi.mocked(restoreLocalBackup).mockResolvedValue({
+      success: true, noteCount: 1, boardCount: 1, attachmentCount: 0,
+    });
+    vi.mocked(readDiskStorageData).mockResolvedValue({
+      schemaVersion: 1, storageUpdatedAt: Date.now(),
+      notes: [{ id: 'r1', kind: 'text', boardId: 'default', x: 0, y: 0, title: '', content: '恢复便签', color: '#FFF', z: 1, collapsed: false, createdAt: 1, updatedAt: 1 }],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config },
+    });
+    vi.mocked(flushNow).mockResolvedValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
+
+    await openDataSettings();
+    await clickElement(findButtonByText('从 zip 覆盖恢复'));
+
+    expect(mockReloadState).toHaveBeenCalled();
+    expect(saveState).toHaveBeenCalledWith(
+      expect.objectContaining({ lastSuccessfulStorageUpdatedAt: null }),
+    );
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('zip 恢复取消确认时不执行恢复', async () => {
@@ -1961,6 +2010,60 @@ describe('BoardDock WebDAV 远端备份/恢复', () => {
     expect(saveState).toHaveBeenCalledWith(
       expect.objectContaining({ lastSuccessfulStorageUpdatedAt: null }),
     );
+  });
+
+  it('远端恢复成功后 reload scheduler 内存态', async () => {
+    const spy = vi.spyOn(ScheduledRemoteBackupServiceModule, 'getSchedulerService').mockReturnValue({ reloadState: mockReloadState } as never);
+    try {
+      const { loadConfig, listBackups, downloadBackup, resolveDownloadedBackup } = await import('../services/backup/WebDavBackupService');
+      const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+      const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
+      const { flushNow } = await import('../services/storage/PersistenceFacade');
+      const { saveState } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+
+      vi.mocked(loadConfig).mockResolvedValue({
+        success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+      });
+      vi.mocked(listBackups).mockResolvedValue([
+        { fileName: 'backup-2026.zip', size: 102400, lastModified: '2026-06-08T10:00:00Z', readable: true },
+      ]);
+      vi.mocked(downloadBackup).mockResolvedValue({ success: true, downloadToken: 'tok-abc' });
+      vi.mocked(resolveDownloadedBackup).mockResolvedValue({ success: true, localPath: '/tmp/dl.zip' });
+      vi.mocked(validateLocalBackup).mockResolvedValue({
+        ok: true,
+        summary: {
+          app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: 1749643200000,
+          noteCount: 1, boardCount: 1, textNoteCount: 1, imageNoteCount: 0, trashNoteCount: 0,
+          imageFileCount: 0, imageFileTotalBytes: 0,
+        },
+        errors: [], warnings: [],
+      });
+      vi.mocked(restoreLocalBackup).mockResolvedValue({
+        success: true, noteCount: 1, boardCount: 1, attachmentCount: 0,
+      });
+      vi.mocked(readDiskStorageData).mockResolvedValue({
+        schemaVersion: 1, storageUpdatedAt: Date.now(),
+        notes: [{ id: 'r1', kind: 'text', boardId: 'default', x: 0, y: 0, title: '', content: '恢复便签', color: '#FFF', z: 1, collapsed: false, createdAt: 1, updatedAt: 1 }],
+        boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+        currentBoardId: 'default',
+        config: { ...useStore.getState().config },
+      });
+      vi.mocked(flushNow).mockResolvedValue(true);
+      vi.mocked(confirm).mockResolvedValue(true);
+
+      await openWebdavView();
+      await clickElement(findButtonByText('刷新远端列表'));
+
+      const restoreBtn = container.querySelector('[data-testid="webdav-restore-button"]');
+      await clickElement(restoreBtn);
+
+      expect(mockReloadState).toHaveBeenCalled();
+      expect(saveState).toHaveBeenCalledWith(
+        expect.objectContaining({ lastSuccessfulStorageUpdatedAt: null }),
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('远端恢复验证失败时 cleanup token 并显示错误', async () => {

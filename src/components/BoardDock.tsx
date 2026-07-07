@@ -914,6 +914,7 @@ export const BoardDock = () => {
             lastSuccessfulStorageUpdatedAt: null,
           });
           setScheduledState(prev => ({ ...prev, lastSuccessfulStorageUpdatedAt: null }));
+          await getSchedulerService()?.reloadState();
         }
       } catch { /* 重置失败不影响恢复结果 */ }
     } catch (err) {
@@ -1546,6 +1547,7 @@ export const BoardDock = () => {
             lastSuccessfulStorageUpdatedAt: null,
           });
           setScheduledState(prev => ({ ...prev, lastSuccessfulStorageUpdatedAt: null }));
+          await getSchedulerService()?.reloadState();
         }
       } catch (resetError) {
         console.warn('远端恢复后重置自动备份状态失败:', resetError);
