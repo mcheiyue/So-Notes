@@ -243,6 +243,9 @@ pub struct ScheduledRemoteBackupState {
     /// 首次建立基线时跳过清理（非失败）。
     #[serde(default)]
     pub last_retention_cleanup_skipped: Option<bool>,
+    /// 上次清理因 busy 跳过。
+    #[serde(default)]
+    pub last_retention_cleanup_busy: Option<bool>,
     /// 上次清理执行时间戳。
     #[serde(default)]
     pub last_retention_cleanup_at: Option<u64>,
@@ -289,6 +292,7 @@ impl Default for ScheduledRemoteBackupState {
             last_retention_cleanup_failed_file_name: None,
             last_retention_cleanup_error: None,
             last_retention_cleanup_skipped: None,
+            last_retention_cleanup_busy: None,
             last_retention_cleanup_at: None,
         }
     }
@@ -943,6 +947,7 @@ mod tests {
             last_retention_cleanup_failed_file_name: None,
             last_retention_cleanup_error: None,
             last_retention_cleanup_skipped: None,
+            last_retention_cleanup_busy: Some(true),
             last_retention_cleanup_at: None,
         };
 
@@ -964,6 +969,7 @@ mod tests {
         assert_eq!(deserialized.baseline_confirmed_remote_count, Some(20));
         assert!(deserialized.cliff_drop_deferred);
         assert_eq!(deserialized.pending_cleanup_target_count, Some(15));
+        assert_eq!(deserialized.last_retention_cleanup_busy, Some(true));
     }
 
     #[test]
