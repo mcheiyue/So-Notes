@@ -2044,9 +2044,7 @@ export const BoardDock = () => {
         setActivityError(sanitizeErrorMessage(err));
       }
     } finally {
-      if (shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) {
-        setActivityLoading(false);
-      }
+      setActivityLoading(false);
     }
   };
 

@@ -3849,6 +3849,54 @@ describe('BoardDock 定时远端备份 UI', () => {
     expect(clearButton?.getAttribute('title')).toBe('清空最近活动');
   });
 
+  it('手动刷新在轮询抢占 requestId 后仍清掉 loading', async () => {
+    vi.useFakeTimers();
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      let resolveManualRefresh: (() => void) | null = null;
+      let listCallCount = 0;
+
+      vi.mocked(invoke).mockImplementation(async (command) => {
+        if (command === 'backup_activity_list') {
+          listCallCount += 1;
+          if (listCallCount === 1) {
+            // 初始加载
+            return [];
+          }
+          if (listCallCount === 2) {
+            // 手动刷新挂起
+            return await new Promise((resolve) => {
+              resolveManualRefresh = () => resolve([]);
+            });
+          }
+          // 轮询返回
+          return [];
+        }
+        return null;
+      });
+
+      await openDataSettings();
+      await vi.waitFor(() => expect(container.querySelector('[data-testid="activity-empty"]')).not.toBeNull());
+
+      // 点击手动刷新
+      await clickElement(container.querySelector('[data-testid="activity-refresh-button"]'));
+
+      // 推进 5 秒触发轮询，轮询会抢占 requestId
+      await vi.advanceTimersByTimeAsync(5000);
+
+      // 手动刷新返回
+      await act(async () => {
+        resolveManualRefresh?.();
+        await Promise.resolve();
+      });
+
+      // loading 应该被清掉
+      expect(container.querySelector('[data-testid="activity-loading"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('清空活动期间启动的轮询在清空完成后不会写回旧条目', async () => {
     vi.useFakeTimers();
     try {
