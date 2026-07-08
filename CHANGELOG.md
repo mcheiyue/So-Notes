@@ -2,6 +2,70 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.5.8] - 2026-07-08
+
+本版本新增备份活动日志系统，提供备份/恢复/保留清理的完整可观测性，并修复 WebDAV 配置安全、敏感信息脱敏、退出前备份语义等多项稳定性问题。
+
+### ✨ 新特性 (Features)
+
+* **备份活动日志系统**
+  > 新增完整的备份活动记录与 UI 展示，支持轮询刷新与手动清空，覆盖自动备份、手动备份、保留清理、恢复等全场景。
+  - Rust 侧活动日志持久化模块，含敏感信息脱敏
+  - TS 侧 BackupActivityLogService，含脱敏辅助函数
+  - 接入自动备份、手动 WebDAV、本地备份/恢复、保留策略等操作
+  - 活动日志 UI 支持轮询刷新与一键清空
+
+* **设置浮层组件抽取**
+  > SettingsPanelShell 统一设置浮层容器，修复内容遮挡问题。
+
+### 🐛 问题修复 (Bug Fixes)
+
+* **WebDAV 配置安全**
+  > 修复 WebDAV 配置写入失败时凭据不回滚、Windows 崩溃后 orphan `.bak` 残留等问题。
+  - 保存配置前自动恢复 orphan `.bak` 文件
+  - 写入失败时回滚凭据
+  - 清空活动日志时同步删除 orphan `.bak`
+
+* **敏感信息脱敏边界**
+  > 修复活动日志中 Unicode 大小写扩展、全角冒号、路径空格、Bearer/Basic token 等脱敏绕过问题。
+  - 修复 Unicode 大小写转换偏移绕过
+  - 修复全角冒号脱敏值边界
+  - 修复路径空格泄露
+  - 补充 Bearer/Basic token 替换
+  - 补充中文敏感词匹配
+
+* **退出前备份语义**
+  > 修复退出前备份 fallback 路径、早退分支、single-flight 等场景的失败原因丢失问题。
+  - fallback 备份使用 capturedStorageUpdatedAt 替代重新读取
+  - 保留早退分支的原始失败原因
+  - single-flight 补充 reasonCode/stage/trigger
+
+* **活动日志 UI 状态**
+  > 修复手动刷新 loading 卡住、并发备份中文提示缺失、busy 状态未同步等问题。
+  - 手动刷新始终清掉 loading 状态
+  - 并发备份时显示"已有备份运行中"
+  - 手动保留清理同步 lastRetentionCleanupBusy 字段
+
+* **备份恢复稳定性**
+  > 修复远端恢复成功后 scheduler 内存态未重置、活动轮询关闭竞态等问题。
+  - 恢复成功后 reload scheduler 内存态
+  - 活动轮询关闭时正确失效旧结果
+  - Rust 状态结构补充 lastRetentionCleanupBusy 字段
+
+* **图片便签尺寸**
+  > 修复极端图片比例导致的尺寸计算异常。
+
+### 🔧 内部改进 (Internal)
+
+* **CI 测试步骤**
+  > release.yml 添加测试步骤，lint 白名单补充 BoardDock.tsx。
+
+* **活动刷新判定**
+  > 拆分活动刷新判定 helper 以通过 lint 检查。
+
+* **保留清理 metrics**
+  > 调整保留清理结构化 metrics 与断崖警告语义。
+
 ## [v1.5.7] - 2026-06-25
 
 本版本为远端备份系统新增保留策略，支持自动清理过期备份、断崖式数据骤降保护，并在看板设置区提供手动预览与清理入口。
