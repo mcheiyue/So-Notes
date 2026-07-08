@@ -1861,6 +1861,7 @@ export const BoardDock = () => {
         lastRetentionCleanupFailedFileName: cleanupSkippedByBusy ? null : (result.failedFileName ?? null),
         lastRetentionCleanupError: cleanupSkippedByBusy ? null : (result.error ?? null),
         lastRetentionCleanupSkipped: cleanupSkippedByBusy,
+        lastRetentionCleanupBusy: cleanupSkippedByBusy,
         lastRetentionCleanupAt: Date.now(),
       };
       let updatedState: ScheduledRemoteBackupState;

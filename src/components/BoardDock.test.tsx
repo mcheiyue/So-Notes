@@ -3617,6 +3617,7 @@ describe('BoardDock 定时远端备份 UI', () => {
     const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
     const { previewRetentionCleanup, executeRetentionCleanup } = await import('../services/backup/RemoteBackupRetentionService');
     const { invoke } = await import('@tauri-apps/api/core');
+    const { saveState } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const oldFile = { fileName: 'SoNotes_Backup_20260101000000.zip', sortTime: new Date('2026-01-01T00:00:00Z') };
     const keepFile = { fileName: 'SoNotes_Backup_20260201000000.zip', sortTime: new Date('2026-02-01T00:00:00Z') };
     vi.mocked(loadConfig).mockResolvedValue({
@@ -3663,6 +3664,7 @@ describe('BoardDock 定时远端备份 UI', () => {
         }),
       }),
     );
+    expect(saveState).toHaveBeenCalled();
   });
 
   it('partial 活动条目展示 failedFileName basename', async () => {
