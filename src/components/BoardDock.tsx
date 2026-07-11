@@ -2532,7 +2532,7 @@ export const BoardDock = () => {
                 )}
 
                 {settingsView === 'WEBDAV' && (
-                    <div className="py-1 min-w-[320px]">
+                    <div className="py-1 min-w-[320px]" data-testid="webdav-settings-section">
                         <div className="px-3 py-2 space-y-2">
                             <input
                                 type="text"

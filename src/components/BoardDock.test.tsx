@@ -4022,3 +4022,174 @@ describe('BoardDock 定时远端备份 UI', () => {
     expect(shouldCommitActivityRefresh(2, 3)).toBe(false);
   });
 });
+
+describe('文案守卫', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const clickElement = async (element: Element | null) => {
+    expect(element).not.toBeNull();
+    await act(async () => {
+      element?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+  };
+
+  const findButtonByText = (text: string) => Array.from(container.querySelectorAll('button')).find(
+    (button) => button.textContent?.includes(text),
+  ) ?? null;
+
+  const getSettingsButton = () => container.querySelector('button[aria-label="打开设置"]');
+
+  const renderBoardDock = async () => {
+    await act(async () => {
+      root.render(<BoardDock />);
+    });
+  };
+
+  const openDataSettings = async () => {
+    await renderBoardDock();
+    await clickElement(getSettingsButton());
+    await clickElement(findButtonByText('数据管理'));
+  };
+
+  const openWebdavView = async () => {
+    await openDataSettings();
+    await clickElement(findButtonByText('远端备份/恢复'));
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    _resetCoordinatorForTesting();
+    resetMockScheduled();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } },
+      ],
+      currentBoardId: 'default',
+      isDockVisible: true,
+      viewMode: 'BOARD',
+      config: { ...useStore.getState().config, themeMode: 'system' },
+      saveStatus: 'idle',
+      saveError: null,
+      isSaving: false,
+      lastSavedAt: null,
+      switchBoard: vi.fn(),
+      createBoard: vi.fn(),
+      deleteBoard: vi.fn(),
+      updateBoard: vi.fn(),
+      reorderBoard: vi.fn(),
+      setDockVisible: vi.fn(),
+      setViewMode: vi.fn(),
+      clearSelection: vi.fn(),
+      exportAll: vi.fn(async () => undefined),
+      importFromFile: vi.fn(async () => ({ status: 'cancelled' as const })),
+      exportCurrentBoard: vi.fn(async () => undefined),
+      setThemeMode: vi.fn(),
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('文案守卫: WebDAV 设置区不含同步类词', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: DEFAULT_SCHEDULED_BACKUP_CONFIG, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: false, passwordSaved: false,
+    });
+
+    await openWebdavView();
+
+    const section = container.querySelector('[data-testid="webdav-settings-section"]');
+    expect(section).not.toBeNull();
+    const text = section?.textContent ?? '';
+
+    // C14 否定：不含同步类词
+    expect(text).not.toMatch(/同步|云同步|自动同步|双向|合并|sync|synchronize|自动拉取|自动下载|自动恢复/i);
+    // C14 正向：含远端备份/上传/恢复/删除相关词
+    expect(text).toMatch(/远端备份|上传|恢复|删除/);
+  });
+
+  it('文案守卫: 自动备份区不含同步类词', async () => {
+    const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
+    const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
+    mockScheduledStateRef.current = {
+      ...DEFAULT_SCHEDULED_BACKUP_STATE,
+      lastAutomaticSuccessAt: Date.now(),
+      lastFailureReason: '凭据错误',
+      nextRunAt: Date.now() + 3600000,
+    };
+    vi.mocked(loadConfig).mockResolvedValue({
+      success: true, config: { ...DEFAULT_SCHEDULED_BACKUP_CONFIG, enabled: true }, error: null,
+    });
+    vi.mocked(webdavLoadConfig).mockResolvedValue({
+      success: true, serverUrl: 'https://dav.example.com', username: 'user1', remoteDir: 'SoNotes_Backups/', passwordSaved: true,
+    });
+
+    await openWebdavView();
+
+    const section = container.querySelector('[data-testid="scheduled-backup-section"]');
+    expect(section).not.toBeNull();
+    const text = section?.textContent ?? '';
+
+    // C14 否定：不含同步类词
+    expect(text).not.toMatch(/同步|云同步|自动同步|双向|合并|sync|synchronize|自动拉取|自动下载|自动恢复/i);
+    // C14 正向：含自动远端备份/下次尝试/最近失败相关词
+    expect(text).toMatch(/自动远端备份|下次尝试|最近失败/);
+  });
+
+  it('文案守卫: 活动日志区不含同步类词', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'backup_activity_list') {
+        return [];
+      }
+      return null;
+    });
+
+    await openDataSettings();
+
+    const section = container.querySelector('[data-testid="activity-log-section"]');
+    expect(section).not.toBeNull();
+    const text = section?.textContent ?? '';
+
+    // C14 否定：不含同步类词
+    expect(text).not.toMatch(/同步|云同步|自动同步|双向|合并|sync|synchronize|自动拉取|自动下载|自动恢复/i);
+    // C14 正向：含最近活动/失败/跳过相关词
+    expect(text).toMatch(/最近活动|失败|跳过/);
+  });
+
+  it('文案守卫: 活动日志区不含审计遥测词', async () => {
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'backup_activity_list') {
+        return [];
+      }
+      return null;
+    });
+
+    await openDataSettings();
+
+    const section = container.querySelector('[data-testid="activity-log-section"]');
+    expect(section).not.toBeNull();
+    const text = section?.textContent ?? '';
+
+    // C15 否定：不含审计/遥测/上报/诊断/上传诊断
+    expect(text).not.toMatch(/审计|遥测|上报|诊断|上传诊断/);
+    // C15 正向：含最近活动/失败/跳过相关词
+    expect(text).toMatch(/最近活动|失败|跳过/);
+  });
+});
