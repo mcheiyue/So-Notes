@@ -46,7 +46,7 @@ const requiredById = {
   'IMG-004': ['预览', 'preview'],
   'UNDO-001': {
     alsoAny: ['useStore'],
-    any: ['定位不进入 Undo/Redo', '预览不进入 Undo/Redo', '定位不进入Undo', '预览不进入Undo'],
+    any: ['定位不进入 Undo/Redo', '定位不进入Undo', '定位不进入历史'],
   },
   'DET-001': { alsoAny: ['detach', '撕下'], any: ['DetachedNote', '窗口'] },
   'DET-002': { alsoAny: ['focus', '聚焦'], any: ['DetachedNote'] },

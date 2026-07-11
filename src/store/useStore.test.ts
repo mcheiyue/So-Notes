@@ -4898,7 +4898,7 @@ describe('v1.4.8 clearDomainHistory 契约', () => {
   });
 });
 
-describe('C7 Undo 负向: 定位 / 预览不进入历史', () => {
+describe('C7 Undo 负向: 定位不进入历史', () => {
   beforeEach(() => {
     vi.stubGlobal('requestAnimationFrame', vi.fn((cb: FrameRequestCallback) => {
       cb(0);

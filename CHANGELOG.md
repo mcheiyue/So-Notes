@@ -16,6 +16,18 @@
 * **图片缺失反馈领域语言**
   > 图片便签缺失占位继续使用「图片不可用」表述，并增加自动化守卫，避免误写成「附件」语义。
 
+* **活动日志敏感值脱敏（空格赋值 / 引号值）**
+  > 修复 `password = secret`、`password="a b c"` 等可漏脱敏的组合路径；TS 与 Rust 两侧同步收紧，并补充回归测试。
+
+* **WebDAV 同 key 写配置失败时凭据回滚**
+  > 旧 secret 为 MissingSecret 时，写盘失败会删除新写入的同 key 凭据；load 非 Missing 错误则中止保存，避免不可回滚覆盖。
+
+* **活动日志清空失败不被成功轮询抹掉**
+  > 清空活动失败后，列表轮询成功不再清除 mutation 错误提示。
+
+* **退出前 fallback 备份耗时可信**
+  > before-exit fallback 在 runner 前记录 `startedAt`、完成后记录 `finishedAt`，避免活动日志/状态中时长恒为 0。
+
 ### 🔧 内部改进 (Internal)
 
 * **关键流程冒烟基线**
