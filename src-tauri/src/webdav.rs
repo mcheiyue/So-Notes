@@ -824,6 +824,9 @@ fn rollback_saved_credential_after_config_write_failure(
     if old_credential_key == Some(new_key) {
         if let Some(secret) = previous_same_key_secret {
             let _ = store.save(&new_cred_key, &secret);
+        } else {
+            // 旧 secret 明确缺失时删除刚写入的新 secret，避免写盘失败后新密码残留密钥链
+            let _ = store.delete(&new_cred_key);
         }
         return;
     }
@@ -870,7 +873,16 @@ fn save_webdav_config_to_path_with_writer(
             account: new_key.clone(),
         };
         let previous_same_key_secret = if old_credential_key.as_deref() == Some(new_key) {
-            store.load(&new_cred_key).ok()
+            match store.load(&new_cred_key) {
+                Ok(secret) => Some(secret),
+                Err(err) if err.kind == WebDavCredentialErrorKind::MissingSecret => None,
+                // 读取失败时无法安全回滚旧值，拒绝覆盖密钥链中的 secret
+                Err(err) => {
+                    return Err(format!(
+                        "读取既有凭据失败，已中止保存以避免无法回滚: {err}"
+                    ));
+                }
+            }
         } else {
             None
         };
@@ -7881,6 +7893,52 @@ mod tests {
 
         assert!(result.unwrap_err().contains("写入 WebDAV 配置文件失败"));
         assert_eq!(store.load(&same_key).unwrap(), "old-password");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_save_write_failure_deletes_same_key_when_old_secret_missing() {
+        let dir = test_config_dir("save-write-failure-same-key-missing");
+        let path = dir.join(CONFIG_FILENAME);
+        let store = MemoryWebDavCredentialStore::new();
+        let old_config = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some(compute_credential_key(
+                "https://example.com/dav",
+                "user1",
+                "Backups/",
+            )),
+        };
+        let same_key = WebDavCredentialKey {
+            service: CREDENTIAL_SERVICE.to_string(),
+            account: old_config.credential_key.clone().unwrap(),
+        };
+        // 不预置旧 secret，模拟密钥链中已缺失
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: true,
+            password: Some("new-password".to_string()),
+        };
+
+        let result = save_webdav_config_to_path_with_writer(
+            &path,
+            &request,
+            Some(&old_config),
+            &store,
+            |_, _| Err("disk full".to_string()),
+        );
+
+        assert!(result.unwrap_err().contains("写入 WebDAV 配置文件失败"));
+        assert!(
+            store.load(&same_key).is_err(),
+            "旧 secret 缺失时写失败应删除刚写入的新 secret"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
