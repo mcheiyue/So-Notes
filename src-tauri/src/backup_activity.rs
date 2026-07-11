@@ -270,8 +270,21 @@ const VALID_STATUSES: &[&str] = &["success", "failed", "skipped", "partial", "ca
 const VALID_LEVELS: &[&str] = &["info", "warning", "error"];
 
 fn sensitive_value_end(line: &str, start: usize) -> usize {
-    line[start..]
-        .find(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == '，' || c == '。')
+    let rest = &line[start..];
+    // 引号包裹的值：消费到配对引号（含引号），避免 password="a b c" 只脱敏首段
+    if let Some(stripped) = rest.strip_prefix('"') {
+        return stripped
+            .find('"')
+            .map(|i| start + 1 + i + 1)
+            .unwrap_or(line.len());
+    }
+    if let Some(stripped) = rest.strip_prefix('\'') {
+        return stripped
+            .find('\'')
+            .map(|i| start + 1 + i + 1)
+            .unwrap_or(line.len());
+    }
+    rest.find(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == '，' || c == '。')
         .map(|i| start + i)
         .unwrap_or(line.len())
 }
@@ -369,47 +382,53 @@ fn redact_sensitive_keywords(line: &str) -> String {
             {
                 continue;
             }
-            // 检查后面紧跟的字符
+            // 检查后面紧跟的字符（允许 keyword 与分隔符之间有空白）
             if after < line.len() {
-                let next_char = bytes[after];
-                // `keyword=value` 或 `keyword: value`
-                let uses_fullwidth_colon = line[after..].starts_with('：');
-                if next_char == b'=' || next_char == b':' || uses_fullwidth_colon {
-                    let separator_len = if uses_fullwidth_colon {
-                        '：'.len_utf8()
-                    } else {
-                        1
-                    };
-                    let val_start = after + separator_len;
-                    let val_start = line[val_start..]
-                        .find(|c: char| !c.is_whitespace())
-                        .map(|i| val_start + i)
-                        .unwrap_or(line.len());
-                    // 值已被前序步骤（redact_auth_tokens）脱敏时跳过，避免重复替换
-                    if line[val_start..].starts_with("[REDACTED]") {
+                let after_ws = line[after..]
+                    .find(|c: char| !c.is_whitespace())
+                    .map(|i| after + i)
+                    .unwrap_or(line.len());
+                if after_ws < line.len() {
+                    let next_char = line.as_bytes()[after_ws];
+                    // `keyword=value` / `keyword : value` / `keyword ：value`
+                    let uses_fullwidth_colon = line[after_ws..].starts_with('：');
+                    if next_char == b'=' || next_char == b':' || uses_fullwidth_colon {
+                        let separator_len = if uses_fullwidth_colon {
+                            '：'.len_utf8()
+                        } else {
+                            1
+                        };
+                        let val_start = after_ws + separator_len;
+                        let val_start = line[val_start..]
+                            .find(|c: char| !c.is_whitespace())
+                            .map(|i| val_start + i)
+                            .unwrap_or(line.len());
+                        // 值已被前序步骤（redact_auth_tokens）脱敏时跳过，避免重复替换
+                        if line[val_start..].starts_with("[REDACTED]") {
+                            result.push_str(&line[cursor..after]);
+                            cursor = after;
+                            found = true;
+                            break;
+                        }
+                        let val_end = sensitive_value_end(line, val_start);
                         result.push_str(&line[cursor..after]);
-                        cursor = after;
+                        result.push_str("=[REDACTED]");
+                        cursor = val_end;
                         found = true;
                         break;
                     }
-                    let val_end = sensitive_value_end(line, val_start);
-                    result.push_str(&line[cursor..after]);
-                    result.push_str("=[REDACTED]");
-                    cursor = val_end;
-                    found = true;
-                    break;
-                }
-                if matches!(next_char, b'_' | b'-' | b'.' | b'(') {
-                    let val_start = after + 1;
-                    let val_end = line[val_start..]
-                        .find(|c: char| c.is_whitespace() || c == ',')
-                        .map(|i| val_start + i)
-                        .unwrap_or(line.len());
-                    result.push_str(&line[cursor..after]);
-                    result.push_str("=[REDACTED]");
-                    cursor = val_end;
-                    found = true;
-                    break;
+                    if after_ws == after && matches!(next_char, b'_' | b'-' | b'.' | b'(') {
+                        let val_start = after + 1;
+                        let val_end = line[val_start..]
+                            .find(|c: char| c.is_whitespace() || c == ',')
+                            .map(|i| val_start + i)
+                            .unwrap_or(line.len());
+                        result.push_str(&line[cursor..after]);
+                        result.push_str("=[REDACTED]");
+                        cursor = val_end;
+                        found = true;
+                        break;
+                    }
                 }
                 if let Some(val_start) = natural_language_value_start(line, after) {
                     let val_end = sensitive_value_end(line, val_start);
@@ -419,6 +438,7 @@ fn redact_sensitive_keywords(line: &str) -> String {
                     found = true;
                     break;
                 }
+                let next_char = bytes[after];
                 // 独立 keyword（后跟空格/逗号/标点）
                 if next_char.is_ascii_whitespace()
                     || next_char == b','
@@ -1354,6 +1374,20 @@ mod tests {
         assert_eq!(sanitize_message("token：abc"), "token=[REDACTED]");
         assert_eq!(sanitize_message("password"), "password=[REDACTED]");
         assert_eq!(sanitize_message("secret key"), "secret=[REDACTED] key");
+        // keyword 与分隔符之间有空格
+        assert_eq!(
+            sanitize_message("password = hunter2 trailing"),
+            "password=[REDACTED] trailing"
+        );
+        assert_eq!(
+            sanitize_message("token : abc123 ok"),
+            "token=[REDACTED] ok"
+        );
+        // 引号内含空格的敏感值整段脱敏
+        assert_eq!(
+            sanitize_message("password=\"correct horse battery staple\" next"),
+            "password=[REDACTED] next"
+        );
         // keyword_something 模式
         assert_eq!(
             sanitize_message("my_password_value"),

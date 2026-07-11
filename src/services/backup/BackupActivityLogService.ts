@@ -89,9 +89,14 @@ export interface BackupActivityAppendInput {
 // 脱敏与工具函数
 // ---------------------------------------------------------------------------
 
-/** 敏感词模式：keyword 后跟 :=/_ 分隔符和值，或 keyword 独立出现（后跟空格/逗号/结尾） */
+/**
+ * 敏感词模式：
+ * - keyword 与 =/:： 之间可有空白（password = x / token : y）
+ * - 值可为双引号/单引号包裹（内含空格）或无引号非空白段
+ * - keyword_xxx / 独立 keyword
+ */
 const SENSITIVE_PATTERN =
-  /(password|token|authorization|secret|密码|令牌)[=:：]\s*[^\s,;，。)}\]]+|(password|token|authorization|secret|密码|令牌)_[^\s,;，。)}\]]+|(password|token|authorization|secret|密码|令牌)(?=[\s,;)}\]]|$)/gi;
+  /(password|token|authorization|secret|密码|令牌)\s*[=:：]\s*(?:"[^"]*"|'[^']*'|[^\s,;，。)}\]]+)|(password|token|authorization|secret|密码|令牌)_[^\s,;，。)}\]]+|(password|token|authorization|secret|密码|令牌)(?=[\s,;)}\]]|$)/gi;
 
 /** Bearer/Basic token 模式：匹配 Bearer 或 Basic 后面的 token 值 */
 const BEARER_TOKEN_PATTERN = /((?:Bearer|Basic)\s+)[^\s,;)}\]]{1,100}/gi;

@@ -184,6 +184,32 @@ describe('BackupActivityLogService', () => {
       expect(result.message).toBe('连接失败，password=[REDACTED] 无效');
     });
 
+    it('替换 keyword 与分隔符之间有空格的赋值', () => {
+      const spacedEq = sanitizeActivityInput({
+        ...baseInput,
+        message: 'auth failed password = hunter2 trailing',
+      });
+      expect(spacedEq.message).toBe('auth failed password=[REDACTED] trailing');
+      expect(spacedEq.message).not.toContain('hunter2');
+
+      const spacedColon = sanitizeActivityInput({
+        ...baseInput,
+        message: 'token : abc123 ok',
+      });
+      expect(spacedColon.message).toBe('token=[REDACTED] ok');
+      expect(spacedColon.message).not.toContain('abc123');
+    });
+
+    it('替换引号内含空格的敏感值整段', () => {
+      const result = sanitizeActivityInput({
+        ...baseInput,
+        message: 'password="correct horse battery staple" next',
+      });
+      expect(result.message).toBe('password=[REDACTED] next');
+      expect(result.message).not.toContain('horse');
+      expect(result.message).not.toContain('staple');
+    });
+
     it('替换 message 中的 token 关键词', () => {
       const result = sanitizeActivityInput({
         ...baseInput,
