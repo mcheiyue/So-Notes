@@ -277,4 +277,20 @@ describe('ImageNoteBody', () => {
     expect(resolveAttachmentAssetUrlCachedMock).toHaveBeenCalledWith(attachment.relativePath);
     expect(container.textContent).toContain('图片不可用');
   });
+
+  it('缺失反馈用图片不可用而非附件', async () => {
+    const attachment = createAttachment();
+    getCachedAttachmentAssetUrlMock.mockReturnValue(undefined);
+    resolveAttachmentAssetUrlCachedMock.mockRejectedValue(new Error('not found'));
+
+    await act(async () => {
+      root.render(<ImageNoteBody attachment={attachment} alt="图片便签" isFocused={true} />);
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('图片不可用');
+    });
+
+    expect(container.textContent).not.toContain('附件');
+  });
 });

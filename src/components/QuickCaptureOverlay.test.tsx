@@ -205,4 +205,23 @@ describe('QuickCaptureOverlay 输入事件', () => {
     ]);
     expect(useStore.getState().isQuickCaptureOpen).toBe(false);
   });
+
+  it('文案守卫: Quick Capture 显示当前看板且不使用页面工作区项目', async () => {
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '我的看板', icon: '📌', createdAt: 0 },
+        { id: 'work', name: '工作看板', icon: '💼', createdAt: 1 },
+      ],
+      currentBoardId: 'work',
+    });
+
+    await renderOverlay();
+
+    const header = container.querySelector('.border-b');
+    expect(header).not.toBeNull();
+    const headerText = header?.textContent ?? '';
+
+    expect(headerText).toContain('工作看板');
+    expect(headerText).not.toMatch(/页面|工作区|项目/);
+  });
 });

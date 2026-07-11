@@ -17,6 +17,9 @@ export const QuickCaptureOverlay: React.FC = () => {
   const isOpen = useUIStore((state) => state.isQuickCaptureOpen);
   const setQuickCaptureOpen = useUIStore((state) => state.setQuickCaptureOpen);
   const addNotesWithContentBatch = useStore((state) => state.addNotesWithContentBatch);
+  const boards = useStore((state) => state.boards);
+  const currentBoardId = useStore((state) => state.currentBoardId);
+  const currentBoardName = boards.find((b) => b.id === currentBoardId)?.name ?? '当前看板';
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -118,8 +121,9 @@ export const QuickCaptureOverlay: React.FC = () => {
         }}
         onKeyDown={trapDialogFocus}
       >
-        <div className="border-b border-border-subtle px-4 py-3 text-sm font-medium text-text-secondary">
-          快速捕获
+        <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3 text-sm font-medium text-text-secondary">
+          <span>快速捕获</span>
+          <span className="truncate text-xs text-text-tertiary">· {currentBoardName}</span>
         </div>
         <textarea
           ref={inputRef}

@@ -1267,7 +1267,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
     const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
     const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
     const { invoke } = await import('@tauri-apps/api/core');
-    const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
+    const { flushNow } = await import('../services/storage/PersistenceFacade');
 
     vi.mocked(openZipDialog).mockResolvedValue('/backups/test.zip');
     vi.mocked(validateLocalBackup).mockResolvedValue({
