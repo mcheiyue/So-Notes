@@ -1237,6 +1237,102 @@ describe('BoardDock v1.2.4 最小修复', () => {
     expect(feedback?.textContent).toContain('恢复成功');
     expect(feedback?.getAttribute('role')).toBe('status');
   });
+
+  it('活动日志: 本地备份成功时记录 local-backup', async () => {
+    const { saveZipDialog } = await import('../utils/fileSystem');
+    const { createLocalBackup } = await import('../services/backup/BackupService');
+    const { invoke } = await import('@tauri-apps/api/core');
+
+    vi.mocked(saveZipDialog).mockResolvedValue('/backups/test.zip');
+    vi.mocked(createLocalBackup).mockResolvedValue({
+      success: true, noteCount: 5, boardCount: 2, attachmentCount: 1, summary: null, zipSizeBytes: null,
+    });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('创建本地 zip 备份'));
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      'backup_activity_append',
+      expect.objectContaining({
+        entry: expect.objectContaining({
+          operation: 'local-backup',
+          status: 'success',
+        }),
+      }),
+    );
+  });
+
+  it('活动日志: 本地恢复成功时记录 local-restore', async () => {
+    const { openZipDialog } = await import('../utils/fileSystem');
+    const { restoreLocalBackup, validateLocalBackup } = await import('../services/backup/BackupService');
+    const { readDiskStorageData } = await import('../services/storage/tauriPersistence');
+    const { invoke } = await import('@tauri-apps/api/core');
+    const { flushNow, pause, resume } = await import('../services/storage/PersistenceFacade');
+
+    vi.mocked(openZipDialog).mockResolvedValue('/backups/test.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: true,
+      summary: {
+        app: 'SoNotes', formatVersion: 1, appVersion: '1.5.2', createdAt: Date.now(),
+        noteCount: 3, boardCount: 1, textNoteCount: 2, imageNoteCount: 1, trashNoteCount: 0,
+        imageFileCount: 1, imageFileTotalBytes: 512,
+      },
+      errors: [], warnings: [],
+    });
+    vi.mocked(restoreLocalBackup).mockResolvedValue({
+      success: true, noteCount: 3, boardCount: 1, attachmentCount: 1,
+    });
+    vi.mocked(readDiskStorageData).mockResolvedValue({
+      schemaVersion: 1, storageUpdatedAt: Date.now(),
+      notes: [{ id: 'r1', kind: 'text', boardId: 'default', x: 0, y: 0, title: '', content: '恢复便签', color: '#FFF', z: 1, collapsed: false, createdAt: 1, updatedAt: 1 }],
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: 'default',
+      config: { ...useStore.getState().config },
+    });
+    vi.mocked(flushNow).mockResolvedValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
+
+    await openDataSettings();
+    await clickElement(findButtonByText('从 zip 覆盖恢复'));
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      'backup_activity_append',
+      expect.objectContaining({
+        entry: expect.objectContaining({
+          operation: 'local-restore',
+          status: 'success',
+        }),
+      }),
+    );
+  });
+
+  it('活动日志: 恢复验证失败时记录错误阶段', async () => {
+    const { openZipDialog } = await import('../utils/fileSystem');
+    const { validateLocalBackup } = await import('../services/backup/BackupService');
+    const { invoke } = await import('@tauri-apps/api/core');
+
+    vi.mocked(openZipDialog).mockResolvedValue('/backups/bad.zip');
+    vi.mocked(validateLocalBackup).mockResolvedValue({
+      ok: false,
+      summary: null,
+      errors: [{ code: 'not_sonotes_backup', severity: 'error', message: '这不是 SoNotes 备份包' }],
+      warnings: [],
+    });
+
+    await openDataSettings();
+    await clickElement(findButtonByText('从 zip 覆盖恢复'));
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      'backup_activity_append',
+      expect.objectContaining({
+        entry: expect.objectContaining({
+          operation: 'local-restore',
+          status: 'failed',
+          stage: expect.stringMatching(/\S/),
+        }),
+      }),
+    );
+  });
 });
 
 describe('BoardDock 图片文件一致性管理入口', () => {
