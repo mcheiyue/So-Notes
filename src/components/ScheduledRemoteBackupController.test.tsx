@@ -433,6 +433,65 @@ describe('ScheduledRemoteBackupController', () => {
     );
   });
 
+  it('退出前 fallback 在 runner 前捕获 startedAt，finishedAt 不与 startedAt 恒等', async () => {
+    const serviceInstance = {
+      ...stubService(),
+      initialize: vi.fn().mockRejectedValue(new Error('初始化失败')),
+    };
+    mockCreateService.mockReturnValue(serviceInstance);
+    mockLoadWebDavConfig.mockResolvedValue({
+      success: true,
+      serverUrl: 'https://dav.example.com',
+      username: 'user1',
+      remoteDir: 'SoNotes_Backups/',
+      passwordSaved: true,
+    });
+    let now = 1_000_000;
+    const dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    mockRunRemoteBackup.mockImplementation(async () => {
+      now += 50;
+      return {
+        success: true,
+        remoteFileName: 'backup.zip',
+        summary: null,
+        zipSizeBytes: null,
+        capturedStorageUpdatedAt: 12345,
+      };
+    });
+
+    try {
+      await act(async () => {
+        root.render(<ScheduledRemoteBackupController />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const listener = mockListen.mock.calls.find(
+        ([event]) => event === 'remote-backup-before-quit-requested',
+      )?.[1] as (() => Promise<void>) | undefined;
+      expect(listener).toBeDefined();
+      await act(async () => {
+        await listener!();
+      });
+      const { calls: quitCallsRetry } = vi.mocked(handleQuitRequest).mock;
+      const passedRunBeforeExit = quitCallsRetry[quitCallsRetry.length - 1]?.[0];
+      expect(passedRunBeforeExit).toBeDefined();
+
+      await passedRunBeforeExit!();
+
+      const saveCalls = mockSaveScheduledState.mock.calls;
+      const saved = saveCalls[saveCalls.length - 1]?.[0] as {
+        lastStartedAt: number;
+        lastFinishedAt: number;
+      };
+      expect(saved.lastStartedAt).toBe(1_000_000);
+      expect(saved.lastFinishedAt).toBe(1_000_050);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
+
   it('退出前 fallback 备份成功后使用 capturedStorageUpdatedAt 而非重新读取时间戳', async () => {
     const serviceInstance = {
       ...stubService(),

@@ -124,8 +124,9 @@ export const ScheduledRemoteBackupController = () => {
             throw new Error('退出前备份服务尚未就绪，请稍后重试');
           }
           const webdavConfig = { serverUrl: config.serverUrl, username: config.username, remoteDir: config.remoteDir ?? undefined };
+          const startedAt = Date.now();
           const result = await runRemoteBackup(runnerDepsRef.current, webdavConfig, { jobKind: 'before-exit-remote-backup' });
-          const now = Date.now();
+          const finishedAt = Date.now();
           const stateResult = await loadScheduledState();
           const prev = stateResult.success && stateResult.state ? stateResult.state : DEFAULT_SCHEDULED_BACKUP_STATE;
           const schedConfigResult = await loadScheduledConfig();
@@ -134,13 +135,13 @@ export const ScheduledRemoteBackupController = () => {
             : FREQUENCY_MS['daily'];
           await saveScheduledState({
             ...prev,
-            lastStartedAt: now,
-            lastFinishedAt: now,
+            lastStartedAt: startedAt,
+            lastFinishedAt: finishedAt,
             lastTrigger: 'before-exit',
-            nextRunAt: now + frequencyMs,
+            nextRunAt: finishedAt + frequencyMs,
             ...(result.success
               ? {
-                  lastAutomaticSuccessAt: now,
+                  lastAutomaticSuccessAt: finishedAt,
                   lastRemoteFileName: result.remoteFileName ?? null,
                   ...(result.capturedStorageUpdatedAt != null
                     ? { lastSuccessfulStorageUpdatedAt: result.capturedStorageUpdatedAt }
@@ -152,7 +153,7 @@ export const ScheduledRemoteBackupController = () => {
                   credentialActionRequired: false,
                 }
               : {
-                  lastFailureAt: now,
+                  lastFailureAt: finishedAt,
                   lastFailureReason: result.error ?? '退出前备份失败',
                   lastFailureStage: result.errorStage ?? null,
                   ...(result.errorStage === 'credential'
@@ -168,8 +169,8 @@ export const ScheduledRemoteBackupController = () => {
               operation: 'scheduled-remote-backup',
               status: result.success ? 'success' : 'failed',
               level: result.success ? 'info' : 'error',
-              startedAt: now,
-              finishedAt: now,
+              startedAt,
+              finishedAt,
               trigger: 'before-exit',
               stage: result.success ? null : (result.errorStage ?? 'unknown'),
               errorCode: result.errorCode ?? null,
