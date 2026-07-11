@@ -31,3 +31,7 @@ performance-test-*.png
 
 # Release plans generated in the repository root
 /RELEASE_PLAN_*.md
+
+# Local verification artifacts (vitest JSON reporters, plan fix scripts, etc.)
+.tmp/
+
