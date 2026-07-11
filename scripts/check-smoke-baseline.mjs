@@ -145,7 +145,9 @@ function parseUniqueResult(segmentText) {
 function extractCommandAndEvidenceText(segmentText) {
   const lines = segmentText.split('\n');
   const chunks = [];
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    // 防御性去掉行尾 CR（主流程已 normalize，此处双保险）
+    const line = rawLine.replace(/\r$/, '');
     const m = line.match(/^[-*]?\s*(自动化命令|证据)[：:]\s*(.*)$/i);
     if (m) {
       chunks.push(m[2].trim());
@@ -284,6 +286,9 @@ function main() {
     console.error(`无法读取文件: ${filePath}`, e.message);
     process.exit(1);
   }
+
+  // Windows CI checkout 常为 CRLF；统一为 LF，避免字段行 `$` 锚定被 \r 阻断
+  content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
   // 按 /^## /m 切段（拒绝重复 ID）
   const { segments, duplicateIds } = splitSegments(content);
