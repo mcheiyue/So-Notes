@@ -90,19 +90,52 @@ const SYNC_BANNED = /同步|云同步|自动同步|双向|合并|sync|synchroniz
 
 /**
  * 按 /^## /m 切段（计划伪代码步骤 1）
- * 返回 Map<段首行ID, 段文本>
+ * 返回 { segments: Map<ID, 段文本>, duplicateIds: string[] }
+ * 重复 ID 不静默覆盖：后出现的同名段记入 duplicateIds，Map 保留首次。
  */
 function splitSegments(content) {
   const segments = new Map();
+  const duplicateIds = [];
+  const seen = new Set();
   // 按 /^## / 分割，保留段首
   const parts = content.split(/(?=^## )/m);
   for (const part of parts) {
     const match = part.match(/^## (\S+)/m);
     if (match) {
-      segments.set(match[1], part);
+      const id = match[1];
+      if (seen.has(id)) {
+        if (!duplicateIds.includes(id)) {
+          duplicateIds.push(id);
+        }
+        // 不覆盖首次段落，避免后段 PASS 抹掉前段 FAIL
+        continue;
+      }
+      seen.add(id);
+      segments.set(id, part);
     }
   }
-  return segments;
+  return { segments, duplicateIds };
+}
+
+/**
+ * 段内 Result 行：要求恰好 1 个 PASS|N/A|FAIL。
+ * 返回 { ok, result?, count, reason? }
+ */
+function parseUniqueResult(segmentText) {
+  const re = /Result:\s*(PASS|N\/A|FAIL)/gi;
+  const matches = [...segmentText.matchAll(re)];
+  if (matches.length === 0) {
+    return { ok: false, count: 0, reason: '缺少 Result: PASS|N/A|FAIL' };
+  }
+  if (matches.length > 1) {
+    const values = matches.map((m) => m[1].toUpperCase()).join(', ');
+    return {
+      ok: false,
+      count: matches.length,
+      reason: `段内 Result 出现 ${matches.length} 次（须恰好 1 个）: ${values}`,
+    };
+  }
+  return { ok: true, count: 1, result: matches[0][1].toUpperCase() };
 }
 
 /**
@@ -252,8 +285,8 @@ function main() {
     process.exit(1);
   }
 
-  // 按 /^## /m 切段
-  const segments = splitSegments(content);
+  // 按 /^## /m 切段（拒绝重复 ID）
+  const { segments, duplicateIds } = splitSegments(content);
 
   // 确定要校验的 ID
   const idsToCheck = onlyIds || REQUIRED_IDS;
@@ -270,6 +303,16 @@ function main() {
   let exitCode = 0;
   const errors = [];
 
+  // ─── 重复 ID：发布阻断（防后段 PASS 覆盖前段 FAIL） ───────────────────
+  for (const id of duplicateIds) {
+    // --ids 过滤时：仅当重复 ID 在检查范围内才报（仍阻断合并污染）
+    if (onlyIds && !onlyIds.includes(id)) {
+      continue;
+    }
+    errors.push(`[${id}] 重复段落 (## ${id} 出现多次)；须每个 ID 唯一`);
+    exitCode = 1;
+  }
+
   // ─── 校验每个必需 ID ─────────────────────────────────────────────────────
   for (const id of idsToCheck) {
     // 检查段是否存在
@@ -281,15 +324,15 @@ function main() {
 
     const segmentText = segments.get(id);
 
-    // 检查 Result 字段（计划伪代码步骤 4）
-    const resultMatch = segmentText.match(/Result:\s*(PASS|N\/A|FAIL)/i);
-    if (!resultMatch) {
-      errors.push(`[${id}] 缺少 Result: PASS|N/A|FAIL`);
+    // 检查 Result 字段：恰好一个（计划伪代码步骤 4 + 防多 Result 假绿）
+    const parsed = parseUniqueResult(segmentText);
+    if (!parsed.ok) {
+      errors.push(`[${id}] ${parsed.reason}`);
       exitCode = 1;
       continue;
     }
 
-    const result = resultMatch[1].toUpperCase();
+    const result = parsed.result;
 
     // FAIL 结果 => exit 1（计划伪代码步骤 4b）
     if (result === 'FAIL' && !allowFail) {
