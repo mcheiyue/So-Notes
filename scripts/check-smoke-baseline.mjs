@@ -33,35 +33,47 @@ const REQUIRED_IDS = [
 /**
  * requiredById：匹配语义定义（计划伪代码步骤 5）
  *
+ * 短语只在「自动化命令」+「证据」字段上匹配（不含场景描述正文），
+ * 避免场景里写「粘贴」即可假满足命令/证据校验。
+ *
  * - 默认规则（OR）：数组内任一词/短语命中即可（大小写不敏感）。
  * - AND 组：{ all: [...] }，组内每一项都必须命中。
  * - alsoAny + any：{ alsoAny: [...], any: [...] }，alsoAny 至少命中一项 + any 至少命中一项；两组之间 AND。
  * - C16：不走默认 requiredById；PASS/N/A 仅由 6b 专项规则判定。
  */
 const requiredById = {
-  'QC-001': ['npx vitest run src/components/QuickCaptureOverlay.test.tsx'],
-  'IMG-001': ['粘贴', 'paste'],
-  'IMG-002': ['拖入', 'drag'],
-  'IMG-003': ['缺失', '占位', '图片不可用'],
-  'IMG-004': ['预览', 'preview'],
+  'QC-001': ['QuickCaptureOverlay.test.tsx'],
+  // 命令/证据须含测试文件锚点；场景描述中的「粘贴/拖入」不再计入
+  'IMG-001': { alsoAny: ['Canvas.test.tsx', 'ImageNoteBody'], any: ['粘贴', 'paste', 'Canvas'] },
+  'IMG-002': { alsoAny: ['Canvas.test.tsx', 'ImageNoteBody'], any: ['拖入', 'drag', 'Canvas'] },
+  'IMG-003': { alsoAny: ['ImageNoteBody'], any: ['缺失', '占位', '图片不可用'] },
+  'IMG-004': { alsoAny: ['ImageNoteBody'], any: ['预览', 'preview'] },
   'UNDO-001': {
     alsoAny: ['useStore'],
     any: ['定位不进入 Undo/Redo', '定位不进入Undo', '定位不进入历史'],
   },
-  'DET-001': { alsoAny: ['detach', '撕下'], any: ['DetachedNote', '窗口'] },
-  'DET-002': { alsoAny: ['focus', '聚焦'], any: ['DetachedNote'] },
-  'DET-003': { alsoAny: ['locate', '定位'], any: ['DetachedNote'] },
-  'DET-004': { alsoAny: ['pin', '置顶'], any: ['DetachedNote'] },
-  'DET-005': { alsoAny: ['close', '关闭'], any: ['DetachedNote'] },
-  'BK-LOCAL-001': ['BackupService', 'local-backup', '备份'],
-  'BK-LOCAL-002': ['BackupService', 'local-restore', '恢复'],
+  'DET-001': { alsoAny: ['DetachedNote', 'detach', '撕下'], any: ['DetachedNote', 'appController'] },
+  'DET-002': { alsoAny: ['DetachedNote', 'focus', '聚焦'], any: ['DetachedNote', 'appController'] },
+  'DET-003': { alsoAny: ['DetachedNote', 'locate', '定位'], any: ['DetachedNote', 'appController'] },
+  'DET-004': { alsoAny: ['DetachedNote', 'pin', '置顶'], any: ['DetachedNote', 'appController'] },
+  'DET-005': { alsoAny: ['DetachedNote', 'close', '关闭'], any: ['DetachedNote', 'appController'] },
+  'BK-LOCAL-001': ['BackupService', 'local-backup'],
+  'BK-LOCAL-002': ['BackupService', 'local-restore'],
   'BK-WEBDAV-001': ['WebDavBackupService', 'RemoteBackupRunner', 'webdav'],
-  'AUTO-001': ['ScheduledRemoteBackupService', '定时', '自动'],
-  'RET-001': ['RetentionCleanupOrchestrator', 'RemoteBackupRetention', '保留'],
-  'CLIFF-001': ['cliff', '断崖', '删除前'],
-  'RESTORE-IMG-001': { alsoAny: ['恢复', 'restore', 'backup'], any: ['asset', 'URL', '可解析'] },
-  'RESTORE-IMG-002': { alsoAny: ['恢复', 'restore', 'backup'], any: ['缺失', '占位', '图片不可用'] },
-  'TRASH-001': ['软删除', '永久删除'],
+  'AUTO-001': ['ScheduledRemoteBackupService'],
+  'RET-001': ['RetentionCleanupOrchestrator', 'RemoteBackupRetention'],
+  'CLIFF-001': { alsoAny: ['ScheduledRemoteBackupService', 'RetentionCleanupOrchestrator'], any: ['cliff', '断崖', '保留'] },
+  // 恢复组合路径：须挂到 BoardDock 恢复 + 缓存/URL 解析
+  'RESTORE-IMG-001': {
+    alsoAny: ['BoardDock'],
+    any: ['invalidateAttachmentPathCache', 'resolveAttachmentAssetUrl', 'zip 恢复成功后替换'],
+  },
+  // 缺失占位 UI + 恢复缓存清理分测；证据须诚实写明非单一组合 e2e
+  'RESTORE-IMG-002': {
+    alsoAny: ['ImageNoteBody', 'BoardDock'],
+    any: ['图片不可用', '缺失', 'invalidateAttachmentPathCache'],
+  },
+  'TRASH-001': { alsoAny: ['TrashGrid', 'domainStore'], any: ['软删除', '永久删除', 'TrashGrid'] },
   // C16 不走默认 requiredById；见 6b 专项规则
 };
 
@@ -94,7 +106,23 @@ function splitSegments(content) {
 }
 
 /**
- * 检查段内是否包含 requiredById 短语
+ * 从段中抽取「自动化命令」+「证据」字段正文（不含场景描述）。
+ * 防止场景描述里写「粘贴」即可假满足 requiredById。
+ */
+function extractCommandAndEvidenceText(segmentText) {
+  const lines = segmentText.split('\n');
+  const chunks = [];
+  for (const line of lines) {
+    const m = line.match(/^[-*]?\s*(自动化命令|证据)[：:]\s*(.*)$/i);
+    if (m) {
+      chunks.push(m[2].trim());
+    }
+  }
+  return chunks.join('\n');
+}
+
+/**
+ * 检查段内「自动化命令/证据」是否包含 requiredById 短语
  * 支持 OR 数组、{all}、{alsoAny, any} 三种形式
  * 返回 { pass: boolean, reason: string }
  */
@@ -105,37 +133,42 @@ function checkRequiredPhrases(id, segmentText) {
   // C16 不走默认 requiredById（计划伪代码步骤 5）
   if (id === 'C16') return { pass: true, reason: 'C16 走专项规则' };
 
+  const scopeText = extractCommandAndEvidenceText(segmentText);
+  if (!scopeText.trim()) {
+    return { pass: false, reason: '自动化命令/证据字段为空，无法校验 requiredById' };
+  }
+
   // 默认 OR 数组
   if (Array.isArray(rule)) {
-    const lowerText = segmentText.toLowerCase();
+    const lowerText = scopeText.toLowerCase();
     const hits = rule.filter(phrase => lowerText.includes(phrase.toLowerCase()));
     if (hits.length === 0) {
-      return { pass: false, reason: `OR 数组无命中；需含至少一项: ${rule.join(' / ')}` };
+      return { pass: false, reason: `OR 数组无命中（仅查命令/证据）；需含至少一项: ${rule.join(' / ')}` };
     }
     return { pass: true, reason: `OR 命中: ${hits.join(', ')}` };
   }
 
   // {all} AND 组
   if (rule.all) {
-    const lowerText = segmentText.toLowerCase();
+    const lowerText = scopeText.toLowerCase();
     const missing = rule.all.filter(phrase => !lowerText.includes(phrase.toLowerCase()));
     if (missing.length > 0) {
-      return { pass: false, reason: `AND 组缺失: ${missing.join(', ')}` };
+      return { pass: false, reason: `AND 组缺失（仅查命令/证据）: ${missing.join(', ')}` };
     }
     return { pass: true, reason: `AND 全命中` };
   }
 
   // {alsoAny, any} 两组 AND（计划伪代码步骤 5）
   if (rule.alsoAny && rule.any) {
-    const lowerText = segmentText.toLowerCase();
+    const lowerText = scopeText.toLowerCase();
     const alsoAnyHits = rule.alsoAny.filter(phrase => lowerText.includes(phrase.toLowerCase()));
     const anyHits = rule.any.filter(phrase => lowerText.includes(phrase.toLowerCase()));
 
     if (alsoAnyHits.length === 0) {
-      return { pass: false, reason: `alsoAny 组无命中；需含至少一项: ${rule.alsoAny.join(' / ')}` };
+      return { pass: false, reason: `alsoAny 组无命中（仅查命令/证据）；需含至少一项: ${rule.alsoAny.join(' / ')}` };
     }
     if (anyHits.length === 0) {
-      return { pass: false, reason: `any 组无命中；需含至少一项: ${rule.any.join(' / ')}` };
+      return { pass: false, reason: `any 组无命中（仅查命令/证据）；需含至少一项: ${rule.any.join(' / ')}` };
     }
     return { pass: true, reason: `alsoAny 命中: ${alsoAnyHits.join(', ')}; any 命中: ${anyHits.join(', ')}` };
   }
