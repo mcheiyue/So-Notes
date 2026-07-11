@@ -17,6 +17,12 @@ vi.mock('../utils/fileSystem', () => ({
   openFile: vi.fn(async () => null),
 }));
 
+vi.mock('../utils/noteElementRegistry', () => ({
+  getNoteElement: vi.fn(() => document.createElement('div')),
+  registerNoteElement: vi.fn(),
+  unregisterNoteElement: vi.fn(),
+}));
+
 const { resolveAttachmentAssetUrlCachedMock, deleteAttachmentFileMock } = vi.hoisted(() => ({
   resolveAttachmentAssetUrlCachedMock: vi.fn(async (relativePath: string) => `asset://localhost/${relativePath}`),
   deleteAttachmentFileMock: vi.fn(async (relativePath: string) => ({ deleted: true, relativePath })),
@@ -29,6 +35,7 @@ vi.mock('../services/storage/attachmentPersistence', () => ({
 }));
 
 import { useStore } from './useStore';
+import { appController } from '../controllers/appController';
 import { db } from './db';
 import { openFile } from '../utils/fileSystem';
 import { invoke } from '@tauri-apps/api/core';
@@ -4888,5 +4895,116 @@ describe('v1.4.8 clearDomainHistory 契约', () => {
 
     useStore.getState().addNote(100, 100);
     expect(useStore.getState().domainHistory.undoStack).toHaveLength(1);
+  });
+});
+
+describe('C7 Undo 负向: 定位 / 预览不进入历史', () => {
+  beforeEach(() => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn((cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } },
+        { id: 'board-2', name: '二号板', icon: '🧭', createdAt: 1, viewport: { x: 0, y: 0 } },
+      ],
+      currentBoardId: 'default',
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          kind: 'text',
+          boardId: 'default',
+          x: 100,
+          y: 200,
+          title: '普通便签',
+          content: '定位测试',
+          color: '#FFFFFF',
+          z: 1,
+          collapsed: false,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+        {
+          id: 'note-collapsed',
+          kind: 'text',
+          boardId: 'default',
+          x: 50,
+          y: 50,
+          title: '折叠便签',
+          content: '折叠定位',
+          color: '#FFFFFF',
+          z: 2,
+          collapsed: true,
+          createdAt: 200,
+          updatedAt: 200,
+        },
+        {
+          id: 'note-remote',
+          kind: 'text',
+          boardId: 'board-2',
+          x: 400,
+          y: 300,
+          title: '远端便签',
+          content: '跨板定位',
+          color: '#dbeafe',
+          z: 3,
+          createdAt: 300,
+          updatedAt: 300,
+        },
+      ]),
+      viewport: { x: 0, y: 0, w: 320, h: 240 },
+      config: { ...useStore.getState().config, maxZ: 3 },
+    });
+  });
+
+  it('Undo 负向: 定位不进入历史', () => {
+    const note = useStore.getState().notesById['note-1'];
+    const historyDepth0 = useStore.getState().domainHistory.undoStack.length;
+
+    appController.locateAndSelectNote(note);
+
+    const state = useStore.getState();
+    expect(state.domainHistory.undoStack.length).toBe(historyDepth0);
+    expect(state.selectedIds).toEqual(['note-1']);
+
+    // 反假绿: 改色后 undoStack 必须增长，证明探针有效
+    useStore.getState().changeColor('note-1', '#dbeafe');
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(historyDepth0 + 1);
+  });
+
+  it('Undo 负向: 折叠便签定位不进入历史', () => {
+    const note = useStore.getState().notesById['note-collapsed'];
+    const historyDepth0 = useStore.getState().domainHistory.undoStack.length;
+
+    appController.locateAndSelectNote(note);
+
+    const state = useStore.getState();
+    expect(state.notesById['note-collapsed'].collapsed).toBe(false);
+    expect(state.domainHistory.undoStack.length).toBe(historyDepth0);
+    expect(state.selectedIds).toEqual(['note-collapsed']);
+
+    // 反假绿: 改色后 undoStack 必须增长
+    useStore.getState().changeColor('note-collapsed', '#fef3c7');
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(historyDepth0 + 1);
+  });
+
+  it('Undo 负向: 跨看板定位不进入历史', () => {
+    const note = useStore.getState().notesById['note-remote'];
+    const historyDepth0 = useStore.getState().domainHistory.undoStack.length;
+
+    appController.locateAndSelectNote(note);
+
+    const state = useStore.getState();
+    expect(state.currentBoardId).toBe('board-2');
+    expect(state.domainHistory.undoStack.length).toBe(historyDepth0);
+    expect(state.selectedIds).toEqual(['note-remote']);
+
+    // 反假绿: 改色后 undoStack 必须增长
+    useStore.getState().changeColor('note-remote', '#fef3c7');
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(historyDepth0 + 1);
   });
 });
