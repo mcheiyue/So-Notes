@@ -249,6 +249,7 @@ export const BoardDock = () => {
   const [activityEntries, setActivityEntries] = useState<BackupActivityEntry[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
+  const activityMutationErrorRef = useRef(false);
   const [activityClearing, setActivityClearing] = useState(false);
   const activityEntriesRef = useRef<BackupActivityEntry[]>([]);
   const activityRefreshRequestIdRef = useRef(0);
@@ -276,11 +277,12 @@ export const BoardDock = () => {
     const requestId = beginActivityRefresh();
     try {
       const entries = await loadRecentActivities(10);
-      if (commitActivityEntries(entries, requestId)) {
+      if (commitActivityEntries(entries, requestId) && !activityMutationErrorRef.current) {
         setActivityError(null);
       }
     } catch (err) {
       if (shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) {
+        activityMutationErrorRef.current = false;
         setActivityError(`刷新失败：${sanitizeErrorMessage(err)}`);
       }
     }
@@ -362,6 +364,7 @@ export const BoardDock = () => {
           setRetentionFeedback(null);
           setActivityEntries([]);
           setActivityLoading(false);
+          activityMutationErrorRef.current = false;
           setActivityError(null);
           setActivityClearing(false);
           activityEntriesRef.current = [];
@@ -430,6 +433,7 @@ export const BoardDock = () => {
     (async () => {
       const requestId = beginActivityRefresh();
       setActivityLoading(true);
+      activityMutationErrorRef.current = false;
       setActivityError(null);
       try {
         const entries = await loadRecentActivities(10);
@@ -437,6 +441,7 @@ export const BoardDock = () => {
         commitActivityEntries(entries, requestId);
       } catch (err) {
         if (!cancelled && shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) {
+          activityMutationErrorRef.current = false;
           setActivityError(sanitizeErrorMessage(err));
         }
       } finally {
@@ -470,7 +475,10 @@ export const BoardDock = () => {
         if (safeEntries.length !== prev.length || safeEntries.some((e, i) => e.id !== prev[i]?.id)) {
           commitActivityEntries(safeEntries, requestId);
         }
-        if (shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) {
+        if (
+          shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)
+          && !activityMutationErrorRef.current
+        ) {
           setActivityError(null);
         }
       } catch { /* 轮询失败静默忽略 */ }
@@ -2036,12 +2044,14 @@ export const BoardDock = () => {
   const refreshActivities = async () => {
     const requestId = beginActivityRefresh();
     setActivityLoading(true);
+    activityMutationErrorRef.current = false;
     setActivityError(null);
     try {
       const entries = await loadRecentActivities(10);
       commitActivityEntries(entries, requestId);
     } catch (err) {
       if (shouldCommitActivityRefresh(requestId, activityRefreshRequestIdRef.current)) {
+        activityMutationErrorRef.current = false;
         setActivityError(sanitizeErrorMessage(err));
       }
     } finally {
@@ -2063,8 +2073,10 @@ export const BoardDock = () => {
       beginActivityRefresh();
       activityEntriesRef.current = [];
       setActivityEntries([]);
+      activityMutationErrorRef.current = false;
       setActivityError(null);
     } catch (err) {
+      activityMutationErrorRef.current = true;
       setActivityError(`清空失败：${sanitizeErrorMessage(err)}`);
     } finally {
       setActivityClearing(false);

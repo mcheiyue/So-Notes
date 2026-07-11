@@ -4072,6 +4072,65 @@ describe('BoardDock 定时远端备份 UI', () => {
     }
   });
 
+  it('清空活动失败后成功轮询不会抹掉错误提示', async () => {
+    vi.useFakeTimers();
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      let listCallCount = 0;
+      vi.mocked(invoke).mockImplementation(async (command) => {
+        if (command === 'backup_activity_list') {
+          listCallCount += 1;
+          if (listCallCount === 1) {
+            return [
+              {
+                id: 'activity-initial',
+                operation: 'remote-list',
+                status: 'success',
+                level: 'info',
+                startedAt: Date.now(),
+                finishedAt: Date.now(),
+                remoteFileName: 'keep.zip',
+              },
+            ];
+          }
+          return [
+            {
+              id: 'activity-after-poll',
+              operation: 'remote-list',
+              status: 'success',
+              level: 'info',
+              startedAt: Date.now(),
+              finishedAt: Date.now(),
+              remoteFileName: 'after-poll.zip',
+            },
+          ];
+        }
+        if (command === 'backup_activity_clear') {
+          throw new Error('clear disk full');
+        }
+        return null;
+      });
+
+      await openDataSettings();
+      await vi.waitFor(() => expect(container.querySelector('[data-testid="activity-list"]')).not.toBeNull());
+
+      await clickElement(container.querySelector('[data-testid="activity-clear-button"]'));
+      await vi.waitFor(() => {
+        expect(container.textContent ?? '').toContain('清空失败');
+      });
+
+      await vi.advanceTimersByTimeAsync(5000);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(container.textContent ?? '').toContain('清空失败');
+      expect(container.textContent ?? '').toContain('clear disk full');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('清除断崖警告记录 skipped 和 warning_dismissed reasonCode', async () => {
     const { loadConfig } = await import('../services/backup/ScheduledRemoteBackupConfigService');
     const { loadConfig: webdavLoadConfig } = await import('../services/backup/WebDavBackupService');
