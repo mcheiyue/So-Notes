@@ -1156,6 +1156,8 @@ export const useStore = create<State>()(
       const createdIds = normalizedNotes.map(() => crypto.randomUUID());
 
       set((state) => {
+        const createdNotes: Note[] = [];
+
         normalizedNotes.forEach((note, index) => {
           const newNote: Note = {
             id: createdIds[index],
@@ -1173,12 +1175,28 @@ export const useStore = create<State>()(
           };
 
           appendNoteToNormalizedState(state, newNote);
+          createdNotes.push({ ...newNote });
         });
 
         state.config.maxZ += normalizedNotes.length;
         state.selectedIds = createdIds;
         state.recentlyCreatedIds = createdIds;
         assignNoteHighlights(state, createdIds, 'created');
+
+        const entry: HistoryEntry<DomainPatch> = {
+          id: crypto.randomUUID(),
+          label: 'add-notes-with-content-batch',
+          createdAt: Date.now(),
+          undo: {
+            type: 'compound-patch',
+            patches: createdIds.map((id) => ({ type: 'remove-note' as const, noteId: id })),
+          },
+          redo: {
+            type: 'compound-patch',
+            patches: createdNotes.map((note) => ({ type: 'add-note' as const, note })),
+          },
+        };
+        state.domainHistory = toMutableHistoryStack(pushHistoryEntry(get().domainHistory, entry));
       });
 
       return createdIds;

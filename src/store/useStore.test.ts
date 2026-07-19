@@ -2053,6 +2053,135 @@ describe('v1.4.3 领域撤销/重做契约', () => {
     createdIds.forEach((id) => expect(useStore.getState().notesById[id]).toBeDefined());
   });
 
+  it('store 历史: addNotesWithContentBatch undo 整批撤销', () => {
+    const before = useStore.getState().domainHistory.undoStack.length;
+
+    const ids = useStore.getState().addNotesWithContentBatch([
+      { content: 'a', x: 0, y: 0 },
+      { content: 'b', x: 10, y: 0 },
+      { content: 'c', x: 20, y: 0 },
+    ]);
+
+    expect(ids).toHaveLength(3);
+    ids.forEach((id) => {
+      expect(useStore.getState().notesById[id]).toBeDefined();
+      expect(useStore.getState().boardNoteIds['default']).toContain(id);
+    });
+
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(before + 1);
+    const entry = useStore.getState().domainHistory.undoStack[
+      useStore.getState().domainHistory.undoStack.length - 1
+    ];
+    expect(entry.label).toBe('add-notes-with-content-batch');
+    expect(entry.undo.type).toBe('compound-patch');
+    expect(entry.redo.type).toBe('compound-patch');
+    if (entry.undo.type === 'compound-patch') {
+      expect(entry.undo.patches).toHaveLength(3);
+      expect(entry.undo.patches.every((p) => p.type === 'remove-note')).toBe(true);
+    }
+    if (entry.redo.type === 'compound-patch') {
+      expect(entry.redo.patches).toHaveLength(3);
+      expect(entry.redo.patches.every((p) => p.type === 'add-note')).toBe(true);
+    }
+
+    expect(useStore.getState().undoDomainChange()).toBe(true);
+
+    const afterUndo = useStore.getState();
+    ids.forEach((id) => {
+      expect(afterUndo.notesById[id]).toBeUndefined();
+      expect(afterUndo.boardNoteIds['default'] ?? []).not.toContain(id);
+      expect(afterUndo.selectedIds).not.toContain(id);
+      expect(afterUndo.recentlyCreatedIds).not.toContain(id);
+      expect(afterUndo.noteHighlights[id]).toBeUndefined();
+    });
+  });
+
+  it('store 历史: addNotesWithContentBatch redo 整批恢复', () => {
+    const ids = useStore.getState().addNotesWithContentBatch([
+      { content: 'a', x: 0, y: 0 },
+      { content: 'b', x: 10, y: 0 },
+      { content: 'c', x: 20, y: 0 },
+    ]);
+    const snapshots = ids.map((id) => {
+      const note = useStore.getState().notesById[id];
+      return {
+        id,
+        content: note.content,
+        x: note.x,
+        y: note.y,
+      };
+    });
+
+    expect(useStore.getState().undoDomainChange()).toBe(true);
+    expect(useStore.getState().redoDomainChange()).toBe(true);
+
+    const afterRedo = useStore.getState();
+    snapshots.forEach((snap) => {
+      expect(afterRedo.notesById[snap.id]).toBeDefined();
+      expect(afterRedo.notesById[snap.id]).toMatchObject({
+        id: snap.id,
+        content: snap.content,
+        x: snap.x,
+        y: snap.y,
+      });
+      // redo 只恢复领域 Note：不回填创建高亮 / recentlyCreated（C25 契约）
+      expect(afterRedo.recentlyCreatedIds).not.toContain(snap.id);
+      expect(afterRedo.noteHighlights[snap.id]).toBeUndefined();
+    });
+    // 禁止把创建时整批 selectedIds 回填；现网 redo 导航可能选中首条 affected note
+    expect(afterRedo.selectedIds).not.toEqual(ids);
+    expect(afterRedo.selectedIds.filter((id) => ids.includes(id)).length).toBeLessThanOrEqual(1);
+  });
+
+  it('store 历史: 空 batch 不 push history', () => {
+    const before = useStore.getState().domainHistory.undoStack.length;
+
+    const emptyCases = [
+      [],
+      [{ content: '', x: 0, y: 0 }],
+      [{ content: '   ', x: 0, y: 0 }],
+      [{ content: '\t\n', x: 0, y: 0 }],
+      [{ content: '\u00a0', x: 0, y: 0 }],
+      [{ content: '\u3000', x: 0, y: 0 }],
+    ] as const;
+
+    for (const input of emptyCases) {
+      const result = useStore.getState().addNotesWithContentBatch([...input]);
+      expect(result).toEqual([]);
+      expect(useStore.getState().domainHistory.undoStack.length).toBe(before);
+    }
+
+    const mixed = useStore.getState().addNotesWithContentBatch([
+      { content: 'a', x: 0, y: 0 },
+      { content: '  ', x: 1, y: 0 },
+    ]);
+    expect(mixed).toHaveLength(1);
+    expect(useStore.getState().domainHistory.undoStack.length).toBe(before + 1);
+    expect(useStore.getState().domainHistory.undoStack[
+      useStore.getState().domainHistory.undoStack.length - 1
+    ].label).toBe('add-notes-with-content-batch');
+  });
+
+  it('store 历史: batch 与单条 add 混合栈', () => {
+    useStore.getState().addNoteWithContent(1, 2, 'single');
+    const [singleId] = useStore.getState().allNoteIds;
+    expect(singleId).toBeDefined();
+
+    const batchIds = useStore.getState().addNotesWithContentBatch([
+      { content: 'batch-a', x: 10, y: 0 },
+      { content: 'batch-b', x: 20, y: 0 },
+    ]);
+    expect(batchIds).toHaveLength(2);
+
+    expect(useStore.getState().undoDomainChange()).toBe(true);
+    expect(useStore.getState().notesById[batchIds[0]]).toBeUndefined();
+    expect(useStore.getState().notesById[batchIds[1]]).toBeUndefined();
+    expect(useStore.getState().notesById[singleId]).toBeDefined();
+
+    expect(useStore.getState().undoDomainChange()).toBe(true);
+    expect(useStore.getState().notesById[singleId]).toBeUndefined();
+  });
+
   it('moveNoteToBoard 记录原看板和位置并支持撤销/重做', () => {
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     try {
