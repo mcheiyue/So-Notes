@@ -3,11 +3,14 @@
  * 冒烟基线文档校验脚本
  *
  * 用法：
- *   node scripts/check-smoke-baseline.mjs <file>              # 校验全部必需 ID
+ *   node scripts/check-smoke-baseline.mjs <file>              # 按路径自动选 preset
  *   node scripts/check-smoke-baseline.mjs --ids ID1,ID2 <file> # 只校验指定 ID
  *   node scripts/check-smoke-baseline.mjs --allow-fail <file>  # 允许 FAIL 结果不阻断
+ *   node scripts/check-smoke-baseline.mjs --preset v1.6.0 <file> # 强制 v1.6.0 ID 集
  *
- * 校验规则见 docs/plans/v1.5.9-prep-and-experience-baseline.md 伪代码（约 L787-872）。
+ * 校验规则：
+ *   - v1.5.9：docs/plans/v1.5.9-prep-and-experience-baseline.md 伪代码（约 L787-872）
+ *   - v1.6.0：docs/plans/v1.6.0-capture-and-organize-implementation.md §7.2
  */
 
 import { readFileSync } from 'node:fs';
@@ -80,11 +83,83 @@ const requiredById = {
 /** 允许 N/A 的 ID 白名单（计划伪代码步骤 6c） */
 const NA_WHITELIST = new Set(['BK-WEBDAV-001', 'C16', 'DET-001', 'DET-002', 'DET-003', 'DET-004', 'DET-005']);
 
+// ── v1.6.0 preset（与 v1.5.9 分支并列，勿互相覆盖；§7.2）────────────────────
+
+const REQUIRED_IDS_V160 = [
+  'QC-BOARD-001',
+  'QC-FAIL-001',
+  'QC-HIGHLIGHT-001',
+  'QC-UNDO-001',
+  'QC-LOCATE-001',
+];
+
+/**
+ * v1.6.0 requiredById：只在「自动化命令」+「证据」字段文本上匹配
+ * BOARD/FAIL/HIGHLIGHT/UNDO/LOCATE(PASS) 使用 { all } AND，防单条 it 假绿
+ */
+const requiredById_V160 = {
+  'QC-BOARD-001': {
+    all: [
+      'QuickCaptureOverlay.test.tsx',
+      '空名回退当前看板',
+      '长名截断且 emoji 不抛错',
+      '不使用页面工作区项目',
+    ],
+  },
+  'QC-FAIL-001': {
+    all: [
+      'QuickCaptureOverlay.test.tsx',
+      'batch 抛错时保留输入且浮层不关',
+      'batch 成功时清空并关闭',
+    ],
+  },
+  'QC-HIGHLIGHT-001': {
+    all: [
+      'useStore.test.ts',
+      '高亮与选区',
+      'TRASH 视图下 batch 仍写入 currentBoardId',
+    ],
+  },
+  'QC-UNDO-001': {
+    all: [
+      'useStore.test.ts',
+      'addNotesWithContentBatch undo 整批撤销',
+      'addNotesWithContentBatch redo 整批恢复',
+      '空 batch 不 push history',
+      'batch 与单条 add 混合栈',
+    ],
+  },
+  'QC-LOCATE-001': {
+    all: [
+      'QuickCaptureOverlay.test.tsx',
+      '空闲时允许定位',
+      '占用时跳过定位',
+    ],
+  },
+};
+
+/** v1.6.0 仅 QC-LOCATE-001 允许 N/A */
+const NA_WHITELIST_V160 = new Set(['QC-LOCATE-001']);
+
 /** 必填字段列表（计划伪代码步骤 7b） */
 const REQUIRED_FIELDS = ['类型:', '自动化命令:', '人工步骤:', '证据:', '跳过原因:'];
 
-/** SYNC_BANNED 正则（计划伪代码步骤 8；与 C14 否定正则同源） */
+/** SYNC_BANNED 正则（计划伪代码步骤 8；与 C14 否定正则同源；C28 doc-guard 从此提取字面） */
 const SYNC_BANNED = /同步|云同步|自动同步|双向|合并|sync|synchronize|自动拉取|自动下载|自动恢复/i;
+
+/**
+ * 解析 preset：路径含 v1.6.0-smoke-baseline 或 --preset v1.6.0 → v1.6.0，否则 v1.5.9
+ * @param {string} filePath
+ * @param {string|null} presetFlag
+ * @returns {'v1.5.9'|'v1.6.0'}
+ */
+function resolvePreset(filePath, presetFlag) {
+  if (presetFlag === 'v1.6.0' || presetFlag === '1.6.0') return 'v1.6.0';
+  if (presetFlag === 'v1.5.9' || presetFlag === '1.5.9') return 'v1.5.9';
+  const posix = String(filePath).replace(/\\/g, '/');
+  if (posix.includes('v1.6.0-smoke-baseline')) return 'v1.6.0';
+  return 'v1.5.9';
+}
 
 // ─── 工具函数 ───────────────────────────────────────────────────────────────────
 
@@ -160,9 +235,12 @@ function extractCommandAndEvidenceText(segmentText) {
  * 检查段内「自动化命令/证据」是否包含 requiredById 短语
  * 支持 OR 数组、{all}、{alsoAny, any} 三种形式
  * 返回 { pass: boolean, reason: string }
+ * @param {string} id
+ * @param {string} segmentText
+ * @param {Record<string, unknown>} ruleMap 当前 preset 的 requiredById
  */
-function checkRequiredPhrases(id, segmentText) {
-  const rule = requiredById[id];
+function checkRequiredPhrases(id, segmentText, ruleMap) {
+  const rule = ruleMap[id];
   if (!rule) return { pass: true, reason: '无 requiredById 规则' };
 
   // C16 不走默认 requiredById（计划伪代码步骤 5）
@@ -261,6 +339,7 @@ function main() {
   let allowFail = false;
   let onlyIds = null;
   let filePath = null;
+  let presetFlag = null;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--allow-fail') {
@@ -268,13 +347,16 @@ function main() {
     } else if (args[i] === '--ids' && i + 1 < args.length) {
       onlyIds = args[i + 1].split(',').map(s => s.trim());
       i++;
+    } else if (args[i] === '--preset' && i + 1 < args.length) {
+      presetFlag = args[i + 1].trim();
+      i++;
     } else if (!args[i].startsWith('-')) {
       filePath = args[i];
     }
   }
 
   if (!filePath) {
-    console.error('用法: node scripts/check-smoke-baseline.mjs [--ids ID1,ID2] [--allow-fail] <file>');
+    console.error('用法: node scripts/check-smoke-baseline.mjs [--ids ID1,ID2] [--allow-fail] [--preset v1.5.9|v1.6.0] <file>');
     process.exit(1);
   }
 
@@ -293,8 +375,14 @@ function main() {
   // 按 /^## /m 切段（拒绝重复 ID）
   const { segments, duplicateIds } = splitSegments(content);
 
+  // preset 切换：路径含 v1.6.0-smoke-baseline 或 --preset v1.6.0
+  const preset = resolvePreset(filePath, presetFlag);
+  const activeRequiredIds = preset === 'v1.6.0' ? REQUIRED_IDS_V160 : REQUIRED_IDS;
+  const activeRequiredById = preset === 'v1.6.0' ? requiredById_V160 : requiredById;
+  const activeNaWhitelist = preset === 'v1.6.0' ? NA_WHITELIST_V160 : NA_WHITELIST;
+
   // 确定要校验的 ID
-  const idsToCheck = onlyIds || REQUIRED_IDS;
+  const idsToCheck = onlyIds || activeRequiredIds;
 
   // ─── 全文 SYNC_BANNED 检查（计划伪代码步骤 8） ─────────────────────────
   const syncMatches = content.match(SYNC_BANNED);
@@ -406,9 +494,32 @@ function main() {
         }
       }
 
-      // 禁止对非白名单 ID 使用 N/A（计划伪代码步骤 6c）
-      if (!NA_WHITELIST.has(id)) {
-        errors.push(`[${id}] 不允许 Result: N/A（仅白名单 ID 可使用 N/A）`);
+      // QC-LOCATE-001 N/A 专项（v1.6.0 §7.2 步骤 6）
+      if (id === 'QC-LOCATE-001') {
+        if (!/原因[:：]/.test(segmentText)) {
+          errors.push(`[${id}] N/A 但缺少 "原因:"`);
+          exitCode = 1;
+        }
+        const locateNaOk =
+          segmentText.includes('未交付') ||
+          segmentText.includes('Optional') ||
+          segmentText.includes('C29') ||
+          segmentText.includes('捕获后程序定位未交付');
+        if (!locateNaOk) {
+          errors.push(
+            `[${id}] N/A 但缺少原因关键词之一：未交付 / Optional / C29 / 捕获后程序定位未交付`,
+          );
+          exitCode = 1;
+        }
+        if (!/跳过原因[:：]\s*\S/.test(segmentText)) {
+          errors.push(`[${id}] N/A 但缺少非空 "跳过原因:"`);
+          exitCode = 1;
+        }
+      }
+
+      // 禁止对非白名单 ID 使用 N/A（计划伪代码步骤 6c；preset 各自白名单）
+      if (!activeNaWhitelist.has(id)) {
+        errors.push(`[${id}] 不允许 Result: N/A（仅白名单 ID 可使用 N/A；preset=${preset}）`);
         exitCode = 1;
       }
 
@@ -418,7 +529,7 @@ function main() {
 
     // ─── PASS 段的专项规则 ──────────────────────────────────────────────
 
-    // C16 PASS 专项（计划伪代码步骤 6b）
+    // C16 PASS 专项（计划伪代码步骤 6b；仅 v1.5.9）
     if (id === 'C16') {
       const testName = '文案守卫: Quick Capture 显示当前看板且不使用页面工作区项目';
       if (!segmentText.includes(testName)) {
@@ -436,7 +547,7 @@ function main() {
     }
 
     // ─── 默认 requiredById 短语检查（计划伪代码步骤 5） ──────────────
-    const phraseCheck = checkRequiredPhrases(id, segmentText);
+    const phraseCheck = checkRequiredPhrases(id, segmentText, activeRequiredById);
     if (!phraseCheck.pass) {
       errors.push(`[${id}] ${phraseCheck.reason}`);
       exitCode = 1;
