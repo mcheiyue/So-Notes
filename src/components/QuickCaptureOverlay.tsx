@@ -11,6 +11,16 @@ const getCaptureOrigin = () => {
   return getViewportSpawnOrigin(viewport);
 };
 
+/**
+ * 快速捕获 header 看板 label 解析（C16 / C26）。
+ * 必须与本组件同文件；禁止抽到 src/utils/**。
+ * null / undefined / '' / 仅空白 →「当前看板」；非空名原样返回（含禁用词子串、emoji）。
+ */
+function resolveQuickCaptureBoardLabel(name: string | null | undefined): string {
+  if (name == null || name.trim() === '') return '当前看板';
+  return name;
+}
+
 const DIALOG_FOCUSABLE_SELECTOR = 'textarea, button:not([disabled])';
 
 export const QuickCaptureOverlay: React.FC = () => {
@@ -19,16 +29,23 @@ export const QuickCaptureOverlay: React.FC = () => {
   const addNotesWithContentBatch = useStore((state) => state.addNotesWithContentBatch);
   const boards = useStore((state) => state.boards);
   const currentBoardId = useStore((state) => state.currentBoardId);
-  const currentBoardName = boards.find((b) => b.id === currentBoardId)?.name ?? '当前看板';
+  const currentBoardName = resolveQuickCaptureBoardLabel(
+    boards.find((b) => b.id === currentBoardId)?.name,
+  );
   const [value, setValue] = useState('');
+  // 关闭时在渲染期清空输入，避免 effect 同步 setState（react-hooks/set-state-in-effect）
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (wasOpen !== isOpen) {
+    setWasOpen(isOpen);
+    if (!isOpen) {
+      setValue('');
+    }
+  }
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
-    if (!isOpen) {
-      setValue('');
-      return;
-    }
+    if (!isOpen) return;
 
     let cancelled = false;
 

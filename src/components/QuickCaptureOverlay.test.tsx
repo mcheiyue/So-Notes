@@ -207,21 +207,96 @@ describe('QuickCaptureOverlay 输入事件', () => {
   });
 
   it('文案守卫: Quick Capture 显示当前看板且不使用页面工作区项目', async () => {
+    // B-C16-1 / B-C16-2 / B-C16-3：有名正常路径 + 用户名含禁用子串时仍原样展示
+    const cases = ['工作看板', '我的页面笔记', '工作区A', '项目X'] as const;
+
+    for (const name of cases) {
+      useStore.setState({
+        boards: [
+          { id: 'default', name: '我的看板', icon: '📌', createdAt: 0 },
+          { id: 'work', name, icon: '💼', createdAt: 1 },
+        ],
+        currentBoardId: 'work',
+        isQuickCaptureOpen: true,
+      });
+
+      await renderOverlay();
+
+      const header = container.querySelector('.border-b');
+      expect(header).not.toBeNull();
+      const headerText = header?.textContent ?? '';
+
+      expect(headerText).toContain(name);
+      // 模板段守卫：禁止产品固定词顶替 label；禁止整段 /页面|工作区|项目/ 作唯一断言
+      expect(headerText).not.toMatch(/快速捕获\s*·\s*(页面|工作区|项目)(\s|$)/);
+      const labelSeg = headerText.split(/·/).slice(1).join('·').trim();
+      expect(labelSeg).toBe(name);
+    }
+  });
+
+  it('文案守卫: Quick Capture 空名回退当前看板', async () => {
+    // B-C26-1..4 + B-C26-6/7：空串 / ASCII 空白 / 控制空白 / Unicode 空白 / board 缺失
+    type EmptyCase =
+      | { kind: 'name'; name: string }
+      | { kind: 'missing-board' };
+
+    const cases: EmptyCase[] = [
+      { kind: 'name', name: '' },
+      { kind: 'name', name: '   ' },
+      { kind: 'name', name: '\t\n' },
+      { kind: 'name', name: '\u00a0' },
+      { kind: 'name', name: '\u3000' },
+      { kind: 'missing-board' },
+    ];
+
+    for (const c of cases) {
+      if (c.kind === 'missing-board') {
+        useStore.setState({
+          boards: [],
+          currentBoardId: 'missing-board-id',
+          isQuickCaptureOpen: true,
+        });
+      } else {
+        useStore.setState({
+          boards: [{ id: 'work', name: c.name, icon: '💼', createdAt: 1 }],
+          currentBoardId: 'work',
+          isQuickCaptureOpen: true,
+        });
+      }
+
+      await renderOverlay();
+
+      const header = container.querySelector('.border-b');
+      expect(header).not.toBeNull();
+      const headerText = header?.textContent ?? '';
+      expect(headerText).toContain('当前看板');
+      const labelSeg = headerText.split(/·/).slice(1).join('·').trim();
+      expect(labelSeg).toBe('当前看板');
+    }
+  });
+
+  it('文案守卫: Quick Capture 长名截断且 emoji 不抛错', async () => {
+    // B-C26-5：emoji 前缀 + ≥80 字符 BMP 长串；不强制回退为「当前看板」
+    const longName = `📌${'测'.repeat(80)}`;
+
     useStore.setState({
-      boards: [
-        { id: 'default', name: '我的看板', icon: '📌', createdAt: 0 },
-        { id: 'work', name: '工作看板', icon: '💼', createdAt: 1 },
-      ],
+      boards: [{ id: 'work', name: longName, icon: '📌', createdAt: 1 }],
       currentBoardId: 'work',
+      isQuickCaptureOpen: true,
     });
 
-    await renderOverlay();
+    await expect(renderOverlay()).resolves.not.toThrow();
 
     const header = container.querySelector('.border-b');
     expect(header).not.toBeNull();
-    const headerText = header?.textContent ?? '';
+    const labelSpan = header?.querySelector('.truncate');
+    expect(labelSpan).not.toBeNull();
+    expect(labelSpan?.className).toContain('truncate');
 
-    expect(headerText).toContain('工作看板');
-    expect(headerText).not.toMatch(/页面|工作区|项目/);
+    const headerText = header?.textContent ?? '';
+    expect(headerText).toContain(longName);
+    expect(headerText).not.toMatch(/快速捕获\s*·\s*当前看板(\s|$)/);
+    const labelSeg = headerText.split(/·/).slice(1).join('·').trim();
+    expect(labelSeg).toBe(longName);
   });
 });
