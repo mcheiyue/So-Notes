@@ -5137,3 +5137,73 @@ describe('C7 Undo 负向: 定位不进入历史', () => {
     expect(useStore.getState().domainHistory.undoStack.length).toBe(historyDepth0 + 1);
   });
 });
+
+describe('v1.6.0 store 契约: addNotesWithContentBatch 高亮/选区/TRASH', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState(useStore.getInitialState(), true);
+  });
+
+  it('store 契约: addNotesWithContentBatch 高亮与选区', () => {
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      currentBoardId: 'default',
+      viewMode: 'BOARD',
+      selectedIds: [],
+      recentlyCreatedIds: [],
+      noteHighlights: {},
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    const createdIds = useStore.getState().addNotesWithContentBatch([
+      { content: 'a', x: 0, y: 0 },
+      { content: 'b', x: 10, y: 0 },
+    ]);
+
+    const state = useStore.getState();
+
+    // S1: recentlyCreatedIds 与 createdIds 集合相等
+    expect(new Set(state.recentlyCreatedIds)).toEqual(new Set(createdIds));
+
+    // S2: 每个 created id 有 reason==='created' 且 token 为 number
+    for (const id of createdIds) {
+      const highlight = state.noteHighlights[id];
+      expect(highlight).toBeDefined();
+      expect(highlight.reason).toBe('created');
+      expect(typeof highlight.token).toBe('number');
+    }
+
+    // S3: selectedIds 与 createdIds 数组相等（同序）
+    expect(state.selectedIds).toEqual(createdIds);
+  });
+
+  it('store 契约: TRASH 视图下 batch 仍写入 currentBoardId 不进废纸篓', () => {
+    const boardId = 'default';
+    useStore.setState({
+      ...createEmptyNormalizedNotesState(),
+      boards: [{ id: boardId, name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: boardId,
+      viewMode: 'TRASH',
+      selectedIds: [],
+      recentlyCreatedIds: [],
+      noteHighlights: {},
+      config: { ...useStore.getState().config, maxZ: 1 },
+    });
+
+    const createdIds = useStore.getState().addNotesWithContentBatch([
+      { content: 't', x: 0, y: 0 },
+    ]);
+
+    expect(createdIds).toHaveLength(1);
+    const [id] = createdIds;
+    const state = useStore.getState();
+    const note = state.notesById[id];
+
+    // T1: 仍写 currentBoardId，不进废纸篓
+    expect(state.currentBoardId).toBe(boardId);
+    expect(note).toBeDefined();
+    expect(note.boardId).toBe(boardId);
+    expect(note.deletedAt == null).toBe(true);
+    expect(state.boardNoteIds[boardId]).toContain(id);
+  });
+});
