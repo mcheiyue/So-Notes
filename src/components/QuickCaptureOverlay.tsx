@@ -33,12 +33,14 @@ export const QuickCaptureOverlay: React.FC = () => {
     boards.find((b) => b.id === currentBoardId)?.name,
   );
   const [value, setValue] = useState('');
-  // 关闭时在渲染期清空输入，避免 effect 同步 setState（react-hooks/set-state-in-effect）
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // 关闭时在渲染期清空输入/错误态，避免 effect 同步 setState（react-hooks/set-state-in-effect）
   const [wasOpen, setWasOpen] = useState(isOpen);
   if (wasOpen !== isOpen) {
     setWasOpen(isOpen);
     if (!isOpen) {
       setValue('');
+      setSubmitError(null);
     }
   }
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -90,9 +92,15 @@ export const QuickCaptureOverlay: React.FC = () => {
     const notes = createSmartPasteNoteInputs(value, origin.x, origin.y);
     if (notes.length === 0) return;
 
-    addNotesWithContentBatch(notes);
-    setValue('');
-    setQuickCaptureOpen(false);
+    try {
+      addNotesWithContentBatch(notes);
+      setValue('');
+      setSubmitError(null);
+      setQuickCaptureOpen(false);
+    } catch {
+      // C24：失败保留草稿与浮层，展示固定可感知错误
+      setSubmitError('创建失败，输入已保留');
+    }
   }, [value, addNotesWithContentBatch, setQuickCaptureOpen]);
 
   const trapDialogFocus = (event: React.KeyboardEvent<HTMLFormElement>) => {
@@ -166,6 +174,11 @@ export const QuickCaptureOverlay: React.FC = () => {
           className="h-40 w-full resize-none bg-transparent px-4 py-3 text-sm text-text-primary outline-none placeholder:text-text-tertiary"
           placeholder="输入内容后按 Enter 创建便签，Shift+Enter 换行"
         />
+        {submitError ? (
+          <div role="alert" className="border-t border-border-subtle px-4 py-2 text-xs text-red-500">
+            {submitError}
+          </div>
+        ) : null}
         <div className="flex items-center justify-between border-t border-border-subtle px-4 py-3 text-xs text-text-tertiary">
           <span>多行内容会保留在同一张便签里</span>
           <div className="flex gap-2">

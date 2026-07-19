@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { QuickCaptureOverlay } from './QuickCaptureOverlay';
 import { useStore } from '../store/useStore';
+import { useUIStore } from '../store';
 import { resetViewportSpawnSequenceForTests } from '../utils/spawnPosition';
 
 const { readTextMock } = vi.hoisted(() => ({
@@ -298,5 +299,96 @@ describe('QuickCaptureOverlay 输入事件', () => {
     expect(headerText).not.toMatch(/快速捕获\s*·\s*当前看板(\s|$)/);
     const labelSeg = headerText.split(/·/).slice(1).join('·').trim();
     expect(labelSeg).toBe(longName);
+  });
+
+  it('失败保留: batch 抛错时保留输入且浮层不关', async () => {
+    const draft = '保留草稿-注入失败';
+    const orig = useStore.getState().addNotesWithContentBatch;
+    const mockBatch = vi.fn(() => {
+      throw new Error('inject-fail');
+    });
+    useStore.setState({
+      addNotesWithContentBatch: mockBatch,
+      isQuickCaptureOpen: true,
+    });
+
+    try {
+      await renderOverlay();
+
+      const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+      expect(textarea).not.toBeNull();
+
+      await act(async () => {
+        const setTextareaValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        setTextareaValue?.call(textarea, draft);
+        textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      const submitButton = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('创建'),
+      );
+      expect(submitButton).toBeDefined();
+
+      await act(async () => {
+        submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      });
+
+      expect(mockBatch).toHaveBeenCalled();
+      expect(textarea?.value).toBe(draft);
+      expect(useUIStore.getState().isQuickCaptureOpen).toBe(true);
+      const alert = container.querySelector('[role="alert"]');
+      expect(alert).not.toBeNull();
+      expect(alert?.textContent ?? '').toContain('创建失败，输入已保留');
+    } finally {
+      useStore.setState({ addNotesWithContentBatch: orig });
+    }
+  });
+
+  it('失败保留: batch 成功时清空并关闭', async () => {
+    const orig = useStore.getState().addNotesWithContentBatch;
+    const mockBatch = vi.fn(() => ['id-injected-ok']);
+    // render 前注入成功 mock（C24 首选 setState）
+    useStore.setState({
+      addNotesWithContentBatch: mockBatch,
+      isQuickCaptureOpen: true,
+    });
+
+    try {
+      await renderOverlay();
+
+      const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+      expect(textarea).not.toBeNull();
+
+      await act(async () => {
+        const setTextareaValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        setTextareaValue?.call(textarea, '成功提交内容');
+        textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      const submitButton = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('创建'),
+      );
+      expect(submitButton).toBeDefined();
+
+      await act(async () => {
+        submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      });
+
+      expect(mockBatch).toHaveBeenCalled();
+      expect(useUIStore.getState().isQuickCaptureOpen).toBe(false);
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+
+      // 成功路径关闭后对话框卸载；重新打开（空剪贴板）验证草稿已清空
+      readTextMock.mockResolvedValueOnce('');
+      await act(async () => {
+        useStore.setState({ isQuickCaptureOpen: true });
+        await Promise.resolve();
+      });
+      const reopened = container.querySelector('textarea') as HTMLTextAreaElement | null;
+      expect(reopened).not.toBeNull();
+      expect(reopened?.value).toBe('');
+    } finally {
+      useStore.setState({ addNotesWithContentBatch: orig });
+    }
   });
 });
