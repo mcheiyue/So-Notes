@@ -2,6 +2,38 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.6.0] - 2026-07-20
+
+本版本聚焦「捕获与整理体验增强」：明确快速捕获目标看板、失败不丢输入、批量创建可一次撤销/重做，并补齐 v1.6.0 冒烟基线与 C28 范围门禁。捕获后程序定位未交付。
+
+### ✨ 新特性 (Features)
+
+* **Quick Capture 目标看板边界**
+  > 快速捕获浮层展示 `快速捕获 · {label}`；看板名为空时回退为「当前看板」，过长名称截断显示，emoji 不抛错；禁用「页面/工作区/项目」产品词。
+
+* **捕获失败保留输入**
+  > 提交失败时浮层不关、输入不丢，并展示「创建失败，输入已保留」；仅成功时清空并关闭。
+
+* **批量捕获 Undo/Redo**
+  > `addNotesWithContentBatch` 一次写入一条 compound 历史，一次撤销/重做整批便签。画布智能粘贴 / 控制器智能粘贴与快速捕获共享同一 batch Undo 语义。
+
+### 🔧 内部改进 (Internal)
+
+* **batch 创建高亮/选区契约**
+  > 批量创建后锁定 `noteHighlights[id].reason==='created'`、`recentlyCreatedIds` 与 `selectedIds` 一致。
+
+* **TRASH 视图下捕获落点**
+  > `viewMode==='TRASH'` 时 batch 仍写入 `currentBoardId`，便签不进入废纸篓。
+
+* **v1.6.0 冒烟基线与 C28 门禁**
+  > 新增 `docs/qa/v1.6.0-smoke-baseline.md`；`check:smoke` 双基线串联；`scripts/check-c28-scope.mjs` 作为范围白名单 SSOT；lint 覆盖 `QuickCaptureOverlay`。
+
+* **v1.6.0 手动测试回归清单**
+  > 新增 `docs/qa/v1.6.0-manual-test-checklist.md`，覆盖 QC-BOARD / QC-FAIL / QC-HIGHLIGHT / QC-UNDO 主路径及 QC-LOCATE N/A 说明，供发布前手测与回归复用。
+
+* **Optional：捕获后程序定位**
+  > 捕获后程序定位与 Viewport Action gate（C29）本版本未交付；冒烟 `QC-LOCATE-001=N/A`。
+
 ## [v1.5.9] - 2026-07-11
 
 本版本为进入 v1.6.0 前的预备与体验基线：建立关键流程冒烟与文案守卫，定稿「捕获与整理体验增强」主线，收口低风险反馈，并补齐备份链路安全/可观测补丁与发布证据门禁。
