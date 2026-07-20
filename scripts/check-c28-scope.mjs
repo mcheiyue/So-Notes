@@ -32,6 +32,7 @@ const EXACT_ALLOWED = new Set([
   'src/components/QuickCaptureOverlay.tsx',
   'src/components/QuickCaptureOverlay.test.tsx',
   'docs/qa/v1.6.0-smoke-baseline.md',
+  'docs/qa/v1.6.0-manual-test-checklist.md',
   'scripts/check-smoke-baseline.mjs',
   'scripts/check-c28-scope.mjs',
   'package.json',
