@@ -68,6 +68,11 @@ const UPLOAD_RETRY_LIMIT: u32 = 3;
 
 const MAX_WEBDAV_REDIRECTS: usize = 10;
 
+/// 与现网 user_agent 字面量一致；本版不改 UA 字符串。
+pub(crate) const WEBDAV_USER_AGENT: &str = "SoNotes/1.5";
+/// HTTP client 默认超时（秒）；原硬编码 30。
+pub(crate) const WEBDAV_HTTP_TIMEOUT_SECS: u64 = 30;
+
 /// 下载 token 有效期。过期 token 不再允许解析为本地恢复路径。
 const DOWNLOAD_TOKEN_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -450,8 +455,10 @@ pub fn normalize_webdav_url(input: &str) -> Result<String, String> {
         return Err("WebDAV 地址不能包含用户名、密码、查询参数或片段".to_string());
     }
 
-    // 构造规范化 URL：scheme + host + port（如有）+ path
-    let mut normalized = format!("{}://{}", parsed.scheme(), host);
+    // 构造规范化 URL：scheme + canonical host + port（如有）+ path
+    // pin key / 请求 host / redirect original_host 同源（P0-3）
+    let host_str = canonical_host(host);
+    let mut normalized = format!("{}://{}", parsed.scheme(), host_str);
     if let Some(port) = parsed.port() {
         normalized.push_str(&format!(":{port}"));
     }
@@ -654,6 +661,36 @@ fn extract_nat64(ip: Ipv6Addr) -> Option<Ipv4Addr> {
     }
 }
 
+/// 规范化 host 用于 pin key / 比较：Domain 小写去 trailing-dot；IPv6 固定 `[ip]`。
+fn canonical_host(host: Host<&str>) -> String {
+    match host {
+        Host::Domain(d) => {
+            let lower = d.to_ascii_lowercase();
+            lower.trim_end_matches('.').to_string()
+        }
+        Host::Ipv4(ip) => ip.to_string(),
+        Host::Ipv6(ip) => format!("[{ip}]"),
+    }
+}
+
+/// 从字符串规范化 host（pin key / original_host 唯一来源）。
+fn canonical_host_from_str(host: &str) -> String {
+    let trimmed = host.trim();
+    let bare = trimmed
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(trimmed);
+
+    if let Ok(ip) = bare.parse::<Ipv4Addr>() {
+        return ip.to_string();
+    }
+    if let Ok(ip) = bare.parse::<Ipv6Addr>() {
+        return format!("[{ip}]");
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    lower.trim_end_matches('.').to_string()
+}
+
 fn validate_webdav_redirect_url(
     url: &Url,
     original_host: &str,
@@ -667,6 +704,7 @@ fn validate_webdav_redirect_url(
         .host()
         .ok_or_else(|| sanitize_webdav_error("重定向目标缺少主机名"))?;
 
+    // trailing-dot 一律拒绝（防止 pin key 失配回退系统 DNS）
     if let Host::Domain(d) = host {
         if d.to_ascii_lowercase().ends_with('.') {
             return Err(sanitize_webdav_error(
@@ -675,6 +713,7 @@ fn validate_webdav_redirect_url(
         }
     }
 
+    // 同 host only：与 pin key 字节级全等，不做规范化
     let redirect_host_raw = url
         .host_str()
         .ok_or_else(|| sanitize_webdav_error("重定向目标缺少主机名"))?;
@@ -691,7 +730,6 @@ fn validate_webdav_redirect_url(
 
     // 重定向永不 trust（C-W3）
     reject_internal_https_host(url, &host, resolver, false).map_err(|e| {
-        // reject_disallowed 可能返回未 sanitize 的旧文案；统一出口
         if e.starts_with("主机校验") || e.starts_with("DNS") || e.starts_with("重定向") {
             e
         } else {
@@ -723,17 +761,13 @@ fn webdav_redirect_policy(
     })
 }
 
-/// 从已规范化 base_url 提取 host / port。
+/// 从已规范化 base_url 提取 canonical host / port（与 pin key 同源）。
 fn authority_from_base_url(base_url: &str) -> Result<(String, u16), String> {
     let parsed = Url::parse(base_url).map_err(|_| sanitize_webdav_error("WebDAV 地址格式无效"))?;
     let host = parsed
         .host()
         .ok_or_else(|| sanitize_webdav_error("WebDAV 地址缺少主机名"))?;
-    let host_str = match host {
-        Host::Domain(d) => d.to_string(),
-        Host::Ipv4(ip) => ip.to_string(),
-        Host::Ipv6(ip) => format!("[{ip}]"),
-    };
+    let host_str = canonical_host(host);
     let port = parsed.port_or_known_default().unwrap_or(443);
     Ok((host_str, port))
 }
@@ -751,8 +785,21 @@ fn is_literal_loopback_host(host: &str) -> bool {
             .unwrap_or(false)
 }
 
-/// 构建 HTTP 客户端：返回前必须 resolve_and_check（fail-closed）。
-/// Commit 2：无 IP pin（pin 属 Commit 3）。
+/// 解析 + 校验 + 准备 pin 列表（纯函数，可单测）。
+/// 入口强制 canonicalize，防止 pin key 与请求 host 不一致。
+/// ClientBuilder 仅在 `build_webdav_http_client` 内创建（C-W7 工厂硬门）。
+fn resolve_and_pin(
+    host: &str,
+    port: u16,
+    resolver: &dyn HostResolver,
+    trust_host: bool,
+) -> Result<(String, Vec<SocketAddr>), String> {
+    let canonical_host = canonical_host_from_str(host);
+    let addrs = resolve_and_check(&canonical_host, port, resolver, trust_host)?;
+    Ok((canonical_host, addrs))
+}
+
+/// 构建 HTTP 客户端：resolve_and_check → resolve_to_addrs 一次 pin 全部（S1）。
 fn build_webdav_http_client(
     host: &str,
     port: u16,
@@ -761,18 +808,31 @@ fn build_webdav_http_client(
     trust_host: bool,
 ) -> Result<reqwest::Client, String> {
     // http localhost 开发例外：字面量 loopback 跳过 S2（https loopback 已在 normalize 拒绝）
-    if !is_literal_loopback_host(host) {
-        let _addrs = resolve_and_check(host, port, resolver.as_ref(), trust_host)?;
+    let (canonical_host, addrs_opt) = if is_literal_loopback_host(host) {
+        (canonical_host_from_str(host), None)
+    } else {
+        let (canon, addrs) = resolve_and_pin(host, port, resolver.as_ref(), trust_host)?;
+        (canon, Some(addrs))
+    };
+
+    // Client::builder 仅允许本工厂（C-W7）
+    let mut builder = reqwest::Client::builder()
+        .user_agent(WEBDAV_USER_AGENT)
+        .timeout(timeout);
+
+    // 一次 pin 全部已校验地址（禁止循环 resolve 覆盖）
+    if let Some(ref addrs) = addrs_opt {
+        builder = builder.resolve_to_addrs(&canonical_host, addrs);
     }
 
-    reqwest::Client::builder()
-        .user_agent("SoNotes/1.5")
-        .timeout(timeout)
-        .redirect(webdav_redirect_policy(
-            host.to_string(),
-            port,
-            Arc::clone(&resolver),
-        ))
+    // redirect：捕获 canonical host:port + resolver（同 host:port only；永不 trust）
+    builder = builder.redirect(webdav_redirect_policy(
+        canonical_host,
+        port,
+        Arc::clone(&resolver),
+    ));
+
+    builder
         .build()
         .map_err(|_e| sanitize_webdav_error("HTTP client 构建失败"))
 }
@@ -1974,9 +2034,10 @@ pub async fn webdav_test_connection(
     let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
     let mut config = config;
     config.password = Some(secret);
-    let target = build_webdav_request_target(&config)?;
-    let (host, port) = authority_from_base_url(&target.base_url)?;
-    let trust_host = false; // Commit 2: field not yet on config
+    // C-W7：先 pin client，再组装请求 URL
+    let base_url = normalize_webdav_url(&config.server_url)?;
+    let (host, port) = authority_from_base_url(&base_url)?;
+    let trust_host = false; // Commit 3: field not yet on config
     let client = build_webdav_http_client(
         &host,
         port,
@@ -1985,6 +2046,7 @@ pub async fn webdav_test_connection(
         trust_host,
     )
     .map_err(|_| "WebDAV 地址不可访问".to_string())?;
+    let target = build_webdav_request_target(&config)?;
     webdav_test_connection_with_client(&client, &target).await
 }
 
@@ -2031,9 +2093,10 @@ pub async fn webdav_list_backups(
     let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
     let mut config = config;
     config.password = Some(secret);
-    let target = build_webdav_request_target(&config)?;
-    let (host, port) = authority_from_base_url(&target.base_url)?;
-    let trust_host = false; // Commit 2: field not yet on config
+    // C-W7：先 pin client，再组装请求 URL
+    let base_url = normalize_webdav_url(&config.server_url)?;
+    let (host, port) = authority_from_base_url(&base_url)?;
+    let trust_host = false; // Commit 3: field not yet on config
     let client = build_webdav_http_client(
         &host,
         port,
@@ -2042,6 +2105,7 @@ pub async fn webdav_list_backups(
         trust_host,
     )
     .map_err(|_| "远端备份列表读取失败".to_string())?;
+    let target = build_webdav_request_target(&config)?;
     webdav_list_backups_with_client(&client, &target).await
 }
 
@@ -2096,9 +2160,10 @@ pub async fn webdav_delete_backup(
     let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
     let mut config = config;
     config.password = Some(secret);
-    let target = build_webdav_request_target(&config)?;
-    let (host, port) = authority_from_base_url(&target.base_url)?;
-    let trust_host = false; // Commit 2: field not yet on config
+    // C-W7：先 pin client，再组装请求 URL
+    let base_url = normalize_webdav_url(&config.server_url)?;
+    let (host, port) = authority_from_base_url(&base_url)?;
+    let trust_host = false; // Commit 3: field not yet on config
     let client = build_webdav_http_client(
         &host,
         port,
@@ -2107,6 +2172,7 @@ pub async fn webdav_delete_backup(
         trust_host,
     )
     .map_err(|_| "远端备份删除失败".to_string())?;
+    let target = build_webdav_request_target(&config)?;
     webdav_delete_backup_with_client(&client, &target, &remote_file_name).await
 }
 
@@ -2525,6 +2591,60 @@ pub async fn webdav_create_remote_backup(
     };
     let mut config = config;
     config.password = Some(secret);
+
+    // C-W7：先 pin client，再组装请求 URL（fail-fast DNS/S2）
+    let client = {
+        let base_url = match normalize_webdav_url(&config.server_url) {
+            Ok(u) => u,
+            Err(e) => {
+                return Ok(WebDavUploadResult {
+                    success: false,
+                    remote_file_name: None,
+                    error: Some(e),
+                    error_stage: Some("config".to_string()),
+                    error_code: None,
+                    summary: None,
+                    zip_size_bytes: None,
+                });
+            }
+        };
+        let (host, port) = match authority_from_base_url(&base_url) {
+            Ok(hp) => hp,
+            Err(e) => {
+                return Ok(WebDavUploadResult {
+                    success: false,
+                    remote_file_name: None,
+                    error: Some(e),
+                    error_stage: Some("config".to_string()),
+                    error_code: None,
+                    summary: None,
+                    zip_size_bytes: None,
+                });
+            }
+        };
+        let trust_host = false; // Commit 3: field not yet on config
+        match build_webdav_http_client(
+            &host,
+            port,
+            Duration::from_secs(60),
+            Arc::new(SystemResolver),
+            trust_host,
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                return Ok(WebDavUploadResult {
+                    success: false,
+                    remote_file_name: None,
+                    error: Some(e),
+                    error_stage: Some("upload".to_string()),
+                    error_code: None,
+                    summary: None,
+                    zip_size_bytes: None,
+                });
+            }
+        }
+    };
+
     let target = match build_webdav_request_target(&config) {
         Ok(t) => t,
         Err(e) => {
@@ -2621,52 +2741,6 @@ pub async fn webdav_create_remote_backup(
             zip_size_bytes: None,
         });
     }
-
-    let client = {
-        let (host, port) = match authority_from_base_url(&target.base_url) {
-            Ok(hp) => hp,
-            Err(e) => {
-                let _ = std::fs::remove_file(&actual_zip_path);
-                if actual_zip_path != temp_zip_path {
-                    let _ = std::fs::remove_file(&temp_zip_path);
-                }
-                return Ok(WebDavUploadResult {
-                    success: false,
-                    remote_file_name: None,
-                    error: Some(e),
-                    error_stage: Some("upload".to_string()),
-                    error_code: None,
-                    summary: None,
-                    zip_size_bytes: None,
-                });
-            }
-        };
-        let trust_host = false; // Commit 2: field not yet on config
-        match build_webdav_http_client(
-            &host,
-            port,
-            Duration::from_secs(60),
-            Arc::new(SystemResolver),
-            trust_host,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = std::fs::remove_file(&actual_zip_path);
-                if actual_zip_path != temp_zip_path {
-                    let _ = std::fs::remove_file(&temp_zip_path);
-                }
-                return Ok(WebDavUploadResult {
-                    success: false,
-                    remote_file_name: None,
-                    error: Some(e),
-                    error_stage: Some("upload".to_string()),
-                    error_code: None,
-                    summary: None,
-                    zip_size_bytes: None,
-                });
-            }
-        }
-    };
 
     let mut upload_result = webdav_upload_backup_with_client(&client, &target, &actual_zip_path).await;
 
@@ -2817,14 +2891,15 @@ pub async fn webdav_download_backup(
     let secret = resolve_webdav_operation_secret(&app, &config, &store)?;
     let mut config = config;
     config.password = Some(secret);
-    let target = build_webdav_request_target(&config)?;
 
     let downloads_dir = webdav_downloads_dir(&app)?;
     std::fs::create_dir_all(&downloads_dir)
         .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
 
-    let (host, port) = authority_from_base_url(&target.base_url)?;
-    let trust_host = false; // Commit 2: field not yet on config
+    // C-W7：先 pin client，再组装请求 URL
+    let base_url = normalize_webdav_url(&config.server_url)?;
+    let (host, port) = authority_from_base_url(&base_url)?;
+    let trust_host = false; // Commit 3: field not yet on config
     let client = build_webdav_http_client(
         &host,
         port,
@@ -2833,6 +2908,7 @@ pub async fn webdav_download_backup(
         trust_host,
     )
     .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+    let target = build_webdav_request_target(&config)?;
 
     webdav_download_backup_with_client(&client, &target, &remote_file_name, &downloads_dir).await
 }
@@ -3760,6 +3836,211 @@ mod tests {
             mock.call_count.load(std::sync::atomic::Ordering::SeqCst),
             2
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Commit 3: S1 IP pin + redirect same-host
+    // -----------------------------------------------------------------------
+
+    /// 测试侧车：记录 resolve_to_addrs 参数（不依赖 reqwest Client 内省）。
+    mod pin_recorder {
+        use super::*;
+        use std::sync::Mutex;
+
+        pub struct PinRecorder {
+            pub calls: Mutex<Vec<(String, Vec<SocketAddr>)>>,
+        }
+
+        impl PinRecorder {
+            pub fn new() -> Arc<Self> {
+                Arc::new(Self {
+                    calls: Mutex::new(Vec::new()),
+                })
+            }
+
+            pub fn record(&self, host: &str, addrs: &[SocketAddr]) {
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push((host.to_string(), addrs.to_vec()));
+            }
+        }
+
+        pub fn apply_pin_with_recorder(
+            builder: reqwest::ClientBuilder,
+            host: &str,
+            addrs: &[SocketAddr],
+            rec: &PinRecorder,
+        ) -> reqwest::ClientBuilder {
+            rec.record(host, addrs);
+            builder.resolve_to_addrs(host, addrs)
+        }
+    }
+
+    /// 记录 resolve 收到的 host（pin_chain 用）。
+    struct CaptureHostResolver {
+        host: Mutex<Option<String>>,
+        addrs: Vec<SocketAddr>,
+    }
+
+    impl HostResolver for CaptureHostResolver {
+        fn resolve(&self, host: &str, _port: u16) -> Result<Vec<SocketAddr>, String> {
+            *self.host.lock().unwrap() = Some(host.to_string());
+            Ok(self.addrs.clone())
+        }
+    }
+
+    #[test]
+    fn rebinding_pins_first_resolve() {
+        let public: SocketAddr = "1.1.1.1:443".parse().unwrap();
+        let mock = MockResolver {
+            responses: vec![Ok(vec![public])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let (canon, addrs) = resolve_and_pin("example.com", 443, &mock, false).unwrap();
+        assert_eq!(canon, "example.com");
+        assert_eq!(addrs, vec![public]);
+        assert_eq!(
+            mock.call_count.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+
+        let rec = pin_recorder::PinRecorder::new();
+        let builder = reqwest::Client::builder();
+        let _builder =
+            pin_recorder::apply_pin_with_recorder(builder, &canon, &addrs, &rec);
+        let calls = rec.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "example.com");
+        assert_eq!(calls[0].1, vec![public]);
+        drop(calls);
+
+        // 再 resolve → 耗尽（P0-1）
+        let err = mock.resolve("example.com", 443).unwrap_err();
+        assert!(err.contains("耗尽"));
+    }
+
+    #[test]
+    fn request_url_host_equals_pin_key() {
+        let public: SocketAddr = "1.1.1.1:443".parse().unwrap();
+        let cases = [
+            ("https://Example.COM./dav", "example.com"),
+            ("https://example.com./dav", "example.com"),
+            ("https://[2001:4860:4860::8888]/dav", "[2001:4860:4860::8888]"),
+        ];
+        for (url, expect_key) in cases {
+            let mock = MockResolver {
+                responses: vec![Ok(vec![public])],
+                call_count: std::sync::atomic::AtomicUsize::new(0),
+            };
+            let base = normalize_webdav_url(url).unwrap();
+            let (auth_host, port) = authority_from_base_url(&base).unwrap();
+            let (pin_key, _addrs) =
+                resolve_and_pin(&auth_host, port, &mock, false).unwrap();
+            assert_eq!(pin_key, expect_key, "pin key for {url}");
+            assert_eq!(auth_host, pin_key, "authority host == pin key for {url}");
+            let parsed = Url::parse(&base).unwrap();
+            assert_eq!(
+                parsed.host_str().unwrap(),
+                pin_key.as_str(),
+                "request URL host == pin key for {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn redirect_ignores_trust() {
+        // trust=true 仅影响首次 pin；redirect 固定 trust=false → 私网 Location reject
+        let public: SocketAddr = "1.1.1.1:443".parse().unwrap();
+        let mock = MockResolver {
+            responses: vec![Ok(vec![public])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        // 首次 pin 成功（公网）
+        let (_canon, addrs) = resolve_and_pin("example.com", 443, &mock, true).unwrap();
+        assert_eq!(addrs, vec![public]);
+
+        // redirect 到同 host 但解析为私网 → 仍 reject（永不 trust）
+        let private: SocketAddr = "192.168.1.1:443".parse().unwrap();
+        let mock2 = MockResolver {
+            responses: vec![Ok(vec![private])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let url = Url::parse("https://example.com/other").unwrap();
+        let err = validate_webdav_redirect_url(&url, "example.com", 443, &mock2).unwrap_err();
+        assert!(
+            err.contains("主机校验失败") || err.contains("不能指向本机或内网") || err.contains("重定向"),
+            "redirect 必须忽略 trust: {err}"
+        );
+    }
+
+    #[test]
+    fn redirect_same_host_only() {
+        let resolver = SystemResolver;
+        let url = Url::parse("https://evil.com/dav").unwrap();
+        let err = validate_webdav_redirect_url(&url, "example.com", 443, &resolver).unwrap_err();
+        assert!(err.contains("重定向校验失败") || err.contains("不一致"));
+    }
+
+    #[test]
+    fn redirect_rejects_different_port() {
+        let resolver = SystemResolver;
+        // 同 host 不同 port
+        let url = Url::parse("https://example.com:8443/dav").unwrap();
+        let err = validate_webdav_redirect_url(&url, "example.com", 443, &resolver).unwrap_err();
+        assert!(err.contains("重定向校验失败") || err.contains("port"));
+    }
+
+    #[test]
+    fn redirect_rejects_trailing_dot_host() {
+        let resolver = SystemResolver;
+        // 跨 host trailing-dot
+        let url = Url::parse("https://evil.com./dav").unwrap();
+        let err = validate_webdav_redirect_url(&url, "example.com", 443, &resolver).unwrap_err();
+        assert!(err.contains("重定向校验失败") || err.contains("trailing") || err.contains("末尾"));
+
+        // 同 host trailing-dot 也拒绝（防止 pin 失配）
+        let url2 = Url::parse("https://example.com./dav").unwrap();
+        let err2 =
+            validate_webdav_redirect_url(&url2, "example.com", 443, &resolver).unwrap_err();
+        assert!(err2.contains("重定向校验失败") || err2.contains("trailing") || err2.contains("末尾"));
+    }
+
+    #[test]
+    fn pin_host_canonicalized() {
+        assert_eq!(WEBDAV_HTTP_TIMEOUT_SECS, 30);
+        assert_eq!(WEBDAV_USER_AGENT, "SoNotes/1.5");
+        assert_eq!(
+            canonical_host_from_str("Example.COM."),
+            "example.com"
+        );
+    }
+
+    #[test]
+    fn pin_host_trailing_dot() {
+        assert_eq!(canonical_host_from_str("example.com."), "example.com");
+    }
+
+    #[test]
+    fn pin_host_ipv6_brackets() {
+        assert_eq!(canonical_host_from_str("[::1]"), "[::1]");
+        assert_eq!(canonical_host_from_str("::1"), "[::1]");
+    }
+
+    #[test]
+    fn pin_chain_canonical_key() {
+        let public: SocketAddr = "1.1.1.1:443".parse().unwrap();
+        let capture = CaptureHostResolver {
+            host: Mutex::new(None),
+            addrs: vec![public],
+        };
+        let (canon, addrs) =
+            resolve_and_pin("Example.COM.", 443, &capture, false).unwrap();
+        assert_eq!(canon, "example.com");
+        assert_eq!(addrs, vec![public]);
+        let seen = capture.host.lock().unwrap().clone().unwrap();
+        assert_eq!(seen, "example.com", "resolve 必须收到 canonical host");
+        assert_ne!(seen, "Example.COM.");
     }
 
     #[test]
