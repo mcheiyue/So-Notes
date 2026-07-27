@@ -9,9 +9,9 @@ use sha2::Digest;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 use tauri::Manager;
 use url::{Host, Url};
@@ -289,6 +289,112 @@ fn compute_credential_key(server_url: &str, username: &str, remote_dir: &str) ->
 /// - 拒绝 query 与 fragment。
 /// - 拒绝空 host。
 /// - 返回规范化后的 URL 字符串（不含凭据/查询/片段）。
+/// 脱敏对外错误：内部 detail 不进前端，返回笼统文案。
+/// ponytail: 无直接 tracing 依赖；detail 仅用于分支，不拼进对外 String。
+pub(crate) fn sanitize_webdav_error(detail: &str) -> String {
+    let lower = detail.to_ascii_lowercase();
+    if lower.starts_with("dns") || lower.starts_with("解析") || lower.contains("dns 解析") {
+        "DNS 解析失败".to_string()
+    } else if lower.contains("黑名单")
+        || lower.contains("本机")
+        || lower.contains("内网")
+        || lower.starts_with("ip 字面量")
+        || lower.contains("主机校验")
+    {
+        "主机校验失败：不能指向本机或内网".to_string()
+    } else if lower.starts_with("重定向") || lower.contains("redirect") {
+        "重定向校验失败".to_string()
+    } else if lower.starts_with("reqwest")
+        || lower.contains("连接")
+        || lower.contains("超时")
+        || lower.contains("http client")
+    {
+        "WebDAV 连接失败".to_string()
+    } else {
+        "WebDAV 操作失败".to_string()
+    }
+}
+
+/// DNS 解析抽象，默认走系统 to_socket_addrs。
+pub(crate) trait HostResolver: Send + Sync {
+    fn resolve(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, String>;
+}
+
+pub(crate) struct SystemResolver;
+
+impl HostResolver for SystemResolver {
+    fn resolve(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+        (host, port)
+            .to_socket_addrs()
+            .map(|iter| iter.collect())
+            .map_err(|e| format!("DNS 解析失败: {e}"))
+    }
+}
+
+/// 测试用 MockResolver：按调用顺序消费 responses；耗尽返回 Err（禁止复用末条）。
+#[cfg(test)]
+pub(crate) struct MockResolver {
+    pub responses: Vec<Result<Vec<SocketAddr>, String>>,
+    pub call_count: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+impl HostResolver for MockResolver {
+    fn resolve(&self, _host: &str, _port: u16) -> Result<Vec<SocketAddr>, String> {
+        let idx = self
+            .call_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        match self.responses.get(idx) {
+            Some(r) => r.clone(),
+            None => Err("MockResolver: 响应队列已耗尽".into()),
+        }
+    }
+}
+
+/// 单次 resolve + S2 校验。IP 字面量跳过 DNS；trust 时 DNS fail 仅重试一次。
+pub(crate) fn resolve_and_check(
+    host: &str,
+    port: u16,
+    resolver: &dyn HostResolver,
+    trust_host: bool,
+) -> Result<Vec<SocketAddr>, String> {
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(host);
+    if let Ok(ip) = bare.parse::<IpAddr>() {
+        let addr = SocketAddr::new(ip, port);
+        if is_disallowed_webdav_ip(ip) {
+            return Err(sanitize_webdav_error("IP 字面量命中 S2 黑名单"));
+        }
+        return Ok(vec![addr]);
+    }
+
+    let addrs = match resolver.resolve(host, port) {
+        Ok(addrs) => addrs,
+        Err(_e) if trust_host => {
+            resolver.resolve(host, port).map_err(|_e2| {
+                sanitize_webdav_error("DNS 解析失败（重试后仍失败）")
+            })?
+        }
+        Err(_e) => {
+            return Err(sanitize_webdav_error("DNS 解析失败"));
+        }
+    };
+
+    if addrs.is_empty() {
+        return Err(sanitize_webdav_error("DNS 解析失败：未返回任何地址"));
+    }
+
+    for addr in &addrs {
+        if is_disallowed_webdav_ip(addr.ip()) {
+            return Err(sanitize_webdav_error("主机校验失败：不能指向本机或内网"));
+        }
+    }
+
+    Ok(addrs)
+}
+
 pub fn normalize_webdav_url(input: &str) -> Result<String, String> {
     let input = input.trim();
     if input.is_empty() {
@@ -302,9 +408,21 @@ pub fn normalize_webdav_url(input: &str) -> Result<String, String> {
         .host()
         .ok_or_else(|| "WebDAV 地址缺少主机名".to_string())?;
 
-    // 检查 scheme
+    // 检查 scheme。C-W1：域名路径禁止 DNS；仅字面量 IP / localhost 字面量早拒绝。
     match parsed.scheme() {
-        "https" => reject_internal_https_host(&parsed, &host)?,
+        "https" => match &host {
+            Host::Domain(domain) => {
+                if domain
+                    .trim_end_matches('.')
+                    .eq_ignore_ascii_case("localhost")
+                {
+                    return Err("WebDAV HTTPS 地址不能指向本机或内网地址".to_string());
+                }
+                // 域名：仅格式规范化，不调用 reject_internal / resolve
+            }
+            Host::Ipv4(ip) => reject_disallowed_https_ip(IpAddr::V4(*ip))?,
+            Host::Ipv6(ip) => reject_disallowed_https_ip(IpAddr::V6(*ip))?,
+        },
         "http" => {
             if !is_http_localhost_exception(&host) {
                 return Err(
@@ -358,18 +476,24 @@ fn is_http_localhost_exception(host: &Host<&str>) -> bool {
     }
 }
 
-fn reject_internal_https_host(parsed: &Url, host: &Host<&str>) -> Result<(), String> {
+fn reject_internal_https_host(
+    parsed: &Url,
+    host: &Host<&str>,
+    resolver: &dyn HostResolver,
+    trust_host: bool,
+) -> Result<(), String> {
     match host {
         Host::Domain(domain) => {
-            if domain.trim_end_matches('.').eq_ignore_ascii_case("localhost") {
-                return Err("WebDAV HTTPS 地址不能指向本机或内网地址".to_string());
+            if domain
+                .trim_end_matches('.')
+                .eq_ignore_ascii_case("localhost")
+            {
+                return Err(sanitize_webdav_error(
+                    "主机校验失败：不能指向本机或内网",
+                ));
             }
-
             let port = parsed.port_or_known_default().unwrap_or(443);
-            if host_resolves_to_disallowed_webdav_ip(domain, port) {
-                return Err("WebDAV HTTPS 地址不能指向本机或内网地址".to_string());
-            }
-            Ok(())
+            resolve_and_check(domain, port, resolver, trust_host).map(|_| ())
         }
         Host::Ipv4(ip) => reject_disallowed_https_ip(IpAddr::V4(*ip)),
         Host::Ipv6(ip) => reject_disallowed_https_ip(IpAddr::V6(*ip)),
@@ -378,17 +502,11 @@ fn reject_internal_https_host(parsed: &Url, host: &Host<&str>) -> Result<(), Str
 
 fn reject_disallowed_https_ip(ip: IpAddr) -> Result<(), String> {
     if is_disallowed_webdav_ip(ip) {
+        // normalize 路径保留可读文案；连接/redirect 路径经 sanitize 的调用方另有出口
         Err("WebDAV HTTPS 地址不能指向本机或内网地址".to_string())
     } else {
         Ok(())
     }
-}
-
-fn host_resolves_to_disallowed_webdav_ip(domain: &str, port: u16) -> bool {
-    (domain, port)
-        .to_socket_addrs()
-        .map(|addrs| addrs.map(|addr| addr.ip()).any(is_disallowed_webdav_ip))
-        .unwrap_or(false)
 }
 
 fn is_disallowed_webdav_ip(ip: IpAddr) -> bool {
@@ -536,22 +654,68 @@ fn extract_nat64(ip: Ipv6Addr) -> Option<Ipv4Addr> {
     }
 }
 
-fn validate_webdav_redirect_url(url: &Url) -> Result<(), String> {
+fn validate_webdav_redirect_url(
+    url: &Url,
+    original_host: &str,
+    original_port: u16,
+    resolver: &dyn HostResolver,
+) -> Result<(), String> {
     if url.scheme() != "https" {
-        return Err("WebDAV 重定向目标必须使用 HTTPS".to_string());
+        return Err(sanitize_webdav_error("重定向目标必须使用 HTTPS"));
     }
-
     let host = url
         .host()
-        .ok_or_else(|| "WebDAV 重定向目标缺少主机名".to_string())?;
-    reject_internal_https_host(url, &host)
+        .ok_or_else(|| sanitize_webdav_error("重定向目标缺少主机名"))?;
+
+    if let Host::Domain(d) = host {
+        if d.to_ascii_lowercase().ends_with('.') {
+            return Err(sanitize_webdav_error(
+                "重定向目标 host 含末尾点（trailing-dot），已拒绝",
+            ));
+        }
+    }
+
+    let redirect_host_raw = url
+        .host_str()
+        .ok_or_else(|| sanitize_webdav_error("重定向目标缺少主机名"))?;
+    if redirect_host_raw != original_host {
+        return Err(sanitize_webdav_error(
+            "重定向目标 host 与 pin key 不一致（字节级全等要求）",
+        ));
+    }
+
+    let redirect_port = url.port_or_known_default().unwrap_or(443);
+    if redirect_port != original_port {
+        return Err(sanitize_webdav_error("重定向目标 port 不匹配"));
+    }
+
+    // 重定向永不 trust（C-W3）
+    reject_internal_https_host(url, &host, resolver, false).map_err(|e| {
+        // reject_disallowed 可能返回未 sanitize 的旧文案；统一出口
+        if e.starts_with("主机校验") || e.starts_with("DNS") || e.starts_with("重定向") {
+            e
+        } else {
+            sanitize_webdav_error(&e)
+        }
+    })
 }
 
-fn webdav_redirect_policy() -> reqwest::redirect::Policy {
-    reqwest::redirect::Policy::custom(|attempt| {
+fn webdav_redirect_policy(
+    original_host: String,
+    original_port: u16,
+    resolver: Arc<dyn HostResolver>,
+) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= MAX_WEBDAV_REDIRECTS {
             attempt.error("WebDAV redirect limit exceeded")
-        } else if validate_webdav_redirect_url(attempt.url()).is_err() {
+        } else if validate_webdav_redirect_url(
+            attempt.url(),
+            &original_host,
+            original_port,
+            resolver.as_ref(),
+        )
+        .is_err()
+        {
             attempt.error("WebDAV redirect target rejected")
         } else {
             attempt.follow()
@@ -559,12 +723,58 @@ fn webdav_redirect_policy() -> reqwest::redirect::Policy {
     })
 }
 
-fn build_webdav_http_client(timeout: Duration) -> Result<reqwest::Client, reqwest::Error> {
+/// 从已规范化 base_url 提取 host / port。
+fn authority_from_base_url(base_url: &str) -> Result<(String, u16), String> {
+    let parsed = Url::parse(base_url).map_err(|_| sanitize_webdav_error("WebDAV 地址格式无效"))?;
+    let host = parsed
+        .host()
+        .ok_or_else(|| sanitize_webdav_error("WebDAV 地址缺少主机名"))?;
+    let host_str = match host {
+        Host::Domain(d) => d.to_string(),
+        Host::Ipv4(ip) => ip.to_string(),
+        Host::Ipv6(ip) => format!("[{ip}]"),
+    };
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    Ok((host_str, port))
+}
+
+/// 字面量 loopback host（normalize 已保证 https loopback 不会到达连接路径）。
+fn is_literal_loopback_host(host: &str) -> bool {
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(host);
+    bare.eq_ignore_ascii_case("localhost")
+        || bare
+            .parse::<IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
+}
+
+/// 构建 HTTP 客户端：返回前必须 resolve_and_check（fail-closed）。
+/// Commit 2：无 IP pin（pin 属 Commit 3）。
+fn build_webdav_http_client(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+    resolver: Arc<dyn HostResolver>,
+    trust_host: bool,
+) -> Result<reqwest::Client, String> {
+    // http localhost 开发例外：字面量 loopback 跳过 S2（https loopback 已在 normalize 拒绝）
+    if !is_literal_loopback_host(host) {
+        let _addrs = resolve_and_check(host, port, resolver.as_ref(), trust_host)?;
+    }
+
     reqwest::Client::builder()
         .user_agent("SoNotes/1.5")
         .timeout(timeout)
-        .redirect(webdav_redirect_policy())
+        .redirect(webdav_redirect_policy(
+            host.to_string(),
+            port,
+            Arc::clone(&resolver),
+        ))
         .build()
+        .map_err(|_e| sanitize_webdav_error("HTTP client 构建失败"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1765,8 +1975,16 @@ pub async fn webdav_test_connection(
     let mut config = config;
     config.password = Some(secret);
     let target = build_webdav_request_target(&config)?;
-    let client = build_webdav_http_client(Duration::from_secs(15))
-        .map_err(|_| "WebDAV 地址不可访问".to_string())?;
+    let (host, port) = authority_from_base_url(&target.base_url)?;
+    let trust_host = false; // Commit 2: field not yet on config
+    let client = build_webdav_http_client(
+        &host,
+        port,
+        Duration::from_secs(15),
+        Arc::new(SystemResolver),
+        trust_host,
+    )
+    .map_err(|_| "WebDAV 地址不可访问".to_string())?;
     webdav_test_connection_with_client(&client, &target).await
 }
 
@@ -1814,8 +2032,16 @@ pub async fn webdav_list_backups(
     let mut config = config;
     config.password = Some(secret);
     let target = build_webdav_request_target(&config)?;
-    let client = build_webdav_http_client(Duration::from_secs(15))
-        .map_err(|_| "远端备份列表读取失败".to_string())?;
+    let (host, port) = authority_from_base_url(&target.base_url)?;
+    let trust_host = false; // Commit 2: field not yet on config
+    let client = build_webdav_http_client(
+        &host,
+        port,
+        Duration::from_secs(15),
+        Arc::new(SystemResolver),
+        trust_host,
+    )
+    .map_err(|_| "远端备份列表读取失败".to_string())?;
     webdav_list_backups_with_client(&client, &target).await
 }
 
@@ -1871,8 +2097,16 @@ pub async fn webdav_delete_backup(
     let mut config = config;
     config.password = Some(secret);
     let target = build_webdav_request_target(&config)?;
-    let client = build_webdav_http_client(Duration::from_secs(30))
-        .map_err(|_| "远端备份删除失败".to_string())?;
+    let (host, port) = authority_from_base_url(&target.base_url)?;
+    let trust_host = false; // Commit 2: field not yet on config
+    let client = build_webdav_http_client(
+        &host,
+        port,
+        Duration::from_secs(30),
+        Arc::new(SystemResolver),
+        trust_host,
+    )
+    .map_err(|_| "远端备份删除失败".to_string())?;
     webdav_delete_backup_with_client(&client, &target, &remote_file_name).await
 }
 
@@ -2388,22 +2622,49 @@ pub async fn webdav_create_remote_backup(
         });
     }
 
-    let client = match build_webdav_http_client(Duration::from_secs(60)) {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = std::fs::remove_file(&actual_zip_path);
-            if actual_zip_path != temp_zip_path {
-                let _ = std::fs::remove_file(&temp_zip_path);
+    let client = {
+        let (host, port) = match authority_from_base_url(&target.base_url) {
+            Ok(hp) => hp,
+            Err(e) => {
+                let _ = std::fs::remove_file(&actual_zip_path);
+                if actual_zip_path != temp_zip_path {
+                    let _ = std::fs::remove_file(&temp_zip_path);
+                }
+                return Ok(WebDavUploadResult {
+                    success: false,
+                    remote_file_name: None,
+                    error: Some(e),
+                    error_stage: Some("upload".to_string()),
+                    error_code: None,
+                    summary: None,
+                    zip_size_bytes: None,
+                });
             }
-            return Ok(WebDavUploadResult {
-                success: false,
-                remote_file_name: None,
-                error: Some(format!("构建 HTTP 客户端失败: {e}")),
-                error_stage: Some("upload".to_string()),
-                error_code: None,
-                summary: None,
-                zip_size_bytes: None,
-            });
+        };
+        let trust_host = false; // Commit 2: field not yet on config
+        match build_webdav_http_client(
+            &host,
+            port,
+            Duration::from_secs(60),
+            Arc::new(SystemResolver),
+            trust_host,
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = std::fs::remove_file(&actual_zip_path);
+                if actual_zip_path != temp_zip_path {
+                    let _ = std::fs::remove_file(&temp_zip_path);
+                }
+                return Ok(WebDavUploadResult {
+                    success: false,
+                    remote_file_name: None,
+                    error: Some(e),
+                    error_stage: Some("upload".to_string()),
+                    error_code: None,
+                    summary: None,
+                    zip_size_bytes: None,
+                });
+            }
         }
     };
 
@@ -2562,8 +2823,16 @@ pub async fn webdav_download_backup(
     std::fs::create_dir_all(&downloads_dir)
         .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
 
-    let client = build_webdav_http_client(Duration::from_secs(120))
-        .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+    let (host, port) = authority_from_base_url(&target.base_url)?;
+    let trust_host = false; // Commit 2: field not yet on config
+    let client = build_webdav_http_client(
+        &host,
+        port,
+        Duration::from_secs(120),
+        Arc::new(SystemResolver),
+        trust_host,
+    )
+    .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
 
     webdav_download_backup_with_client(&client, &target, &remote_file_name, &downloads_dir).await
 }
@@ -3373,28 +3642,124 @@ mod tests {
     #[test]
     fn redirect_guard_accepts_public_https_target() {
         let url = Url::parse("https://1.1.1.1/dav/file.zip?token=abc").unwrap();
-        validate_webdav_redirect_url(&url).unwrap();
+        let resolver = SystemResolver;
+        validate_webdav_redirect_url(&url, "1.1.1.1", 443, &resolver).unwrap();
     }
 
     #[test]
     fn redirect_guard_rejects_http_target() {
         let url = Url::parse("http://example.com/dav/file.zip").unwrap();
-        let err = validate_webdav_redirect_url(&url).unwrap_err();
-        assert!(err.contains("HTTPS"));
+        let resolver = SystemResolver;
+        let err = validate_webdav_redirect_url(&url, "example.com", 443, &resolver).unwrap_err();
+        assert!(err.contains("重定向校验失败"));
     }
 
     #[test]
     fn redirect_guard_rejects_https_private_target() {
         let url = Url::parse("https://192.168.1.10/dav/file.zip").unwrap();
-        let err = validate_webdav_redirect_url(&url).unwrap_err();
-        assert!(err.contains("本机") || err.contains("内网"));
+        let resolver = SystemResolver;
+        let err =
+            validate_webdav_redirect_url(&url, "192.168.1.10", 443, &resolver).unwrap_err();
+        assert!(err.contains("主机校验失败") || err.contains("不能指向本机或内网"));
     }
 
     #[test]
     fn redirect_guard_rejects_https_localhost_target() {
         let url = Url::parse("https://localhost/dav/file.zip").unwrap();
-        let err = validate_webdav_redirect_url(&url).unwrap_err();
-        assert!(err.contains("本机") || err.contains("内网"));
+        let resolver = SystemResolver;
+        let err = validate_webdav_redirect_url(&url, "localhost", 443, &resolver).unwrap_err();
+        assert!(err.contains("主机校验失败") || err.contains("不能指向本机或内网"));
+    }
+
+    #[test]
+    fn dns_fail_is_closed() {
+        let mock = MockResolver {
+            responses: vec![Err("mock DNS fail".into())],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let err = resolve_and_check("example.com", 443, &mock, false).unwrap_err();
+        assert!(err.contains("DNS"));
+        assert_eq!(
+            mock.call_count.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+    }
+
+    #[test]
+    fn dns_fail_with_trust_retries() {
+        let mock = MockResolver {
+            responses: vec![Err("fail1".into()), Err("fail2".into())],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let err = resolve_and_check("example.com", 443, &mock, true).unwrap_err();
+        assert!(err.contains("DNS"));
+        assert_eq!(
+            mock.call_count.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+    }
+
+    #[test]
+    fn dns_fail_with_trust_still_rejects_private() {
+        let private: SocketAddr = "192.168.1.1:443".parse().unwrap();
+        let mock = MockResolver {
+            responses: vec![Ok(vec![private])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let err = resolve_and_check("example.com", 443, &mock, true).unwrap_err();
+        assert!(err.contains("主机校验失败") || err.contains("不能指向本机或内网"));
+        assert!(!err.contains("192.168"));
+    }
+
+    #[test]
+    fn dns_fail_with_trust_retry_succeeds() {
+        let public: SocketAddr = "1.1.1.1:443".parse().unwrap();
+        let mock = MockResolver {
+            responses: vec![Err("fail1".into()), Ok(vec![public])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let addrs = resolve_and_check("example.com", 443, &mock, true).unwrap();
+        assert_eq!(addrs, vec![public]);
+        assert_eq!(
+            mock.call_count.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+    }
+
+    #[test]
+    fn normalize_domain_no_dns() {
+        let result = normalize_webdav_url("https://example.com/remote.php/dav");
+        assert!(result.is_ok(), "normalize 域名应返回 Ok，实际: {:?}", result);
+    }
+
+    #[test]
+    fn error_sanitization_no_ip_leak() {
+        let private: SocketAddr = "192.168.1.1:443".parse().unwrap();
+        let mock = MockResolver {
+            responses: vec![Ok(vec![private])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let err = resolve_and_check("example.com", 443, &mock, false).unwrap_err();
+        assert!(err.contains("不能指向本机或内网") || err.contains("主机校验失败"));
+        assert!(!err.contains("192.168"));
+        assert!(!err.contains("192.168.1.1"));
+    }
+
+    #[test]
+    fn mock_resolver_exhausted_returns_err() {
+        let public: SocketAddr = "1.1.1.1:443".parse().unwrap();
+        let mock = MockResolver {
+            responses: vec![Ok(vec![public])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let first = mock.resolve("example.com", 443).unwrap();
+        assert_eq!(first, vec![public]);
+        let second = mock.resolve("example.com", 443).unwrap_err();
+        assert!(second.contains("耗尽"));
+        assert_eq!(
+            mock.call_count.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
     }
 
     #[test]
