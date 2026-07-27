@@ -82,16 +82,19 @@ function main() {
       process.exit(1);
     }
 
-    // trust_host 透传：形态 1 或形态 2
+    // trust_host 透传：Commit3 false / Commit4 config.trust_host / 字面量 false
     const hasLetTrust =
-      /let\s+trust_host\s*=\s*false\s*;/.test(body) &&
+      /let\s+trust_host\s*=\s*(?:false|config\.trust_host)\s*;/.test(body) &&
       /build_webdav_http_client\s*\([\s\S]*trust_host/.test(body);
+    const hasConfigField =
+      /build_webdav_http_client\s*\([\s\S]*config\.trust_host/.test(body) &&
+      (body.includes('SystemResolver') || body.includes('Arc::new'));
     const hasLiteralFalse =
       /build_webdav_http_client\s*\([^;]*false\s*\)/.test(body) &&
       (body.includes('SystemResolver') || body.includes('Arc::new'));
-    if (!hasLetTrust && !hasLiteralFalse) {
+    if (!hasLetTrust && !hasConfigField && !hasLiteralFalse) {
       console.error(
-        `FAIL: ${name} 未透传 trust_host（需 let trust_host=false 或字面量 false+SystemResolver）`,
+        `FAIL: ${name} 未透传 trust_host（需 let trust_host=false|config.trust_host 或字面量/字段+SystemResolver）`,
       );
       process.exit(1);
     }

@@ -611,6 +611,7 @@ export function createScheduledRemoteBackupService(
         serverUrl: webdavResult.serverUrl,
         username: webdavResult.username ?? '',
         remoteDir: webdavResult.remoteDir ?? undefined,
+        trustHost: webdavResult.trustHost ?? false,
       };
 
       const result = await runRemoteBackup(deps.runnerDeps, webdavConfig, {

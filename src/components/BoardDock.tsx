@@ -221,6 +221,7 @@ export const BoardDock = () => {
     password: '',
     remoteDir: 'SoNotes_Backups/',
     rememberPassword: false,
+    trustHost: false,
   });
   const [webdavOperation, setWebdavOperation] = useState<'idle' | 'testing' | 'saving' | 'listing' | 'creating' | 'restoring' | 'deleting'>('idle');
   const [webdavFeedback, setWebdavFeedback] = useState<{ status: 'success' | 'error' | 'info'; message: string } | null>(null);
@@ -351,7 +352,7 @@ export const BoardDock = () => {
           setZipOperation('idle');
           setSettingsView('MAIN');
           setAttachmentScanState({ status: 'idle', missingCount: 0, orphanCount: 0, orphanPaths: [], errorMessage: null });
-          setWebdavDraft({ serverUrl: '', username: '', password: '', remoteDir: 'SoNotes_Backups/', rememberPassword: false });
+          setWebdavDraft({ serverUrl: '', username: '', password: '', remoteDir: 'SoNotes_Backups/', rememberPassword: false, trustHost: false });
           setWebdavOperation('idle');
           setWebdavFeedback(null);
           setWebdavBackups([]);
@@ -385,6 +386,7 @@ export const BoardDock = () => {
             username: result.username ?? '',
             remoteDir: result.remoteDir ?? 'SoNotes_Backups/',
             password: '',
+            trustHost: result.trustHost ?? false,
           }));
           setWebdavPasswordSaved(result.passwordSaved);
         }
@@ -983,6 +985,7 @@ export const BoardDock = () => {
       username: webdavDraft.username.trim(),
       password: webdavDraft.password || undefined,
       remoteDir: webdavDraft.remoteDir.trim() || undefined,
+      trustHost: webdavDraft.trustHost,
     };
   };
 
@@ -1058,7 +1061,7 @@ export const BoardDock = () => {
     try {
       const result = await WebDavBackupService.clearConfig();
       if (result.success) {
-        setWebdavDraft({ serverUrl: '', username: '', password: '', remoteDir: 'SoNotes_Backups/', rememberPassword: false });
+        setWebdavDraft({ serverUrl: '', username: '', password: '', remoteDir: 'SoNotes_Backups/', rememberPassword: false, trustHost: false });
         setWebdavBackups([]);
         setWebdavPasswordSaved(false);
         if (scheduledConfig.enabled) {
@@ -2592,6 +2595,16 @@ export const BoardDock = () => {
                                     data-testid="webdav-remember-password"
                                 />
                                 <span>记住密码</span>
+                            </label>
+                            <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={webdavDraft.trustHost}
+                                    onChange={(e) => setWebdavDraft(prev => ({ ...prev, trustHost: e.target.checked }))}
+                                    className="rounded"
+                                    data-testid="webdav-trust-host"
+                                />
+                                <span>信任此主机（DNS 失败时重试；IP 黑名单仍生效）</span>
                             </label>
                         </div>
 

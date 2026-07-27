@@ -96,6 +96,9 @@ pub struct WebDavConfig {
     /// 密码或应用令牌（仅在本次请求中使用，不持久化）。
     #[serde(default)]
     pub password: Option<String>,
+    /// 信任此主机：仅 DNS 失败时重试一次；不跳过 IP 黑名单。
+    #[serde(default)]
+    pub trust_host: bool,
 }
 
 impl std::fmt::Debug for WebDavConfig {
@@ -105,6 +108,7 @@ impl std::fmt::Debug for WebDavConfig {
             .field("username", &self.username)
             .field("remote_dir", &self.remote_dir)
             .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .field("trust_host", &self.trust_host)
             .finish()
     }
 }
@@ -143,6 +147,9 @@ pub struct WebDavConfigSaveRequest {
     /// 密码或应用令牌（仅在本次请求中使用，不应持久化到普通配置文件）。
     #[serde(default)]
     pub password: Option<String>,
+    /// 信任此主机（DNS 失败时重试；IP 黑名单仍生效）。
+    #[serde(default)]
+    pub trust_host: bool,
 }
 
 impl std::fmt::Debug for WebDavConfigSaveRequest {
@@ -153,6 +160,7 @@ impl std::fmt::Debug for WebDavConfigSaveRequest {
             .field("remote_dir", &self.remote_dir)
             .field("remember_password", &self.remember_password)
             .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .field("trust_host", &self.trust_host)
             .finish()
     }
 }
@@ -173,6 +181,9 @@ pub struct WebDavConfigLoadResult {
     pub password_saved: bool,
     /// 错误信息（失败时）。
     pub error: Option<String>,
+    /// 信任此主机（与 trusted_host 指纹绑定；不匹配则 false）。
+    #[serde(default)]
+    pub trust_host: bool,
 }
 
 /// 配置保存结果。
@@ -262,6 +273,12 @@ struct WebDavConfigFile {
     /// 仅在 `password_saved=true` 时写入，用于定位系统凭据。
     #[serde(skip_serializing_if = "Option::is_none", default)]
     credential_key: Option<String>,
+    /// 信任此主机（仅 DNS 重试；旧配置缺省 false）。
+    #[serde(default)]
+    trust_host: bool,
+    /// 绑定的 canonical host 指纹；与当前 host 不匹配则 load 时 trust=false。
+    #[serde(default)]
+    trusted_host: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1411,6 +1428,7 @@ pub async fn webdav_load_config(app: tauri::AppHandle) -> Result<WebDavConfigLoa
             remote_dir: None,
             password_saved: false,
             error: None,
+            trust_host: false,
         });
     }
 
@@ -1420,6 +1438,7 @@ pub async fn webdav_load_config(app: tauri::AppHandle) -> Result<WebDavConfigLoa
     let config: WebDavConfigFile =
         serde_json::from_str(&content).map_err(|e| format!("解析 WebDAV 配置文件失败: {e}"))?;
 
+    let trust_host = resolve_trust_host_for_load(&config);
     Ok(WebDavConfigLoadResult {
         success: true,
         server_url: Some(config.server_url),
@@ -1427,7 +1446,22 @@ pub async fn webdav_load_config(app: tauri::AppHandle) -> Result<WebDavConfigLoa
         remote_dir: Some(config.remote_dir),
         password_saved: config.password_saved && config.credential_key.is_some(),
         error: None,
+        trust_host,
     })
+}
+
+/// load 时校验 trusted_host 指纹与当前 server_url host 是否匹配。
+fn resolve_trust_host_for_load(file: &WebDavConfigFile) -> bool {
+    let host_str = Url::parse(&file.server_url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+    let current_host = canonical_host_from_str(&host_str);
+    match &file.trusted_host {
+        Some(fingerprint) if *fingerprint == current_host => file.trust_host,
+        Some(_) => false,
+        None => file.trust_host,
+    }
 }
 
 /// 纯校验+规范化：将前端保存请求转换为可安全持久化的配置结构。
@@ -1447,6 +1481,33 @@ fn prepare_config_save(
     let new_key = compute_credential_key(&server_url, &request.username, &remote_dir);
     let old_credential_key = old_config.and_then(|c| c.credential_key.clone());
 
+    // trust 绑定：host 变更需用户 re-opt-in；canonical 相同则按 request 写入
+    let host_str = Url::parse(&server_url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+    let new_host = canonical_host_from_str(&host_str);
+    let old_trusted = old_config.and_then(|c| c.trusted_host.clone());
+
+    let (trust_host, trusted_host) = match old_trusted {
+        Some(ref fp) if *fp == new_host => {
+            if request.trust_host {
+                (true, Some(new_host.clone()))
+            } else {
+                (false, None)
+            }
+        }
+        Some(_) if request.trust_host => (true, Some(new_host.clone())),
+        Some(_) => (false, None),
+        None => {
+            if request.trust_host {
+                (true, Some(new_host.clone()))
+            } else {
+                (false, None)
+            }
+        }
+    };
+
     if request.remember_password {
         if request.password.as_deref().unwrap_or("").is_empty() {
             return Err("勾选记住密码时必须提供密码".to_string());
@@ -1458,6 +1519,8 @@ fn prepare_config_save(
             remote_dir,
             password_saved: true,
             credential_key: Some(new_key),
+            trust_host,
+            trusted_host,
         };
         return Ok((config, old_credential_key));
     }
@@ -1468,6 +1531,8 @@ fn prepare_config_save(
         remote_dir,
         password_saved: false,
         credential_key: None,
+        trust_host,
+        trusted_host,
     };
     Ok((config, old_credential_key))
 }
@@ -2037,7 +2102,7 @@ pub async fn webdav_test_connection(
     // C-W7：先 pin client，再组装请求 URL
     let base_url = normalize_webdav_url(&config.server_url)?;
     let (host, port) = authority_from_base_url(&base_url)?;
-    let trust_host = false; // Commit 3: field not yet on config
+    let trust_host = config.trust_host;
     let client = build_webdav_http_client(
         &host,
         port,
@@ -2096,7 +2161,7 @@ pub async fn webdav_list_backups(
     // C-W7：先 pin client，再组装请求 URL
     let base_url = normalize_webdav_url(&config.server_url)?;
     let (host, port) = authority_from_base_url(&base_url)?;
-    let trust_host = false; // Commit 3: field not yet on config
+    let trust_host = config.trust_host;
     let client = build_webdav_http_client(
         &host,
         port,
@@ -2163,7 +2228,7 @@ pub async fn webdav_delete_backup(
     // C-W7：先 pin client，再组装请求 URL
     let base_url = normalize_webdav_url(&config.server_url)?;
     let (host, port) = authority_from_base_url(&base_url)?;
-    let trust_host = false; // Commit 3: field not yet on config
+    let trust_host = config.trust_host;
     let client = build_webdav_http_client(
         &host,
         port,
@@ -2622,7 +2687,7 @@ pub async fn webdav_create_remote_backup(
                 });
             }
         };
-        let trust_host = false; // Commit 3: field not yet on config
+        let trust_host = config.trust_host;
         match build_webdav_http_client(
             &host,
             port,
@@ -2899,7 +2964,7 @@ pub async fn webdav_download_backup(
     // C-W7：先 pin client，再组装请求 URL
     let base_url = normalize_webdav_url(&config.server_url)?;
     let (host, port) = authority_from_base_url(&base_url)?;
-    let trust_host = false; // Commit 3: field not yet on config
+    let trust_host = config.trust_host;
     let client = build_webdav_http_client(
         &host,
         port,
@@ -3444,6 +3509,7 @@ mod tests {
             username: "alice".to_string(),
             remote_dir: Some("SoNotes_Backups/".to_string()),
             password: Some("super-secret-token".to_string()),
+            trust_host: false,
         };
 
         let output = format!("{config:?}");
@@ -3467,6 +3533,7 @@ mod tests {
             remote_dir: Some("SoNotes_Backups/".to_string()),
             remember_password: false,
             password: Some("super-secret-token".to_string()),
+            trust_host: false,
         };
 
         let output = format!("{request:?}");
@@ -4368,6 +4435,8 @@ mod tests {
             remote_dir: "SoNotes_Backups/".to_string(),
             password_saved: false,
             credential_key: None,
+            trust_host: false,
+            trusted_host: None,
         };
 
         let json = serde_json::to_string_pretty(&config).unwrap();
@@ -4395,6 +4464,8 @@ mod tests {
             remote_dir: "Backups/".to_string(),
             password_saved: true,
             credential_key: None,
+            trust_host: false,
+            trusted_host: None,
         };
 
         let json = serde_json::to_string_pretty(&config).unwrap();
@@ -4423,6 +4494,8 @@ mod tests {
             remote_dir: "Backups/".to_string(),
             password_saved: false,
             credential_key: None,
+            trust_host: false,
+            trusted_host: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(
@@ -4575,6 +4648,7 @@ mod tests {
             username: "user1".to_string(),
             remote_dir: Some("Backups/".to_string()),
             password: None,
+            trust_host: false,
         };
         let key = compute_credential_key(
             &normalize_webdav_url(&config.server_url).unwrap(),
@@ -4592,6 +4666,8 @@ mod tests {
             remote_dir: normalize_remote_dir(config.remote_dir.as_deref().unwrap()).unwrap(),
             password_saved: true,
             credential_key: Some(key),
+            trust_host: false,
+            trusted_host: None,
         };
         std::fs::write(&backup_path, serde_json::to_string(&config_file).unwrap()).unwrap();
 
@@ -4639,6 +4715,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: true,
             password: Some("secret123".to_string()),
+            trust_host: false,
         };
         let (config, _) = prepare_config_save(&request, None).unwrap();
         assert!(
@@ -4659,6 +4736,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: true,
             password: None,
+            trust_host: false,
         };
         let err = prepare_config_save(&request, None).unwrap_err();
         assert!(err.contains("记住密码时必须提供密码"), "无密码也应拒绝: {err}");
@@ -4672,6 +4750,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: false,
             password: Some("token123".to_string()),
+            trust_host: false,
         };
         let (config, _) = prepare_config_save(&request, None).unwrap();
         assert!(
@@ -4688,6 +4767,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: false,
             password: None,
+            trust_host: false,
         };
         let (config, _) = prepare_config_save(&request, None).unwrap();
         assert_eq!(
@@ -4704,6 +4784,7 @@ mod tests {
             remote_dir: Some("MyBackups".to_string()),
             remember_password: false,
             password: None,
+            trust_host: false,
         };
         let (config, _) = prepare_config_save(&request, None).unwrap();
         assert_eq!(
@@ -4720,6 +4801,7 @@ mod tests {
             remote_dir: None,
             remember_password: false,
             password: None,
+            trust_host: false,
         };
         let (config, _) = prepare_config_save(&request, None).unwrap();
         assert_eq!(config.remote_dir, "SoNotes_Backups/");
@@ -4733,6 +4815,7 @@ mod tests {
             remote_dir: None,
             remember_password: false,
             password: None,
+            trust_host: false,
         };
         let err = prepare_config_save(&request, None).unwrap_err();
         assert!(err.contains("HTTPS"), "应拒绝非本机 HTTP: {err}");
@@ -4746,6 +4829,7 @@ mod tests {
             remote_dir: Some("a/b/c".to_string()),
             remember_password: false,
             password: None,
+            trust_host: false,
         };
         let err = prepare_config_save(&request, None).unwrap_err();
         assert!(err.contains("嵌套"), "应拒绝嵌套目录: {err}");
@@ -4759,6 +4843,7 @@ mod tests {
             remote_dir: None,
             remember_password: false,
             password: Some("supersecret".to_string()),
+            trust_host: false,
         };
         let (config, _) = prepare_config_save(&request, None).unwrap();
         let json = serde_json::to_string(&config).unwrap();
@@ -4780,6 +4865,7 @@ mod tests {
             remote_dir: None,
             remember_password: false,
             password: None,
+            trust_host: false,
         };
         let err = prepare_config_save(&request, None).unwrap_err();
         assert!(err.contains("用户名"), "应拒绝含 userinfo 的 URL: {err}");
@@ -8565,6 +8651,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: true,
             password: Some(TEST_SECRET.to_string()),
+            trust_host: false,
         };
 
         let (config, _) = prepare_config_save(&request, None).unwrap();
@@ -8609,6 +8696,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: false,
             password: None,
+            trust_host: false,
         };
 
         let (config, _) = prepare_config_save(&request, None).unwrap();
@@ -8641,6 +8729,8 @@ mod tests {
             remote_dir: "Backups/".to_string(),
             password_saved: true,
             credential_key: Some(old_key_str.to_string()),
+            trust_host: false,
+            trusted_host: None,
         };
 
         let request = WebDavConfigSaveRequest {
@@ -8649,6 +8739,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: true,
             password: Some("new-password".to_string()),
+            trust_host: false,
         };
 
         let (config, old_credential_key) = prepare_config_save(&request, Some(&old_config)).unwrap();
@@ -8723,6 +8814,8 @@ mod tests {
             remote_dir: "Backups/".to_string(),
             password_saved: true,
             credential_key: Some(old_key.account.clone()),
+            trust_host: false,
+            trusted_host: None,
         };
         let request = WebDavConfigSaveRequest {
             server_url: "https://different-server.com/dav".to_string(),
@@ -8730,6 +8823,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: true,
             password: Some("new-password".to_string()),
+            trust_host: false,
         };
         let (new_config, _) = prepare_config_save(&request, Some(&old_config)).unwrap();
         let new_key = WebDavCredentialKey {
@@ -8767,6 +8861,8 @@ mod tests {
                 "user1",
                 "Backups/",
             )),
+            trust_host: false,
+            trusted_host: None,
         };
         let same_key = WebDavCredentialKey {
             service: CREDENTIAL_SERVICE.to_string(),
@@ -8779,6 +8875,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: true,
             password: Some("new-password".to_string()),
+            trust_host: false,
         };
 
         let result = save_webdav_config_to_path_with_writer(
@@ -8810,6 +8907,8 @@ mod tests {
                 "user1",
                 "Backups/",
             )),
+            trust_host: false,
+            trusted_host: None,
         };
         let same_key = WebDavCredentialKey {
             service: CREDENTIAL_SERVICE.to_string(),
@@ -8822,6 +8921,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: true,
             password: Some("new-password".to_string()),
+            trust_host: false,
         };
 
         let result = save_webdav_config_to_path_with_writer(
@@ -8865,6 +8965,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: true,
             password: None,
+            trust_host: false,
         };
 
         let err = prepare_config_save(&request, None).unwrap_err();
@@ -8879,6 +8980,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: true,
             password: Some("secret".to_string()),
+            trust_host: false,
         };
 
         let err = prepare_config_save(&request, None).unwrap_err();
@@ -8920,6 +9022,8 @@ mod tests {
             remote_dir: "Backups/".to_string(),
             password_saved: true,
             credential_key: Some(old_key_str.to_string()),
+            trust_host: false,
+            trusted_host: None,
         };
 
         let request = WebDavConfigSaveRequest {
@@ -8928,6 +9032,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: false,
             password: None,
+            trust_host: false,
         };
 
         let old_cred_key = WebDavCredentialKey {
@@ -9008,6 +9113,7 @@ mod tests {
             username: "alice".to_string(),
             remote_dir: Some("Backups/".to_string()),
             password: None,
+            trust_host: false,
         };
 
         let dir = std::env::temp_dir().join(format!(
@@ -9022,6 +9128,8 @@ mod tests {
             remote_dir: "Backups/".to_string(),
             password_saved: true,
             credential_key: Some(cred_key_val),
+            trust_host: false,
+            trusted_host: None,
         };
         let json = serde_json::to_string(&config_file).unwrap();
         std::fs::write(&path, json).unwrap();
@@ -9059,6 +9167,8 @@ mod tests {
             remote_dir: "Backups/".to_string(),
             password_saved: true,
             credential_key: Some(saved_key),
+            trust_host: false,
+            trusted_host: None,
         };
         let json = serde_json::to_string(&config_file).unwrap();
         std::fs::write(&path, json).unwrap();
@@ -9069,6 +9179,7 @@ mod tests {
             username: "alice".to_string(),
             remote_dir: Some("Backups/".to_string()),
             password: None,
+            trust_host: false,
         };
 
         let result = resolve_operation_secret_core(Some(&path), &config, &store);
@@ -9125,6 +9236,7 @@ mod tests {
             remote_dir: Some("Backups/".to_string()),
             remember_password: true,
             password: Some(TEST_SECRET.to_string()),
+            trust_host: false,
         };
 
         let (config, _) = prepare_config_save(&request, None).unwrap();
@@ -9154,6 +9266,7 @@ mod tests {
             username: "alice".to_string(),
             remote_dir: Some("Backups/".to_string()),
             password: Some("inline-token".to_string()),
+            trust_host: false,
         };
 
         let result = resolve_operation_secret_core(None, &config, &store);
@@ -9168,6 +9281,7 @@ mod tests {
             username: "alice".to_string(),
             remote_dir: Some("Backups/".to_string()),
             password: None,
+            trust_host: false,
         };
 
         let cred_key_val =
@@ -9190,6 +9304,8 @@ mod tests {
             remote_dir: "Backups/".to_string(),
             password_saved: true,
             credential_key: Some(cred_key.account.clone()),
+            trust_host: false,
+            trusted_host: None,
         };
         let json = serde_json::to_string(&config_file).unwrap();
         std::fs::write(&path, json).unwrap();
@@ -9208,6 +9324,7 @@ mod tests {
             username: "alice".to_string(),
             remote_dir: Some("Backups/".to_string()),
             password: None,
+            trust_host: false,
         };
 
         let real_key = compute_credential_key(
@@ -9228,6 +9345,8 @@ mod tests {
             remote_dir: "Backups/".to_string(),
             password_saved: true,
             credential_key: Some(real_key),
+            trust_host: false,
+            trusted_host: None,
         };
         let json = serde_json::to_string(&config_file).unwrap();
         std::fs::write(&path, json).unwrap();
@@ -9247,6 +9366,7 @@ mod tests {
             username: "alice".to_string(),
             remote_dir: Some("Backups/".to_string()),
             password: None,
+            trust_host: false,
         };
 
         let result = resolve_operation_secret_core(None, &config, &store);
@@ -9275,6 +9395,8 @@ mod tests {
             remote_dir: "Backups/".to_string(),
             password_saved: true,
             credential_key: Some("test-key-abc123".to_string()),
+            trust_host: false,
+            trusted_host: None,
         };
         let json = serde_json::to_string(&config_file).unwrap();
         std::fs::write(&path, json).unwrap();
@@ -9342,5 +9464,205 @@ mod tests {
             ),
             "错误类型应为 MissingSecret"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Commit 4: trust_host 持久化 / host 变更 / password_saved 链
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn trust_host_persists_roundtrip() {
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: false,
+            password: None,
+            trust_host: true,
+        };
+        let (config, _) = prepare_config_save(&request, None).unwrap();
+        assert!(config.trust_host);
+        assert_eq!(config.trusted_host.as_deref(), Some("example.com"));
+
+        let json = serde_json::to_string(&config).unwrap();
+        let read: WebDavConfigFile = serde_json::from_str(&json).unwrap();
+        assert!(read.trust_host);
+        assert_eq!(read.trusted_host.as_deref(), Some("example.com"));
+        assert!(resolve_trust_host_for_load(&read));
+    }
+
+    #[test]
+    fn trust_cleared_when_host_changes() {
+        let old = WebDavConfigFile {
+            server_url: "https://old.example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: false,
+            credential_key: None,
+            trust_host: true,
+            trusted_host: Some("old.example.com".to_string()),
+        };
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://new.example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: false,
+            password: None,
+            trust_host: false,
+        };
+        let (config, _) = prepare_config_save(&request, Some(&old)).unwrap();
+        assert!(!config.trust_host);
+        assert!(config.trusted_host.is_none());
+    }
+
+    #[test]
+    fn trust_set_on_host_change_when_user_opts_in() {
+        let old = WebDavConfigFile {
+            server_url: "https://old.example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: false,
+            credential_key: None,
+            trust_host: true,
+            trusted_host: Some("old.example.com".to_string()),
+        };
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://new.example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: false,
+            password: None,
+            trust_host: true,
+        };
+        let (config, _) = prepare_config_save(&request, Some(&old)).unwrap();
+        assert!(config.trust_host);
+        assert_eq!(config.trusted_host.as_deref(), Some("new.example.com"));
+    }
+
+    #[test]
+    fn trust_persists_when_host_same() {
+        let old = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: false,
+            credential_key: None,
+            trust_host: true,
+            trusted_host: Some("example.com".to_string()),
+        };
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: false,
+            password: None,
+            trust_host: true,
+        };
+        let (config, _) = prepare_config_save(&request, Some(&old)).unwrap();
+        assert!(config.trust_host);
+        assert_eq!(config.trusted_host.as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn trust_persists_when_host_case_differs() {
+        let old = WebDavConfigFile {
+            server_url: "https://Example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: false,
+            credential_key: None,
+            trust_host: true,
+            trusted_host: Some("example.com".to_string()),
+        };
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: false,
+            password: None,
+            trust_host: true,
+        };
+        let (config, _) = prepare_config_save(&request, Some(&old)).unwrap();
+        assert!(config.trust_host);
+        assert_eq!(config.trusted_host.as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn trust_persists_when_host_trailing_dot() {
+        let old = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: false,
+            credential_key: None,
+            trust_host: true,
+            trusted_host: Some("example.com".to_string()),
+        };
+        // trailing-dot host via raw URL host is uncommon after normalize; exercise prepare
+        // with same canonical host after normalize_webdav_url.
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com./dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: false,
+            password: None,
+            trust_host: true,
+        };
+        let (config, _) = prepare_config_save(&request, Some(&old)).unwrap();
+        assert!(
+            config.trust_host,
+            "trailing-dot 规范化后 host 相同应保持 trust; got trusted_host={:?}",
+            config.trusted_host
+        );
+        assert_eq!(config.trusted_host.as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn load_password_saved_requires_credential_key() {
+        let json = r#"{"server_url":"https://example.com/dav","username":"user1","remote_dir":"Backups/","password_saved":true,"credential_key":null}"#;
+        let file: WebDavConfigFile = serde_json::from_str(json).unwrap();
+        let password_saved = file.password_saved && file.credential_key.is_some();
+        assert!(!password_saved);
+    }
+
+    #[test]
+    fn load_password_saved_true_when_key_present() {
+        let json = r#"{"server_url":"https://example.com/dav","username":"user1","remote_dir":"Backups/","password_saved":true,"credential_key":"k1"}"#;
+        let file: WebDavConfigFile = serde_json::from_str(json).unwrap();
+        let password_saved = file.password_saved && file.credential_key.is_some();
+        assert!(password_saved);
+    }
+
+    #[test]
+    fn prepare_preserves_credential_when_password_unchanged() {
+        let old = WebDavConfigFile {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: "Backups/".to_string(),
+            password_saved: true,
+            credential_key: Some("old-key".to_string()),
+            trust_host: false,
+            trusted_host: None,
+        };
+        let request = WebDavConfigSaveRequest {
+            server_url: "https://example.com/dav".to_string(),
+            username: "user1".to_string(),
+            remote_dir: Some("Backups/".to_string()),
+            remember_password: true,
+            password: Some("same-or-new".to_string()),
+            trust_host: false,
+        };
+        let (config, _) = prepare_config_save(&request, Some(&old)).unwrap();
+        assert!(config.credential_key.is_some());
+        assert!(config.password_saved);
+    }
+
+    #[test]
+    fn trust_host_defaults_false_on_old_config() {
+        let json = r#"{"server_url":"https://example.com/dav","username":"user1","remote_dir":"Backups/","password_saved":false}"#;
+        let file: WebDavConfigFile = serde_json::from_str(json).unwrap();
+        assert!(!file.trust_host);
+        assert!(file.trusted_host.is_none());
+        assert!(!resolve_trust_host_for_load(&file));
     }
 }

@@ -45,6 +45,8 @@ export interface WebDavConfig {
   readonly username: string;
   readonly remoteDir?: string;
   readonly password?: string;
+  /** 信任此主机：DNS 失败时重试；缺省 false */
+  readonly trustHost?: boolean;
 }
 
 export interface WebDavConfigSaveRequest {
@@ -53,6 +55,7 @@ export interface WebDavConfigSaveRequest {
   readonly remoteDir?: string;
   readonly rememberPassword: boolean;
   readonly password?: string;
+  readonly trustHost?: boolean;
 }
 
 export interface WebDavConfigLoadResult {
@@ -62,6 +65,7 @@ export interface WebDavConfigLoadResult {
   readonly remoteDir?: string | null;
   readonly passwordSaved: boolean;
   readonly error?: string;
+  readonly trustHost?: boolean;
 }
 
 export interface WebDavConfigSaveResult {

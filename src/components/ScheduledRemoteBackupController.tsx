@@ -123,7 +123,12 @@ export const ScheduledRemoteBackupController = () => {
           if (!config.success || !config.passwordSaved || !config.serverUrl || !config.username) {
             throw new Error('退出前备份服务尚未就绪，请稍后重试');
           }
-          const webdavConfig = { serverUrl: config.serverUrl, username: config.username, remoteDir: config.remoteDir ?? undefined };
+          const webdavConfig = {
+            serverUrl: config.serverUrl,
+            username: config.username,
+            remoteDir: config.remoteDir ?? undefined,
+            trustHost: config.trustHost ?? false,
+          };
           const startedAt = Date.now();
           const result = await runRemoteBackup(runnerDepsRef.current, webdavConfig, { jobKind: 'before-exit-remote-backup' });
           const finishedAt = Date.now();

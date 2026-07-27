@@ -4347,4 +4347,49 @@ describe('文案守卫', () => {
     // C15 正向：含最近活动/失败/跳过相关词
     expect(text).toMatch(/最近活动|失败|跳过/);
   });
+
+  it('webdavDraft 默认 trustHost=false 且 checkbox 文案正确', async () => {
+    const { loadConfig } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+
+    await openWebdavView();
+
+    const trustCb = container.querySelector('[data-testid="webdav-trust-host"]') as HTMLInputElement | null;
+    expect(trustCb).not.toBeNull();
+    expect(trustCb?.checked).toBe(false);
+
+    const labelText = trustCb?.closest('label')?.textContent ?? '';
+    expect(labelText).toContain('DNS 失败时重试');
+    expect(labelText).toContain('IP 黑名单仍生效');
+  });
+
+  it('buildWebdavConfig 透传 trustHost', async () => {
+    const { loadConfig, testConnection } = await import('../services/backup/WebDavBackupService');
+    vi.mocked(loadConfig).mockResolvedValue({ success: false, passwordSaved: false });
+    vi.mocked(testConnection).mockResolvedValue({ success: true });
+
+    await openWebdavView();
+
+    const serverInput = container.querySelector('[data-testid="webdav-server-url"]') as HTMLInputElement;
+    const usernameInput = container.querySelector('[data-testid="webdav-username"]') as HTMLInputElement;
+    const passwordInput = container.querySelector('[data-testid="webdav-password"]') as HTMLInputElement;
+    const trustCb = container.querySelector('[data-testid="webdav-trust-host"]') as HTMLInputElement;
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+
+    await act(async () => {
+      nativeSetter.call(serverInput, 'https://dav.example.com');
+      serverInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(usernameInput, 'user1');
+      usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nativeSetter.call(passwordInput, 'secret');
+      passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await clickElement(trustCb);
+
+    await clickElement(findButtonByText('测试连接'));
+
+    expect(testConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ trustHost: true }),
+    );
+  });
 });
