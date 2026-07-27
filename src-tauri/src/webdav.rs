@@ -9,7 +9,7 @@ use sha2::Digest;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -393,19 +393,146 @@ fn host_resolves_to_disallowed_webdav_ip(domain: &str, port: u16) -> bool {
 
 fn is_disallowed_webdav_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(ip) => {
-            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private() // 10/8, 172.16/12, 192.168/16
+                || v4.is_link_local() // 169.254/16
+                || v4.is_unspecified() // 0.0.0.0
+                || is_unspecified_net(v4) // 0.0.0.0/8（不仅 0.0.0.0）
+                || v4.is_multicast() // 224/4
+                || v4.is_broadcast() // 255.255.255.255
+                || is_cgnat(v4) // 100.64/10
+                || is_test_net(v4) // 192.0.2/24, 198.51.100/24, 203.0.113/24
+                || is_reserved_240(v4) // 240/4
+                || is_benchmark(v4) // 198.18.0.0/15（RFC 2544）
+                || is_ietf_shared(v4) // 192.0.0.0/24（RFC 6890）
         }
-        IpAddr::V6(ip) => {
-            if let Some(mapped) = ip.to_ipv4_mapped() {
-                return is_disallowed_webdav_ip(IpAddr::V4(mapped));
+        IpAddr::V6(v6) => {
+            // IPv4-mapped → 递归 V4
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_disallowed_webdav_ip(IpAddr::V4(v4));
             }
-
-            ip.is_loopback()
-                || ip.is_unique_local()
-                || ip.is_unicast_link_local()
-                || ip.is_unspecified()
+            // 6to4 嵌入 IPv4 → 解嵌后递归
+            if let Some(v4) = extract_6to4(v6) {
+                return is_disallowed_webdav_ip(IpAddr::V4(v4));
+            }
+            // NAT64 WKP 嵌入 IPv4 → 解嵌后递归
+            if let Some(v4) = extract_nat64(v6) {
+                return is_disallowed_webdav_ip(IpAddr::V4(v4));
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local() // fc00::/7（使用 std 方法）
+                || v6.is_unicast_link_local() // fe80::/10
+                || v6.is_multicast() // ff00::/8
+                || is_documentation_ipv6(v6) // 2001:db8::/32, 3fff::/20
+                || is_deprecated_site_local(v6) // fec0::/10（RFC 3849 已废弃，但安全起见仍拒绝）
+                || is_nat64_non_wkp(v6) // 64:ff9b:1::/48（RFC 6052 NAT64 非 WKP）
+                || is_discard_only_ipv6(v6) // 100::/64（RFC 6666 Discard-Only）
+                || is_benchmarking_ipv6(v6) // 2001:2::/48（RFC 5180 Benchmarking）
+                || is_teredo(v6) // 2001:0::/32（RFC 4380 Teredo）
         }
+    }
+}
+
+fn is_unspecified_net(ip: Ipv4Addr) -> bool {
+    ip.octets()[0] == 0 // 0.0.0.0/8（不仅 0.0.0.0）
+}
+
+fn is_cgnat(ip: Ipv4Addr) -> bool {
+    ip.octets()[0] == 100 && (ip.octets()[1] >= 64 && ip.octets()[1] <= 127)
+}
+
+fn is_test_net(ip: Ipv4Addr) -> bool {
+    matches!(
+        ip.octets(),
+        [192, 0, 2, _] | [198, 51, 100, _] | [203, 0, 113, _]
+    )
+}
+
+fn is_reserved_240(ip: Ipv4Addr) -> bool {
+    ip.octets()[0] >= 240
+}
+
+fn is_benchmark(ip: Ipv4Addr) -> bool {
+    ip.octets()[0] == 198 && (ip.octets()[1] >= 18 && ip.octets()[1] <= 19) // 198.18.0.0/15
+}
+
+/// 192.0.0.0/24（RFC 6890 IETF Protocol Assignments / Shared Address Space）
+/// 该段用于 DS-Lite 等运营商内部，非用户可达公网
+fn is_ietf_shared(ip: Ipv4Addr) -> bool {
+    ip.octets()[0] == 192 && ip.octets()[1] == 0 && ip.octets()[2] == 0
+}
+
+fn is_documentation_ipv6(ip: Ipv6Addr) -> bool {
+    // 2001:db8::/32 (RFC 3849)
+    (ip.segments()[0] == 0x2001 && ip.segments()[1] == 0x0db8)
+    // 3fff::/20 (RFC 9637) — 首段 = 0x3fff，第二段高 4 位 = 0
+        || (ip.segments()[0] == 0x3fff && (ip.segments()[1] & 0xf000) == 0)
+}
+
+/// fec0::/10（已废弃的 site-local，RFC 3849）
+/// fec0::/10 = fec0:: to febf::... — 前 10 位 = 1111111011
+fn is_deprecated_site_local(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xffc0) == 0xfec0
+}
+
+/// 64:ff9b:1::/48（RFC 6052 NAT64 非 WKP，local-use）
+/// 与 WKP 64:ff9b::/96 区分：此段允许本地部署的 NAT64 前缀
+fn is_nat64_non_wkp(ip: Ipv6Addr) -> bool {
+    ip.segments()[0] == 0x0064
+        && ip.segments()[1] == 0xff9b
+        && ip.segments()[2] == 0x0001
+    // segments[3..] 可以是任意值（/48 前缀后）
+}
+
+/// 100::/64（RFC 6666 Discard-Only Address Block）
+fn is_discard_only_ipv6(ip: Ipv6Addr) -> bool {
+    ip.segments()[0] == 0x0100
+        && ip.segments()[1] == 0
+        && ip.segments()[2] == 0
+        && ip.segments()[3] == 0
+        && ip.segments()[4] == 0
+        && ip.segments()[5] == 0
+    // segments[6..7] 可以是任意值（/64 前缀后）
+}
+
+/// 2001:2::/48（RFC 5180 Benchmarking）
+fn is_benchmarking_ipv6(ip: Ipv6Addr) -> bool {
+    ip.segments()[0] == 0x2001 && ip.segments()[1] == 0x0002
+    // segments[2..] 可以是任意值（/48 前缀后）
+}
+
+/// Teredo 隧道 2001:0::/32（RFC 4380）
+/// Teredo 地段嵌入客户端 IPv4，易被用于 SSRF 绕过
+fn is_teredo(ip: Ipv6Addr) -> bool {
+    ip.segments()[0] == 0x2001 && ip.segments()[1] == 0
+}
+
+/// 6to4 (2002::/16) 嵌入 IPv4 提取
+fn extract_6to4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
+    if ip.segments()[0] == 0x2002 {
+        let v4_bits = ((ip.segments()[1] as u32) << 16) | (ip.segments()[2] as u32);
+        Some(Ipv4Addr::from(v4_bits))
+    } else {
+        None
+    }
+}
+
+/// NAT64 WKP (64:ff9b::/96) 嵌入 IPv4 提取
+fn extract_nat64(ip: Ipv6Addr) -> Option<Ipv4Addr> {
+    if ip.segments()[0] == 0x0064
+        && ip.segments()[1] == 0xff9b
+        && ip.segments()[2] == 0
+        && ip.segments()[3] == 0
+        && ip.segments()[4] == 0
+        && ip.segments()[5] == 0
+    {
+        // NAT64 /96 前缀后，IPv4 占 segments[6..8]（高16位+低16位）
+        let v4_bits = ((ip.segments()[6] as u32) << 16) | (ip.segments()[7] as u32);
+        Some(Ipv4Addr::from(v4_bits))
+    } else {
+        None
     }
 }
 
@@ -3116,6 +3243,131 @@ mod tests {
     fn disallowed_ip_check_accepts_public_addresses() {
         assert!(!is_disallowed_webdav_ip("1.1.1.1".parse().unwrap()));
         assert!(!is_disallowed_webdav_ip("2001:4860:4860::8888".parse().unwrap()));
+    }
+
+    #[test]
+    fn disallowed_ip_check_cgnat() {
+        let cases = [
+            ("100.64.0.1", true),
+            ("100.127.255.255", true),
+            ("100.63.255.255", false),
+            ("100.128.0.0", false),
+        ];
+        for (ip, expected) in cases {
+            assert_eq!(
+                is_disallowed_webdav_ip(ip.parse().unwrap()),
+                expected,
+                "ip={ip}"
+            );
+        }
+    }
+
+    #[test]
+    fn disallowed_ip_check_test_nets() {
+        let cases = [
+            ("192.0.2.1", true),
+            ("198.51.100.1", true),
+            ("203.0.113.1", true),
+            ("192.0.0.1", true),  // 192.0.0.0/24 IETF Shared
+            ("192.0.1.0", false), // 192.0.0.0/24 边界外
+        ];
+        assert!(cases.len() >= 5);
+        for (ip, expected) in cases {
+            assert_eq!(
+                is_disallowed_webdav_ip(ip.parse().unwrap()),
+                expected,
+                "ip={ip}"
+            );
+        }
+    }
+
+    #[test]
+    fn disallowed_ip_check_reserved_240() {
+        let cases = [
+            ("240.0.0.1", true),
+            ("255.0.0.1", true),
+            ("239.255.255.255", true), // multicast, also disallowed
+            ("223.255.255.255", false),
+        ];
+        for (ip, expected) in cases {
+            assert_eq!(
+                is_disallowed_webdav_ip(ip.parse().unwrap()),
+                expected,
+                "ip={ip}"
+            );
+        }
+    }
+
+    #[test]
+    fn disallowed_ip_check_ipv4_multicast_broadcast() {
+        let cases = [
+            ("224.0.0.1", true),
+            ("239.255.255.255", true),
+            ("255.255.255.255", true),
+            ("223.0.0.1", false),
+        ];
+        for (ip, expected) in cases {
+            assert_eq!(
+                is_disallowed_webdav_ip(ip.parse().unwrap()),
+                expected,
+                "ip={ip}"
+            );
+        }
+    }
+
+    #[test]
+    fn disallowed_ip_check_ipv6_multicast_doc() {
+        // fec0 is deprecated site-local NOT ULA
+        let cases = [
+            ("ff02::1", true),
+            ("2001:db8::1", true),
+            ("fec0::1", true),
+            ("64:ff9b:1::1", true),
+            ("100::1", true),
+            ("2001:2::1", true),
+            ("3fff::1", true),
+            ("3fff:0fff::1", true),
+            ("3fff:1000::1", false),
+            ("2001:0::1", true), // Teredo
+        ];
+        assert!(cases.len() >= 10);
+        for (ip, expected) in cases {
+            assert_eq!(
+                is_disallowed_webdav_ip(ip.parse().unwrap()),
+                expected,
+                "ip={ip}"
+            );
+        }
+    }
+
+    #[test]
+    fn disallowed_ip_check_public_still_allowed() {
+        assert!(!is_disallowed_webdav_ip("8.8.8.8".parse().unwrap()));
+        assert!(!is_disallowed_webdav_ip("2606:4700::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn disallowed_ip_check_unspecified_net() {
+        assert!(is_disallowed_webdav_ip("0.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn disallowed_ip_check_benchmark() {
+        assert!(is_disallowed_webdav_ip("198.18.0.1".parse().unwrap()));
+        assert!(is_disallowed_webdav_ip("198.19.255.255".parse().unwrap()));
+        assert!(!is_disallowed_webdav_ip("198.20.0.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn disallowed_ip_check_6to4_embedded() {
+        // 2002:c0a8:0101::1 → 6to4 嵌入 192.168.1.1
+        assert!(is_disallowed_webdav_ip("2002:c0a8:0101::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn disallowed_ip_check_nat64_embedded() {
+        // 64:ff9b::c0a8:0101 → NAT64 嵌入 192.168.1.1
+        assert!(is_disallowed_webdav_ip("64:ff9b::c0a8:0101".parse().unwrap()));
     }
 
     #[test]
