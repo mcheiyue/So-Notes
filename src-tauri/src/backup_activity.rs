@@ -12,6 +12,7 @@ use fs4::fs_std::FileExt;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tauri::Manager;
 
 // ---------------------------------------------------------------------------
@@ -236,18 +237,19 @@ fn replace_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
 // 脱敏处理
 // ---------------------------------------------------------------------------
 
-/// 敏感关键词列表（小写匹配）。
-const SENSITIVE_KEYWORDS: &[&str] = &[
-    "password",
-    "token",
-    "authorization",
-    "secret",
-    "username",
-    "serverurl",
-    "url",
-    "密码",
-    "令牌",
-];
+/// 敏感词 SSOT（与前端 `src/shared/sensitive-words.json` 共用；构建期嵌入）。
+const SENSITIVE_WORDS_JSON: &str =
+    include_str!("../../src/shared/sensitive-words.json");
+
+/// 敏感关键词列表（小写匹配；来自 SSOT JSON 字符串数组）。
+fn sensitive_keywords() -> &'static [String] {
+    static KEYWORDS: OnceLock<Vec<String>> = OnceLock::new();
+    KEYWORDS.get_or_init(|| {
+        serde_json::from_str::<Vec<String>>(SENSITIVE_WORDS_JSON).unwrap_or_else(|e| {
+            panic!("sensitive-words.json 必须是字符串数组: {e}");
+        })
+    })
+}
 
 /// 合法的 operation 枚举值（与 TS 侧 BackupActivityOperation 对齐）。
 const VALID_OPERATIONS: &[&str] = &[
@@ -366,8 +368,8 @@ fn redact_sensitive_keywords(line: &str) -> String {
     while cursor < line.len() {
         // 尝试在当前位置之后找敏感词
         let mut found = false;
-        for kw in SENSITIVE_KEYWORDS {
-            let kw_lower = *kw;
+        for kw in sensitive_keywords() {
+            let kw_lower = kw.as_str();
             let kw_len = kw_lower.len();
             let after = cursor + kw_len;
             if after > line.len() {

@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { BackupSummary } from './BackupService';
+// 敏感词 SSOT（与 Rust backup_activity 共用）
+import sensitiveWords from '../../shared/sensitive-words.json';
 
 // ---------------------------------------------------------------------------
 // 类型定义（与 Rust serde camelCase 序列化对齐）
@@ -89,14 +91,24 @@ export interface BackupActivityAppendInput {
 // 脱敏与工具函数
 // ---------------------------------------------------------------------------
 
+/** 从 SSOT 构建 alternation；转义正则元字符 */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const SENSITIVE_KEYWORDS = sensitiveWords as readonly string[];
+const SENSITIVE_ALT = SENSITIVE_KEYWORDS.map(escapeRegExp).join('|');
+
 /**
- * 敏感词模式：
+ * 敏感词模式（词表来自 src/shared/sensitive-words.json）：
  * - keyword 与 =/:： 之间可有空白（password = x / token : y）
  * - 值可为双引号/单引号包裹（内含空格）或无引号非空白段
  * - keyword_xxx / 独立 keyword
  */
-const SENSITIVE_PATTERN =
-  /(password|token|authorization|secret|密码|令牌)\s*[=:：]\s*(?:"[^"]*"|'[^']*'|[^\s,;，。)}\]]+)|(password|token|authorization|secret|密码|令牌)_[^\s,;，。)}\]]+|(password|token|authorization|secret|密码|令牌)(?=[\s,;)}\]]|$)/gi;
+const SENSITIVE_PATTERN = new RegExp(
+  `(${SENSITIVE_ALT})\\s*[=:：]\\s*(?:"[^"]*"|'[^']*'|[^\\s,;，。)}\\]]+)|(${SENSITIVE_ALT})_[^\\s,;，。)}\\]]+|(${SENSITIVE_ALT})(?=[\\s,;)}\\]]|$)`,
+  'gi',
+);
 
 /** Bearer/Basic token 模式：匹配 Bearer 或 Basic 后面的 token 值 */
 const BEARER_TOKEN_PATTERN = /((?:Bearer|Basic)\s+)[^\s,;)}\]]{1,100}/gi;
@@ -147,6 +159,27 @@ export function sanitizeActivityInput(
       : input.remoteFileName,
     metrics: sanitizeMetrics(input.metrics),
   };
+}
+
+/**
+ * 将任意错误转成脱敏后的可读字符串（供 UI / catch 路径复用）。
+ */
+export function sanitizeErrorMessage(err: unknown): string {
+  const raw =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'string'
+        ? err
+        : '未知错误';
+  const { message } = sanitizeActivityInput({
+    message: raw,
+    operation: 'local-backup',
+    status: 'failed',
+    level: 'error',
+    startedAt: 0,
+    finishedAt: 0,
+  });
+  return message ?? '操作失败';
 }
 
 /**

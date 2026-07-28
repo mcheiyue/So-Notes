@@ -30,7 +30,7 @@ import {
   fileNameFromPath,
   loadRecentActivities,
   clearBackupActivities,
-  sanitizeActivityInput,
+  sanitizeErrorMessage,
 } from "../services/backup/BackupActivityLogService";
 import type { BackupActivityAppendInput, BackupActivityEntry } from "../services/backup/BackupActivityLogService";
 import { shouldCommitActivityRefresh } from './boardDockActivityRefresh';
@@ -45,19 +45,6 @@ type RestoreApplyResult =
     };
 
 const BOARD_ICONS = ["📝", "🚀", "💡", "🎨", "📅", "✅", "🔥", "✨", "📚", "🧘"];
-
-const sanitizeErrorMessage = (err: unknown): string => {
-  const raw = formatUnknownError(err);
-  const { message } = sanitizeActivityInput({
-    message: raw,
-    operation: 'local-backup',
-    status: 'failed',
-    level: 'error',
-    startedAt: 0,
-    finishedAt: 0,
-  });
-  return message ?? '操作失败';
-};
 
 const setsEqual = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean => {
   if (a.size !== b.size) return false;

@@ -244,6 +244,22 @@ describe('BackupActivityLogService', () => {
       expect(result.message).toBe('secret=[REDACTED]');
     });
 
+    it('替换 message 中的 username/serverUrl（SSOT 扩展词）', () => {
+      const user = sanitizeActivityInput({
+        ...baseInput,
+        message: 'username=alice trailing',
+      });
+      expect(user.message).toBe('username=[REDACTED] trailing');
+      expect(user.message).not.toContain('alice');
+
+      const server = sanitizeActivityInput({
+        ...baseInput,
+        message: 'serverUrl=https://dav.example.com ok',
+      });
+      expect(server.message).toBe('serverurl=[REDACTED] ok');
+      expect(server.message).not.toContain('dav.example.com');
+    });
+
     it('移除 URL 中的 userinfo', () => {
       const result = sanitizeActivityInput({
         ...baseInput,
