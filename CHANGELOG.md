@@ -2,6 +2,40 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.6.1] - 2026-07-28
+
+本版本聚焦 WebDAV HTTPS 备份链路的 SSRF 硬化：扩展特殊用途与隧道相关 IP 黑名单、连接阶段 DNS 失败改为 fail-closed、解析结果 pin 防 rebinding，并提供「信任此主机」仅用于 DNS 失败时的一次重试。
+
+### ✨ 新特性 (Features)
+
+* **「信任此主机」配置**
+  > WebDAV 设置可勾选「信任此主机（DNS 失败时重试；IP 黑名单仍生效）」。仅在 DNS 解析失败时再解析一次；仍失败则拒绝连接。勾选**不会**放行内网或黑名单 IP，也不会放宽重定向校验。
+
+  - 旧配置缺省为未信任（`trust_host=false`）。
+  - 主机名变更时需重新确认信任；同 host 规范化（大小写 / trailing-dot）不误清。
+
+### 🐛 问题修复 (Bug Fixes)
+
+* **WebDAV 连接 DNS 失败不再静默放行**
+  > 连接前解析失败时默认拒绝，避免 fail-open 绕过 SSRF 检查。
+
+* **扩展不可达 / 特殊用途目标 IP 拦截**
+  > 在原有私网、回环等基础上，拒绝 CGNAT、TEST-NET、240/4、组播/广播、IETF Shared、文档与废弃站点本地 IPv6、NAT64 非 WKP、Teredo 前缀，以及对 6to4 / NAT64 嵌入私网地址的递归判定。
+
+* **连接时固定解析 IP，降低 DNS rebinding 风险**
+  > 校验通过后的地址表 pin 到 HTTP 客户端；后续请求不因二次解析换 IP 而绕过首检。
+
+* **HTTPS 重定向仅允许同 host**
+  > 重定向目标完整走 SSRF 校验；不同 host / 不同 port / trailing-dot 主机名拒绝；信任开关对重定向无效。
+
+### 🔧 内部改进 (Internal)
+
+* **SSRF 验收门禁与 DoD runner**
+  > 新增范围白名单、normalize 无 DNS、Commit2+3 同树、入口顺序，以及 `run-v161-dod` 封装关键单测与静态门。
+
+* **可 mock 的 DNS 解析抽象**
+  > `HostResolver` 支持单测注入，覆盖 fail-closed、信任重试、pin 与 rebinding 逻辑证明。
+
 ## [v1.6.0] - 2026-07-20
 
 本版本聚焦「捕获与整理体验增强」：明确快速捕获目标看板、失败不丢输入、批量创建可一次撤销/重做，并补齐 v1.6.0 冒烟基线与 C28 范围门禁。捕获后程序定位未交付。
