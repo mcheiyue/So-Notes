@@ -519,6 +519,30 @@ describe('WebDavBackupService', () => {
       expect(result.success).toBe(false);
       expect(result.errorStage).toBe('unknown');
     });
+
+    it('createRemoteBackup catch 脱敏', async () => {
+      const config = {
+        serverUrl: 'https://example.com',
+        username: 'user',
+      };
+      // mock 抛含 URL / userinfo / path 的 Error；返回 error 无原文
+      invokeMock.mockRejectedValueOnce(
+        new Error(
+          'upload failed for https://user:pass@dav.example.com/remote.php/dav/files/user1/SoNotes_Backups/backup.zip password=secret123',
+        ),
+      );
+
+      const result = await createRemoteBackup(config);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain('[URL_REDACTED]');
+      expect(result.error).toContain('password=[REDACTED]');
+      expect(result.error).not.toContain('dav.example.com');
+      expect(result.error).not.toContain('user:pass');
+      expect(result.error).not.toContain('secret123');
+      expect(result.error).not.toContain('/remote.php/dav/files/user1');
+    });
   });
 
   // -------------------------------------------------------------------------

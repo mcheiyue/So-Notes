@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { RemoteBackupStage } from './ScheduledRemoteBackupConfigService';
 import type { BackupSummary } from './BackupService';
+import { sanitizeActivityInput } from './BackupActivityLogService';
 
 // ---------------------------------------------------------------------------
 // Rust errorStage → 前端 RemoteBackupStage 映射
@@ -166,8 +167,18 @@ export async function createRemoteBackup(
     const raw = await invoke<WebDavUploadResult>('webdav_create_remote_backup', { config });
     return { ...raw, errorStage: normalizeErrorStage(raw.errorStage, raw.errorCode) };
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    const lower = message.toLowerCase();
+    const raw = err instanceof Error ? err.message : String(err);
+    // 用共享 helper 脱敏后写入 error；阶段判断仍用 raw（脱敏后可能丢关键词）
+    const sanitized =
+      sanitizeActivityInput({
+        operation: 'remote-backup',
+        status: 'failed',
+        level: 'error',
+        startedAt: 0,
+        finishedAt: 0,
+        message: raw,
+      }).message ?? '未知错误';
+    const lower = raw.toLowerCase();
     const isCredentialError =
       lower.includes('credential') ||
       lower.includes('keyring') ||
@@ -176,7 +187,7 @@ export async function createRemoteBackup(
       lower.includes('凭据');
     return {
       success: false,
-      error: message,
+      error: sanitized,
       errorStage: isCredentialError ? 'credential' : 'unknown',
       errorCode: undefined,
       summary: null,
