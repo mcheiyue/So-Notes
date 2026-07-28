@@ -2793,7 +2793,7 @@ impl std::fmt::Display for WebDavCredentialError {
 }
 /// Credential store 边界：业务逻辑通过此 trait 与系统密钥链交互。
 ///
-/// 生产环境使用 `SystemWebDavCredentialStore`（接入 keyring crate）；
+/// 生产环境使用 `SystemWebDavCredentialStore`（keyring-core + 平台 store）；
 /// 测试环境使用 `MemoryWebDavCredentialStore`（内存 HashMap）。
 pub trait WebDavCredentialStore: Send + Sync {
     fn save(&self, key: &WebDavCredentialKey, secret: &str) -> Result<(), WebDavCredentialError>;
@@ -2851,10 +2851,10 @@ impl WebDavCredentialStore for MemoryWebDavCredentialStore {
         Ok(())
     }
 }
-/// 系统密钥链 credential store，通过 `keyring` crate 接入操作系统凭据管理器。
+/// 系统密钥链 credential store，通过 keyring-core + 平台 store 接入 OS 凭据管理器。
 ///
 /// 每次操作按需创建 `keyring_core::Entry`，不缓存实例。
-/// Windows 平台需要在调用方初始化 `keyring::use_windows_native_store()`。
+/// 应用启动时需 `keyring_core::set_default_store(windows_native_keyring_store::Store::…)`。
 pub struct SystemWebDavCredentialStore;
 impl SystemWebDavCredentialStore {
     pub fn new() -> Self {
@@ -7582,8 +7582,10 @@ mod tests {
     #[test]
     #[ignore]
     fn system_store_save_and_load_roundtrip() {
-        let config = std::collections::HashMap::new();
-        keyring::use_windows_native_store(&config).expect("初始化 Windows 密钥链失败");
+        // ponytail: ignore 测仍参与编译；与 lib.rs 启动路径同一 store
+        keyring_core::set_default_store(
+            windows_native_keyring_store::Store::new().expect("初始化 Windows 密钥链失败"),
+        );
         let store = SystemWebDavCredentialStore::new();
         let key = WebDavCredentialKey {
             service: "so-notes-test".to_string(),
@@ -7598,8 +7600,9 @@ mod tests {
     #[test]
     #[ignore]
     fn system_store_delete_removes_credential() {
-        let config = std::collections::HashMap::new();
-        keyring::use_windows_native_store(&config).expect("初始化 Windows 密钥链失败");
+        keyring_core::set_default_store(
+            windows_native_keyring_store::Store::new().expect("初始化 Windows 密钥链失败"),
+        );
         let store = SystemWebDavCredentialStore::new();
         let key = WebDavCredentialKey {
             service: "so-notes-test".to_string(),
