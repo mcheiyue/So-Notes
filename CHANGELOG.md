@@ -2,6 +2,18 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.6.3] - 2026-07-30
+
+本版本统一 ViewMode 切换语义：权威 `useUIStore.setViewMode` 对齐 BOARD↔TRASH 完整副作用（视口保存/恢复、清选区、TRASH 清理 UI），`useStore.setViewMode` 薄委托并标记废弃。关单状态：CODE V1 **已统一**。
+
+### 🐛 问题修复 (Bug Fixes)
+
+* **ViewMode 语义统一（CODE V1 已统一）**
+  > 生产入口经 uiStore 的 setViewMode 现具备与旧 useStore 路径一致的完整副作用；TRASH↔BOARD 保存/恢复 `board.viewport`（仅 `{x,y}`）；TRASH 时清理选区/菜单/粘性拖拽等。
+
+  - 权威实现落在 `uiStore.setViewMode`。
+  - `useStore.setViewMode` 薄委托权威并 `@deprecated`。
+
 ## [v1.6.2] - 2026-07-29
 
 本版本聚焦备份链路敏感信息脱敏与依赖瘦身：共享敏感词词表供 TS/Rust 引用，远程备份 catch 错误字段脱敏，移除 keyring 4 并改用 keyring-core + 平台 store，显著减小安装包体积。
