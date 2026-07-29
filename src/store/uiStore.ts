@@ -8,6 +8,7 @@ import type {
 } from './types';
 import type { SmartPasteResult } from '../utils/smartPaste';
 import { useStore } from './useStore';
+import { useViewportStore } from './viewportStore';
 
 export const UI_STORE_MODULE = 'uiStore';
 
@@ -155,10 +156,45 @@ export const useUIStore = create<UIStoreState>()(
     ...createInitialUIState(),
 
     setViewMode: (mode) => {
+      // 权威完整副作用：BOARD↔TRASH 视口存取 + TRASH 清理；禁止 pushHistory
+      const prev = useUIStore.getState().viewMode;
+
+      if (mode === 'TRASH' && prev === 'BOARD') {
+        const { x, y } = useViewportStore.getState().viewport;
+        const { currentBoardId, boards } = useStore.getState();
+        const boardIndex = boards.findIndex((b) => b.id === currentBoardId);
+        if (boardIndex >= 0) {
+          const nextBoards = boards.map((b, i) =>
+            i === boardIndex ? { ...b, viewport: { x, y } } : b,
+          );
+          useStore.setState({ boards: nextBoards });
+        }
+      }
+
       set((state) => {
         state.viewMode = mode;
         state.selectedIds = [];
+        if (mode === 'TRASH') {
+          state.isDockVisible = false;
+          state.contextMenu = { isOpen: false, x: 0, y: 0, type: 'CANVAS' };
+          state.smartPasteSplitPanel = null;
+          state.isSpotlightOpen = false;
+          state.isQuickCaptureOpen = false;
+        }
       });
+
+      if (mode === 'TRASH') {
+        useViewportStore.getState().setStickyDrag(null);
+        useViewportStore.getState().setPanMode(false);
+      }
+
+      if (mode === 'BOARD' && prev === 'TRASH') {
+        const { currentBoardId, boards } = useStore.getState();
+        const board = boards.find((b) => b.id === currentBoardId);
+        if (board?.viewport) {
+          useViewportStore.getState().setViewportPosition(board.viewport.x, board.viewport.y);
+        }
+      }
     },
 
     setSelectedIds: (ids) => {

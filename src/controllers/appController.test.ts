@@ -205,6 +205,144 @@ describe('appController first-tier intents', () => {
     expect(useUIStore.getState().viewMode).toBe('BOARD');
   });
 
+  it('setViewMode 权威路径完整副作用', () => {
+    useStore.setState({
+      viewMode: 'BOARD',
+      selectedIds: ['n1'],
+      isDockVisible: true,
+      contextMenu: { isOpen: true, x: 10, y: 20, type: 'NOTE', targetId: 'n1' },
+      smartPasteSplitPanel: { noteId: 'n1', result: { kind: 'single', source: 'text', options: [] } },
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+      viewport: { x: 100, y: 200, w: 320, h: 240 },
+    });
+    useUIStore.setState({
+      viewMode: 'BOARD',
+      selectedIds: ['n1'],
+      isDockVisible: true,
+      contextMenu: { isOpen: true, x: 10, y: 20, type: 'NOTE', targetId: 'n1' },
+      smartPasteSplitPanel: { noteId: 'n1', result: { kind: 'single', source: 'text', options: [] } },
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+    });
+    useViewportStore.setState({
+      viewport: { x: 100, y: 200, w: 320, h: 240 },
+      stickyDrag: { id: 'n1', offsetX: 1, offsetY: 2, status: 'active' },
+      interaction: {
+        isPanMode: true,
+        isDragging: false,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+    });
+
+    appController.setViewMode('TRASH');
+
+    expect(useUIStore.getState().viewMode).toBe('TRASH');
+    expect(useUIStore.getState().selectedIds).toEqual([]);
+    expect(useUIStore.getState().isDockVisible).toBe(false);
+    expect(useUIStore.getState().contextMenu).toEqual({ isOpen: false, x: 0, y: 0, type: 'CANVAS' });
+    expect(useUIStore.getState().smartPasteSplitPanel).toBeNull();
+    expect(useUIStore.getState().isSpotlightOpen).toBe(false);
+    expect(useUIStore.getState().isQuickCaptureOpen).toBe(false);
+    expect(useViewportStore.getState().stickyDrag.id).toBeNull();
+    expect(useViewportStore.getState().interaction.isPanMode).toBe(false);
+    expect(useStore.getState().boards.find((b) => b.id === 'default')?.viewport).toEqual({
+      x: 100,
+      y: 200,
+    });
+  });
+
+  it('setViewMode TRASH 保存 board.viewport', () => {
+    useStore.setState({
+      viewMode: 'BOARD',
+      viewport: { x: 100, y: 200, w: 320, h: 240 },
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+    });
+    useUIStore.setState({ viewMode: 'BOARD' });
+    useViewportStore.setState({ viewport: { x: 100, y: 200, w: 320, h: 240 } });
+
+    appController.setViewMode('TRASH');
+
+    expect(useStore.getState().boards.find((b) => b.id === 'default')?.viewport).toEqual({
+      x: 100,
+      y: 200,
+    });
+  });
+
+   it('setViewMode BOARD 主动恢复 board.viewport（真恢复步骤：改坏后恢复）', () => {
+    useStore.setState({
+      viewMode: 'BOARD',
+      viewport: { x: 100, y: 200, w: 320, h: 240 },
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+    });
+    useUIStore.setState({ viewMode: 'BOARD' });
+    useViewportStore.setState({ viewport: { x: 100, y: 200, w: 320, h: 240 } });
+
+    appController.setViewMode('TRASH');
+    expect(useStore.getState().boards.find((b) => b.id === 'default')?.viewport).toEqual({
+      x: 100,
+      y: 200,
+    });
+
+    // 真恢复步骤：故意改坏 runtime pan（假绿杀手）
+    useViewportStore.getState().setViewportPosition(0, 0);
+    expect(useViewportStore.getState().viewport.x).toBe(0);
+    expect(useViewportStore.getState().viewport.y).toBe(0);
+
+    appController.setViewMode('BOARD');
+
+    expect(useViewportStore.getState().viewport.x).toBe(100);
+    expect(useViewportStore.getState().viewport.y).toBe(200);
+    expect(useStore.getState().viewport.x).toBe(100);
+    expect(useStore.getState().viewport.y).toBe(200);
+  });
+
+  it('setViewMode TRASH 清理冲突 UI', () => {
+    useStore.setState({
+      viewMode: 'BOARD',
+      selectedIds: ['n1', 'n2'],
+      isDockVisible: true,
+      contextMenu: { isOpen: true, x: 50, y: 60, type: 'CANVAS' },
+      smartPasteSplitPanel: { noteId: 'n1', result: { kind: 'single', source: 'text', options: [] } },
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+    });
+    useUIStore.setState({
+      viewMode: 'BOARD',
+      selectedIds: ['n1', 'n2'],
+      isDockVisible: true,
+      contextMenu: { isOpen: true, x: 50, y: 60, type: 'CANVAS' },
+      smartPasteSplitPanel: { noteId: 'n1', result: { kind: 'single', source: 'text', options: [] } },
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+    });
+    useViewportStore.setState({
+      stickyDrag: { id: 'n1', offsetX: 5, offsetY: 6, status: 'active' },
+      interaction: {
+        isPanMode: true,
+        isDragging: false,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+    });
+
+    appController.setViewMode('TRASH');
+
+    const ui = useUIStore.getState();
+    expect(ui.selectedIds).toEqual([]);
+    expect(ui.isDockVisible).toBe(false);
+    expect(ui.contextMenu.isOpen).toBe(false);
+    expect(ui.smartPasteSplitPanel).toBeNull();
+    expect(ui.isSpotlightOpen).toBe(false);
+    expect(ui.isQuickCaptureOpen).toBe(false);
+    expect(useViewportStore.getState().stickyDrag).toEqual({
+      id: null,
+      offsetX: 0,
+      offsetY: 0,
+      status: 'active',
+    });
+    expect(useViewportStore.getState().interaction.isPanMode).toBe(false);
+  });
+
   it('toggleViewMode 切换视图模式并清空选区', () => {
     useStore.setState({ viewMode: 'BOARD', selectedIds: ['n1'] });
     useUIStore.setState({ viewMode: 'BOARD', selectedIds: ['n1'] });

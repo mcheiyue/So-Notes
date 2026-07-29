@@ -19,6 +19,7 @@ vi.mock('../utils/fileSystem', () => ({
 
 import { createInitialUIState, useUIStore, uiSelectors } from './uiStore';
 import { useStore } from './useStore';
+import { useViewportStore } from './viewportStore';
 import { createEmptyNormalizedNotesState } from './normalization';
 
 const resetUIStore = () => {
@@ -75,6 +76,154 @@ describe('uiStore 纯 UI actions', () => {
 
     expect(useUIStore.getState().viewMode).toBe('TRASH');
     expect(useUIStore.getState().selectedIds).toEqual([]);
+  });
+
+  it('setViewMode 权威路径完整副作用', () => {
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: 'default',
+      viewMode: 'BOARD',
+      selectedIds: ['a'],
+      isDockVisible: true,
+      contextMenu: { isOpen: true, x: 1, y: 2, type: 'NOTE', targetId: 'a' },
+      smartPasteSplitPanel: { noteId: 'a', result: { kind: 'single', source: 'text', options: [] } },
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+      viewport: { x: 100, y: 200, w: 320, h: 240 },
+    });
+    useUIStore.setState({
+      viewMode: 'BOARD',
+      selectedIds: ['a'],
+      isDockVisible: true,
+      contextMenu: { isOpen: true, x: 1, y: 2, type: 'NOTE', targetId: 'a' },
+      smartPasteSplitPanel: { noteId: 'a', result: { kind: 'single', source: 'text', options: [] } },
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+    });
+    useViewportStore.setState({
+      viewport: { x: 100, y: 200, w: 320, h: 240 },
+      stickyDrag: { id: 'a', offsetX: 3, offsetY: 4, status: 'active' },
+      interaction: {
+        isPanMode: true,
+        isDragging: false,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+    });
+
+    useUIStore.getState().setViewMode('TRASH');
+
+    expect(useUIStore.getState().viewMode).toBe('TRASH');
+    expect(useUIStore.getState().selectedIds).toEqual([]);
+    expect(useUIStore.getState().isDockVisible).toBe(false);
+    expect(useUIStore.getState().contextMenu).toEqual({ isOpen: false, x: 0, y: 0, type: 'CANVAS' });
+    expect(useUIStore.getState().smartPasteSplitPanel).toBeNull();
+    expect(useUIStore.getState().isSpotlightOpen).toBe(false);
+    expect(useUIStore.getState().isQuickCaptureOpen).toBe(false);
+    expect(useViewportStore.getState().stickyDrag.id).toBeNull();
+    expect(useViewportStore.getState().interaction.isPanMode).toBe(false);
+    expect(useStore.getState().boards[0].viewport).toEqual({ x: 100, y: 200 });
+  });
+
+  it('setViewMode TRASH 保存 board.viewport', () => {
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: 'default',
+      viewMode: 'BOARD',
+      viewport: { x: 150, y: 250, w: 320, h: 240 },
+    });
+    useUIStore.setState({ viewMode: 'BOARD' });
+    useViewportStore.setState({ viewport: { x: 150, y: 250, w: 320, h: 240 } });
+
+    useUIStore.getState().setViewMode('TRASH');
+
+    expect(useStore.getState().boards[0].viewport).toEqual({ x: 150, y: 250 });
+  });
+
+    it('setViewMode BOARD 主动恢复 board.viewport（真恢复步骤：改坏后恢复）', () => {
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
+      currentBoardId: 'default',
+      viewMode: 'BOARD',
+      viewport: { x: 100, y: 200, w: 320, h: 240 },
+    });
+    useUIStore.setState({ viewMode: 'BOARD' });
+    useViewportStore.setState({ viewport: { x: 100, y: 200, w: 320, h: 240 } });
+
+    useUIStore.getState().setViewMode('TRASH');
+    expect(useStore.getState().boards[0].viewport).toEqual({ x: 100, y: 200 });
+
+    // 真恢复步骤：故意改坏 runtime pan
+    useViewportStore.getState().setViewportPosition(0, 0);
+    expect(useViewportStore.getState().viewport.x).toBe(0);
+
+    useUIStore.getState().setViewMode('BOARD');
+
+    expect(useViewportStore.getState().viewport.x).toBe(100);
+    expect(useViewportStore.getState().viewport.y).toBe(200);
+    expect(useStore.getState().viewport.x).toBe(100);
+    expect(useStore.getState().viewport.y).toBe(200);
+  });
+
+  it('setViewMode TRASH 清理冲突 UI', () => {
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      viewMode: 'BOARD',
+    });
+    useUIStore.setState({
+      viewMode: 'BOARD',
+      selectedIds: ['a'],
+      isDockVisible: true,
+      contextMenu: { isOpen: true, x: 9, y: 9, type: 'CANVAS' },
+      smartPasteSplitPanel: { noteId: 'a', result: { kind: 'single', source: 'text', options: [] } },
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+    });
+    useViewportStore.setState({
+      stickyDrag: { id: 'a', offsetX: 1, offsetY: 1, status: 'active' },
+      interaction: {
+        isPanMode: true,
+        isDragging: false,
+        edgePush: { top: false, bottom: false, left: false, right: false },
+      },
+    });
+
+    useUIStore.getState().setViewMode('TRASH');
+
+    expect(useUIStore.getState().selectedIds).toEqual([]);
+    expect(useUIStore.getState().isDockVisible).toBe(false);
+    expect(useUIStore.getState().contextMenu.isOpen).toBe(false);
+    expect(useUIStore.getState().smartPasteSplitPanel).toBeNull();
+    expect(useUIStore.getState().isSpotlightOpen).toBe(false);
+    expect(useUIStore.getState().isQuickCaptureOpen).toBe(false);
+    expect(useViewportStore.getState().stickyDrag.id).toBeNull();
+    expect(useViewportStore.getState().interaction.isPanMode).toBe(false);
+  });
+
+  it('setViewMode BOARD 不清 Spotlight/QC', () => {
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      viewMode: 'TRASH',
+    });
+    useUIStore.setState({
+      viewMode: 'TRASH',
+      selectedIds: ['a'],
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+    });
+
+    useUIStore.getState().setViewMode('BOARD');
+
+    expect(useUIStore.getState().viewMode).toBe('BOARD');
+    expect(useUIStore.getState().selectedIds).toEqual([]);
+    expect(useUIStore.getState().isSpotlightOpen).toBe(true);
+    expect(useUIStore.getState().isQuickCaptureOpen).toBe(true);
   });
 
   it('setSelectedIds / toggleSelection / clearSelection 正确管理选区', () => {
@@ -289,16 +438,7 @@ describe('uiStore TRASH 安全收口 UI 字段同步', () => {
   });
 
   it('useStore setViewMode(TRASH) 清理的 UI 字段同步到 useUIStore', () => {
-    useStore.setState({
-      selectedIds: ['note-1', 'note-2'],
-      contextMenu: { isOpen: true, x: 100, y: 200, type: 'NOTE', targetId: 'note-1' },
-      smartPasteSplitPanel: { noteId: 'note-1', result: { kind: 'single', source: 'text', options: [] } },
-      isSpotlightOpen: true,
-      isQuickCaptureOpen: true,
-      isDockVisible: true,
-    });
-
-    useStore.getState().setViewMode('TRASH');
+    useUIStore.getState().setViewMode('TRASH');
 
     expect(useUIStore.getState().viewMode).toBe('TRASH');
     expect(useUIStore.getState().selectedIds).toEqual([]);
@@ -307,9 +447,19 @@ describe('uiStore TRASH 安全收口 UI 字段同步', () => {
     expect(useUIStore.getState().isSpotlightOpen).toBe(false);
     expect(useUIStore.getState().isQuickCaptureOpen).toBe(false);
     expect(useUIStore.getState().isDockVisible).toBe(false);
+
+    // 反向同步桥使 useStore 也更新（使用同步桥确保）
+    const useStoreState = useStore.getState();
+    expect(useStoreState.viewMode).toBe('TRASH');
   });
 
   it('useStore setViewMode(BOARD) 只清 selectedIds，不触碰其他 UI 状态', () => {
+    useUIStore.setState({
+      viewMode: 'TRASH',
+      selectedIds: ['note-1'],
+      isSpotlightOpen: true,
+      isQuickCaptureOpen: true,
+    });
     useStore.setState({
       viewMode: 'TRASH',
       selectedIds: ['note-1'],
@@ -317,13 +467,21 @@ describe('uiStore TRASH 安全收口 UI 字段同步', () => {
       isQuickCaptureOpen: true,
     });
 
-    useStore.getState().setViewMode('BOARD');
+    useUIStore.getState().setViewMode('BOARD');
 
     expect(useUIStore.getState().viewMode).toBe('BOARD');
     expect(useUIStore.getState().selectedIds).toEqual([]);
     expect(useUIStore.getState().isSpotlightOpen).toBe(true);
     expect(useUIStore.getState().isQuickCaptureOpen).toBe(true);
+
+    const useStoreState = useStore.getState();
+    expect(useStoreState.viewMode).toBe('BOARD');
+    expect(useStoreState.selectedIds).toEqual([]);
+    expect(useStoreState.isSpotlightOpen).toBe(true);
+    expect(useStoreState.isQuickCaptureOpen).toBe(true);
   });
+
+
 });
 
 describe('uiStore 多选/右键菜单/Dock 兼容行为', () => {
