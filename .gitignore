@@ -35,3 +35,8 @@ performance-test-*.png
 # Local verification artifacts (vitest JSON reporters, plan fix scripts, etc.)
 .tmp/
 
+
+# Agent / local session noise
+.omo/
+.pi-subagents/
+
