@@ -2,6 +2,34 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
+## [v1.6.2] - 2026-07-29
+
+本版本聚焦备份链路敏感信息脱敏与依赖瘦身：共享敏感词词表供 TS/Rust 引用，远程备份 catch 错误字段脱敏，移除 keyring 4 并改用 keyring-core + 平台 store，显著减小安装包体积。
+
+### ✨ 新特性 (Features)
+
+* **共享敏感词词表（SSOT）**
+  > 新增 `src/shared/sensitive-words.json`，供前端与 Rust 备份活动日志统一脱敏；覆盖 password/token/authorization/secret/username/serverurl/url 等常见字段。
+
+  - BoardDock 删除本地 sanitize 副本，改用共享导出。
+  - TS `BackupActivityLogService` 与 Rust `backup_activity` 均引用同一词表。
+
+### 🐛 问题修复 (Bug Fixes)
+
+* **远程备份 catch 错误字段脱敏**
+  > `WebDavBackupService.createRemoteBackup` 的 catch 路径对写入活动日志的 `error` 字段做脱敏，避免密码/令牌等明文落盘。
+
+  - 阶段判断仍用原始错误；仅落库字段脱敏（R2 已收窄，非全链路已修复）。
+  - 补充单测「createRemoteBackup catch 脱敏」。
+
+### 🚀 优化 (Optimizations)
+
+* **移除 keyring 4，改用 keyring-core + 平台 store**
+  > 依赖树去掉 keyring v4；Windows 使用 `windows-native-keyring-store`，启动时 `set_default_store`。
+
+  - 发布构建体积约 **6.68 MB**（较 v1.6.1 基线约 11.4 MB 回收约 5 MB）。
+  - 升级后可能需重输一次 WebDAV 密码（store 切换，C-K3 手动未验）。
+
 ## [v1.6.1] - 2026-07-28
 
 本版本聚焦 WebDAV HTTPS 备份链路的 SSRF 硬化：扩展特殊用途与隧道相关 IP 黑名单、连接阶段 DNS 失败改为 fail-closed、解析结果 pin 防 rebinding，并提供「信任此主机」仅用于 DNS 失败时的一次重试。
