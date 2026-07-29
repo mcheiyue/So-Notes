@@ -633,6 +633,11 @@ const toMutableHistoryStack = <T>(stack: HistoryStack<T>): {
 });
 
 
+// 薄委托目标：create 完成后由 top-level await 绑定，避免 useStore↔uiStore 循环 TDZ
+let uiSetViewModeRef: (mode: ViewMode) => void = () => {
+  throw new Error('setViewMode: uiStore 尚未就绪');
+};
+
 export const useStore = create<State>()(
   immer((set, get) => ({
     ...createEmptyNormalizedNotesState(),
@@ -812,28 +817,10 @@ export const useStore = create<State>()(
         });
     },
 
+    /** @deprecated 请使用 `useUIStore.setViewMode` 或 `appController.setViewMode` */
     setViewMode: (mode) => {
-        set((state) => {
-            // 离开看板视图前保存当前视口，避免重新挂载画布时恢复到旧位置。
-            if (mode === 'TRASH' && state.viewMode === 'BOARD') {
-                const currentBoard = state.boards.find(b => b.id === state.currentBoardId);
-                if (currentBoard) {
-                    currentBoard.viewport = { x: state.viewport.x, y: state.viewport.y };
-                }
-            }
-
-            state.viewMode = mode;
-            state.selectedIds = [];
-            if (mode === 'TRASH') {
-                state.isDockVisible = false; // 进入 TRASH 时默认收起 Dock
-                state.contextMenu = { isOpen: false, x: 0, y: 0, type: 'CANVAS' };
-                state.smartPasteSplitPanel = null;
-                state.stickyDrag = { id: null, offsetX: 0, offsetY: 0, status: 'active' };
-                state.interaction.isPanMode = false;
-                state.isSpotlightOpen = false;
-                state.isQuickCaptureOpen = false;
-            }
-        });
+      // 由文件末尾 top-level await 绑定；模块初始化完成后可用
+      uiSetViewModeRef(mode);
     },
 
     createBoard: (name, icon) => {
@@ -2736,4 +2723,10 @@ export const useStore = create<State>()(
     },
   }))
 );
+
+// useStore 已导出后再加载 uiStore，循环安全；绑定薄委托
+const { useUIStore } = await import('./uiStore');
+uiSetViewModeRef = (mode) => {
+  useUIStore.getState().setViewMode(mode);
+};
 
