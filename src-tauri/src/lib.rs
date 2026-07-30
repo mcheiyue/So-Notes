@@ -618,6 +618,16 @@ pub fn run() {
                 } else {
                     let is_pinned = state.is_pinned.lock().map(|p| *p).unwrap_or(false);
                     if !is_pinned {
+                        // ponytail: race guard — tray click sets last_toggle_time before
+                        // set_focus(); blur fires right after and must not hide the window
+                        let recently_toggled = state
+                            .last_toggle_time
+                            .lock()
+                            .map(|t| now_millis() - *t < 300)
+                            .unwrap_or(false);
+                        if recently_toggled {
+                            return;
+                        }
                         let window_handle = window.clone();
                         let app_handle = window.app_handle().clone();
                         tauri::async_runtime::spawn(async move {

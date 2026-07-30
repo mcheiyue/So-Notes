@@ -2724,9 +2724,16 @@ export const useStore = create<State>()(
   }))
 );
 
-// useStore 已导出后再加载 uiStore，循环安全；绑定薄委托
-const { useUIStore } = await import('./uiStore');
-uiSetViewModeRef = (mode) => {
-  useUIStore.getState().setViewMode(mode);
-};
+// ponytail: top-level await 阻塞 Vite 7 模块图加载，改为 microtask 延迟绑定
+// uiStore 在模块图中排在 useStore 之后，microtask 执行时已就绪
+queueMicrotask(async () => {
+  try {
+    const { useUIStore } = await import('./uiStore');
+    uiSetViewModeRef = (mode) => {
+      useUIStore.getState().setViewMode(mode);
+    };
+  } catch {
+    // uiStore 加载失败时保留默认 throw，运行时调用会报明确错误
+  }
+});
 
