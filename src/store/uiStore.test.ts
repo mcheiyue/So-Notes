@@ -141,7 +141,7 @@ describe('uiStore 纯 UI actions', () => {
     expect(useStore.getState().boards[0].viewport).toEqual({ x: 150, y: 250 });
   });
 
-    it('setViewMode BOARD 主动恢复 board.viewport（真恢复步骤：改坏后恢复）', () => {
+  it('setViewMode BOARD 主动恢复 board.viewport（真恢复步骤：改坏后恢复）', () => {
     useStore.setState(useStore.getInitialState(), true);
     useStore.setState({
       boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0, viewport: { x: 0, y: 0 } }],
@@ -165,6 +165,25 @@ describe('uiStore 纯 UI actions', () => {
     expect(useViewportStore.getState().viewport.y).toBe(200);
     expect(useStore.getState().viewport.x).toBe(100);
     expect(useStore.getState().viewport.y).toBe(200);
+  });
+
+  it('setViewMode BOARD 无 board.viewport 时不强制清零 runtime pan', () => {
+    useStore.setState(useStore.getInitialState(), true);
+    useStore.setState({
+      boards: [{ id: 'default', name: '主板', icon: '📌', createdAt: 0 }],
+      currentBoardId: 'default',
+      viewMode: 'TRASH',
+      viewport: { x: 77, y: 88, w: 320, h: 240 },
+    });
+    useUIStore.setState({ viewMode: 'TRASH' });
+    useViewportStore.setState({ viewport: { x: 77, y: 88, w: 320, h: 240 } });
+
+    useUIStore.getState().setViewMode('BOARD');
+
+    expect(useViewportStore.getState().viewport.x).toBe(77);
+    expect(useViewportStore.getState().viewport.y).toBe(88);
+    expect(useStore.getState().viewport.x).toBe(77);
+    expect(useStore.getState().viewport.y).toBe(88);
   });
 
   it('setViewMode TRASH 清理冲突 UI', () => {

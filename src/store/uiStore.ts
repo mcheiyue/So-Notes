@@ -188,14 +188,12 @@ export const useUIStore = create<UIStoreState>()(
         useViewportStore.getState().setPanMode(false);
       }
 
-      // Always restore viewport when going from TRASH to BOARD
+      // TRASH→BOARD：仅有 board.viewport 时恢复；无则不破坏 runtime pan（plan §2.3）
       if (mode === 'BOARD' && prev === 'TRASH') {
         const { currentBoardId, boards } = useStore.getState();
         const board = boards.find((b) => b.id === currentBoardId);
         if (board?.viewport) {
           useViewportStore.getState().setViewportPosition(board.viewport.x, board.viewport.y);
-        } else {
-          useViewportStore.getState().setViewportPosition(0, 0);
         }
       }
     },
