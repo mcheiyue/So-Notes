@@ -198,9 +198,6 @@ export const useUIStore = create<UIStoreState>()(
           useViewportStore.getState().setViewportPosition(0, 0);
         }
       }
-
-      // Force reverse sync for viewMode to prevent any race
-      useStore.setState({ viewMode: mode }, false);
     },
 
     setSelectedIds: (ids) => {
