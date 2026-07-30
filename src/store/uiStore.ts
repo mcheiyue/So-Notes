@@ -188,13 +188,19 @@ export const useUIStore = create<UIStoreState>()(
         useViewportStore.getState().setPanMode(false);
       }
 
+      // Always restore viewport when going from TRASH to BOARD
       if (mode === 'BOARD' && prev === 'TRASH') {
         const { currentBoardId, boards } = useStore.getState();
         const board = boards.find((b) => b.id === currentBoardId);
         if (board?.viewport) {
           useViewportStore.getState().setViewportPosition(board.viewport.x, board.viewport.y);
+        } else {
+          useViewportStore.getState().setViewportPosition(0, 0);
         }
       }
+
+      // Force reverse sync for viewMode to prevent any race
+      useStore.setState({ viewMode: mode }, false);
     },
 
     setSelectedIds: (ids) => {
