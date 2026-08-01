@@ -2,9 +2,9 @@
 
 本项目的所有重要变更都将记录在此文件中。
 
-## [v1.6.3] - 2026-07-30
+## [v1.6.3] - 2026-08-02
 
-本版本统一 ViewMode 切换语义：权威 `useUIStore.setViewMode` 对齐 BOARD↔TRASH 完整副作用（视口保存/恢复、清选区、TRASH 清理 UI），`useStore.setViewMode` 薄委托并标记废弃。关单状态：CODE V1 **已统一**。
+本版本统一 ViewMode 切换语义，并修复托盘唤起窗口空白、TRASH↔BOARD 视口恢复边界等问题。关单状态：CODE V1 **已统一**。
 
 ### 🐛 问题修复 (Bug Fixes)
 
@@ -13,6 +13,13 @@
 
   - 权威实现落在 `uiStore.setViewMode`。
   - `useStore.setViewMode` 薄委托权威并 `@deprecated`。
+  - 无 `board.viewport` 时不强制清零 runtime pan（优先不破坏）。
+
+* **修复托盘点击后主窗口空白/不显示**
+  > 点击系统托盘图标时窗口可正常显示界面，避免 webview 空白、看似托盘失灵。
+
+  - 去掉阻塞 Vite 模块图的 top-level await，改为 microtask 绑定 `uiSetViewModeRef`。
+  - 托盘切换后短时内 blur 不误 hide，降低 show/hide 竞态。
 
 ## [v1.6.2] - 2026-07-29
 
