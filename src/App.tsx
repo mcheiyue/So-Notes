@@ -70,9 +70,11 @@ function App() {
   const { start: startFPS, stop: stopFPS } = useFPSMonitor();
 
   useEffect(() => {
-    startFPS((data) => {
-      diagnostics.updateFPS(data.fps, data.jankCount);
-    });
+    if (import.meta.env.DEV || import.meta.env.VITE_ENABLE_PROFILING === 'true') {
+      startFPS((data) => {
+        diagnostics.updateFPS(data.fps, data.jankCount);
+      });
+    }
     return stopFPS;
   }, [startFPS, stopFPS]);
 
