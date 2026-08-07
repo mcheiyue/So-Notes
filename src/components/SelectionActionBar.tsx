@@ -1,22 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NOTE_UI_COLORS } from '../store/types';
-import { useStore } from '../store/useStore';
-import { useUIStore } from '../store';
+import { useDomainStore, useUIStore } from '../store';
 import { Z_INDEX } from '../constants/layout';
 import { cn } from '../utils/cn';
+import { appController } from '../controllers/appController';
 
 const actionButtonClass = 'rounded-full px-2.5 py-1 text-[11px] font-semibold text-text-secondary transition-colors hover:bg-secondary-bg hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-sky-300 dark:hover:bg-white/10';
 
 export const SelectionActionBar: React.FC = () => {
   const viewMode = useUIStore(state => state.viewMode);
   const selectedIds = useUIStore(state => state.selectedIds);
-  const notesById = useStore(state => state.notesById);
-  const mergeSelectedNotes = useStore(state => state.mergeSelectedNotes);
-  const deleteSelectedNotes = useStore(state => state.deleteSelectedNotes);
-  const changeSelectedNotesColor = useStore(state => state.changeSelectedNotesColor);
-  const batchToggleCollapse = useStore(state => state.batchToggleCollapse);
-  const arrangeNotes = useStore(state => state.arrangeNotes);
-  const duplicateSelectedNotes = useStore(state => state.duplicateSelectedNotes);
+  const notesById = useDomainStore(state => state.notesById);
+  const mergeSelectedNotes = appController.mergeSelectedNotes;
+  const deleteSelectedNotes = appController.deleteSelectedNotes;
+  const changeSelectedNotesColor = appController.changeSelectedNotesColor;
+  const batchToggleCollapse = appController.toggleSelectedNotesCollapse;
+  const arrangeNotes = appController.arrangeNotes;
+  const duplicateSelectedNotes = appController.duplicateSelectedNotes;
 
   const [isColorPopoverOpen, setIsColorPopoverOpen] = useState(false);
   const colorPopoverRef = useRef<HTMLDivElement>(null);

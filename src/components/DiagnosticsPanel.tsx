@@ -3,8 +3,8 @@ import { diagnostics } from '../utils/diagnostics';
 import DiagnosticsMetric, { DiagnosticsMetricHandle } from './DiagnosticsMetric';
 import { cn } from '../utils/cn';
 import { SAMPLE_PRESETS, generatePresetSample } from '../test/fixtures/sampleData';
-import { useStore } from '../store/useStore';
 import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
+import { appController } from '../controllers/appController';
 
 const UPDATE_INTERVAL = 1000;
 
@@ -23,8 +23,7 @@ export const DiagnosticsPanel: React.FC = () => {
   // Inject test data handler
   const injectTestData = (presetName: keyof typeof SAMPLE_PRESETS) => {
     const sampleData = generatePresetSample(presetName);
-    const store = useStore.getState();
-    const existingBoardNames = store.boards.map((b) => b.name);
+    const existingBoardNames = appController.getLegacyBoards().map((b) => b.name);
 
     // Rename boards to avoid conflicts
     const renamedBoards = sampleData.boards.map((b, i) => ({
@@ -32,11 +31,8 @@ export const DiagnosticsPanel: React.FC = () => {
       name: existingBoardNames.includes(b.name) ? `${b.name} (测试${i})` : b.name,
     }));
 
-    // Merge data into store via setState
-    useStore.setState((state) => {
-      // Add boards
+    appController.injectDiagnosticsSample((state) => {
       state.boards.push(...renamedBoards);
-      // Add notes with new board IDs mapping
       const boardIdMap = new Map<string, string>();
       sampleData.boards.forEach((oldBoard, i) => {
         boardIdMap.set(oldBoard.id, renamedBoards[i].id);
@@ -58,9 +54,6 @@ export const DiagnosticsPanel: React.FC = () => {
       Object.assign(state.layoutNotesById, newLayoutNotes);
       state.config.maxZ = Math.max(state.config.maxZ, state.allNoteIds.length + 1);
     });
-
-    // Trigger save
-    store.saveToDisk();
   };
 
   useEffect(() => {

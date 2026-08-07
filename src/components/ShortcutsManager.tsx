@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useUIStore } from '../store';
-import { useStore } from '../store/useStore';
 import { appController } from '../controllers/appController';
 
 export default function ShortcutsManager() {
@@ -56,14 +55,14 @@ export default function ShortcutsManager() {
     if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
-    useStore.getState().undoDomainChange();
+    appController.undoDomainChange();
   }, { enableOnFormTags: false });
 
   useHotkeys(['mod+y', 'mod+shift+z'], (e) => {
     if (viewMode === 'TRASH') return;
     if (areCanvasShortcutsBlocked) return;
     e.preventDefault();
-    useStore.getState().redoDomainChange();
+    appController.redoDomainChange();
   }, { enableOnFormTags: false });
 
   // --- Native Behavior Guard (UX Protection) ---

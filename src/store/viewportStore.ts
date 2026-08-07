@@ -52,16 +52,6 @@ export const createInitialViewportState = (): ViewportStateFields => ({
   stickyDrag: { id: null, offsetX: 0, offsetY: 0, status: 'active' },
 });
 
-const isSameViewportState = (
-  a: ViewportStateFields,
-  b: ViewportStateFields,
-): boolean =>
-  a.viewport === b.viewport &&
-  a.shellRect === b.shellRect &&
-  a.canvas === b.canvas &&
-  a.interaction === b.interaction &&
-  a.stickyDrag === b.stickyDrag;
-
 const extractViewportFromLegacy = (state: ReturnType<typeof useStore.getState>): ViewportStateFields => ({
   viewport: state.viewport,
   shellRect: state.shellRect,

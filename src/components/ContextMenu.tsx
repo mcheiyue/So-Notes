@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useStore } from '../store/useStore';
-import { useUIStore } from '../store';
+import { useDomainStore, useUIStore, useViewportStore } from '../store';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { cn } from '../utils/cn';
 import {
@@ -42,18 +41,16 @@ const MenuItemButton: React.FC<MenuItemButtonProps> = ({ className, type, ...pro
 );
 
 const ContextMenuContent: React.FC = () => {
-  const { 
-    contextMenu, 
-    setContextMenu, 
-    selectedIds, 
-    notesById,
-    boards,
-    currentBoardId,
-    viewMode,
-    viewport,
-    shellRect,
-    smartPasteSplitPanel,
-  } = useStore();
+  const contextMenu = useUIStore((s) => s.contextMenu);
+  const setContextMenu = useUIStore((s) => s.setContextMenu);
+  const selectedIds = useUIStore((s) => s.selectedIds);
+  const viewMode = useUIStore((s) => s.viewMode);
+  const smartPasteSplitPanel = useUIStore((s) => s.smartPasteSplitPanel);
+  const notesById = useDomainStore((s) => s.notesById);
+  const boards = useDomainStore((s) => s.boards);
+  const currentBoardId = useDomainStore((s) => s.currentBoardId);
+  const viewport = useViewportStore((s) => s.viewport);
+  const shellRect = useViewportStore((s) => s.shellRect);
   const menuRef = useRef<HTMLDivElement>(null);
   const [hasClipboardText, setHasClipboardText] = useState(false);
   const [confirmArrange, setConfirmArrange] = useState(false);

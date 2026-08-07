@@ -388,8 +388,33 @@ export const appController = {
       current.markNoteHighlights([noteId], 'located');
     };
 
-    requestAnimationFrame(() => tryLocate(0));
+     requestAnimationFrame(() => tryLocate(0));
+   },
+
+  undoDomainChange: () => useStore.getState().undoDomainChange(),
+  redoDomainChange: () => useStore.getState().redoDomainChange(),
+  restoreNote: (id: string) => useStore.getState().restoreNote(id),
+  deleteNotePermanently: (id: string) => useStore.getState().deleteNotePermanently(id),
+  emptyTrash: () => useStore.getState().emptyTrash(),
+  restoreAllTrash: () => useStore.getState().restoreAllTrash(),
+  restoreSelectedTrash: (ids: string[]) => useStore.getState().restoreSelectedTrash(ids),
+  deleteSelectedPermanently: (ids: string[]) => useStore.getState().deleteSelectedPermanently(ids),
+  addNotesWithContentBatch: (
+    notes: Array<{ x: number; y: number; content: string }>,
+  ) => useStore.getState().addNotesWithContentBatch(notes),
+  applySmartPasteSplit: (optionId: Parameters<ReturnType<typeof useStore.getState>['applySmartPasteSplit']>[0]) =>
+    useStore.getState().applySmartPasteSplit(optionId),
+  closeSmartPasteSplitPanel: () => useStore.getState().closeSmartPasteSplitPanel(),
+  /** 诊断面板注入样本：薄委托 legacy setState + save */
+  injectDiagnosticsSample: (
+    mutator: (state: ReturnType<typeof useStore.getState>) => void,
+  ): void => {
+    useStore.setState(mutator as never);
+    void useStore.getState().saveToDisk();
   },
+  getLegacyBoards: () => useStore.getState().boards,
+  getLegacyCurrentBoardId: () => useStore.getState().currentBoardId,
 } as const;
+
 
 export type AppController = typeof appController;

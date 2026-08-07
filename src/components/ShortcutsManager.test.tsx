@@ -9,6 +9,8 @@ const appControllerMock = vi.hoisted(() => ({
   duplicateSelectedNotes: vi.fn(),
   resetViewport: vi.fn(),
   smartPasteFromText: vi.fn(),
+  undoDomainChange: vi.fn(),
+  redoDomainChange: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
@@ -62,6 +64,8 @@ describe('ShortcutsManager 撤销重做快捷键', () => {
     appControllerMock.duplicateSelectedNotes.mockClear();
     appControllerMock.resetViewport.mockClear();
     appControllerMock.smartPasteFromText.mockClear();
+    appControllerMock.undoDomainChange.mockImplementation(() => useStore.getState().undoDomainChange());
+    appControllerMock.redoDomainChange.mockImplementation(() => useStore.getState().redoDomainChange());
 
     useStore.setState(useStore.getInitialState(), true);
     useUIStore.setState(createInitialUIState());

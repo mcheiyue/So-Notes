@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useStore } from "./store/useStore";
+import { useDomainStore, useUIStore } from "./store";
 import { CanvasWithProfiler } from "./components/Canvas";
 import { TrashGrid } from "./components/TrashGrid";
 import { BoardDock } from "./components/BoardDock";
@@ -27,45 +27,15 @@ import { startDetachedNoteSnapshotSync } from "./services/detachedNoteSnapshotSy
 import { DETACHED_NOTE_EVENTS } from "./types/detachedNoteSnapshot";
 import type { DetachedNoteLocatePayload, DetachedNoteClosedPayload } from "./types/detachedNoteSnapshot";
 
-const getTraySaveStatusCopy = (saveStatus: string, saveError: string | null): string | null => {
-  if (saveStatus === 'saving') {
-    return '保存中';
-  }
-
-  if (saveStatus === 'error') {
-    const detail = saveError?.trim();
-    if (!detail) {
-      return '保存失败';
-    }
-
-    const clippedDetail = detail.length > 24 ? `${detail.slice(0, 24)}…` : detail;
-    return `保存失败：${clippedDetail}`;
-  }
-
-  return null;
-};
-
-const buildTrayTooltip = (boardName: string, saveStatus: string, saveError: string | null) => {
-  const normalizedBoardName = boardName.trim() || '主板';
-  const statusCopy = getTraySaveStatusCopy(saveStatus, saveError);
-  if (!statusCopy) {
-    return `SoNotes · 当前看板：${normalizedBoardName}`;
-  }
-  return `SoNotes · 当前看板：${normalizedBoardName} · ${statusCopy}`;
-};
-
 function App() {
   const [globalShortcutError, setGlobalShortcutError] = useState<string | null>(null);
-  const viewMode = useStore(state => state.viewMode);
-  const boards = useStore(state => state.boards);
-  const isSpotlightOpen = useStore(state => state.isSpotlightOpen);
-  const notesById = useStore(state => state.notesById);
-  const allNoteIds = useStore(state => state.allNoteIds);
-  const boardNoteIds = useStore(state => state.boardNoteIds);
-  const currentBoardId = useStore(state => state.currentBoardId);
-  const saveStatus = useStore(state => state.saveStatus);
-  const saveError = useStore(state => state.saveError);
-  const selectedIds = useStore(state => state.selectedIds);
+  const viewMode = useUIStore(state => state.viewMode);
+  const isSpotlightOpen = useUIStore(state => state.isSpotlightOpen);
+  const selectedIds = useUIStore(state => state.selectedIds);
+  const notesById = useDomainStore(state => state.notesById);
+  const allNoteIds = useDomainStore(state => state.allNoteIds);
+  const boardNoteIds = useDomainStore(state => state.boardNoteIds);
+  const currentBoardId = useDomainStore(state => state.currentBoardId);
 
   const { start: startFPS, stop: stopFPS } = useFPSMonitor();
 
@@ -84,15 +54,6 @@ function App() {
     const trashNotes = allNoteIds.filter((id) => notesById[id]?.deletedAt).length;
     diagnostics.updateNoteStats(totalNotes, currentBoardNotes, selectedIds.length, trashNotes);
   }, [allNoteIds, boardNoteIds, currentBoardId, notesById, selectedIds]);
-
-  useEffect(() => {
-    const currentBoard = boards.find(board => board.id === currentBoardId);
-    const tooltip = buildTrayTooltip(currentBoard?.name ?? '主板', saveStatus, saveError);
-
-    invoke('set_tray_tooltip', { tooltip }).catch((error) => {
-      console.warn('Failed to update tray tooltip:', error);
-    });
-  }, [boards, currentBoardId, saveError, saveStatus]);
 
   const syncViewportToShell = useCallback((rect: WindowShellContentRect) => {
     appController.syncShellViewport(rect);
@@ -232,9 +193,10 @@ function App() {
 
 // Extracted for cleaner re-renders
 const BoardBadge = () => {
-    const { boards, currentBoardId } = useStore();
+    const boards = useDomainStore(state => state.boards);
+    const currentBoardId = useDomainStore(state => state.currentBoardId);
     const board = boards.find(b => b.id === currentBoardId);
-    
+
     return (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-secondary-bg/50 backdrop-blur-sm rounded-lg text-xs font-medium text-text-tertiary transition-all duration-300 border border-border-subtle/20">
             <span>{board?.icon || '📌'}</span>

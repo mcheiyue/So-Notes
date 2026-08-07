@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { LAYOUT, Z_INDEX } from '../constants/layout';
-import { useStore } from '../store/useStore';
-import { useUIStore } from '../store';
+import { useDomainStore, useUIStore } from '../store';
 import { useViewportStore } from '../store/viewportStore';
 import { cn } from '../utils/cn';
 import type { SmartPasteOption } from '../utils/smartPaste';
+import { appController } from '../controllers/appController';
 
 const BUBBLE_WIDTH = 224;
 const BUBBLE_GAP = 12;
@@ -18,11 +18,11 @@ const getSplitOptionPreview = (option: SmartPasteOption) => {
 export const SmartPasteSplitBubble: React.FC = () => {
   const viewMode = useUIStore((state) => state.viewMode);
   const panel = useUIStore((state) => state.smartPasteSplitPanel);
-  const note = useStore((state) => panel ? state.notesById[panel.noteId] : undefined);
+  const note = useDomainStore((state) => (panel ? state.notesById[panel.noteId] : undefined));
   const viewport = useViewportStore((state) => state.viewport);
   const shellRect = useViewportStore((state) => state.shellRect);
-  const closeSmartPasteSplitPanel = useStore((state) => state.closeSmartPasteSplitPanel);
-  const applySmartPasteSplit = useStore((state) => state.applySmartPasteSplit);
+  const closeSmartPasteSplitPanel = appController.closeSmartPasteSplitPanel;
+  const applySmartPasteSplit = appController.applySmartPasteSplit;
   const bubbleRef = useRef<HTMLDivElement>(null);
 
   const splitOptions = useMemo(

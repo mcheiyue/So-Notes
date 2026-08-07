@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
-import { useStore } from '../store/useStore';
-import { useUIStore, useViewportStore } from '../store';
+import { useDomainStore, useUIStore, useViewportStore } from '../store';
 import { Z_INDEX } from '../constants/layout';
 import { createSmartPasteNoteInputs } from '../utils/smartPaste';
 import { getViewportSpawnOrigin } from '../utils/spawnPosition';
+import { appController } from '../controllers/appController';
 
 const getCaptureOrigin = () => {
   const { viewport } = useViewportStore.getState();
@@ -26,9 +26,9 @@ const DIALOG_FOCUSABLE_SELECTOR = 'textarea, button:not([disabled])';
 export const QuickCaptureOverlay: React.FC = () => {
   const isOpen = useUIStore((state) => state.isQuickCaptureOpen);
   const setQuickCaptureOpen = useUIStore((state) => state.setQuickCaptureOpen);
-  const addNotesWithContentBatch = useStore((state) => state.addNotesWithContentBatch);
-  const boards = useStore((state) => state.boards);
-  const currentBoardId = useStore((state) => state.currentBoardId);
+  const addNotesWithContentBatch = appController.addNotesWithContentBatch;
+  const boards = useDomainStore((state) => state.boards);
+  const currentBoardId = useDomainStore((state) => state.currentBoardId);
   const currentBoardName = resolveQuickCaptureBoardLabel(
     boards.find((b) => b.id === currentBoardId)?.name,
   );

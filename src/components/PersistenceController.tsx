@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store/useStore';
 import { attach } from '../services/storage/StorageService';
 import type { AttachResult } from '../services/storage/types';
@@ -17,8 +18,30 @@ const getCurrentDomainState = () => {
   };
 };
 
+const getTraySaveStatusCopy = (saveStatus: string, saveError: string | null): string | null => {
+  if (saveStatus === 'saving') return '保存中';
+  if (saveStatus === 'error') {
+    const detail = saveError?.trim();
+    if (!detail) return '保存失败';
+    const clippedDetail = detail.length > 24 ? `${detail.slice(0, 24)}…` : detail;
+    return `保存失败：${clippedDetail}`;
+  }
+  return null;
+};
+
+const buildTrayTooltip = (boardName: string, saveStatus: string, saveError: string | null) => {
+  const normalizedBoardName = boardName.trim() || '主板';
+  const statusCopy = getTraySaveStatusCopy(saveStatus, saveError);
+  if (!statusCopy) return `SoNotes · 当前看板：${normalizedBoardName}`;
+  return `SoNotes · 当前看板：${normalizedBoardName} · ${statusCopy}`;
+};
+
 export const PersistenceController = () => {
   const storageHandleRef = useRef<AttachResult | null>(null);
+  const boards = useStore((s) => s.boards);
+  const currentBoardId = useStore((s) => s.currentBoardId);
+  const saveStatus = useStore((s) => s.saveStatus);
+  const saveError = useStore((s) => s.saveError);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +83,15 @@ export const PersistenceController = () => {
       storageHandleRef.current = null;
     };
   }, []);
+
+  // 托盘 tooltip：saveStatus 仅在 useStore，随 Persistence 白名单文件订阅
+  useEffect(() => {
+    const currentBoard = boards.find((board) => board.id === currentBoardId);
+    const tooltip = buildTrayTooltip(currentBoard?.name ?? '主板', saveStatus, saveError);
+    invoke('set_tray_tooltip', { tooltip }).catch((error) => {
+      console.warn('Failed to update tray tooltip:', error);
+    });
+  }, [boards, currentBoardId, saveError, saveStatus]);
 
   return null;
 };

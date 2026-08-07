@@ -1,5 +1,5 @@
 import { emitTo, listen } from '@tauri-apps/api/event';
-import { useStore } from '../store/useStore';
+import { useDomainStore, useUIStore } from '../store';
 import type { DetachedNoteReadyPayload, DetachedNoteSnapshot, DetachedNoteThemePayload } from '../types/detachedNoteSnapshot';
 import { DETACHED_NOTE_EVENTS } from '../types/detachedNoteSnapshot';
 import type { AttachmentRef, ThemeMode } from '../store/types';
@@ -42,7 +42,7 @@ const resolveIsDark = (themeMode: ThemeMode): boolean => {
 };
 
 const buildThemePayload = (): DetachedNoteThemePayload => {
-  const themeMode = useStore.getState().config.themeMode ?? 'system';
+  const themeMode = useDomainStore.getState().config.themeMode ?? 'system';
   return { themeMode, isDark: resolveIsDark(themeMode) };
 };
 
@@ -86,7 +86,7 @@ const syncDetachedNote = (
 
     if (options.retryAfterOpen) {
       setTimeout(() => {
-        const currentNote = useStore.getState().notesById[noteId];
+        const currentNote = useDomainStore.getState().notesById[noteId];
         if (!currentNote || currentNote.deletedAt) {
           emitMissing(noteId);
           return;
@@ -100,7 +100,8 @@ const syncDetachedNote = (
 };
 
 const syncAllDetachedNotes = (options: { retryAfterOpen?: boolean } = {}): void => {
-  const { notesById, detachedNotes } = useStore.getState();
+  const notesById = useDomainStore.getState().notesById;
+  const detachedNotes = useUIStore.getState().detachedNotes;
 
   for (const entry of detachedNotes) {
     const note = notesById[entry.noteId];
@@ -109,7 +110,7 @@ const syncAllDetachedNotes = (options: { retryAfterOpen?: boolean } = {}): void 
 };
 
 const syncAllDetachedThemes = (): void => {
-  const { detachedNotes } = useStore.getState();
+  const detachedNotes = useUIStore.getState().detachedNotes;
 
   for (const entry of detachedNotes) {
     emitTheme(entry.noteId);
@@ -121,23 +122,33 @@ export const startDetachedNoteSnapshotSync = (): (() => void) => {
     return stopDetachedNoteSnapshotSync;
   }
 
-  unsubscribe = useStore.subscribe((state, prevState) => {
-    const detachedChanged = state.detachedNotes !== prevState.detachedNotes;
-    const notesChanged = state.notesById !== prevState.notesById;
-    const themeChanged = state.config.themeMode !== prevState.config.themeMode;
+  const onMaybeSync = () => {
+    syncAllDetachedNotes();
+    syncAllDetachedThemes();
+  };
 
-    if (!detachedChanged && !notesChanged && !themeChanged) {
-      return;
+  const unsubDomain = useDomainStore.subscribe((state, prevState) => {
+    if (state.notesById !== prevState.notesById || state.config.themeMode !== prevState.config.themeMode) {
+      if (state.notesById !== prevState.notesById) {
+        syncAllDetachedNotes();
+      }
+      if (state.config.themeMode !== prevState.config.themeMode) {
+        syncAllDetachedThemes();
+      }
     }
+  });
 
-    if (detachedChanged || notesChanged) {
-      syncAllDetachedNotes({ retryAfterOpen: detachedChanged });
-    }
-
-    if (detachedChanged || themeChanged) {
+  const unsubUI = useUIStore.subscribe((state, prevState) => {
+    if (state.detachedNotes !== prevState.detachedNotes) {
+      syncAllDetachedNotes({ retryAfterOpen: true });
       syncAllDetachedThemes();
     }
   });
+
+  unsubscribe = () => {
+    unsubDomain();
+    unsubUI();
+  };
 
   if (!unlistenReadyPromise) {
     unlistenReadyPromise = listen<DetachedNoteReadyPayload>(
@@ -146,8 +157,7 @@ export const startDetachedNoteSnapshotSync = (): (() => void) => {
         const { noteId } = event.payload;
         clearPendingTimer(noteId);
         emitTheme(noteId);
-        const { notesById } = useStore.getState();
-        const note = notesById[noteId];
+        const note = useDomainStore.getState().notesById[noteId];
         if (!note || note.deletedAt) {
           emitMissing(noteId);
         } else {
@@ -158,6 +168,7 @@ export const startDetachedNoteSnapshotSync = (): (() => void) => {
     );
   }
 
+  void onMaybeSync;
   return stopDetachedNoteSnapshotSync;
 };
 

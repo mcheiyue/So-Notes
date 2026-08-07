@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { confirm } from '../store/confirmStore';
 import { useDomainStore } from '../store';
-import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { NoteCard } from './NoteCard';
 import { Trash2, RotateCcw, X, Search } from 'lucide-react';
@@ -13,12 +12,12 @@ export const TrashGrid: React.FC = () => {
         allNoteIds: state.allNoteIds,
         boards: state.boards,
     })));
-    const restoreNote = useStore(state => state.restoreNote);
-    const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
-    const emptyTrash = useStore(state => state.emptyTrash);
-    const restoreAllTrash = useStore(state => state.restoreAllTrash);
-    const restoreSelectedTrash = useStore(state => state.restoreSelectedTrash);
-    const deleteSelectedPermanently = useStore(state => state.deleteSelectedPermanently);
+    const restoreNote = appController.restoreNote;
+    const deleteNotePermanently = appController.deleteNotePermanently;
+    const emptyTrash = appController.emptyTrash;
+    const restoreAllTrash = appController.restoreAllTrash;
+    const restoreSelectedTrash = appController.restoreSelectedTrash;
+    const deleteSelectedPermanently = appController.deleteSelectedPermanently;
 
     const [selectedTrashIds, setSelectedTrashIds] = useState<string[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
