@@ -87,6 +87,7 @@ vi.mock('../utils/imageDimensions', () => ({
 
 import { Canvas } from './Canvas';
 import { useStore } from '../store/useStore';
+import { useViewportStore } from '../store/viewportStore';
 import { useUIStore } from '../store/uiStore';
 import { normalizeNotes, createLayoutNotesById } from '../store/normalization';
 import { Note } from '../store/types';
@@ -723,8 +724,8 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(worldLayer?.style.transform).toBe('translate3d(-10px, -35px, 0)');
-    expect(useStore.getState().viewport.x).toBe(10);
-    expect(useStore.getState().viewport.y).toBe(35);
+    expect(useViewportStore.getState().viewport.x).toBe(10);
+    expect(useViewportStore.getState().viewport.y).toBe(35);
 
     await act(async () => {
       window.dispatchEvent(new MouseEvent('mouseup', {
@@ -735,8 +736,8 @@ describe('Canvas 空白命中判定', () => {
       }));
     });
 
-    expect(useStore.getState().viewport.x).toBe(10);
-    expect(useStore.getState().viewport.y).toBe(35);
+    expect(useViewportStore.getState().viewport.x).toBe(10);
+    expect(useViewportStore.getState().viewport.y).toBe(35);
   });
 
   it('抓手模式下从 NoteCard 的 data-note-pan-guard 拖动会启动画布平移', async () => {
@@ -785,8 +786,8 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(worldLayer?.style.transform).toBe('translate3d(-10px, -35px, 0)');
-    expect(useStore.getState().viewport.x).toBe(10);
-    expect(useStore.getState().viewport.y).toBe(35);
+    expect(useViewportStore.getState().viewport.x).toBe(10);
+    expect(useViewportStore.getState().viewport.y).toBe(35);
   });
 
   it('active DragSession 便签即使旧布局位置被虚拟化裁剪也会保持渲染', async () => {
@@ -936,7 +937,7 @@ describe('Canvas 空白命中判定', () => {
 
     const leader = useStore.getState().notesById['leader'];
     const follower = useStore.getState().notesById['follower'];
-    const viewport = useStore.getState().viewport;
+    const viewport = useViewportStore.getState().viewport;
     const expectedLeader = resolveDragStopWorldPosition(
       1100,
       650,
@@ -998,8 +999,8 @@ describe('Canvas 空白命中判定', () => {
       rafCallbacks[0]?.(0);
     });
 
-    expect(useStore.getState().viewport.x).toBe(45);
-    expect(useStore.getState().viewport.y).toBe(60);
+    expect(useViewportStore.getState().viewport.x).toBe(45);
+    expect(useViewportStore.getState().viewport.y).toBe(60);
     expect(worldLayer?.style.transform).toBe('translate3d(-45px, -60px, 0)');
     expect(useStore.getState().notesById['note-1']?.x).toBe(125);
   });
@@ -1191,8 +1192,8 @@ describe('Canvas 空白命中判定', () => {
       rafCallbacks[0]?.(0);
     });
 
-    expect(useStore.getState().viewport.x).toBe(0);
-    expect(useStore.getState().viewport.y).toBe(0);
+    expect(useViewportStore.getState().viewport.x).toBe(0);
+    expect(useViewportStore.getState().viewport.y).toBe(0);
     expect(getEdgePushAccumulatedDelta().x).toBe(0);
     expect(getEdgePushAccumulatedDelta().y).toBe(0);
 
@@ -1200,8 +1201,8 @@ describe('Canvas 空白命中判定', () => {
       rafCallbacks[1]?.(0);
     });
 
-    expect(useStore.getState().viewport.x).toBe(0);
-    expect(useStore.getState().viewport.y).toBe(0);
+    expect(useViewportStore.getState().viewport.x).toBe(0);
+    expect(useViewportStore.getState().viewport.y).toBe(0);
     expect(getEdgePushAccumulatedDelta().x).toBe(0);
     expect(getEdgePushAccumulatedDelta().y).toBe(0);
   });
@@ -1395,8 +1396,8 @@ describe('Canvas 空白命中判定', () => {
     });
 
     expect(useStore.getState().interaction.isPanMode).toBe(false);
-    expect(useStore.getState().viewport.x).toBe(0);
-    expect(useStore.getState().viewport.y).toBe(0);
+    expect(useViewportStore.getState().viewport.x).toBe(0);
+    expect(useViewportStore.getState().viewport.y).toBe(0);
   });
 
   it('Spotlight 打开时 Space 不进入平移模式且不阻止默认行为', async () => {

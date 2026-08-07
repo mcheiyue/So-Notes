@@ -165,6 +165,44 @@ describe('viewportStore 写入动作', () => {
     expect(useViewportStore.getState().viewport.y).toBe(888);
     expect(useViewportStore.getState().interaction.isPanMode).toBe(true);
   });
+
+  it('P0-06 setViewportPosition 不每调用触发 useStore.setState', () => {
+    // 先撑大 canvas，避免 position 连带扩 canvas 触发 reverse setState
+    useViewportStore.getState().expandCanvas(5000, 5000);
+    const spy = vi.spyOn(useStore, 'setState');
+    for (let i = 0; i < 5; i++) {
+      useViewportStore.getState().setViewportPosition(100 + i * 10, 200);
+    }
+    expect(spy).toHaveBeenCalledTimes(0);
+    spy.mockRestore();
+  });
+
+  it('P0-06 setEdgePush 不每调用触发 useStore.setState', () => {
+    const spy = vi.spyOn(useStore, 'setState');
+    for (let i = 0; i < 5; i++) {
+      useViewportStore.getState().setEdgePush({ [i % 2 === 0 ? 'top' : 'right']: true });
+    }
+    expect(spy).toHaveBeenCalledTimes(0);
+    spy.mockRestore();
+  });
+
+  it('P0-06 setViewportPosition 后 switchBoard 写入 boards[].viewport', () => {
+    useStore.setState({
+      boards: [
+        { id: 'default', name: '主板', icon: '📌', createdAt: 0 },
+        { id: 'board-2', name: '二号板', icon: '🧩', createdAt: 1, viewport: { x: 10, y: 20 } },
+      ],
+      currentBoardId: 'default',
+      saveToDisk: vi.fn(async () => true),
+    });
+    useViewportStore.getState().expandCanvas(5000, 5000);
+    useViewportStore.getState().setViewportPosition(500, 600);
+
+    useStore.getState().switchBoard('board-2');
+
+    const oldBoard = useStore.getState().boards.find((b) => b.id === 'default');
+    expect(oldBoard?.viewport).toEqual({ x: 500, y: 600 });
+  });
 });
 
 describe('viewportStore 同步桥', () => {
@@ -216,12 +254,11 @@ describe('viewportStore 同步桥', () => {
     expect(useViewportStore.getState().stickyDrag.offsetX).toBe(10);
   });
 
-  it('useViewportStore 直接写入会通过反向同步桥同步回 useStore', () => {
-    useViewportStore.getState().setViewportPosition(500, 600);
+  it('useViewportStore 直接写入会通过反向同步桥同步回 useStore（非热字段）', () => {
+    useViewportStore.getState().setShellRect({ left: 10, top: 20, right: 1290, bottom: 740 });
 
-    expect(useViewportStore.getState().viewport.x).toBe(500);
-    expect(useStore.getState().viewport.x).toBe(500);
-    expect(useStore.getState().viewport.y).toBe(600);
+    expect(useViewportStore.getState().shellRect).toEqual({ left: 10, top: 20, right: 1290, bottom: 740 });
+    expect(useStore.getState().shellRect).toEqual({ left: 10, top: 20, right: 1290, bottom: 740 });
   });
 });
 

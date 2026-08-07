@@ -7,6 +7,7 @@ import { db } from './db';
 import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNotes, extractLayoutNote, normalizeNotes, sanitizeNoteAttachments } from './normalization';
 import { createUndoRedoHistory, pushHistoryEntry, undoHistory, redoHistory, clearDomainHistory as clearDomainHistoryFn, type HistoryStack, type HistoryEntry } from './undoRedoHistory';
 import { applyDomainPatch, type DomainPatch } from './domainPatches';
+import { getCurrentViewport } from './runtimePan';
 import type { DomainState } from './domainStore';
 
 import { saveFile, openFile } from '../utils/fileSystem';
@@ -742,38 +743,39 @@ export const useStore = create<State>()(
 
       await prehydrateImageNoteAssetUrls(finalData.notes);
 
-      set((state) => {
-        const normalizedNotes = normalizeNotes(finalData.notes);
-        state.notesById = normalizedNotes.notesById;
-        state.allNoteIds = normalizedNotes.allNoteIds;
-        state.boardNoteIds = normalizedNotes.boardNoteIds;
-        state.layoutNotesById = createLayoutNotesById(normalizedNotes.notesById);
+       set((state) => {
+         const normalizedNotes = normalizeNotes(finalData.notes);
+         state.notesById = normalizedNotes.notesById;
+         state.allNoteIds = normalizedNotes.allNoteIds;
+         state.boardNoteIds = normalizedNotes.boardNoteIds;
+         state.layoutNotesById = createLayoutNotesById(normalizedNotes.notesById);
 
-        state.config = finalData.config;
-        state.boards = finalData.boards;
-        state.currentBoardId = finalData.currentBoardId;
-        
-        // Restore viewport for the initial board
-        const activeBoard = state.boards.find(b => b.id === state.currentBoardId);
-        if (activeBoard && activeBoard.viewport) {
-            state.viewport.x = activeBoard.viewport.x;
-            state.viewport.y = activeBoard.viewport.y;
-        }
+         state.config = finalData.config;
+         state.boards = finalData.boards;
+         state.currentBoardId = finalData.currentBoardId;
+         
+          // Restore viewport for the initial board（写入 useStore → forward 到 viewportStore）
+          const activeBoard = state.boards.find(b => b.id === state.currentBoardId);
+          if (activeBoard && activeBoard.viewport) {
+              state.viewport.x = activeBoard.viewport.x;
+              state.viewport.y = activeBoard.viewport.y;
+          }
 
-        state.isLoaded = true;
+         state.isLoaded = true;
 
-        // Apply loaded theme
-        const theme = finalData.config.themeMode || 'system';
-        const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        const shouldBeDark = theme === 'dark' || (theme === 'system' && isSystemDark);
-        
-        if (shouldBeDark) {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
-        localStorage.setItem('theme', theme);
-      });
+         // Apply loaded theme
+         const theme = finalData.config.themeMode || 'system';
+         const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+         const shouldBeDark = theme === 'dark' || (theme === 'system' && isSystemDark);
+         
+         if (shouldBeDark) {
+             document.documentElement.classList.add('dark');
+         } else {
+             document.documentElement.classList.remove('dark');
+         }
+         localStorage.setItem('theme', theme);
+       });
+
       
       // 4. Sync Sources
       // If we chose DISK, we must update the stale WAL immediately
@@ -794,7 +796,7 @@ export const useStore = create<State>()(
             // 1. Save current viewport to OLD board
             const oldBoard = state.boards.find(b => b.id === state.currentBoardId);
             if (oldBoard) {
-                oldBoard.viewport = { x: state.viewport.x, y: state.viewport.y };
+                oldBoard.viewport = { x: getCurrentViewport().x, y: getCurrentViewport().y };
             }
 
             // 2. Switch
@@ -868,14 +870,14 @@ export const useStore = create<State>()(
         });
     },
 
-    // v1.1.5 Viewport Actions
+    // v1.1.5 Viewport Actions（读 runtime pan 走 getCurrentViewport，写仍落 legacy 并由 forward 同步）
     setViewportSize: (w, h) => {
+        const pan = getCurrentViewport();
         set((state) => {
             state.viewport.w = w;
             state.viewport.h = h;
-            // Ensure canvas is at least viewport size
-            state.canvas.w = Math.max(state.canvas.w, state.viewport.x + w);
-            state.canvas.h = Math.max(state.canvas.h, state.viewport.y + h);
+            state.canvas.w = Math.max(state.canvas.w, pan.x + w);
+            state.canvas.h = Math.max(state.canvas.h, pan.y + h);
         });
     },
 
@@ -910,39 +912,30 @@ export const useStore = create<State>()(
     },
 
     panViewport: (dx, dy) => {
+        const pan = getCurrentViewport();
+        let newX = pan.x + dx;
+        let newY = pan.y + dy;
+        if (newX < 0) newX = 0;
+        if (newY < 0) newY = 0;
+        const neededW = newX + pan.w;
+        const neededH = newY + pan.h;
         set((state) => {
-            // Apply delta
-            let newX = state.viewport.x + dx;
-            let newY = state.viewport.y + dy;
-
-            // Enforce Top-Left Hard Wall (x >= 0, y >= 0)
-            if (newX < 0) newX = 0;
-            if (newY < 0) newY = 0;
-
             state.viewport.x = newX;
             state.viewport.y = newY;
-
-            // Auto-expand canvas if viewport moves into new territory
-            const neededW = newX + state.viewport.w;
-            const neededH = newY + state.viewport.h;
-            
             if (neededW > state.canvas.w) state.canvas.w = neededW;
             if (neededH > state.canvas.h) state.canvas.h = neededH;
         });
     },
 
     setViewportPosition: (x, y) => {
+        const pan = getCurrentViewport();
+        const finalX = Math.max(0, x);
+        const finalY = Math.max(0, y);
         set((state) => {
-            // Enforce Top-Left Hard Wall
-            const finalX = Math.max(0, x);
-            const finalY = Math.max(0, y);
-
             state.viewport.x = finalX;
             state.viewport.y = finalY;
-
-            // Expand canvas
-            state.canvas.w = Math.max(state.canvas.w, finalX + state.viewport.w);
-            state.canvas.h = Math.max(state.canvas.h, finalY + state.viewport.h);
+            state.canvas.w = Math.max(state.canvas.w, finalX + pan.w);
+            state.canvas.h = Math.max(state.canvas.h, finalY + pan.h);
         });
     },
 
@@ -1306,7 +1299,7 @@ export const useStore = create<State>()(
         const preArrangeSnapshots = new Map<string, { x: number; y: number; updatedAt: number }>();
 
         set((state) => {
-            const viewport = state.viewport;
+            const viewport = getCurrentViewport();
             const worldRightEdge = viewport.x + viewport.w;
             const worldBottomEdge = viewport.y + viewport.h;
 
@@ -2025,7 +2018,7 @@ export const useStore = create<State>()(
         currentDomain,
         patched.notesById,
         currentDomain.currentBoardId,
-        get().viewport,
+        getCurrentViewport(),
       );
 
       set((state) => {
@@ -2058,7 +2051,7 @@ export const useStore = create<State>()(
         currentDomain,
         patched.notesById,
         currentDomain.currentBoardId,
-        get().viewport,
+        getCurrentViewport(),
       );
 
       set((state) => {

@@ -8,6 +8,7 @@ import {
   StickyDragStatus,
 } from './types';
 import { useStore } from './useStore';
+import { bindRuntimePanReader } from './runtimePan';
 
 export const VIEWPORT_STORE_MODULE = 'viewportStore';
 
@@ -191,37 +192,65 @@ const hasViewportFieldChanged = (
 ): boolean =>
   VIEWPORT_SYNC_FIELDS.some((field) => current[field] !== previous[field]);
 
-const hasViewportStoreFieldChanged = (
+/** 策略 A：reverse 跳过 pan(viewport) 与仅 edgePush 的 interaction；保留 canvas/shellRect/stickyDrag/非 edge interaction */
+const buildLegacyReversePatch = (
   current: ViewportStateFields,
-  previous: ViewportStateFields,
-): boolean =>
-  VIEWPORT_SYNC_FIELDS.some((field) => current[field] !== previous[field]);
+  legacy: ReturnType<typeof useStore.getState>,
+): Partial<ViewportStateFields> | null => {
+  const patch: Partial<ViewportStateFields> = {};
 
-const extractViewportStateForLegacy = (state: ViewportStateFields) => ({
-  viewport: state.viewport,
-  shellRect: state.shellRect,
-  canvas: state.canvas,
-  interaction: state.interaction,
-  stickyDrag: state.stickyDrag,
-});
+  // pan 热字段（仅 x/y）：不 reverse；viewport 尺寸 w/h 变化仍 reverse
+  if (current.viewport !== legacy.viewport) {
+    const c = current.viewport;
+    const p = legacy.viewport;
+    if (c.w !== p.w || c.h !== p.h) {
+      patch.viewport = c;
+    }
+  }
+  if (current.shellRect !== legacy.shellRect) {
+    patch.shellRect = current.shellRect;
+  }
+  if (current.canvas !== legacy.canvas) {
+    patch.canvas = current.canvas;
+  }
+  if (current.stickyDrag !== legacy.stickyDrag) {
+    patch.stickyDrag = current.stickyDrag;
+  }
+  if (current.interaction !== legacy.interaction) {
+    const c = current.interaction;
+    const p = legacy.interaction;
+    const nonEdgeSame = c.isPanMode === p.isPanMode && c.isDragging === p.isDragging;
+    // 仅 edgePush 变化 → 跳过；isPanMode/isDragging 变化 → reverse 整段 interaction
+    if (!nonEdgeSame) {
+      patch.interaction = c;
+    }
+  }
 
-const syncLegacyViewportToViewportStore = () => {
-  const legacyState = useStore.getState();
-  const viewportStoreState = useViewportStore.getState();
-  const nextViewportState = extractViewportFromLegacy(legacyState);
+  return Object.keys(patch).length > 0 ? patch : null;
+};
 
-  if (!isSameViewportState(viewportStoreState, nextViewportState)) {
-    useViewportStore.setState(nextViewportState);
+const syncLegacyViewportToViewportStore = (
+  current: ReturnType<typeof useStore.getState>,
+  previous: ReturnType<typeof useStore.getState>,
+) => {
+  // 只 forward 实际变更字段，避免 reverse 写 canvas 时把陈旧 pan 盖回 viewportStore
+  const patch: Partial<ViewportStateFields> = {};
+  for (const field of VIEWPORT_SYNC_FIELDS) {
+    if (current[field] !== previous[field]) {
+      (patch as Record<string, unknown>)[field] = current[field];
+    }
+  }
+  if (Object.keys(patch).length > 0) {
+    useViewportStore.setState(patch);
   }
 };
 
 const syncViewportStoreToLegacy = () => {
   const viewportState = useViewportStore.getState();
   const legacyState = useStore.getState();
-  const nextLegacyViewport = extractViewportStateForLegacy(viewportState);
-
-  if (!isSameViewportState(legacyState, nextLegacyViewport)) {
-    useStore.setState(nextLegacyViewport);
+  const patch = buildLegacyReversePatch(viewportState, legacyState);
+  if (patch) {
+    useStore.setState(patch);
   }
 };
 
@@ -237,21 +266,28 @@ export const attachViewportSync = (): (() => void) => {
     return detachViewportSync;
   }
 
-  syncLegacyViewportToViewportStore();
+  // 初始对齐：全量从 legacy 拉一次
+  useViewportStore.setState(extractViewportFromLegacy(useStore.getState()));
 
   unsubscribeViewportSync = useStore.subscribe((state, previousState) => {
     if (hasViewportFieldChanged(state, previousState)) {
-      syncLegacyViewportToViewportStore();
+      syncLegacyViewportToViewportStore(state, previousState);
     }
   });
 
   unsubscribeViewportReverseSync = useViewportStore.subscribe((state, previousState) => {
-    if (hasViewportStoreFieldChanged(state, previousState)) {
+    // 任意字段引用变化都尝试 reverse；buildLegacyReversePatch 会丢掉 pan/edgePush 热字段
+    if (VIEWPORT_SYNC_FIELDS.some((field) => state[field] !== previousState[field])) {
       syncViewportStoreToLegacy();
     }
   });
 
   return detachViewportSync;
 };
+
+bindRuntimePanReader(() => {
+  const v = useViewportStore.getState().viewport;
+  return { x: v.x, y: v.y, w: v.w, h: v.h };
+});
 
 attachViewportSync();

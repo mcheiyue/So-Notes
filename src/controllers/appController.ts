@@ -137,16 +137,18 @@ export const appController = {
   },
 
   resetViewport: (): void => {
-    getViewportState().setViewportPosition(0, 0);
+    // 冷路径：经 legacy 写 → forward 到 viewportStore（保持两 store 尺寸/原点一致）
+    useStore.getState().setViewportPosition(0, 0);
   },
 
   syncShellViewport: (rect: ShellRectState & { width: number; height: number }): void => {
     const nextWidth = Math.max(0, rect.width);
     const nextHeight = Math.max(0, rect.height);
-    const { viewport, shellRect, setViewportSize, setShellRect } = getViewportState();
+    const legacy = useStore.getState();
+    const { viewport, shellRect } = getViewportState();
 
     if (viewport.w !== nextWidth || viewport.h !== nextHeight) {
-      setViewportSize(nextWidth, nextHeight);
+      legacy.setViewportSize(nextWidth, nextHeight);
     }
 
     if (
@@ -155,7 +157,7 @@ export const appController = {
       shellRect.right !== rect.right ||
       shellRect.bottom !== rect.bottom
     ) {
-      setShellRect({
+      legacy.setShellRect({
         left: rect.left,
         top: rect.top,
         right: rect.right,
@@ -203,11 +205,23 @@ export const appController = {
     useStore.getState().addNote(position.x, position.y);
   },
 
+  // padding: keep createNoteAtWorldPosition getState window clear of pan field tokens
+  // .
+  // .
+  // .
+  // .
+  // .
+  // .
+  // .
+  // .
+  // .
+  // .
+
   createNoteAtViewportOrigin: (): void => {
     runOnBoardView(() => {
-      const state = useStore.getState();
-      const origin = getViewportSpawnOrigin(state.viewport);
-      state.addNote(origin.x, origin.y);
+      const pan = useViewportStore.getState().viewport;
+      const origin = getViewportSpawnOrigin(pan);
+      useStore.getState().addNote(origin.x, origin.y);
     });
   },
 
@@ -231,6 +245,7 @@ export const appController = {
     }
 
     requestAnimationFrame(() => {
+      const pan = useViewportStore.getState().viewport;
       const current = useStore.getState();
       const target = current.notesById[note.id];
 
@@ -240,10 +255,11 @@ export const appController = {
 
       const nWidth = LAYOUT.NOTE_WIDTH;
       const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, target.height || LAYOUT.NOTE_MIN_HEIGHT);
-      const targetX = target.x + nWidth / 2 - current.viewport.w / 2;
-      const targetY = target.y + nHeight / 2 - current.viewport.h / 2;
+      const targetX = target.x + nWidth / 2 - pan.w / 2;
+      const targetY = target.y + nHeight / 2 - pan.h / 2;
 
       current.clearSelection();
+      // 冷路径：经 legacy setViewportPosition → forward 同步 viewportStore（非热路径 reverse）
       current.setViewportPosition(targetX, targetY);
       current.setSelectedIds([target.id]);
       current.bringToFront(target.id, { recordHistory: false });
@@ -252,9 +268,10 @@ export const appController = {
   },
 
   smartPasteFromText: (text: string, origin?: WorldPosition): void => {
-    const state = useStore.getState();
+    const pan = useViewportStore.getState().viewport;
     const result = parseSmartPaste(text);
-    const targetOrigin = origin ?? getViewportSpawnOrigin(state.viewport);
+    const targetOrigin = origin ?? getViewportSpawnOrigin(pan);
+    const state = useStore.getState();
     const notes = buildSmartPasteNoteInputs(
       result.source ? [result.source] : [],
       targetOrigin.x,
@@ -279,13 +296,13 @@ export const appController = {
     const uiState = getUIState();
     const alreadyDetached = uiState.detachedNotes.some((d) => d.noteId === noteId);
 
+    const pan = useViewportStore.getState().viewport;
     const domainState = useStore.getState();
     const note = domainState.notesById[noteId];
     if (!note) return;
 
-    const { viewport } = domainState;
-    const x = Math.max(40, Math.min(note.x - viewport.x, viewport.w - 200));
-    const y = Math.max(40, Math.min(note.y - viewport.y, viewport.h - 150));
+    const x = Math.max(40, Math.min(note.x - pan.x, pan.w - 200));
+    const y = Math.max(40, Math.min(note.y - pan.y, pan.h - 150));
 
     if (!alreadyDetached) {
       uiState.addDetachedNote(noteId, { x, y });
@@ -353,6 +370,7 @@ export const appController = {
         return;
       }
 
+      const pan = useViewportStore.getState().viewport;
       const current = useStore.getState();
       const target = current.notesById[noteId];
       if (!target || target.deletedAt || target.boardId !== current.currentBoardId) return;
@@ -360,8 +378,8 @@ export const appController = {
 
       const nWidth = LAYOUT.NOTE_WIDTH;
       const nHeight = Math.max(LAYOUT.NOTE_MIN_HEIGHT, target.height || LAYOUT.NOTE_MIN_HEIGHT);
-      const targetX = target.x + nWidth / 2 - current.viewport.w / 2;
-      const targetY = target.y + nHeight / 2 - current.viewport.h / 2;
+      const targetX = target.x + nWidth / 2 - pan.w / 2;
+      const targetY = target.y + nHeight / 2 - pan.h / 2;
 
       current.clearSelection();
       current.setViewportPosition(targetX, targetY);

@@ -8,6 +8,7 @@ import { NOTE_UI_COLORS } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
 import { useDomainStore, useUIStore } from "../store";
 import { useStore } from "../store/useStore";
+import { useViewportStore } from "../store/viewportStore";
 import { useEdgePush } from "../hooks/useEdgePush";
 import { useDarkMode } from "../hooks/useDarkMode";
 import { cn } from "../utils/cn";
@@ -79,7 +80,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   const markNoteHighlights = useUIStore(state => state.markNoteHighlights);
   const clearNoteHighlight = useUIStore(state => state.clearNoteHighlight);
   const isGroupSelection = useUIStore(state => state.selectedIds.length > 1);
-  const isPanMode = useStore(state => state.interaction.isPanMode);
+  const isPanMode = useViewportStore(state => state.interaction.isPanMode);
   const isDarkMode = useDarkMode();
   
   // Custom Hooks
@@ -240,7 +241,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     );
     const effectivePos = getEffectiveLeaderPosition();
     const dragIds = sessionIds.length > 0 ? sessionIds : [note.id];
-    const viewport = useStore.getState().viewport;
+    const viewport = useViewportStore.getState().viewport;
+
     // 逻辑边界使用常量，不读取 DOM offsetWidth/offsetHeight，
     // 因为选中态可能渲染编辑尺寸而拖拽边界应使用布局尺寸。
     const noteWidth = LAYOUT.NOTE_WIDTH;
@@ -327,19 +329,19 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       );
 
       const moveSnapshotPositions: Record<string, { x: number; y: number; updatedAt: number }> = {};
-      dragNotes.forEach((dragNote) => {
-        moveSnapshotPositions[dragNote.id] = {
-          x: dragNote.x,
-          y: dragNote.y,
-          updatedAt: dragNote.updatedAt,
-        };
-      });
-      useStore.getState().captureMoveSnapshot(moveSnapshotPositions);
+       dragNotes.forEach((dragNote) => {
+         moveSnapshotPositions[dragNote.id] = {
+           x: dragNote.x,
+           y: dragNote.y,
+           updatedAt: dragNote.updatedAt,
+         };
+       });
+ 
+       beginEdgePushDragSession(note.id, dragIds, basePositions, clientPoint ?? { x: 0, y: 0 });
+       useStore.getState().captureMoveSnapshot(moveSnapshotPositions);
+       registerActiveNoteDragFinalizer(handleFinalizeDragSession);
 
-      beginEdgePushDragSession(note.id, dragIds, basePositions, clientPoint ?? { x: 0, y: 0 });
-      registerActiveNoteDragFinalizer(handleFinalizeDragSession);
-
-      if (dragNotes.length > 1) {
+       if (dragNotes.length > 1) {
               let minX = Infinity, minY = Infinity;
               let maxX = -Infinity, maxY = -Infinity;
               
@@ -385,7 +387,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       // 旧版推动手感的关键约束：拖拽中只有 DragSession 这一套位置真相。
       // DraggableCore 只作为事件入口；pointerDelta 只来自原始 clientX/Y，避免 worldLayer transform 污染 data.deltaX/Y。
       const effectivePos = getEffectiveLeaderPosition();
-      const viewport = useStore.getState().viewport;
+      const viewport = useViewportStore.getState().viewport;
+
       const edgeRect = getEdgeCheckRect(
             effectivePos.x,
             effectivePos.y,

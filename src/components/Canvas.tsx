@@ -282,9 +282,9 @@ export const Canvas: React.FC = () => {
   }, [engine]);
 
   useEffect(() => {
-    engine.syncEdgePushLoop();
+    engine.syncPushLoop();
     return () => {
-      engine.stopEdgePushLoop();
+      engine.stopPushLoop();
     };
   }, [engine, edgePush]);
 
@@ -307,13 +307,14 @@ export const Canvas: React.FC = () => {
     if (stickyDragId) {
       const localPoint = toCanvasLocalPoint(e.clientX, e.clientY);
       const vpState = useViewportStore.getState();
-      const legacyState = useStore.getState();
-      if (vpState.stickyDrag.status === 'suspended') {
+      const pan = vpState.viewport;
+      const sticky = vpState.stickyDrag;
+      if (sticky.status === 'suspended') {
         return;
       }
-      const vp = vpState.viewport;
-      const newX = (localPoint.x - vpState.stickyDrag.offsetX) / scale + vp.x;
-      const newY = (localPoint.y - vpState.stickyDrag.offsetY) / scale + vp.y;
+      const newX = (localPoint.x - sticky.offsetX) / scale + pan.x;
+      const newY = (localPoint.y - sticky.offsetY) / scale + pan.y;
+      const legacyState = useStore.getState();
 
       const currentNote = legacyState.notesById[stickyDragId];
       const isSelected = legacyState.selectedIds.includes(stickyDragId);
@@ -427,6 +428,8 @@ export const Canvas: React.FC = () => {
 
         const dims = await getImageDimensionsFromRelativePath(writeResult.relativePath);
 
+        const pan = useViewportStore.getState().viewport;
+        const spawn = getViewportSpawnOrigin(pan);
         const currentStore = useStore.getState();
         const nonDeletedSelectedIds = currentStore.selectedIds.filter(
           (id) => !currentStore.layoutNotesById[id]?.deletedAt,
@@ -435,15 +438,14 @@ export const Canvas: React.FC = () => {
         if (nonDeletedSelectedIds.length === 1) {
           const selectedNote = currentStore.notesById[nonDeletedSelectedIds[0]];
           currentStore.addImageNotesBatch([{
-            x: (selectedNote?.x ?? getViewportSpawnOrigin(useViewportStore.getState().viewport).x) + IMAGE_DROP_STAGGER_OFFSET_X,
-            y: (selectedNote?.y ?? getViewportSpawnOrigin(useViewportStore.getState().viewport).y) + IMAGE_DROP_STAGGER_OFFSET_Y,
+            x: (selectedNote?.x ?? spawn.x) + IMAGE_DROP_STAGGER_OFFSET_X,
+            y: (selectedNote?.y ?? spawn.y) + IMAGE_DROP_STAGGER_OFFSET_Y,
             attachment: attachmentRef,
             originalWidth: dims?.width,
             originalHeight: dims?.height,
           }]);
         } else {
-          const vp = useViewportStore.getState().viewport;
-          const origin = getViewportSpawnOrigin(vp);
+          const origin = spawn;
           currentStore.addImageNotesBatch([{
             x: origin.x,
             y: origin.y,

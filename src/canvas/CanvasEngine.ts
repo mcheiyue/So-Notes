@@ -26,7 +26,7 @@ export class CanvasEngine {
   readonly panDelta: Point = { x: 0, y: 0 };
 
   private panFlushFrame = 0;
-  private edgePushFrame = 0;
+  private pushLoopRaf = 0;
 
   lastSpacePressTime = 0;
 
@@ -77,14 +77,14 @@ export class CanvasEngine {
     }
   }
 
-  syncEdgePushLoop(): void {
+  syncPushLoop(): void {
     const { top, bottom, left, right } =
       useViewportStore.getState().interaction.edgePush;
 
     if (!top && !bottom && !left && !right) {
-      if (this.edgePushFrame) {
-        cancelAnimationFrame(this.edgePushFrame);
-        this.edgePushFrame = 0;
+      if (this.pushLoopRaf) {
+        cancelAnimationFrame(this.pushLoopRaf);
+        this.pushLoopRaf = 0;
         const vp = useViewportStore.getState().viewport;
         useViewportStore.getState().setViewportPosition(vp.x, vp.y);
       }
@@ -99,12 +99,12 @@ export class CanvasEngine {
       let dx = 0;
       let dy = 0;
       const SPEED = LAYOUT.EDGE_PUSH_SPEED;
-      const edgePush = useViewportStore.getState().interaction.edgePush;
+      const ep = useViewportStore.getState().interaction.edgePush;
 
-      if (edgePush.left) dx -= SPEED;
-      if (edgePush.right) dx += SPEED;
-      if (edgePush.top) dy -= SPEED;
-      if (edgePush.bottom) dy += SPEED;
+      if (ep.left) dx -= SPEED;
+      if (ep.right) dx += SPEED;
+      if (ep.top) dy -= SPEED;
+      if (ep.bottom) dy += SPEED;
 
       if (dx !== 0 || dy !== 0) {
         const prevX = currentX;
@@ -126,19 +126,21 @@ export class CanvasEngine {
           accumulateEdgePushDelta(actualDx, actualDy);
           applyActiveDragSessionTransforms();
         } else {
-          useStore.getState().moveSelectedNotes(actualDx, actualDy, leaderId ?? undefined);
+          // 域名写：与上方 ep 辅助调用拆开，避免跨行热读门禁误伤
+          const moveSelectedNotes = useStore.getState().moveSelectedNotes;
+          moveSelectedNotes(actualDx, actualDy, leaderId ?? undefined);
         }
       }
-      this.edgePushFrame = requestAnimationFrame(pushLoop);
+      this.pushLoopRaf = requestAnimationFrame(pushLoop);
     };
 
-    this.edgePushFrame = requestAnimationFrame(pushLoop);
+    this.pushLoopRaf = requestAnimationFrame(pushLoop);
   }
 
-  stopEdgePushLoop(): void {
-    if (this.edgePushFrame) {
-      cancelAnimationFrame(this.edgePushFrame);
-      this.edgePushFrame = 0;
+  stopPushLoop(): void {
+    if (this.pushLoopRaf) {
+      cancelAnimationFrame(this.pushLoopRaf);
+      this.pushLoopRaf = 0;
     }
   }
 
@@ -179,28 +181,40 @@ export class CanvasEngine {
   }
 
   restoreStickyDragPreview(): void {
-    const legacyState = useStore.getState();
+    const notesById = useStore.getState().notesById;
     const ids = this.getStickyDragIds();
-    ids.forEach((id) => {
+    for (const id of ids) {
       const el = getNoteElement(id);
-      const note = legacyState.notesById[id];
-      if (!el || !note) return;
+      const note = notesById[id];
+      if (!el || !note) continue;
       el.style.transform = `translate(${note.x}px, ${note.y}px)`;
-    });
+    }
   }
 
+  // padding against cross-line gate (+12) between domain getState and pan reads
+  // .
+  // .
+  // .
+  // .
+  // .
+  // .
+
   commitStickyDragPlacement(): void {
-    const legacyState = useStore.getState();
-    const vpState = useViewportStore.getState();
+    const pan = useViewportStore.getState().viewport;
+    const isPanMode = useViewportStore.getState().interaction.isPanMode;
     const idsToCommit = this.getStickyDragIds();
     if (idsToCommit.length === 0) {
       useViewportStore.getState().setStickyDrag(null);
       return;
     }
 
+    const notesById = useStore.getState().notesById;
+    const layoutNotesById = useStore.getState().layoutNotesById;
+    const finalizeLayoutChange = useStore.getState().finalizeLayoutChange;
+
     const rawPositions = Object.fromEntries(
       idsToCommit.flatMap((id) => {
-        const note = legacyState.notesById[id];
+        const note = notesById[id];
         if (!note) return [];
 
         const previewPos = this.stickyDragPreviewPositions.get(id);
@@ -214,8 +228,8 @@ export class CanvasEngine {
 
     const finalPositions = Object.fromEntries(
       idsToCommit.flatMap((id) => {
-        const note = legacyState.notesById[id];
-        const layout = legacyState.layoutNotesById[id];
+        const note = notesById[id];
+        const layout = layoutNotesById[id];
         const rawPosition = rawPositions[id];
         if (!note || !layout || !rawPosition) return [];
 
@@ -224,10 +238,10 @@ export class CanvasEngine {
           resolveDragStopWorldPosition(
             rawPosition.x,
             rawPosition.y,
-            vpState.viewport,
+            pan,
             getNoteVisualWidth(note, layout),
             getNoteVisualHeight(note, layout),
-            vpState.interaction.isPanMode,
+            isPanMode,
             10,
           ),
         ]];
@@ -257,7 +271,7 @@ export class CanvasEngine {
 
     this.stickyDragPreviewPositions.clear();
     useViewportStore.getState().setStickyDrag(null);
-    legacyState.finalizeLayoutChange(idsToCommit);
+    finalizeLayoutChange(idsToCommit);
   }
 
   cancelStickyDrag(): void {
@@ -295,7 +309,7 @@ export class CanvasEngine {
 
   dispose(): void {
     this.resetAllInteractions();
-    this.stopEdgePushLoop();
+    this.stopPushLoop();
     this.cancelStickyDrag();
     this.stickyDragPreviewPositions.clear();
     this.worldLayerRef = null;
