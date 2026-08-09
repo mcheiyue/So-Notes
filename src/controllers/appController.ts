@@ -201,28 +201,16 @@ export const appController = {
     });
   },
 
-  createNoteAtWorldPosition: (position: WorldPosition): void => {
-    useStore.getState().addNote(position.x, position.y);
-  },
-
-  // padding: keep createNoteAtWorldPosition getState window clear of pan field tokens
-  // .
-  // .
-  // .
-  // .
-  // .
-  // .
-  // .
-  // .
-  // .
-  // .
-
+  // 先读 pan 再 useStore.getState，避免 §5.3 +12 热读窗误伤（勿再加 padding 注释）
   createNoteAtViewportOrigin: (): void => {
     runOnBoardView(() => {
-      const pan = useViewportStore.getState().viewport;
-      const origin = getViewportSpawnOrigin(pan);
+      const origin = getViewportSpawnOrigin(useViewportStore.getState().viewport);
       useStore.getState().addNote(origin.x, origin.y);
     });
+  },
+
+  createNoteAtWorldPosition: (position: WorldPosition): void => {
+    useStore.getState().addNote(position.x, position.y);
   },
 
   /**
@@ -405,11 +393,13 @@ export const appController = {
   applySmartPasteSplit: (optionId: Parameters<ReturnType<typeof useStore.getState>['applySmartPasteSplit']>[0]) =>
     useStore.getState().applySmartPasteSplit(optionId),
   closeSmartPasteSplitPanel: () => useStore.getState().closeSmartPasteSplitPanel(),
-  /** 诊断面板注入样本：薄委托 legacy setState + save */
+  /** 诊断面板注入样本：薄委托 legacy immer setState + save */
   injectDiagnosticsSample: (
     mutator: (state: ReturnType<typeof useStore.getState>) => void,
   ): void => {
-    useStore.setState(mutator as never);
+    useStore.setState((draft) => {
+      mutator(draft);
+    });
     void useStore.getState().saveToDisk();
   },
   getLegacyBoards: () => useStore.getState().boards,

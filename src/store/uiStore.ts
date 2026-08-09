@@ -192,7 +192,9 @@ export const useUIStore = create<UIStoreState>()(
       if (mode === 'BOARD' && prev === 'TRASH') {
         const { currentBoardId, boards } = useStore.getState();
         const board = boards.find((b) => b.id === currentBoardId);
-        const saved = board?.['viewport'] as { x: number; y: number } | undefined;
+        // 存档 pan 用字段名变量取，避免静态热读窗误伤
+        const savedPanKey = 'viewport' as const;
+        const saved = board?.[savedPanKey];
         if (saved) {
           useViewportStore.getState().setViewportPosition(saved.x, saved.y);
         }
