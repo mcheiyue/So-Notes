@@ -1,8 +1,38 @@
-# 更新日志 (Changelog)
+## [v1.6.4] - 2026-08-11
 
-本项目的所有重要变更都将记录在此文件中。
+本版本完成 Store 读路径迁移 + Viewport 热路径 SSOT，将生产代码对旧 `useStore` 的直接 import 收敛到 10 个白名单文件，并修复多便签平移「卡一半」的 Viewport 双写问题（UX P0-06）。
 
-## [v1.6.3] - 2026-08-02
+关单状态：CODE M1/M2 **读路径达标（≤10）**；P0-06 **已修复**（策略 A）。
+
+### 🐛 问题修复 (Bug Fixes)
+
+* **Viewport 热路径仅写 useViewportStore（UX P0-06 硬 0）**
+  > pan / edgePush / 拖拽等热更新不再每帧反向双写 `useStore.setState`，多便签平移不再「卡一半」；switchBoard 落盘硬 it 通过。
+
+  - reverse 桥保留 stickyDrag / shellRect / canvas / 尺寸与非 edge interaction，仅跳过 pan(x/y) 与纯 edgePush。
+  - 新增 `runtimePan` 断开 useStore ↔ viewportStore 循环依赖。
+
+* **生产 import `useStore` 文件数 ≤10（白名单保留）**
+  > 读路径全部迁分 store（uiStore / viewportStore / domainStore）；写入口经 appController 或分 store action。
+
+  - App、ContextMenu、QuickCapture、SmartPaste、SelectionActionBar、ShortcutsManager、TrashGrid、DiagnosticsPanel、detachedNoteSnapshotSync 均去除 `useStore` import。
+  - 托盘 tooltip 逻辑随 `saveStatus` 迁至 PersistenceController。
+
+* **Overlay 死代码删除**
+  > `DetachedNoteOverlay.tsx` + test 完全移除，无生产引用。
+
+* **FPS/diagnostics 采集门控**
+  > `App.tsx` startFPS 仅在 DEV / VITE_ENABLE_PROFILING 下开启，生产默认不常开采集。
+
+### 🔧 内部改进 (Internal)
+
+* **依赖地图 + ≤10 列表回写**
+  > `v1.5.5-use-store-dependency-map.md` 更新；C-M3/C-M5 验收全绿。
+
+* **appController 薄委托**
+  > 为去 import 追加 undo/redo、trash、智能粘贴等单行薄委托，不新建 service/facade 文件。
+
+
 
 本版本统一 ViewMode 切换语义，并修复托盘唤起窗口空白、TRASH↔BOARD 视口恢复边界等问题。关单状态：CODE V1 **已统一**。
 
