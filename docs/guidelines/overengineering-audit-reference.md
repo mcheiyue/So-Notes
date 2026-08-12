@@ -56,7 +56,7 @@
 | `docs/plans/` | 27 文件，~14504 行 |
 | `src/components/BoardDock.tsx` | 非空 ~3221 / 物理 ~3438 |
 | `src/store/useStore.ts` | 非空 ~2382 / 物理 ~2739 |
-| `src-tauri/src/webdav.rs` | 物理 8448 / 非空 ~7406 |
+| `src-tauri/src/webdav/`（原单文件已拆） | 叶模块 8 生产 rs + tests；原 ~8538 行已分治 |
 | `src-tauri/src/backup.rs` | 物理 ~5691 |
 | backup 前端（`src/services/backup/` 等，11 文件） | ~2938 非空 |
 
@@ -83,7 +83,7 @@
 | --- | --- | --- | --- |
 | 7 | **shrink** | `BoardDock` 巨石 | `src/components/BoardDock.tsx`（非空 ~3221）。UI/设置/诊断等堆叠；拆分按真实边界，不为 LOC 美学单独开版。 |
 | 8 | **shrink** | `useStore` 巨石 | `src/store/useStore.ts`（非空 ~2382）。与 #1 绑定：先定真相源，再谈切分。 |
-| 9 | **shrink** | `webdav.rs` / `backup.rs` 巨体 + 内嵌测 | `src-tauri/src/webdav.rs`（物理 8448）、`backup.rs`（~5691）。含内嵌测；瘦身非版本主主题默认项。 |
+| 9 | **shrink** | `webdav/` 已拆分 / `backup.rs` 仍巨体 | **webdav**：v1.6.5 已拆为 `webdav/` 目录叶模块（types/error/ssrf/credential/config/transport/ops + tests），**已拆分**。**backup.rs**（~5691）仍 open。 |
 | 10 | **shrink** | backup 前端多层（网状，非 11 级栈） | `src/services/backup/` 约 11 个生产模块（Coordinator / Runner / Retention / WebDAV / 计划任务 / ActivityLog 等）网状协作。「11 层」表述偏夸。 |
 
 ### 5.3 薄层与误判（PARTIAL / 禁止）
@@ -156,7 +156,7 @@
 | #6 *_MODULE / scaffold | delete/yagni | open | chore 附带 | 删除无消费者常量；规范禁止新增 |
 | #7 BoardDock 巨石 | shrink | open | 有意后置 | 按真实 UI 边界拆分且有测试；非纯 LOC |
 | #8 useStore 巨石 | shrink | open | 依赖 #1 | SSOT 完成后按域切分 |
-| #9 webdav/backup.rs 巨体 | shrink | open | deferred / 非默认主主题 | 模块边界清晰；内嵌测可外置 |
+| #9 webdav/backup.rs 巨体 | shrink | partial | webdav=v1.6.5 已拆分；backup 仍 deferred | webdav 目录叶模块已落地；backup.rs 边界与外置测仍 open |
 | #10 backup 前端网状 | shrink | open | deferred | 职责文档化或必要合并；不追求「层数」 |
 | #11 三 facade PARTIAL | PARTIAL | open | 用法收紧，非整删 | 新代码直连；旧 facade 仅保留有 mock 点者 |
 | #12 docs/plans 堆积 | yagni | open | chore 归档 | 历史计划移 archive 或索引收敛 |

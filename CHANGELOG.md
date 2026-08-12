@@ -1,3 +1,19 @@
+## [v1.6.5] - 2026-08-12
+
+本版本完成 WebDAV 后端模块化（CODE W1）：将原单文件 `webdav.rs` 拆为目录叶模块，行为与 invoke 表面保持不变，降低后续维护与审查成本。
+
+关单状态：CODE W1 **已拆分**。
+
+### 🔧 内部改进 (Internal)
+
+* **WebDAV 后端模块化（CODE W1 已拆分）**
+  > 原 `src-tauri/src/webdav.rs` 改为 `src-tauri/src/webdav/` 目录模块；配置、SSRF、凭据、传输与上传下载分文件承载，前端命令名与 lib 注册路径不变。
+
+  - 叶模块：`types` / `error` / `ssrf` / `credential` / `config` / `transport` / `ops` + 外置 `tests`。
+  - `lib.rs` 对 `webdav::*` 的 11 处注册保持原路径；生产 rs ≤ 8。
+  - 单测：`cargo test --lib webdav` 295 passed（基线不塌）。
+  - 技术债：overengineering #9 中 **webdav 过大** 记为已拆分；`backup.rs` 仍 open。
+
 ## [v1.6.4] - 2026-08-11
 
 本版本完成 Store 读路径迁移 + Viewport 热路径 SSOT，将生产代码对旧 `useStore` 的直接 import 收敛到 10 个白名单文件，并修复多便签平移「卡一半」的 Viewport 双写问题（UX P0-06）。
