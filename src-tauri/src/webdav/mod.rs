@@ -1,4 +1,6 @@
-//! WebDAV 远端备份：配置闭环、连接测试、远端列表、上传、下载与 token 生命周期
+//! WebDAV remote backup module facade (config / transport / ops / ssrf / credential).
+//!
+//! 配置闭环、连接测试、远端列表、上传、下载与 download-token 生命周期。
 mod types;
 mod error;
 mod ssrf;
