@@ -2,6 +2,9 @@
 //!
 //! 本模块提供 WebDAV 远端备份的配置闭环、连接测试、远端列表、上传、下载与
 //! 下载 token 生命周期管理。
+mod types;
+mod error;
+
 use crate::backup;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
@@ -14,7 +17,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 use tauri::Manager;
 use url::{Host, Url};
-// ---------------------------------------------------------------------------
+
+pub use types::*;
+pub use error::*;
 // 单次执行锁（single-flight guard）
 // ---------------------------------------------------------------------------
 /// 全局互斥锁，确保同一时间只有一个任务进入 create-zip + upload 流程。
@@ -26,226 +31,22 @@ fn webdav_create_backup_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
-// ---------------------------------------------------------------------------
-// 常量
-// ---------------------------------------------------------------------------
-/// 远端默认目录名（不含尾部斜杠的规范形式）。
-const DEFAULT_REMOTE_DIR_NAME: &str = "SoNotes_Backups";
-/// 远端备份文件名正则：`SoNotes_Backup_YYYYMMDDHHMMSS.zip`（恰好 14 位数字）。
-///
-/// 用字符串匹配而非引入 regex crate，保持依赖最小。
-const REMOTE_BACKUP_FILENAME_PATTERN: &str = "SoNotes_Backup_";
-/// 日期时间部分长度（YYYYMMDDHHMMSS = 14 位）。
-const DATETIME_LEN: usize = 14;
-/// 远端备份文件完整长度（前缀 15 + 14 日期 + 4 .zip = 33）。
-const REMOTE_BACKUP_FILENAME_LEN: usize = 15 + DATETIME_LEN + 4; // 33
-/// 配置文件名。
-const CONFIG_FILENAME: &str = "webdav-config.json";
-/// 下载临时文件最大字节数（1 GiB 压缩 zip 传输上限）。
-const MAX_WEBDAV_BACKUP_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
-/// 应用缓存目录下的 WebDAV 临时目录名。
-const WEBDAV_TEMP_DIR_NAME: &str = "webdav-backups";
-/// 上传前临时 zip 存放子目录名。
-const WEBDAV_PENDING_DIR_NAME: &str = "pending";
-/// 下载临时文件存放子目录名。
-const WEBDAV_DOWNLOADS_DIR_NAME: &str = "downloads";
-/// 上传同名冲突重试次数上限。
-const UPLOAD_RETRY_LIMIT: u32 = 3;
-const MAX_WEBDAV_REDIRECTS: usize = 10;
-/// 与现网 user_agent 字面量一致；本版不改 UA 字符串。
-pub(crate) const WEBDAV_USER_AGENT: &str = "SoNotes/1.5";
-/// HTTP client 默认超时（秒）；原硬编码 30。
-pub(crate) const WEBDAV_HTTP_TIMEOUT_SECS: u64 = 30;
-/// 下载 token 有效期。过期 token 不再允许解析为本地恢复路径。
-const DOWNLOAD_TOKEN_TTL: Duration = Duration::from_secs(24 * 60 * 60);
-/// WebDAV 临时文件启动清理阈值。
-const WEBDAV_TEMP_FILE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
-// ---------------------------------------------------------------------------
+
 // 序列化类型（前端消费，camelCase）
 // ---------------------------------------------------------------------------
-/// WebDAV 连接配置（前端传入；密码/令牌仅用于本次请求，不持久化）。
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavConfig {
-    /// WebDAV 服务地址（仅 host + 可选端口），例如 `example.com` 或 `example.com:5005`。
-    pub server_url: String,
-    /// 用户名。
-    pub username: String,
-    /// 远端目录（单级，例如 `SoNotes_Backups/`）。
-    pub remote_dir: Option<String>,
-    /// 密码或应用令牌（仅在本次请求中使用，不持久化）。
-    #[serde(default)]
-    pub password: Option<String>,
-    /// 信任此主机：仅 DNS 失败时重试一次；不跳过 IP 黑名单。
-    #[serde(default)]
-    pub trust_host: bool,
-}
-impl std::fmt::Debug for WebDavConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WebDavConfig")
-            .field("server_url", &self.server_url)
-            .field("username", &self.username)
-            .field("remote_dir", &self.remote_dir)
-            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
-            .field("trust_host", &self.trust_host)
-            .finish()
-    }
-}
-/// 连接测试结果。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavConnectionResult {
-    pub success: bool,
-    pub error: Option<String>,
-}
-/// 远端备份条目。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavRemoteBackup {
-    pub file_name: String,
-    pub size: Option<u64>,
-    pub last_modified: Option<String>,
-    pub status: Option<u16>,
-    pub readable: bool,
-}
-/// 保存配置请求（含密码/令牌字段与记住密码标记）。
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavConfigSaveRequest {
-    /// WebDAV 服务地址。
-    pub server_url: String,
-    /// 用户名。
-    pub username: String,
-    /// 远端目录（单级）。
-    pub remote_dir: Option<String>,
-    /// 是否记住密码。若为 `true` 且提供了密码/令牌，当前应返回错误（系统密钥链未实现）。
-    pub remember_password: bool,
-    /// 密码或应用令牌（仅在本次请求中使用，不应持久化到普通配置文件）。
-    #[serde(default)]
-    pub password: Option<String>,
-    /// 信任此主机（DNS 失败时重试；IP 黑名单仍生效）。
-    #[serde(default)]
-    pub trust_host: bool,
-}
-impl std::fmt::Debug for WebDavConfigSaveRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WebDavConfigSaveRequest")
-            .field("server_url", &self.server_url)
-            .field("username", &self.username)
-            .field("remote_dir", &self.remote_dir)
-            .field("remember_password", &self.remember_password)
-            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
-            .field("trust_host", &self.trust_host)
-            .finish()
-    }
-}
-/// 配置加载结果。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavConfigLoadResult {
-    /// 是否成功。
-    pub success: bool,
-    /// 已保存的 WebDAV 服务地址（成功时）。
-    pub server_url: Option<String>,
-    /// 已保存的用户名（成功时）。
-    pub username: Option<String>,
-    /// 已保存的远端目录（成功时）。
-    pub remote_dir: Option<String>,
-    /// 是否标记为已记住密码（密钥链引用占位）。
-    pub password_saved: bool,
-    /// 错误信息（失败时）。
-    pub error: Option<String>,
-    /// 信任此主机（与 trusted_host 指纹绑定；不匹配则 false）。
-    #[serde(default)]
-    pub trust_host: bool,
-}
-/// 配置保存结果。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavConfigSaveResult {
-    /// 是否成功。
-    pub success: bool,
-    /// 非致命警告（如凭据删除失败）。
-    pub warning: Option<String>,
-    /// 错误信息（失败时）。
-    pub error: Option<String>,
-}
-/// 配置清除结果。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavConfigClearResult {
-    /// 是否成功。
-    pub success: bool,
-    /// 错误信息（失败时）。
-    pub error: Option<String>,
-    /// 密钥链 secret 删除失败时的警告信息。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub secret_cleanup_warning: Option<String>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavUploadResult {
-    pub success: bool,
-    pub remote_file_name: Option<String>,
-    pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_stage: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<backup::BackupSummary>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub zip_size_bytes: Option<u64>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavDownloadResult {
-    pub success: bool,
-    pub download_token: Option<String>,
-    pub error: Option<String>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LocalBackupPathResult {
-    pub success: bool,
-    pub local_path: Option<String>,
-    pub error: Option<String>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavCleanupResult {
-    pub success: bool,
-    pub error: Option<String>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebDavDeleteResult {
-    pub success: bool,
-    pub error: Option<String>,
-}
-// ---------------------------------------------------------------------------
-// 内部持久化结构（不暴露给前端）
-// ---------------------------------------------------------------------------
-/// 写入磁盘的配置文件结构。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WebDavConfigFile {
-    server_url: String,
-    username: String,
-    remote_dir: String,
-    /// 是否标记为"已记住密码"。实际凭据不在此文件中存储。
-    password_saved: bool,
-    /// 密钥链 account 标识（SHA-256 哈希前 32 字符）。
-    /// 仅在 `password_saved=true` 时写入，用于定位系统凭据。
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    credential_key: Option<String>,
-    /// 信任此主机（仅 DNS 重试；旧配置缺省 false）。
-    #[serde(default)]
-    trust_host: bool,
-    /// 绑定的 canonical host 指纹；与当前 host 不匹配则 load 时 trust=false。
-    #[serde(default)]
-    trusted_host: Option<String>,
-}
-// ---------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
 // credential_key 计算
 // ---------------------------------------------------------------------------
 /// 基于 server_url / username / remote_dir 计算密钥链 account 标识。
@@ -274,29 +75,7 @@ fn compute_credential_key(server_url: &str, username: &str, remote_dir: &str) ->
 /// - 返回规范化后的 URL 字符串（不含凭据/查询/片段）。
 /// 脱敏对外错误：内部 detail 不进前端，返回笼统文案。
 /// ponytail: 无直接 tracing 依赖；detail 仅用于分支，不拼进对外 String。
-pub(crate) fn sanitize_webdav_error(detail: &str) -> String {
-    let lower = detail.to_ascii_lowercase();
-    if lower.starts_with("dns") || lower.starts_with("解析") || lower.contains("dns 解析") {
-        "DNS 解析失败".to_string()
-    } else if lower.contains("黑名单")
-        || lower.contains("本机")
-        || lower.contains("内网")
-        || lower.starts_with("ip 字面量")
-        || lower.contains("主机校验")
-    {
-        "主机校验失败：不能指向本机或内网".to_string()
-    } else if lower.starts_with("重定向") || lower.contains("redirect") {
-        "重定向校验失败".to_string()
-    } else if lower.starts_with("reqwest")
-        || lower.contains("连接")
-        || lower.contains("超时")
-        || lower.contains("http client")
-    {
-        "WebDAV 连接失败".to_string()
-    } else {
-        "WebDAV 操作失败".to_string()
-    }
-}
+
 /// DNS 解析抽象，默认走系统 to_socket_addrs。
 pub(crate) trait HostResolver: Send + Sync {
     fn resolve(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, String>;
@@ -2690,70 +2469,6 @@ pub async fn cleanup_downloaded_backup(
         error: None,
     })
 }
-// ===========================================================================
-// WebDAV 错误分类（内部使用，不改变前端返回类型）
-// ===========================================================================
-/// WebDAV 操作过程中的错误类型分类。
-///
-/// 本枚举仅用于 Rust 内部分类与测试断言，不直接暴露给前端。
-/// 前端可见文案由 `webdav_error_message()` 在 Tauri 命令返回前生成。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WebDavErrorKind {
-    /// 鉴权失败（HTTP 401）。
-    AuthFailed,
-    /// 权限不足或访问被拒绝（HTTP 403）。
-    Forbidden,
-    /// 目标不存在（HTTP 404）。
-    NotFound,
-    /// 远端目录不存在、父路径冲突或同名对象已存在（HTTP 409/412）。
-    PathConflict,
-    /// 资源被锁定（HTTP 423）。
-    Locked,
-    /// 远端存储空间不足（HTTP 507）。
-    InsufficientStorage,
-    /// 服务端不支持当前方法或路径不正确（HTTP 405）。
-    MethodNotAllowed,
-    /// 请求超时。
-    Timeout,
-    /// 网络不可达或连接失败。
-    NetworkUnreachable,
-    /// 重定向被安全策略拒绝。
-    RedirectRejected,
-    /// 非预期的 HTTP 状态码。
-    UnexpectedStatus,
-    /// PROPFIND 响应 XML 无效或无法解析。
-    InvalidPropfindResponse,
-    /// 下载内容超过允许大小上限。
-    DownloadTooLarge,
-    /// 远端文件名校验失败。
-    InvalidRemoteFileName,
-    /// 本地临时文件操作失败。
-    LocalTempFileError,
-}
-/// WebDAV 操作类型，用于区分同一状态码在不同操作下的语义。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WebDavOperation {
-    /// 连接测试。
-    TestConnection,
-    /// 列出远端备份。
-    ListBackups,
-    /// 上传备份。
-    UploadBackup,
-    /// 下载备份。
-    DownloadBackup,
-    /// 删除备份。
-    DeleteBackup,
-}
-/// WebDAV 操作错误，包含分类、可选 HTTP 状态码和可重试标记。
-///
-/// 本结构体不保存用户文案，避免结构体相等比较被中文文案变化拖动。
-/// 用户可见文案由 `webdav_error_message()` 在调用点生成。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WebDavOperationError {
-    pub kind: WebDavErrorKind,
-    pub status: Option<u16>,
-    pub retryable: bool,
-}
 // ---------------------------------------------------------------------------
 // Credential Store 抽象
 // ---------------------------------------------------------------------------
@@ -2943,186 +2658,6 @@ impl WebDavCredentialStore for FailingDeleteCredentialStore {
             kind: WebDavCredentialErrorKind::DeleteFailed,
             message: "FailingDeleteCredentialStore: delete always fails".to_string(),
         })
-    }
-}
-/// 传输层故障分类，用于将 `reqwest::Error` 转换为内部分类。
-///
-/// 拆分此层使得单元测试可以直接断言映射逻辑，无需在 CI 中制造真实超时或网络故障。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WebDavTransportFailure {
-    /// 请求超时。
-    Timeout,
-    /// 网络不可达或连接失败。
-    NetworkUnreachable,
-    /// 重定向被安全策略拒绝。
-    RedirectRejected,
-    /// 其他传输层错误。
-    Other,
-}
-/// 将 HTTP 状态码分类为 `WebDavOperationError`。
-///
-/// 映射规则：
-/// - 401 → AuthFailed
-/// - 403 → Forbidden
-/// - 404 → NotFound
-/// - 405 → MethodNotAllowed
-/// - 409 → PathConflict
-/// - 412 → PathConflict
-/// - 423 → Locked
-/// - 507 → InsufficientStorage
-/// - 408/429 → Timeout（可重试）
-/// - 5xx → UnexpectedStatus（可重试）
-/// - 其他 → UnexpectedStatus（不可重试）
-///
-/// 注意：`retryable` 字段仅是分类标签，不代表所有操作都会执行重试。
-/// 每个操作的重试策略由自身逻辑独立控制，例如 upload 只重试 409/412 冲突。
-pub fn classify_webdav_status(
-    _operation: WebDavOperation,
-    status: reqwest::StatusCode,
-) -> WebDavOperationError {
-    let code = status.as_u16();
-    match code {
-        401 => WebDavOperationError {
-            kind: WebDavErrorKind::AuthFailed,
-            status: Some(code),
-            retryable: false,
-        },
-        403 => WebDavOperationError {
-            kind: WebDavErrorKind::Forbidden,
-            status: Some(code),
-            retryable: false,
-        },
-        404 => WebDavOperationError {
-            kind: WebDavErrorKind::NotFound,
-            status: Some(code),
-            retryable: false,
-        },
-        405 => WebDavOperationError {
-            kind: WebDavErrorKind::MethodNotAllowed,
-            status: Some(code),
-            retryable: false,
-        },
-        408 => WebDavOperationError {
-            kind: WebDavErrorKind::Timeout,
-            status: Some(code),
-            retryable: true,
-        },
-        409 => WebDavOperationError {
-            kind: WebDavErrorKind::PathConflict,
-            status: Some(code),
-            retryable: false,
-        },
-        412 => WebDavOperationError {
-            kind: WebDavErrorKind::PathConflict,
-            status: Some(code),
-            retryable: false,
-        },
-        423 => WebDavOperationError {
-            kind: WebDavErrorKind::Locked,
-            status: Some(code),
-            retryable: false,
-        },
-        429 => WebDavOperationError {
-            kind: WebDavErrorKind::Timeout,
-            status: Some(code),
-            retryable: true,
-        },
-        507 => WebDavOperationError {
-            kind: WebDavErrorKind::InsufficientStorage,
-            status: Some(code),
-            retryable: false,
-        },
-        500..=599 => WebDavOperationError {
-            kind: WebDavErrorKind::UnexpectedStatus,
-            status: Some(code),
-            retryable: true,
-        },
-        _ => WebDavOperationError {
-            kind: WebDavErrorKind::UnexpectedStatus,
-            status: Some(code),
-            retryable: false,
-        },
-    }
-}
-/// 将传输层故障分类映射为 `WebDavOperationError`。
-///
-/// 测试可直接构造 `WebDavTransportFailure::Timeout` 断言映射逻辑，
-/// 无需在 CI 中制造真实超时。
-pub fn classify_transport_failure(
-    failure: WebDavTransportFailure,
-    _operation: WebDavOperation,
-) -> WebDavOperationError {
-    match failure {
-        WebDavTransportFailure::Timeout => WebDavOperationError {
-            kind: WebDavErrorKind::Timeout,
-            status: None,
-            retryable: true,
-        },
-        WebDavTransportFailure::NetworkUnreachable => WebDavOperationError {
-            kind: WebDavErrorKind::NetworkUnreachable,
-            status: None,
-            retryable: true,
-        },
-        WebDavTransportFailure::RedirectRejected => WebDavOperationError {
-            kind: WebDavErrorKind::RedirectRejected,
-            status: None,
-            retryable: false,
-        },
-        WebDavTransportFailure::Other => WebDavOperationError {
-            kind: WebDavErrorKind::UnexpectedStatus,
-            status: None,
-            retryable: false,
-        },
-    }
-}
-/// 将 `reqwest::Error` 转换为内部传输层故障分类。
-///
-/// 调用链：`reqwest::Error` → `WebDavTransportFailure` → `WebDavOperationError`。
-pub fn classify_reqwest_error(
-    _operation: WebDavOperation,
-    error: &reqwest::Error,
-) -> WebDavOperationError {
-    let failure = if error.is_timeout() {
-        WebDavTransportFailure::Timeout
-    } else if error.is_connect() {
-        WebDavTransportFailure::NetworkUnreachable
-    } else if error.is_redirect() {
-        WebDavTransportFailure::RedirectRejected
-    } else {
-        WebDavTransportFailure::Other
-    };
-    classify_transport_failure(failure, _operation)
-}
-/// 将 `WebDavOperationError` 映射为用户可见的中文错误信息。
-///
-/// 本函数仅作为内部映射，本版本不接入命令函数，保持现有用户可见文案不变。
-/// 后续 Commit 6+ 会逐步将命令函数的错误路径接入此映射。
-pub fn webdav_error_message(error: &WebDavOperationError) -> String {
-    match error.kind {
-        WebDavErrorKind::AuthFailed => "WebDAV 鉴权失败".to_string(),
-        WebDavErrorKind::Forbidden => "WebDAV 权限不足或访问被拒绝".to_string(),
-        WebDavErrorKind::NotFound => "远端目标不存在".to_string(),
-        WebDavErrorKind::PathConflict => "远端路径冲突".to_string(),
-        WebDavErrorKind::Locked => "远端资源被锁定".to_string(),
-        WebDavErrorKind::InsufficientStorage => "远端存储空间不足".to_string(),
-        WebDavErrorKind::MethodNotAllowed => "WebDAV 服务端不支持当前方法或路径不正确".to_string(),
-        WebDavErrorKind::Timeout => {
-            if error.status.is_some() {
-                "WebDAV 请求超时".to_string()
-            } else {
-                "WebDAV 连接超时".to_string()
-            }
-        }
-        WebDavErrorKind::NetworkUnreachable => "WebDAV 网络不可达".to_string(),
-        WebDavErrorKind::RedirectRejected => "WebDAV 重定向被拒绝".to_string(),
-        WebDavErrorKind::UnexpectedStatus => match error.status {
-            Some(code) => format!("WebDAV 服务器返回异常状态码: {code}"),
-            None => "WebDAV 未知错误".to_string(),
-        },
-        WebDavErrorKind::InvalidPropfindResponse => "WebDAV 列表 XML 解析失败".to_string(),
-        WebDavErrorKind::DownloadTooLarge => "远端备份超过允许大小".to_string(),
-        WebDavErrorKind::InvalidRemoteFileName => "远端备份文件名不合法".to_string(),
-        WebDavErrorKind::LocalTempFileError => "本地临时文件操作失败".to_string(),
     }
 }
 // ===========================================================================
