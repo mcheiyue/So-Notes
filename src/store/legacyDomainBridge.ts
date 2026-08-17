@@ -62,7 +62,7 @@ const collectChangedRecordIds = <TValue>(
 
   const changed: string[] = [];
   for (const id of nextIds) {
-    if (!Object.hasOwn(prev, id)) {
+    if (!Object.prototype.hasOwnProperty.call(prev, id)) {
       return null;
     }
     if (next[id] !== prev[id]) {
@@ -111,7 +111,10 @@ const resolveSingleNotePatchId = (
 
 const patchSingleNoteIntoDomainStore = (state: LegacyStoreState, noteId: string): boolean => {
   const note = state.notesById[noteId];
-  const domainHasNote = Object.hasOwn(useDomainStore.getState().notesById, noteId);
+  const domainHasNote = Object.prototype.hasOwnProperty.call(
+    useDomainStore.getState().notesById,
+    noteId,
+  );
   if (!note || !domainHasNote) {
     return false;
   }

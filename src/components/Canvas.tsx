@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useCallback, useMemo, useState, Profiler } from "react";
-import { useStore } from "../store/useStore";
-import { useViewportStore } from "../store";
+import { appController, useIsLoaded } from "../controllers/appController";
+import { useDomainStore, useUIStore, useViewportStore } from "../store";
 import { NoteCard } from "./NoteCard";
 import { cn } from "../utils/cn";
 import { Z_INDEX } from "../constants/layout";
@@ -102,8 +102,8 @@ const isDragInteractionLocked = (): boolean => {
 };
 
 export const Canvas: React.FC = () => {
-  const isLoaded = useStore((s) => s.isLoaded);
-  const currentBoardId = useStore((s) => s.currentBoardId);
+  const isLoaded = useIsLoaded();
+  const currentBoardId = useDomainStore((s) => s.currentBoardId);
 
   const stickyDragId = useViewportStore((s) => s.stickyDrag.id);
   const stickyDragStatus = useViewportStore((s) => s.stickyDrag.status);
@@ -113,9 +113,9 @@ export const Canvas: React.FC = () => {
   const viewport = useViewportStore((s) => s.viewport);
   const [isImageDropOnNoteHintVisible, setIsImageDropOnNoteHintVisible] = useState(false);
 
-  const notesById = useStore((s) => s.notesById);
-  const layoutNotesById = useStore((s) => s.layoutNotesById);
-  const currentBoardNoteIds = useStore((s) => s.boardNoteIds[s.currentBoardId] ?? EMPTY_NOTE_IDS);
+  const notesById = useDomainStore((s) => s.notesById);
+  const layoutNotesById = useDomainStore((s) => s.layoutNotesById);
+  const currentBoardNoteIds = useDomainStore((s) => s.boardNoteIds[s.currentBoardId] ?? EMPTY_NOTE_IDS);
 
   const throttledViewportX = Math.floor(viewport.x / 100) * 100;
   const throttledViewportY = Math.floor(viewport.y / 100) * 100;
@@ -235,9 +235,10 @@ export const Canvas: React.FC = () => {
         bottom: screenRect.bottom + vp.y
       };
 
-      const boardNoteIds = useStore.getState().boardNoteIds[useStore.getState().currentBoardId] ?? [];
-      const layoutNotesById = useStore.getState().layoutNotesById;
-      const notesById = useStore.getState().notesById;
+      const domain = useDomainStore.getState();
+      const boardNoteIds = domain.boardNoteIds[domain.currentBoardId] ?? [];
+      const layoutNotesById = domain.layoutNotesById;
+      const notesById = domain.notesById;
       const newSelectedIds: string[] = [];
 
       for (const id of boardNoteIds) {
@@ -260,13 +261,13 @@ export const Canvas: React.FC = () => {
         }
       }
 
-      const existingIds = useStore.getState().selectedIds;
+      const existingIds = useUIStore.getState().selectedIds;
       if (newSelectedIds.length > 0) {
         if (e.shiftKey) {
           const mergedIds = [...new Set([...existingIds, ...newSelectedIds])];
-          useStore.getState().setSelectedIds(mergedIds);
+          useUIStore.getState().setSelectedIds(mergedIds);
         } else {
-          useStore.getState().setSelectedIds(newSelectedIds);
+          useUIStore.getState().setSelectedIds(newSelectedIds);
         }
       }
     }
@@ -314,10 +315,9 @@ export const Canvas: React.FC = () => {
       }
       const newX = (localPoint.x - sticky.offsetX) / scale + pan.x;
       const newY = (localPoint.y - sticky.offsetY) / scale + pan.y;
-      const legacyState = useStore.getState();
-
-      const currentNote = legacyState.notesById[stickyDragId];
-      const isSelected = legacyState.selectedIds.includes(stickyDragId);
+      const domainNotes = useDomainStore.getState().notesById;
+      const currentNote = domainNotes[stickyDragId];
+      const isSelected = useUIStore.getState().selectedIds.includes(stickyDragId);
       const ids = engine.getStickyDragIds();
 
       if (isSelected && ids.length > 1 && currentNote) {
@@ -327,7 +327,7 @@ export const Canvas: React.FC = () => {
           if (id === stickyDragId) return;
           const el = getNoteElement(id);
           if (!el) return;
-          const note = legacyState.notesById[id];
+          const note = domainNotes[id];
           if (!note) return;
           const previewX = note.x + dx;
           const previewY = note.y + dy;
@@ -381,7 +381,7 @@ export const Canvas: React.FC = () => {
     const vp = useViewportStore.getState().viewport;
     const x = localPoint.x + vp.x;
     const y = localPoint.y + vp.y;
-    useStore.getState().addNote(x, y);
+    appController.addNote(x, y);
   };
 
   const handlePaste = async (e: React.ClipboardEvent) => {
@@ -394,8 +394,8 @@ export const Canvas: React.FC = () => {
       return;
     }
 
-    const state = useStore.getState();
-    if (state.isSpotlightOpen || state.isQuickCaptureOpen || state.smartPasteSplitPanel || state.contextMenu.isOpen) {
+    const ui = useUIStore.getState();
+    if (ui.isSpotlightOpen || ui.isQuickCaptureOpen || ui.smartPasteSplitPanel || ui.contextMenu.isOpen) {
       return;
     }
 
@@ -430,14 +430,14 @@ export const Canvas: React.FC = () => {
 
         const pan = useViewportStore.getState().viewport;
         const spawn = getViewportSpawnOrigin(pan);
-        const currentStore = useStore.getState();
-        const nonDeletedSelectedIds = currentStore.selectedIds.filter(
-          (id) => !currentStore.layoutNotesById[id]?.deletedAt,
+        const domain = useDomainStore.getState();
+        const nonDeletedSelectedIds = useUIStore.getState().selectedIds.filter(
+          (id) => !domain.layoutNotesById[id]?.deletedAt,
         );
 
         if (nonDeletedSelectedIds.length === 1) {
-          const selectedNote = currentStore.notesById[nonDeletedSelectedIds[0]];
-          currentStore.addImageNotesBatch([{
+          const selectedNote = domain.notesById[nonDeletedSelectedIds[0]];
+          appController.addImageNotesBatch([{
             x: (selectedNote?.x ?? spawn.x) + IMAGE_DROP_STAGGER_OFFSET_X,
             y: (selectedNote?.y ?? spawn.y) + IMAGE_DROP_STAGGER_OFFSET_Y,
             attachment: attachmentRef,
@@ -446,7 +446,7 @@ export const Canvas: React.FC = () => {
           }]);
         } else {
           const origin = spawn;
-          currentStore.addImageNotesBatch([{
+          appController.addImageNotesBatch([{
             x: origin.x,
             y: origin.y,
             attachment: attachmentRef,
@@ -472,10 +472,9 @@ export const Canvas: React.FC = () => {
     }
 
     e.preventDefault();
-    const store = useStore.getState();
-    const createdIds = store.addNotesWithContentBatch(notes) ?? [];
+    const createdIds = appController.addNotesWithContentBatch(notes) ?? [];
     if (createdIds.length > 0 && result.options.length > 1) {
-      store.openSmartPasteSplitPanel({ noteId: createdIds[0], result });
+      useUIStore.getState().openSmartPasteSplitPanel({ noteId: createdIds[0], result });
     }
   };
 
@@ -576,7 +575,7 @@ export const Canvas: React.FC = () => {
         originalHeight: entry.dims?.height,
       }));
 
-      useStore.getState().addImageNotesBatch(batchInputs);
+      appController.addImageNotesBatch(batchInputs);
     } catch (batchError) {
       console.warn('批量创建便签失败，执行附件补偿删除。', batchError);
       for (const entry of writeResults) {
@@ -629,7 +628,7 @@ export const Canvas: React.FC = () => {
       }
       
       if (!e.shiftKey && !e.ctrlKey) {
-        useStore.getState().clearSelection();
+        useUIStore.getState().clearSelection();
       }
     }
   };
@@ -658,7 +657,7 @@ export const Canvas: React.FC = () => {
           if (stickyDragId) {
               return;
           } else {
-              useStore.getState().setContextMenu({
+              useUIStore.getState().setContextMenu({
                   isOpen: true,
                   x: e.clientX,
                   y: e.clientY,

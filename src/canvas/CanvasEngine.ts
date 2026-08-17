@@ -1,6 +1,6 @@
+import { appController } from "../controllers/appController";
 import { LAYOUT } from "../constants/layout";
-import { useStore } from "../store/useStore";
-import { useViewportStore } from "../store";
+import { useDomainStore, useUIStore, useViewportStore } from "../store";
 import {
   getEdgePushDragLeader,
   hasActiveEdgePushDragSession,
@@ -127,8 +127,7 @@ export class CanvasEngine {
           applyActiveDragSessionTransforms();
         } else {
           // 域名写：与上方 ep 辅助调用拆开，避免跨行热读门禁误伤
-          const moveSelectedNotes = useStore.getState().moveSelectedNotes;
-          moveSelectedNotes(actualDx, actualDy, leaderId ?? undefined);
+          appController.moveSelectedNotes(actualDx, actualDy, leaderId ?? undefined);
         }
       }
       this.pushLoopRaf = requestAnimationFrame(pushLoop);
@@ -173,15 +172,15 @@ export class CanvasEngine {
     const leaderId = vpState.stickyDrag.id;
     if (!leaderId) return [];
 
-    const legacyState = useStore.getState();
-    if (legacyState.selectedIds.includes(leaderId) && legacyState.selectedIds.length > 1) {
-      return legacyState.selectedIds;
+    const selectedIds = useUIStore.getState().selectedIds;
+    if (selectedIds.includes(leaderId) && selectedIds.length > 1) {
+      return selectedIds;
     }
     return [leaderId];
   }
 
   restoreStickyDragPreview(): void {
-    const notesById = useStore.getState().notesById;
+    const notesById = useDomainStore.getState().notesById;
     const ids = this.getStickyDragIds();
     for (const id of ids) {
       const el = getNoteElement(id);
@@ -208,9 +207,8 @@ export class CanvasEngine {
       return;
     }
 
-    const notesById = useStore.getState().notesById;
-    const layoutNotesById = useStore.getState().layoutNotesById;
-    const finalizeLayoutChange = useStore.getState().finalizeLayoutChange;
+    const notesById = useDomainStore.getState().notesById;
+    const layoutNotesById = useDomainStore.getState().layoutNotesById;
 
     const rawPositions = Object.fromEntries(
       idsToCommit.flatMap((id) => {
@@ -248,30 +246,15 @@ export class CanvasEngine {
       }),
     ) as Record<string, { x: number; y: number }>;
 
-    const timestamp = Date.now();
-    useStore.setState((draft) => {
-      idsToCommit.forEach((id) => {
-        const note = draft.notesById[id];
-        const position = finalPositions[id];
-        if (!note || !position) return;
-
-        note.x = position.x;
-        note.y = position.y;
-        note.updatedAt = timestamp;
-        draft.layoutNotesById[id] = {
-          id: note.id,
-          x: note.x,
-          y: note.y,
-          boardId: note.boardId,
-          deletedAt: note.deletedAt ?? null,
-          color: note.color,
-        };
-      });
-    });
+    for (const id of idsToCommit) {
+      const position = finalPositions[id];
+      if (!position) continue;
+      appController.moveNote(id, position.x, position.y);
+    }
 
     this.stickyDragPreviewPositions.clear();
     useViewportStore.getState().setStickyDrag(null);
-    finalizeLayoutChange(idsToCommit);
+    appController.finalizeLayoutChange(idsToCommit);
   }
 
   cancelStickyDrag(): void {

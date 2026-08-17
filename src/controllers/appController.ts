@@ -439,6 +439,38 @@ export const appController = {
   importFromFile: () => useStore.getState().importFromFile(),
   setThemeMode: (mode: ThemeMode) => useStore.getState().setThemeMode(mode),
   saveToDisk: () => useStore.getState().saveToDisk(),
+  changeColor: (id: string, color: string) => useStore.getState().changeColor(id, color),
+  setIsDragging: (isDragging: boolean) => getViewportState().setIsDragging(isDragging),
+  /** 拖拽落位：批量写世界坐标（无 history；随后须 finalizeLayoutChange） */
+  applyNoteWorldPositions: (positions: Record<string, { x: number; y: number }>) => {
+    useStore.setState((state) => {
+      for (const [id, pos] of Object.entries(positions)) {
+        const n = state.notesById[id];
+        if (!n) continue;
+        n.x = pos.x;
+        n.y = pos.y;
+        state.layoutNotesById[id] = {
+          id: n.id,
+          x: n.x,
+          y: n.y,
+          boardId: n.boardId,
+          deletedAt: n.deletedAt ?? null,
+          color: n.color,
+        };
+      }
+    });
+  },
+  /** 备份恢复：整包写回 legacy useStore（含 persist 字段） */
+  applyRestoredDiskSnapshot: (
+    mutator: (
+      state: ReturnType<typeof useStore.getState>,
+    ) => Partial<ReturnType<typeof useStore.getState>>,
+  ): void => {
+    useStore.setState((state) => ({
+      ...state,
+      ...mutator(state),
+    }));
+  },
   /** 诊断面板注入样本：薄委托 legacy immer setState + save */
   injectDiagnosticsSample: (
     mutator: (state: ReturnType<typeof useStore.getState>) => void,
@@ -452,5 +484,16 @@ export const appController = {
   getLegacyCurrentBoardId: () => useStore.getState().currentBoardId,
 } as const;
 
+/** 组件侧订 isLoaded，避免静态 from useStore（COUNT 门禁） */
+export const useIsLoaded = (): boolean => useStore((s) => s.isLoaded);
+
+/** BoardDock 订 persist 状态，路径仍经白名单门面文件 */
+export const useSaveStatusSlice = () =>
+  useStore((s) => ({
+    saveStatus: s.saveStatus,
+    isSaving: s.isSaving,
+    saveError: s.saveError,
+    lastSavedAt: s.lastSavedAt,
+  }));
 
 export type AppController = typeof appController;

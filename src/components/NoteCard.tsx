@@ -6,8 +6,8 @@ import { confirm } from "../store/confirmStore";
 import { X, GripHorizontal, Palette, RotateCcw, Trash2, Copy, Check } from "lucide-react";
 import { NOTE_UI_COLORS } from "../store/types";
 import { LAYOUT, Z_INDEX } from "../constants/layout";
+import { appController } from "../controllers/appController";
 import { useDomainStore, useUIStore } from "../store";
-import { useStore } from "../store/useStore";
 import { useViewportStore } from "../store/viewportStore";
 import { useEdgePush } from "../hooks/useEdgePush";
 import { useDarkMode } from "../hooks/useDarkMode";
@@ -55,24 +55,24 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   // Selectors
   const note = useDomainStore(state => state.notesById[id]);
 
-  const updateNote = useStore(state => state.updateNote);
-  const updateTitle = useStore(state => state.updateTitle);
-  const finalizeLayoutChange = useStore(state => state.finalizeLayoutChange);
-  const commitNoteTextEdit = useStore(state => state.commitNoteTextEdit);
-  const deleteNote = useStore(state => state.deleteNote);
-  const bringToFront = useStore(state => state.bringToFront);
-  const changeColor = useStore(state => state.changeColor);
-  const toggleCollapse = useStore(state => state.toggleCollapse);
-  const setContextMenu = useStore(state => state.setContextMenu);
-  const toggleSelection = useStore(state => state.toggleSelection);
-  const setSelectedIds = useStore(state => state.setSelectedIds);
-  const restoreNote = useStore(state => state.restoreNote);
-  const deleteNotePermanently = useStore(state => state.deleteNotePermanently);
-  const setIsDragging = useStore(state => state.setIsDragging);
-  const commitNoteEditingSize = useStore(state => state.commitNoteEditingSize);
-  const addImageNotesBatch = useStore(state => state.addImageNotesBatch);
+  const updateNote = appController.updateNote;
+  const updateTitle = appController.updateTitle;
+  const finalizeLayoutChange = appController.finalizeLayoutChange;
+  const commitNoteTextEdit = appController.commitNoteTextEdit;
+  const deleteNote = appController.deleteNote;
+  const bringToFront = appController.bringToFront;
+  const changeColor = appController.changeColor;
+  const toggleCollapse = appController.toggleCollapse;
+  const setContextMenu = useUIStore((s) => s.setContextMenu);
+  const toggleSelection = useUIStore((s) => s.toggleSelection);
+  const setSelectedIds = useUIStore((s) => s.setSelectedIds);
+  const restoreNote = appController.restoreNote;
+  const deleteNotePermanently = appController.deleteNotePermanently;
+  const setIsDragging = appController.setIsDragging;
+  const commitNoteEditingSize = appController.commitNoteEditingSize;
+  const addImageNotesBatch = appController.addImageNotesBatch;
   
-  const isStickyDragging = useStore(state => state.stickyDrag.id === id);
+  const isStickyDragging = useViewportStore(state => state.stickyDrag.id === id);
   const isSelected = useUIStore(state => state.selectedIds.includes(id));
   const isRecentlyCreated = useUIStore(state => state.recentlyCreatedIds.includes(id));
   const noteHighlight = useUIStore(state => state.noteHighlights[id]);
@@ -273,33 +273,32 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
     setEdgePushDragLeader(null);
     unregisterActiveNoteDragFinalizer(handleFinalizeDragSession);
 
-    useStore.setState((state) => {
-      dragIds.forEach((id) => {
-        const n = state.notesById[id];
-        if (!n) return;
+    const positions: Record<string, { x: number; y: number }> = {};
+    const domainNotes = useDomainStore.getState().notesById;
+    dragIds.forEach((dragId) => {
+      const n = domainNotes[dragId];
+      if (!n) return;
 
-        const rawPosition = id === note.id
-          ? finalPosition
-          : sessionPositions[id];
-        if (!rawPosition) return;
+      const rawPosition = dragId === note.id
+        ? finalPosition
+        : sessionPositions[dragId];
+      if (!rawPosition) return;
 
-        const resolvedPosition = id === note.id
-          ? finalPosition
-          : resolveDragStopWorldPosition(
-              rawPosition.x,
-              rawPosition.y,
-              viewport,
-              LAYOUT.NOTE_WIDTH,
-              n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT,
-              isPanMode,
-              margin,
-            );
+      const resolvedPosition = dragId === note.id
+        ? finalPosition
+        : resolveDragStopWorldPosition(
+            rawPosition.x,
+            rawPosition.y,
+            viewport,
+            LAYOUT.NOTE_WIDTH,
+            n.collapsed ? LAYOUT.NOTE_COLLAPSED_HEIGHT : LAYOUT.NOTE_MIN_HEIGHT,
+            isPanMode,
+            margin,
+          );
 
-        n.x = resolvedPosition.x;
-        n.y = resolvedPosition.y;
-        state.layoutNotesById[id] = { id: n.id, x: n.x, y: n.y, boardId: n.boardId, deletedAt: n.deletedAt ?? null, color: n.color };
-      });
+      positions[dragId] = resolvedPosition;
     });
+    appController.applyNoteWorldPositions(positions);
 
     finalizeLayoutChange(dragIds);
   };
@@ -314,14 +313,15 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       if (clientPoint) {
         latestDragClientPointRef.current = clientPoint;
       }
-      const state = useStore.getState();
-      const isNoteSelected = state.selectedIds.includes(note.id);
-      const dragIds = isNoteSelected ? state.selectedIds : [note.id];
+      const selectedIds = useUIStore.getState().selectedIds;
+      const notesById = useDomainStore.getState().notesById;
+      const isNoteSelected = selectedIds.includes(note.id);
+      const dragIds = isNoteSelected ? selectedIds : [note.id];
       if (!isNoteSelected) {
         setSelectedIds(dragIds);
       }
       const dragNotes = dragIds.flatMap((dragId) => {
-          const dragNote = state.notesById[dragId];
+          const dragNote = notesById[dragId];
           return dragNote ? [dragNote] : [];
       });
       const basePositions = Object.fromEntries(
@@ -338,7 +338,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
        });
  
        beginEdgePushDragSession(note.id, dragIds, basePositions, clientPoint ?? { x: 0, y: 0 });
-       useStore.getState().captureMoveSnapshot(moveSnapshotPositions);
+       appController.captureMoveSnapshot(moveSnapshotPositions);
        registerActiveNoteDragFinalizer(handleFinalizeDragSession);
 
        if (dragNotes.length > 1) {
@@ -416,7 +416,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
       setIsHovered(true);
       return;
     }
-    if (useStore.getState().stickyDrag.id) return;
+    if (useViewportStore.getState().stickyDrag.id) return;
 
     const targetElement = mouseEvent.target instanceof Element ? mouseEvent.target : null;
     const clickedHeaderAction = !!targetElement?.closest('.note-action');

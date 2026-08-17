@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { confirm } from "../store/confirmStore";
-import { useStore } from "../store/useStore";
+import { appController, useSaveStatusSlice } from "../controllers/appController";
+import { useDomainStore, useUIStore } from "../store";
 import { cn } from "../utils/cn";
 import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw, Cloud, Wifi, RefreshCw, Save, Clock, Shield, Eye, AlertTriangle } from "lucide-react";
 import { Z_INDEX } from "../constants/layout";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { SettingsPanelShell } from "./SettingsPanelShell";
-import { appController } from "../controllers/appController";
 import { listAttachmentFiles, deleteAttachmentFile, attachmentExists, invalidateAttachmentPathCache, resolveAttachmentAssetUrlCached } from "../services/storage/attachmentPersistence";
 import { detectMissingReferences, detectOrphanAttachments } from "../services/storage/attachmentConsistency";
 import { saveZipDialog, openZipDialog } from "../utils/fileSystem";
@@ -67,8 +67,7 @@ const FREQUENCY_MS: Record<string, number> = {
   'weekly': 7 * 24 * 60 * 60 * 1000,
 };
 
-type StoreState = ReturnType<typeof useStore.getState>;
-type ImportFeedback = Awaited<ReturnType<StoreState['importFromFile']>>;
+type ImportFeedback = Awaited<ReturnType<typeof appController.importFromFile>>;
 
 const formatImportSummary = (summary: NonNullable<ImportFeedback['summary']>) => {
   const parts = [
@@ -168,16 +167,22 @@ const prehydrateRestoredImageNoteAssetUrls = async (notes: Note[]): Promise<void
 };
 
 export const BoardDock = () => {
-  const store = useStore();
-  const { 
-    boards, boardNoteIds, notesById, currentBoardId, 
-    createBoard, deleteBoard, updateBoard, reorderBoard,
-    isDockVisible, setDockVisible, 
-    viewMode,
-    exportAll, importFromFile,
-    config, setThemeMode,
-    saveStatus, isSaving, saveError, lastSavedAt
-  } = store;
+  const boards = useDomainStore((s) => s.boards);
+  const boardNoteIds = useDomainStore((s) => s.boardNoteIds);
+  const notesById = useDomainStore((s) => s.notesById);
+  const currentBoardId = useDomainStore((s) => s.currentBoardId);
+  const config = useDomainStore((s) => s.config);
+  const isDockVisible = useUIStore((s) => s.isDockVisible);
+  const setDockVisible = useUIStore((s) => s.setDockVisible);
+  const viewMode = useUIStore((s) => s.viewMode);
+  const { saveStatus, isSaving, saveError, lastSavedAt } = useSaveStatusSlice();
+  const createBoard = appController.createBoard;
+  const deleteBoard = appController.deleteBoard;
+  const updateBoard = appController.updateBoard;
+  const reorderBoard = appController.reorderBoard;
+  const exportAll = appController.exportAll;
+  const importFromFile = appController.importFromFile;
+  const setThemeMode = appController.setThemeMode;
   const [isInputMode, setIsInputMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsView, setSettingsView] = useState<'MAIN' | 'DATA' | 'THEME' | 'DIAGNOSTICS' | 'WEBDAV'>('MAIN');
@@ -520,7 +525,7 @@ export const BoardDock = () => {
   const onAttachmentScanClick = async () => {
     setAttachmentScanState({ status: 'scanning', missingCount: 0, orphanCount: 0, orphanPaths: [], errorMessage: null });
     try {
-      const allNotes = Object.values(store.notesById);
+      const allNotes = Object.values(notesById);
       const knownFiles = await listAttachmentFiles();
       const missingRefs = await detectMissingReferences(allNotes, attachmentExists);
       const orphans = detectOrphanAttachments(knownFiles, allNotes);
@@ -555,7 +560,7 @@ export const BoardDock = () => {
       for (const relativePath of attachmentScanState.orphanPaths) {
         await deleteAttachmentFile(relativePath);
       }
-      store.clearDomainHistory();
+      appController.clearDomainHistory();
       await onAttachmentScanClick();
     } catch (err) {
       setAttachmentScanState((prev) => ({
@@ -678,8 +683,7 @@ export const BoardDock = () => {
     invalidateAttachmentPathCache();
     await prehydrateRestoredImageNoteAssetUrls(restoredData.notes);
 
-    useStore.setState((state) => ({
-      ...state,
+    appController.applyRestoredDiskSnapshot((state) => ({
       notesById: normalizedNotes.notesById,
       allNoteIds: normalizedNotes.allNoteIds,
       boardNoteIds: normalizedNotes.boardNoteIds,
@@ -698,7 +702,9 @@ export const BoardDock = () => {
       saveStatus: 'idle',
       saveError: null,
       isSaving: false,
-      ...(activeBoard?.viewport ? { viewport: { ...state.viewport, x: activeBoard.viewport.x, y: activeBoard.viewport.y } } : {}),
+      ...(activeBoard?.viewport
+        ? { viewport: { ...state.viewport, x: activeBoard.viewport.x, y: activeBoard.viewport.y } }
+        : {}),
     }));
 
     const theme = restoredData.config.themeMode || 'system';
@@ -2321,7 +2327,7 @@ export const BoardDock = () => {
                             <button
                                 key={item.id}
                                 type="button"
-                                onClick={() => setThemeMode(item.id as StoreState['config']['themeMode'])}
+                                onClick={() => setThemeMode(item.id as 'light' | 'dark' | 'system')}
                                 className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
                             >
                                 <div className="flex items-center gap-2">
@@ -2349,7 +2355,7 @@ export const BoardDock = () => {
                         <button
                             type="button"
                             onClick={async () => {
-                            await store.exportCurrentBoard();
+                            await appController.exportCurrentBoard();
                             setShowSettings(false);
                             }}
                             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-secondary-bg/50 dark:hover:bg-white/5 hover:text-text-primary transition-colors"
