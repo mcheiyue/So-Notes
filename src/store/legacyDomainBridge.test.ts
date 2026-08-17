@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { attachLegacyDomainBridge, detachLegacyDomainBridge } from './legacyDomainBridge';
-import { createInitialDomainState, useDomainStore } from './domainStore';
+import { createInitialDomainState, setDomainPersistenceBridge, useDomainStore } from './domainStore';
 import { useStore } from './useStore';
 import { Board, DEFAULT_CONFIG, Note } from './types';
 
@@ -177,5 +177,37 @@ describe('legacyDomainBridge', () => {
       title: '新标题',
       content: '最终正文',
     });
+  });
+
+  it('P0-07 单 note patch 仍通知 domain 持久化桥', () => {
+    const note: Note = {
+      id: 'note-p007-persist',
+      kind: 'text',
+      boardId: 'default',
+      x: 10,
+      y: 20,
+      title: '标题',
+      content: '正文',
+      color: '#FFFFFF',
+      z: 3,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+
+    seedSingleNote(note);
+    attachLegacyDomainBridge();
+    const persistSpy = vi.fn();
+    setDomainPersistenceBridge(persistSpy);
+    const replaceSpy = spyReplaceDomainState();
+    persistSpy.mockClear();
+
+    useStore.getState().updateNote(note.id, '落盘正文');
+
+    expect(replaceSpy).toHaveBeenCalledTimes(0);
+    expect(persistSpy).toHaveBeenCalled();
+    const lastCall = persistSpy.mock.calls[persistSpy.mock.calls.length - 1]?.[0];
+    expect(lastCall?.notesById?.[note.id]?.content).toBe('落盘正文');
+
+    setDomainPersistenceBridge(null);
   });
 });

@@ -120,12 +120,7 @@ const patchSingleNoteIntoDomainStore = (state: LegacyStoreState, noteId: string)
   }
 
   const layout = state.layoutNotesById[noteId];
-  useDomainStore.setState((draft) => {
-    draft.notesById[noteId] = note;
-    if (layout) {
-      draft.layoutNotesById[noteId] = layout;
-    }
-  });
+  useDomainStore.getState().mirrorPatchNote(note, layout ?? null);
   return true;
 };
 

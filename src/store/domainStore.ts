@@ -41,6 +41,8 @@ export type DomainPersistenceBridge = (state: DomainState) => void;
 
 export interface DomainActions {
   replaceDomainState: (state: DomainState) => void;
+  /** 桥单 note 镜像；内部 notify 持久化 */
+  mirrorPatchNote: (note: Note, layout?: LayoutNote | null) => void;
   hydrateFromNotes: (notes: Note[], boards: Board[], currentBoardId: string, config: AppConfig) => void;
   setCurrentBoard: (boardId: string) => void;
   createBoard: (name: string, icon: string) => string;
@@ -375,6 +377,17 @@ export const useDomainStore = create<DomainStoreState>()(
     replaceDomainState: (nextState) => {
       set((state) => {
         Object.assign(state, nextState);
+      });
+      notifyPersistenceBridge(get());
+    },
+
+    /** 桥：单 note 镜像写（须 notify，禁止裸 setState 漏持久化） */
+    mirrorPatchNote: (note: Note, layout?: LayoutNote | null) => {
+      set((state) => {
+        state.notesById[note.id] = note;
+        if (layout) {
+          state.layoutNotesById[note.id] = layout;
+        }
       });
       notifyPersistenceBridge(get());
     },
