@@ -8,7 +8,18 @@ import { createEmptyNormalizedNotesState, createLayoutNotesById, denormalizeNote
 import { createUndoRedoHistory, pushHistoryEntry, undoHistory, redoHistory, clearDomainHistory as clearDomainHistoryFn, type HistoryStack, type HistoryEntry } from './undoRedoHistory';
 import { applyDomainPatch, type DomainPatch } from './domainPatches';
 import { getCurrentViewport } from './runtimePan';
-import type { DomainState } from './domainStore';
+import {
+  applyAddNote,
+  applyAddNotesWithContentBatch,
+  applyDeleteNotesPermanently,
+  applyFinalizeLayoutChange,
+  applyMoveNote,
+  applyMoveNotes,
+  applySoftDeleteNotes,
+  applyUpdateNote,
+  applyUpdateTitle,
+  type DomainState,
+} from './domainStore';
 
 import { saveFile, openFile } from '../utils/fileSystem';
 import { createDataTransferService, type ImportFromFileResult } from '../services/transfer/DataTransferService';
@@ -513,6 +524,19 @@ const extractDomainSlice = (state: State): DomainState => ({
   currentBoardId: state.currentBoardId,
   config: state.config,
 });
+
+const mutateDomainSlice = <T>(state: State, mutate: (domain: DomainState) => T): T => {
+  const domain = extractDomainSlice(state);
+  const result = mutate(domain);
+  state.notesById = domain.notesById;
+  state.allNoteIds = domain.allNoteIds;
+  state.boardNoteIds = domain.boardNoteIds;
+  state.layoutNotesById = domain.layoutNotesById;
+  state.boards = domain.boards;
+  state.currentBoardId = domain.currentBoardId;
+  state.config = domain.config;
+  return result;
+};
 
 const resolveRestoreBoardId = (
   state: Pick<State, 'boards' | 'currentBoardId'>,
@@ -1054,24 +1078,11 @@ export const useStore = create<State>()(
     setPinned: (pinned) => set({ isPinned: pinned }),
 
     addNote: (x, y) => {
-      const newNote: Note = {
-        id: crypto.randomUUID(),
-        kind: 'text',
-        boardId: get().currentBoardId,
-        title: '',
-        content: '',
-        x,
-        y,
-        z: get().config.maxZ + 1,
-        color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
-        collapsed: false,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const id = crypto.randomUUID();
+      const createdAt = Date.now();
 
       set((state) => {
-        appendNoteToNormalizedState(state, newNote);
-        state.config.maxZ += 1;
+        const newNote = mutateDomainSlice(state, (domain) => applyAddNote(domain, { x, y }, id, createdAt));
         state.selectedIds = [newNote.id];
         state.recentlyCreatedIds = [newNote.id];
         assignNoteHighlights(state, [newNote.id], 'created');
@@ -1088,24 +1099,11 @@ export const useStore = create<State>()(
     },
 
     addNoteWithContent: (x, y, content) => {
-      const newNote: Note = {
-        id: crypto.randomUUID(),
-        kind: 'text',
-        boardId: get().currentBoardId,
-        title: '',
-        content: content,
-        x,
-        y,
-        z: get().config.maxZ + 1,
-        color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
-        collapsed: false,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const id = crypto.randomUUID();
+      const createdAt = Date.now();
 
       set((state) => {
-        appendNoteToNormalizedState(state, newNote);
-        state.config.maxZ += 1;
+        const newNote = mutateDomainSlice(state, (domain) => applyAddNote(domain, { x, y, content }, id, createdAt));
         state.selectedIds = [newNote.id];
         state.recentlyCreatedIds = [newNote.id];
         assignNoteHighlights(state, [newNote.id], 'created');
@@ -1130,35 +1128,14 @@ export const useStore = create<State>()(
         return [];
       }
 
-      const boardId = get().currentBoardId;
       const createdAt = Date.now();
-      const startZ = get().config.maxZ;
       const createdIds = normalizedNotes.map(() => crypto.randomUUID());
 
       set((state) => {
-        const createdNotes: Note[] = [];
+        const createdNotes = mutateDomainSlice(state, (domain) =>
+          applyAddNotesWithContentBatch(domain, normalizedNotes, createdIds, createdAt),
+        ).map((note) => ({ ...note }));
 
-        normalizedNotes.forEach((note, index) => {
-          const newNote: Note = {
-            id: createdIds[index],
-            kind: 'text',
-            boardId,
-            title: '',
-            content: note.content,
-            x: note.x,
-            y: note.y,
-            z: startZ + index + 1,
-            color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
-            collapsed: false,
-            createdAt,
-            updatedAt: createdAt,
-          };
-
-          appendNoteToNormalizedState(state, newNote);
-          createdNotes.push({ ...newNote });
-        });
-
-        state.config.maxZ += normalizedNotes.length;
         state.selectedIds = createdIds;
         state.recentlyCreatedIds = createdIds;
         assignNoteHighlights(state, createdIds, 'created');
@@ -1169,7 +1146,7 @@ export const useStore = create<State>()(
           createdAt: Date.now(),
           undo: {
             type: 'compound-patch',
-            patches: createdIds.map((id) => ({ type: 'remove-note' as const, noteId: id })),
+            patches: createdIds.map((batchId) => ({ type: 'remove-note' as const, noteId: batchId })),
           },
           redo: {
             type: 'compound-patch',
@@ -1184,47 +1161,26 @@ export const useStore = create<State>()(
 
     updateTitle: (id, title) => {
       set((state) => {
-        const note = getNoteById(state, id);
-        if (note) {
-          note.title = title;
-          note.updatedAt = Date.now();
-        }
+        mutateDomainSlice(state, (domain) => applyUpdateTitle(domain, id, title));
       });
     },
 
     updateNote: (id, content) => {
       set((state) => {
-        const note = getNoteById(state, id);
-        if (note) {
-          note.content = content;
-          note.updatedAt = Date.now();
-        }
+        mutateDomainSlice(state, (domain) => applyUpdateNote(domain, id, content));
       });
     },
 
     moveNote: (id, x, y) => {
       set((state) => {
-        const note = getNoteById(state, id);
-        if (note) {
-          note.x = x;
-          note.y = y;
-          state.layoutNotesById[note.id] = extractLayoutNote(note);
-        }
+        mutateDomainSlice(state, (domain) => applyMoveNote(domain, id, x, y));
       });
     },
 
 
     moveSelectedNotes: (dx, dy, excludeId) => {
         set((state) => {
-            state.selectedIds.forEach(id => {
-                if (id === excludeId) return;
-                const note = getNoteById(state, id);
-                if (note) {
-                    note.x += dx;
-                    note.y += dy;
-                    state.layoutNotesById[note.id] = extractLayoutNote(note);
-                }
-            });
+            mutateDomainSlice(state, (domain) => applyMoveNotes(domain, state.selectedIds, dx, dy, excludeId));
         });
     },
 
@@ -1236,12 +1192,7 @@ export const useStore = create<State>()(
         const timestamp = Date.now();
 
         set((state) => {
-            uniqueIds.forEach((id) => {
-                const note = getNoteById(state, id);
-                if (note) {
-                    note.updatedAt = timestamp;
-                }
-            });
+            mutateDomainSlice(state, (domain) => applyFinalizeLayoutChange(domain, uniqueIds, timestamp));
 
             if (uniqueIds.length === 1) {
                 const noteId = uniqueIds[0];
@@ -1594,13 +1545,11 @@ export const useStore = create<State>()(
 
     deleteNote: (id) => {
       set((state) => {
-        const note = getNoteById(state, id);
-        if (!note || note.deletedAt) return;
-
         const deletedAt = Date.now();
-        note.deletedAt = deletedAt;
-        state.layoutNotesById[note.id] = extractLayoutNote(note);
-        clearTransientNoteState(state, note.id);
+        const deletedIds = mutateDomainSlice(state, (domain) => applySoftDeleteNotes(domain, [id], deletedAt));
+        if (deletedIds.length === 0) return;
+
+        clearTransientNoteState(state, id);
         state.selectedIds = state.selectedIds.filter(selId => selId !== id);
 
         const entry: HistoryEntry<DomainPatch> = {
@@ -1655,7 +1604,8 @@ export const useStore = create<State>()(
             if (note) {
                 collectAttachmentRelativePaths([note]).forEach((relativePath) => candidatePaths.add(relativePath));
             }
-            removeNoteFromNormalizedState(state, id);
+            mutateDomainSlice(state, (domain) => applyDeleteNotesPermanently(domain, [id]));
+            clearTransientNoteState(state, id);
             state.selectedIds = state.selectedIds.filter((selectedId) => selectedId !== id);
         });
         cleanupUnreferencedAttachmentFiles(candidatePaths);
@@ -1671,7 +1621,8 @@ export const useStore = create<State>()(
                     collectAttachmentRelativePaths([note]).forEach((relativePath) => candidatePaths.add(relativePath));
                 }
             });
-            noteIdsToDelete.forEach((noteId) => removeNoteFromNormalizedState(state, noteId));
+            mutateDomainSlice(state, (domain) => applyDeleteNotesPermanently(domain, noteIdsToDelete));
+            noteIdsToDelete.forEach((noteId) => clearTransientNoteState(state, noteId));
             state.selectedIds = state.selectedIds.filter((id) => state.notesById[id]);
         });
         cleanupUnreferencedAttachmentFiles(candidatePaths);
@@ -1795,8 +1746,9 @@ export const useStore = create<State>()(
                 if (note) {
                     collectAttachmentRelativePaths([note]).forEach((relativePath) => candidatePaths.add(relativePath));
                 }
-                removeNoteFromNormalizedState(state, id);
             });
+            mutateDomainSlice(state, (domain) => applyDeleteNotesPermanently(domain, ids));
+            ids.forEach((id) => clearTransientNoteState(state, id));
             state.selectedIds = state.selectedIds.filter((selectedId) => !ids.includes(selectedId));
         });
         cleanupUnreferencedAttachmentFiles(candidatePaths);
@@ -2122,17 +2074,9 @@ export const useStore = create<State>()(
         const deletedAt = Date.now();
 
         set((state) => {
-            const snapshots: Array<{ id: string }> = [];
-
-            selectedIds.forEach((id) => {
-                const note = state.notesById[id];
-                if (!note || note.deletedAt) return;
-
-                snapshots.push({ id });
-                note.deletedAt = deletedAt;
-                state.layoutNotesById[note.id] = extractLayoutNote(note);
-                clearTransientNoteState(state, note.id);
-            });
+            const snapshots = mutateDomainSlice(state, (domain) => applySoftDeleteNotes(domain, selectedIds, deletedAt))
+              .map((softDeletedId) => ({ id: softDeletedId }));
+            snapshots.forEach(({ id }) => clearTransientNoteState(state, id));
 
             state.selectedIds = [];
 

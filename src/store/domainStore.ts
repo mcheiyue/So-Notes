@@ -202,6 +202,154 @@ const recalculateMaxZ = (state: DomainState) => {
   state.config.maxZ = Math.max(state.config.maxZ, maxNoteZ, state.allNoteIds.length);
 };
 
+// ponytail: single write body for useStore + domainStore. History stays in useStore.
+export const applyAddNote = (
+  state: DomainState,
+  input: AddNoteInput,
+  id: string,
+  createdAt: number,
+): Note => {
+  const nextZ = state.config.maxZ + 1;
+  const note = createDomainNote(state, input, id, createdAt, nextZ);
+  appendNoteToDomainState(state, note);
+  state.config.maxZ = nextZ;
+  return note;
+};
+
+export const applyAddNotesWithContentBatch = (
+  state: DomainState,
+  notes: readonly BatchNoteInput[],
+  ids: readonly string[],
+  createdAt: number,
+  boardId?: string,
+): Note[] => {
+  const targetBoardId = resolveTargetBoardId(state, boardId);
+  const startZ = state.config.maxZ;
+  const created: Note[] = [];
+  notes.forEach((note, index) => {
+    const noteId = ids[index];
+    if (!noteId) {
+      return;
+    }
+
+    const newNote = createDomainNote(state, { ...note, boardId: targetBoardId }, noteId, createdAt, startZ + index + 1);
+    appendNoteToDomainState(state, newNote);
+    created.push(newNote);
+  });
+  state.config.maxZ += notes.length;
+  return created;
+};
+
+export const applyUpdateTitle = (state: DomainState, id: string, title: string): boolean => {
+  const note = getNoteById(state, id);
+  if (!note) {
+    return false;
+  }
+
+  note.title = title;
+  note.updatedAt = Date.now();
+  return true;
+};
+
+export const applyUpdateNote = (state: DomainState, id: string, content: string): boolean => {
+  const note = getNoteById(state, id);
+  if (!note) {
+    return false;
+  }
+
+  note.content = content;
+  note.updatedAt = Date.now();
+  return true;
+};
+
+export const applyMoveNote = (state: DomainState, id: string, x: number, y: number): boolean => {
+  const note = getNoteById(state, id);
+  if (!note) {
+    return false;
+  }
+
+  note.x = x;
+  note.y = y;
+  state.layoutNotesById[note.id] = extractLayoutNote(note);
+  return true;
+};
+
+export const applyMoveNotes = (
+  state: DomainState,
+  ids: readonly string[],
+  dx: number,
+  dy: number,
+  excludeId?: string,
+): boolean => {
+  let changed = false;
+  ids.forEach((id) => {
+    if (id === excludeId) {
+      return;
+    }
+
+    const note = getNoteById(state, id);
+    if (!note) {
+      return;
+    }
+
+    note.x += dx;
+    note.y += dy;
+    state.layoutNotesById[note.id] = extractLayoutNote(note);
+    changed = true;
+  });
+  return changed;
+};
+
+export const applyFinalizeLayoutChange = (
+  state: DomainState,
+  noteIds: readonly string[],
+  timestamp: number,
+): boolean => {
+  let changed = false;
+  noteIds.forEach((id) => {
+    const note = getNoteById(state, id);
+    if (!note) {
+      return;
+    }
+
+    note.updatedAt = timestamp;
+    changed = true;
+  });
+  return changed;
+};
+
+export const applySoftDeleteNotes = (
+  state: DomainState,
+  ids: readonly string[],
+  deletedAt: number,
+): string[] => {
+  const deletedIds: string[] = [];
+  ids.forEach((id) => {
+    const note = getNoteById(state, id);
+    if (!note || note.deletedAt) {
+      return;
+    }
+
+    note.deletedAt = deletedAt;
+    state.layoutNotesById[note.id] = extractLayoutNote(note);
+    deletedIds.push(id);
+  });
+  return deletedIds;
+};
+
+export const applyDeleteNotesPermanently = (state: DomainState, ids: readonly string[]): string[] => {
+  const removedIds: string[] = [];
+  ids.forEach((id) => {
+    if (!state.notesById[id]) {
+      return;
+    }
+
+    removeNoteFromDomainState(state, id);
+    removedIds.push(id);
+  });
+  return removedIds;
+};
+
 export const domainSelectors = {
   noteById: (state: DomainState, noteId: string): Note | undefined => state.notesById[noteId],
   boardById: (state: DomainState, boardId: string): Board | undefined => state.boards.find((board) => board.id === boardId),
@@ -335,9 +483,7 @@ export const useDomainStore = create<DomainStoreState>()(
       const createdAt = Date.now();
 
       set((state) => {
-        const nextZ = state.config.maxZ + 1;
-        appendNoteToDomainState(state, createDomainNote(state, input, id, createdAt, nextZ));
-        state.config.maxZ = nextZ;
+        applyAddNote(state, input, id, createdAt);
       });
       notifyPersistenceBridge(get());
       return id;
@@ -356,12 +502,7 @@ export const useDomainStore = create<DomainStoreState>()(
       const createdAt = Date.now();
 
       set((state) => {
-        const targetBoardId = resolveTargetBoardId(state, boardId);
-        const startZ = state.config.maxZ;
-        normalizedNotes.forEach((note, index) => {
-          appendNoteToDomainState(state, createDomainNote(state, { ...note, boardId: targetBoardId }, ids[index], createdAt, startZ + index + 1));
-        });
-        state.config.maxZ += normalizedNotes.length;
+        applyAddNotesWithContentBatch(state, normalizedNotes, ids, createdAt, boardId);
       });
       notifyPersistenceBridge(get());
       return ids;
@@ -370,12 +511,7 @@ export const useDomainStore = create<DomainStoreState>()(
     updateTitle: (id, title) => {
       let changed = false;
       set((state) => {
-        const note = getNoteById(state, id);
-        if (!note) return;
-
-        note.title = title;
-        note.updatedAt = Date.now();
-        changed = true;
+        changed = applyUpdateTitle(state, id, title);
       });
       if (changed) notifyPersistenceBridge(get());
     },
@@ -383,12 +519,7 @@ export const useDomainStore = create<DomainStoreState>()(
     updateNote: (id, content) => {
       let changed = false;
       set((state) => {
-        const note = getNoteById(state, id);
-        if (!note) return;
-
-        note.content = content;
-        note.updatedAt = Date.now();
-        changed = true;
+        changed = applyUpdateNote(state, id, content);
       });
       if (changed) notifyPersistenceBridge(get());
     },
@@ -396,13 +527,7 @@ export const useDomainStore = create<DomainStoreState>()(
     moveNote: (id, x, y) => {
       let changed = false;
       set((state) => {
-        const note = getNoteById(state, id);
-        if (!note) return;
-
-        note.x = x;
-        note.y = y;
-        state.layoutNotesById[note.id] = extractLayoutNote(note);
-        changed = true;
+        changed = applyMoveNote(state, id, x, y);
       });
       if (changed) notifyPersistenceBridge(get());
     },
@@ -410,16 +535,7 @@ export const useDomainStore = create<DomainStoreState>()(
     moveNotes: (ids, dx, dy, excludeId) => {
       let changed = false;
       set((state) => {
-        ids.forEach((id) => {
-          if (id === excludeId) return;
-          const note = getNoteById(state, id);
-          if (!note) return;
-
-          note.x += dx;
-          note.y += dy;
-          state.layoutNotesById[note.id] = extractLayoutNote(note);
-          changed = true;
-        });
+        changed = applyMoveNotes(state, ids, dx, dy, excludeId);
       });
       if (changed) notifyPersistenceBridge(get());
     },
@@ -431,13 +547,7 @@ export const useDomainStore = create<DomainStoreState>()(
       const timestamp = Date.now();
       let changed = false;
       set((state) => {
-        uniqueIds.forEach((id) => {
-          const note = getNoteById(state, id);
-          if (!note) return;
-
-          note.updatedAt = timestamp;
-          changed = true;
-        });
+        changed = applyFinalizeLayoutChange(state, uniqueIds, timestamp);
       });
       if (changed) notifyPersistenceBridge(get());
     },
@@ -460,19 +570,12 @@ export const useDomainStore = create<DomainStoreState>()(
     },
 
     softDeleteNotes: (ids) => {
-      let changed = false;
       const deletedAt = Date.now();
+      let deletedIds: string[] = [];
       set((state) => {
-        ids.forEach((id) => {
-          const note = getNoteById(state, id);
-          if (!note) return;
-
-          note.deletedAt = deletedAt;
-          state.layoutNotesById[note.id] = extractLayoutNote(note);
-          changed = true;
-        });
+        deletedIds = applySoftDeleteNotes(state, ids, deletedAt);
       });
-      if (changed) notifyPersistenceBridge(get());
+      if (deletedIds.length > 0) notifyPersistenceBridge(get());
     },
 
     restoreNote: (id) => {
@@ -504,16 +607,11 @@ export const useDomainStore = create<DomainStoreState>()(
     },
 
     deleteNotesPermanently: (ids) => {
-      let changed = false;
+      let removedIds: string[] = [];
       set((state) => {
-        ids.forEach((id) => {
-          if (!state.notesById[id]) return;
-
-          removeNoteFromDomainState(state, id);
-          changed = true;
-        });
+        removedIds = applyDeleteNotesPermanently(state, ids);
       });
-      if (changed) notifyPersistenceBridge(get());
+      if (removedIds.length > 0) notifyPersistenceBridge(get());
     },
 
     emptyTrash: () => {
