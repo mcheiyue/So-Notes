@@ -1,6 +1,7 @@
 import { useStore } from '../store/useStore';
 import { useUIStore } from '../store/uiStore';
 import { useViewportStore } from '../store/viewportStore';
+import { useShallow } from 'zustand/react/shallow';
 import { invoke } from '@tauri-apps/api/core';
 import { LAYOUT } from '../constants/layout';
 import type { AttachmentRef, Board, Note, ShellRectState, StickyDragStatus, ThemeMode } from '../store/types';
@@ -487,13 +488,15 @@ export const appController = {
 /** 组件侧订 isLoaded，避免静态 from useStore（COUNT 门禁） */
 export const useIsLoaded = (): boolean => useStore((s) => s.isLoaded);
 
-/** BoardDock 订 persist 状态，路径仍经白名单门面文件 */
+/** BoardDock 订 persist 状态；useShallow 避免 getSnapshot 每次新对象导致无限重渲染 */
 export const useSaveStatusSlice = () =>
-  useStore((s) => ({
-    saveStatus: s.saveStatus,
-    isSaving: s.isSaving,
-    saveError: s.saveError,
-    lastSavedAt: s.lastSavedAt,
-  }));
+  useStore(
+    useShallow((s) => ({
+      saveStatus: s.saveStatus,
+      isSaving: s.isSaving,
+      saveError: s.saveError,
+      lastSavedAt: s.lastSavedAt,
+    })),
+  );
 
 export type AppController = typeof appController;
