@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { attachLegacyDomainBridge, detachLegacyDomainBridge } from './legacyDomainBridge';
 import { createInitialDomainState, useDomainStore } from './domainStore';
 import { useStore } from './useStore';
@@ -7,11 +7,39 @@ import { Board, DEFAULT_CONFIG, Note } from './types';
 const resetStores = (options: { reattachBridge?: boolean } = {}) => {
   detachLegacyDomainBridge();
   useStore.setState(useStore.getInitialState(), true);
+  useDomainStore.setState({
+    replaceDomainState: useDomainStore.getInitialState().replaceDomainState,
+  });
   useDomainStore.getState().replaceDomainState(createInitialDomainState());
 
   if (options.reattachBridge) {
     attachLegacyDomainBridge();
   }
+};
+
+const seedSingleNote = (note: Note) => {
+  useStore.setState({
+    notesById: { [note.id]: note },
+    allNoteIds: [note.id],
+    boardNoteIds: { [note.boardId]: [note.id] },
+    layoutNotesById: {
+      [note.id]: {
+        id: note.id,
+        boardId: note.boardId,
+        x: note.x,
+        y: note.y,
+        color: note.color,
+        deletedAt: note.deletedAt ?? null,
+      },
+    },
+    config: { ...DEFAULT_CONFIG, maxZ: note.z },
+  });
+};
+
+const spyReplaceDomainState = () => {
+  const replaceSpy = vi.fn(useDomainStore.getState().replaceDomainState);
+  useDomainStore.setState({ replaceDomainState: replaceSpy });
+  return replaceSpy;
 };
 
 describe('legacyDomainBridge', () => {
@@ -20,6 +48,7 @@ describe('legacyDomainBridge', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     resetStores({ reattachBridge: true });
   });
 
@@ -91,5 +120,62 @@ describe('legacyDomainBridge', () => {
     useStore.setState({ selectedIds: ['note-ui-only'] });
 
     expect(useDomainStore.getState().notesById).toBe(beforeNotesById);
+  });
+
+  it('P0-07 单 note moveNote 不触发全表 replaceDomainState', () => {
+    const note: Note = {
+      id: 'note-p007-move',
+      kind: 'text',
+      boardId: 'default',
+      x: 10,
+      y: 20,
+      title: '标题',
+      content: '正文',
+      color: '#FFFFFF',
+      z: 3,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+
+    seedSingleNote(note);
+    attachLegacyDomainBridge();
+    const replaceSpy = spyReplaceDomainState();
+
+    useStore.getState().moveNote(note.id, 100, 200);
+    useStore.getState().moveNote(note.id, 110, 210);
+    useStore.getState().moveNote(note.id, 120, 220);
+
+    expect(replaceSpy).toHaveBeenCalledTimes(0);
+    expect(useDomainStore.getState().notesById[note.id]).toMatchObject({ x: 120, y: 220 });
+  });
+
+  it('P0-07 单 note 内容更新不触发全表 replaceDomainState', () => {
+    const note: Note = {
+      id: 'note-p007-content',
+      kind: 'text',
+      boardId: 'default',
+      x: 10,
+      y: 20,
+      title: '标题',
+      content: '正文',
+      color: '#FFFFFF',
+      z: 3,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+
+    seedSingleNote(note);
+    attachLegacyDomainBridge();
+    const replaceSpy = spyReplaceDomainState();
+
+    useStore.getState().updateNote(note.id, '第一版');
+    useStore.getState().updateTitle(note.id, '新标题');
+    useStore.getState().updateNote(note.id, '最终正文');
+
+    expect(replaceSpy).toHaveBeenCalledTimes(0);
+    expect(useDomainStore.getState().notesById[note.id]).toMatchObject({
+      title: '新标题',
+      content: '最终正文',
+    });
   });
 });

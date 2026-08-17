@@ -1,7 +1,14 @@
+/**
+ * 单向桥：useStore domain 切片 → domainStore 镜像。
+ * P0-07：单 note 热更新走 patch，禁止默认 clone+replaceDomainState 全表。
+ * 低频（attach / boards / 结构变化）仍全表。退役条件见依赖地图（C-S11）。
+ */
 import { DomainState, useDomainStore } from './domainStore';
 import { useStore } from './useStore';
 
 export const LEGACY_DOMAIN_BRIDGE_MODULE = 'legacyDomainBridge';
+
+type LegacyStoreState = ReturnType<typeof useStore.getState>;
 
 let unsubscribeLegacyDomainBridge: (() => void) | null = null;
 
@@ -32,8 +39,8 @@ const readLegacyDomainState = (): DomainState => {
 };
 
 const hasLegacyDomainReferenceChanged = (
-  state: ReturnType<typeof useStore.getState>,
-  previousState: ReturnType<typeof useStore.getState>,
+  state: LegacyStoreState,
+  previousState: LegacyStoreState,
 ): boolean => (
   state.notesById !== previousState.notesById ||
   state.allNoteIds !== previousState.allNoteIds ||
@@ -43,6 +50,81 @@ const hasLegacyDomainReferenceChanged = (
   state.currentBoardId !== previousState.currentBoardId ||
   state.config !== previousState.config
 );
+
+const collectChangedRecordIds = <TValue>(
+  next: Record<string, TValue>,
+  prev: Record<string, TValue>,
+): readonly string[] | null => {
+  const nextIds = Object.keys(next);
+  if (nextIds.length !== Object.keys(prev).length) {
+    return null;
+  }
+
+  const changed: string[] = [];
+  for (const id of nextIds) {
+    if (!Object.hasOwn(prev, id)) {
+      return null;
+    }
+    if (next[id] !== prev[id]) {
+      changed.push(id);
+      if (changed.length > 1) {
+        return null;
+      }
+    }
+  }
+  return changed;
+};
+
+const resolveSingleNotePatchId = (
+  state: LegacyStoreState,
+  previousState: LegacyStoreState,
+): string | null => {
+  if (
+    state.allNoteIds !== previousState.allNoteIds ||
+    state.boardNoteIds !== previousState.boardNoteIds ||
+    state.boards !== previousState.boards ||
+    state.currentBoardId !== previousState.currentBoardId ||
+    state.config !== previousState.config
+  ) {
+    return null;
+  }
+
+  const noteIds = state.notesById === previousState.notesById
+    ? []
+    : collectChangedRecordIds(state.notesById, previousState.notesById);
+  const layoutIds = state.layoutNotesById === previousState.layoutNotesById
+    ? []
+    : collectChangedRecordIds(state.layoutNotesById, previousState.layoutNotesById);
+
+  if (noteIds === null || layoutIds === null) {
+    return null;
+  }
+
+  const changed = new Set([...noteIds, ...layoutIds]);
+  if (changed.size !== 1) {
+    return null;
+  }
+
+  const [noteId] = changed;
+  return noteId ?? null;
+};
+
+const patchSingleNoteIntoDomainStore = (state: LegacyStoreState, noteId: string): boolean => {
+  const note = state.notesById[noteId];
+  const domainHasNote = Object.hasOwn(useDomainStore.getState().notesById, noteId);
+  if (!note || !domainHasNote) {
+    return false;
+  }
+
+  const layout = state.layoutNotesById[noteId];
+  useDomainStore.setState((draft) => {
+    draft.notesById[noteId] = note;
+    if (layout) {
+      draft.layoutNotesById[noteId] = layout;
+    }
+  });
+  return true;
+};
 
 export const syncLegacyDomainToDomainStore = () => {
   useDomainStore.getState().replaceDomainState(readLegacyDomainState());
@@ -60,9 +142,16 @@ export const attachLegacyDomainBridge = (): (() => void) => {
 
   syncLegacyDomainToDomainStore();
   unsubscribeLegacyDomainBridge = useStore.subscribe((state, previousState) => {
-    if (hasLegacyDomainReferenceChanged(state, previousState)) {
-      syncLegacyDomainToDomainStore();
+    if (!hasLegacyDomainReferenceChanged(state, previousState)) {
+      return;
     }
+
+    const noteId = resolveSingleNotePatchId(state, previousState);
+    if (noteId && patchSingleNoteIntoDomainStore(state, noteId)) {
+      return;
+    }
+
+    syncLegacyDomainToDomainStore();
   });
 
   return detachLegacyDomainBridge;
