@@ -20,12 +20,16 @@ pub enum WriteIntent {
         generation_id: u64,
         ack: oneshot::Sender<WriteAck>,
     },
+    /// 导入路径预留；consumer 已分支处理
+    #[allow(dead_code)]
     Import {
         content: String,
         path: PathBuf,
         generation_id: u64,
         ack: oneshot::Sender<WriteAck>,
     },
+    /// 恢复路径预留；consumer 已分支处理
+    #[allow(dead_code)]
     Restore {
         content: String,
         path: PathBuf,
@@ -91,6 +95,7 @@ impl IntentQueue {
         }
     }
 
+    #[allow(dead_code)] // 导入入口预留；与 WriteIntent::Import 成对
     pub async fn submit_import(
         &self,
         content: String,

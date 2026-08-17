@@ -1,7 +1,7 @@
 //! WebDAV 凭据 key / store
 use sha2::Digest;
+#[cfg(test)]
 use std::collections::HashMap;
-use std::sync::Mutex;
 pub(crate) const CREDENTIAL_SERVICE: &str = "SoNotes.WebDAV";
 
 // credential_key 计算
@@ -35,6 +35,7 @@ pub struct WebDavCredentialKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebDavCredentialErrorKind {
     /// 当前平台没有可用密钥链服务。
+    #[allow(dead_code)] // 平台无密钥链时预留；测试与未来接入
     Unavailable,
     /// 保存 secret 失败。
     SaveFailed,
@@ -68,9 +69,11 @@ pub trait WebDavCredentialStore: Send + Sync {
 /// 内存 credential store，仅用于单元测试。
 ///
 /// 使用 `Mutex<HashMap>` 实现 `Send + Sync`，不依赖系统密钥链。
+#[cfg(test)]
 pub struct MemoryWebDavCredentialStore {
     inner: std::sync::Mutex<HashMap<String, String>>,
 }
+#[cfg(test)]
 impl MemoryWebDavCredentialStore {
     pub fn new() -> Self {
         Self {
@@ -81,11 +84,13 @@ impl MemoryWebDavCredentialStore {
         format!("{}/{}", key.service, key.account)
     }
 }
+#[cfg(test)]
 impl Default for MemoryWebDavCredentialStore {
     fn default() -> Self {
         Self::new()
     }
 }
+#[cfg(test)]
 impl WebDavCredentialStore for MemoryWebDavCredentialStore {
     fn save(&self, key: &WebDavCredentialKey, secret: &str) -> Result<(), WebDavCredentialError> {
         let mut map = self.inner.lock().map_err(|_| WebDavCredentialError {
@@ -182,17 +187,21 @@ impl WebDavCredentialStore for SystemWebDavCredentialStore {
     }
 }
 /// 测试用 credential store：delete 始终失败，用于验证 warning 路径。
+#[cfg(test)]
 pub struct FailingDeleteCredentialStore;
+#[cfg(test)]
 impl FailingDeleteCredentialStore {
     pub fn new() -> Self {
         Self
     }
 }
+#[cfg(test)]
 impl Default for FailingDeleteCredentialStore {
     fn default() -> Self {
         Self::new()
     }
 }
+#[cfg(test)]
 impl WebDavCredentialStore for FailingDeleteCredentialStore {
     fn save(&self, _key: &WebDavCredentialKey, _secret: &str) -> Result<(), WebDavCredentialError> {
         Ok(())

@@ -5,7 +5,7 @@ use std::time::Duration;
 use url::{Host, Url};
 
 use super::error::sanitize_webdav_error;
-use super::types::{MAX_WEBDAV_REDIRECTS, WEBDAV_HTTP_TIMEOUT_SECS, WEBDAV_USER_AGENT};
+use super::types::{MAX_WEBDAV_REDIRECTS, WEBDAV_USER_AGENT};
 // ---------------------------------------------------------------------------
 // URL 规范化
 // ---------------------------------------------------------------------------

@@ -2,8 +2,6 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
 use tauri::Manager;
 use url::Url;
 
@@ -12,7 +10,7 @@ use super::credential::{
     WebDavCredentialKey, WebDavCredentialStore, CREDENTIAL_SERVICE,
 };
 use super::ssrf::{
-    build_webdav_http_client, canonical_host_from_str, normalize_webdav_url, SystemResolver,
+    canonical_host_from_str, normalize_webdav_url,
 };
 use super::types::*;
 

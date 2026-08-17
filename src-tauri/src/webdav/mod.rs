@@ -11,8 +11,6 @@ mod ops;
 
 pub use types::*;
 pub use error::*;
-pub(crate) use ssrf::*;
-pub(crate) use credential::*;
 pub(crate) use config::*;
 pub(crate) use transport::*;
 pub(crate) use ops::*;
@@ -25,13 +23,23 @@ pub use ops::{
 };
 pub use transport::{webdav_delete_backup, webdav_list_backups, webdav_test_connection};
 
-// ponytail: tests 外置后共享原同文件 use
-pub(crate) use std::net::SocketAddr;
-pub(crate) use std::path::{Path, PathBuf};
-pub(crate) use std::sync::{Arc, Mutex};
-pub(crate) use std::time::{Duration, SystemTime};
-pub(crate) use url::Url;
+// tests.rs 用 `use super::*`；仅 test 目标 re-export，避免 lib 构建 unused
+#[cfg(test)]
+pub(crate) use ssrf::*;
+#[cfg(test)]
+pub(crate) use credential::*;
+#[cfg(test)]
 pub(crate) use std::io::Write;
+#[cfg(test)]
+pub(crate) use std::net::SocketAddr;
+#[cfg(test)]
+pub(crate) use std::path::{Path, PathBuf};
+#[cfg(test)]
+pub(crate) use std::sync::{Arc, Mutex};
+#[cfg(test)]
+pub(crate) use std::time::{Duration, SystemTime};
+#[cfg(test)]
+pub(crate) use url::Url;
 
 #[cfg(test)]
 mod tests;

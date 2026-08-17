@@ -1,17 +1,12 @@
 //! WebDAV 传输层：RequestTarget、PROPFIND、test/list/delete
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::Manager;
 
 use super::config::{
-    config_file_path, normalize_remote_dir, resolve_operation_secret_from_path,
+    normalize_remote_dir,
     resolve_webdav_operation_secret, validate_remote_backup_filename,
 };
-use super::credential::{
-    compute_credential_key, SystemWebDavCredentialStore, WebDavCredentialKey,
-    WebDavCredentialStore, CREDENTIAL_SERVICE,
-};
+use super::credential::SystemWebDavCredentialStore;
 use super::error::*;
 use super::ssrf::*;
 use super::types::*;
@@ -560,7 +555,7 @@ pub async fn webdav_delete_backup(
     let client = build_webdav_http_client(
         &host,
         port,
-        Duration::from_secs(30),
+        Duration::from_secs(WEBDAV_HTTP_TIMEOUT_SECS),
         Arc::new(SystemResolver),
         trust_host,
     )

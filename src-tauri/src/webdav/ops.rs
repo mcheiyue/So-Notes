@@ -45,7 +45,7 @@ pub(crate) fn webdav_create_backup_lock() -> &'static tokio::sync::Mutex<()> {
 // 下载 Token 存储
 // ---------------------------------------------------------------------------
 #[derive(Debug, Clone)]
-enum DownloadTokenState {
+pub(crate) enum DownloadTokenState {
     Ready { file_path: PathBuf },
     Resolved { file_path: PathBuf },
     Cleaned { file_path: Option<PathBuf> },
