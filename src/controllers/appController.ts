@@ -3,7 +3,7 @@ import { useUIStore } from '../store/uiStore';
 import { useViewportStore } from '../store/viewportStore';
 import { invoke } from '@tauri-apps/api/core';
 import { LAYOUT } from '../constants/layout';
-import type { Note, ShellRectState, StickyDragStatus } from '../store/types';
+import type { AttachmentRef, Board, Note, ShellRectState, StickyDragStatus, ThemeMode } from '../store/types';
 import { parseSmartPaste, buildSmartPasteNoteInputs } from '../utils/smartPaste';
 import { getViewportSpawnOrigin } from '../utils/spawnPosition';
 import { getNoteElement } from '../utils/noteElementRegistry';
@@ -387,12 +387,58 @@ export const appController = {
   restoreAllTrash: () => useStore.getState().restoreAllTrash(),
   restoreSelectedTrash: (ids: string[]) => useStore.getState().restoreSelectedTrash(ids),
   deleteSelectedPermanently: (ids: string[]) => useStore.getState().deleteSelectedPermanently(ids),
+  addNote: (x: number, y: number) => useStore.getState().addNote(x, y),
+  moveNote: (id: string, x: number, y: number) => useStore.getState().moveNote(id, x, y),
+  moveSelectedNotes: (dx: number, dy: number, excludeId?: string) =>
+    useStore.getState().moveSelectedNotes(dx, dy, excludeId),
+  updateNote: (id: string, content: string) => useStore.getState().updateNote(id, content),
+  updateTitle: (id: string, title: string) => useStore.getState().updateTitle(id, title),
+  finalizeLayoutChange: (noteIds: string[]) => useStore.getState().finalizeLayoutChange(noteIds),
+  commitNoteTextEdit: (
+    noteId: string,
+    beforeTitle: string,
+    beforeContent: string,
+    beforeUpdatedAt: number,
+  ) => useStore.getState().commitNoteTextEdit(noteId, beforeTitle, beforeContent, beforeUpdatedAt),
+  commitNoteEditingSize: (
+    noteId: string,
+    newWidth: number,
+    newHeight: number,
+    beforeResize: Parameters<ReturnType<typeof useStore.getState>['commitNoteEditingSize']>[3],
+  ) => useStore.getState().commitNoteEditingSize(noteId, newWidth, newHeight, beforeResize),
+  captureMoveSnapshot: (positions: Record<string, { x: number; y: number; updatedAt: number }>) =>
+    useStore.getState().captureMoveSnapshot(positions),
+  addImageNotesBatch: (
+    inputs: Array<{
+      x: number;
+      y: number;
+      attachment: AttachmentRef;
+      originalWidth?: number;
+      originalHeight?: number;
+    }>,
+  ) => useStore.getState().addImageNotesBatch(inputs),
+  toggleCollapse: (noteId: string, options?: { recordHistory?: boolean }) =>
+    useStore.getState().toggleCollapse(noteId, options),
+  bringToFront: (noteId: string, options?: { recordHistory?: boolean }) =>
+    useStore.getState().bringToFront(noteId, options),
   addNotesWithContentBatch: (
     notes: Array<{ x: number; y: number; content: string }>,
   ) => useStore.getState().addNotesWithContentBatch(notes),
   applySmartPasteSplit: (optionId: Parameters<ReturnType<typeof useStore.getState>['applySmartPasteSplit']>[0]) =>
     useStore.getState().applySmartPasteSplit(optionId),
   closeSmartPasteSplitPanel: () => useStore.getState().closeSmartPasteSplitPanel(),
+  createBoard: (name: string, icon: string) => useStore.getState().createBoard(name, icon),
+  deleteBoard: (boardId: string) => useStore.getState().deleteBoard(boardId),
+  updateBoard: (boardId: string, updates: Partial<Board>) =>
+    useStore.getState().updateBoard(boardId, updates),
+  reorderBoard: (boardId: string, direction: 'left' | 'right') =>
+    useStore.getState().reorderBoard(boardId, direction),
+  clearDomainHistory: () => useStore.getState().clearDomainHistory(),
+  exportCurrentBoard: () => useStore.getState().exportCurrentBoard(),
+  exportAll: () => useStore.getState().exportAll(),
+  importFromFile: () => useStore.getState().importFromFile(),
+  setThemeMode: (mode: ThemeMode) => useStore.getState().setThemeMode(mode),
+  saveToDisk: () => useStore.getState().saveToDisk(),
   /** 诊断面板注入样本：薄委托 legacy immer setState + save */
   injectDiagnosticsSample: (
     mutator: (state: ReturnType<typeof useStore.getState>) => void,
