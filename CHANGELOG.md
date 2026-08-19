@@ -1,3 +1,52 @@
+## [v1.6.6] - 2026-08-20
+
+本版本聚焦 Store 写路径收口：生产代码对旧 `useStore` 的静态 import 压到 5 个白名单文件（写路径达标 ≤5），并修复单便签热更新时全表镜像导致的卡顿（UX P0-07 已修复，策略 A）。同步修复去 import 后 BoardDock 死循环导致界面/托盘不可用，以及 P0-07 热路径漏通知持久化桥的问题。
+
+关单状态字：CODE S6 **写路径达标（≤5）**；UX P0-07 **已修复**（策略 A）。
+
+### 🐛 问题修复 (Bug Fixes)
+
+* **单便签热更新不再全表镜像 domain（UX P0-07 已修复）**
+  > 仅改一条便签位置/内容时，桥改为单 note patch，不再默认 `clone + replaceDomainState` 全表，拖动与输入更跟手。
+
+  - 策略 A：boards / 结构变化 / 多 note 仍走全表（有测锁定）。
+  - 硬测：`P0-07 单 note moveNote…` / `…内容更新…` 与多 note 全表路径。
+
+* **P0-07 patch 后仍会通知持久化**
+  > 单 note 镜像经 `mirrorPatchNote` 调用持久化桥，避免热路径改完不 dirty、退出丢改动。
+
+* **修复 BoardDock 无限重渲染导致界面卡死/托盘拉不起**
+  > `useSaveStatusSlice` 改为 `useShallow`，消除 getSnapshot 每次新对象触发的 Maximum update depth；前端恢复后托盘单击显隐恢复正常。
+
+### 🚀 优化 (Optimizations)
+
+* **写路径 import 白名单压到 5**
+  > Canvas / NoteCard / CanvasEngine / BoardDock / main 去掉静态 `from useStore`；读写经 appController / domainStore / uiStore / viewportStore。
+
+  - 保留：`uiStore`、`viewportStore`、`legacyDomainBridge`、`appController`、`PersistenceController`。
+  - `legacyDomainBridge` 仍保留（退役条件见依赖地图）；domain 仍经桥镜像，非最终唯一写源。
+
+### ⚡ 性能优化 (Performance)
+
+* **单 note 热路径 0 次全表 replace**
+  > 与 P0-07 同源：高频 move/内容更新不再每步整表克隆镜像。
+
+### 🔧 内部改进 (Internal)
+
+* **appController domain 写门面补齐**
+  > 组件侧统一薄委托；含恢复快照、拖拽落位坐标批写、isLoaded/saveStatus 订阅钩子。
+
+* **useStore 与 domainStore 共享 apply* mutator**
+  > 核心 add/move/软删/硬删等单一实现体；`domainHistory` 仍在 useStore。
+
+* **依赖地图回写 v1.6.6 期末白名单**
+  > `v1.5.5-use-store-dependency-map.md` COUNT=5 + 桥退役条件更新。
+
+### 🧹 清理 (Cleanup)
+
+* **Rust webdav/persistence 编译告警清理**
+  > unused import、测试桩 `cfg(test)`、可见性与 timeout 常量；dev 构建噪音下降（不改 WebDAV 对外行为）。
+
 ## [v1.6.5] - 2026-08-12
 
 本版本完成 WebDAV 后端模块化（CODE W1）：将原单文件 `webdav.rs` 拆为目录叶模块，行为与 invoke 表面保持不变，降低后续维护与审查成本。
