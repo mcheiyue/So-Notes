@@ -210,4 +210,67 @@ describe('legacyDomainBridge', () => {
 
     setDomainPersistenceBridge(null);
   });
+
+  it('P0-07 多 note moveSelectedNotes 仍走全表 replaceDomainState', () => {
+    const noteA: Note = {
+      id: 'note-p007-multi-a',
+      kind: 'text',
+      boardId: 'default',
+      x: 0,
+      y: 0,
+      title: 'A',
+      content: 'a',
+      color: '#FFFFFF',
+      z: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const noteB: Note = {
+      id: 'note-p007-multi-b',
+      kind: 'text',
+      boardId: 'default',
+      x: 50,
+      y: 50,
+      title: 'B',
+      content: 'b',
+      color: '#FFFFFF',
+      z: 2,
+      createdAt: 2,
+      updatedAt: 2,
+    };
+
+    useStore.setState({
+      notesById: { [noteA.id]: noteA, [noteB.id]: noteB },
+      allNoteIds: [noteA.id, noteB.id],
+      boardNoteIds: { default: [noteA.id, noteB.id] },
+      layoutNotesById: {
+        [noteA.id]: {
+          id: noteA.id,
+          boardId: noteA.boardId,
+          x: noteA.x,
+          y: noteA.y,
+          color: noteA.color,
+          deletedAt: null,
+        },
+        [noteB.id]: {
+          id: noteB.id,
+          boardId: noteB.boardId,
+          x: noteB.x,
+          y: noteB.y,
+          color: noteB.color,
+          deletedAt: null,
+        },
+      },
+      selectedIds: [noteA.id, noteB.id],
+      config: { ...DEFAULT_CONFIG, maxZ: 2 },
+    });
+    attachLegacyDomainBridge();
+    const replaceSpy = spyReplaceDomainState();
+
+    useStore.getState().moveSelectedNotes(10, 20);
+
+    expect(replaceSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(useDomainStore.getState().notesById[noteA.id]).toMatchObject({ x: 10, y: 20 });
+    expect(useDomainStore.getState().notesById[noteB.id]).toMatchObject({ x: 60, y: 70 });
+  });
 });
