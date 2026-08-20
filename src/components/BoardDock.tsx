@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { confirm } from "../store/confirmStore";
 import { appController, useSaveStatusSlice } from "../controllers/appController";
+import { useShallow } from "zustand/react/shallow";
 import { useDomainStore, useUIStore } from "../store";
 import { cn } from "../utils/cn";
 import { Plus, Trash2, Settings, Download, Upload, Share, ChevronRight, Moon, Sun, Monitor, Database, Check, Activity, Search, Archive, RotateCcw, Cloud, Wifi, RefreshCw, Save, Clock, Shield, Eye, AlertTriangle } from "lucide-react";
@@ -151,6 +152,18 @@ const formatWebDavLastModified = (value?: string | null): string => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 };
 
+const countBoardActiveNotes = (
+  noteIds: readonly string[] | undefined,
+  notesById: Record<string, Note>,
+): number => {
+  let count = 0;
+  for (const noteId of noteIds ?? []) {
+    const note = notesById[noteId];
+    if (note && !note.deletedAt) count += 1;
+  }
+  return count;
+};
+
 const prehydrateRestoredImageNoteAssetUrls = async (notes: Note[]): Promise<void> => {
   const imageRelativePaths = notes
     .filter((note) => note.kind === 'image')
@@ -168,10 +181,15 @@ const prehydrateRestoredImageNoteAssetUrls = async (notes: Note[]): Promise<void
 
 export const BoardDock = () => {
   const boards = useDomainStore((s) => s.boards);
-  const boardNoteIds = useDomainStore((s) => s.boardNoteIds);
-  const notesById = useDomainStore((s) => s.notesById);
   const currentBoardId = useDomainStore((s) => s.currentBoardId);
   const config = useDomainStore((s) => s.config);
+  const boardActiveNoteCounts = useDomainStore(useShallow((s) => {
+    const counts: Record<string, number> = {};
+    for (const board of s.boards) {
+      counts[board.id] = countBoardActiveNotes(s.boardNoteIds[board.id], s.notesById);
+    }
+    return counts;
+  }));
   const isDockVisible = useUIStore((s) => s.isDockVisible);
   const setDockVisible = useUIStore((s) => s.setDockVisible);
   const viewMode = useUIStore((s) => s.viewMode);
@@ -525,7 +543,7 @@ export const BoardDock = () => {
   const onAttachmentScanClick = async () => {
     setAttachmentScanState({ status: 'scanning', missingCount: 0, orphanCount: 0, orphanPaths: [], errorMessage: null });
     try {
-      const allNotes = Object.values(notesById);
+      const allNotes = Object.values(useDomainStore.getState().notesById);
       const knownFiles = await listAttachmentFiles();
       const missingRefs = await detectMissingReferences(allNotes, attachmentExists);
       const orphans = detectOrphanAttachments(knownFiles, allNotes);
@@ -2120,10 +2138,7 @@ export const BoardDock = () => {
       }
   };
 
-  const getBoardActiveNoteCount = (boardId: string) => (boardNoteIds[boardId] ?? []).filter((noteId) => {
-      const note = notesById[noteId];
-      return note && !note.deletedAt;
-  }).length;
+  const getBoardActiveNoteCount = (boardId: string) => boardActiveNoteCounts[boardId] ?? 0;
 
   const handleCreate = () => {
     if (newBoardName.trim()) {

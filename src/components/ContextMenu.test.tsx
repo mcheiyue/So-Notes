@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, Profiler } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -23,6 +23,7 @@ vi.mock('../utils/fileSystem', () => ({
 
 import { ContextMenu } from './ContextMenu';
 import { useStore } from '../store/useStore';
+import { useViewportStore } from '../store/viewportStore';
 import { normalizeNotes } from '../store/normalization';
 
 describe('ContextMenu shell 坐标合同', () => {
@@ -402,5 +403,37 @@ describe('ContextMenu 撕下便签菜单项', () => {
       (button) => button.textContent?.includes('撕下便签'),
     );
     expect(detachButton).toBeUndefined();
+  });
+
+  it('P0-08 菜单关闭时 viewport 变化不增加 Content 渲染次数', async () => {
+    useStore.setState({
+      contextMenu: { isOpen: false, x: 10, y: 10, type: 'CANVAS' },
+    });
+
+    let commits = 0;
+    await act(async () => {
+      root.render(
+        <Profiler id="p0-08-context-menu" onRender={() => { commits += 1; }}>
+          <ContextMenu />
+        </Profiler>,
+      );
+    });
+
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+    const commitsAfterMount = commits;
+
+    await act(async () => {
+      const viewport = useViewportStore.getState().viewport;
+      useViewportStore.setState({ viewport: { ...viewport, x: 80, y: 90 } });
+      useViewportStore.setState({
+        viewport: { ...useViewportStore.getState().viewport, x: 120, y: 140 },
+      });
+      useViewportStore.setState({
+        viewport: { ...useViewportStore.getState().viewport, x: 160, y: 180 },
+      });
+    });
+
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+    expect(commits).toBe(commitsAfterMount);
   });
 });

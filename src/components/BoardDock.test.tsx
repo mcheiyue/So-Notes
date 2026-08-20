@@ -1339,6 +1339,46 @@ describe('BoardDock v1.2.4 最小修复', () => {
       }),
     );
   });
+
+  it('P0-08 单 note 坐标更新不因整表 notesById 订阅触发 Dock 多余渲染', async () => {
+    // render 计数会被 Dock 的 backup/webdav effects 打脆；源码断言兜底整表 notesById 渲染订阅
+    const fs = await import('fs');
+    const path = await import('path');
+    const boardDockSource = fs.readFileSync(path.resolve(__dirname, './BoardDock.tsx'), 'utf-8');
+    expect(boardDockSource).not.toMatch(/useDomainStore\([^)]*notesById/);
+    expect(boardDockSource).not.toMatch(
+      /useDomainStore\s*\(\s*(?:useShallow\s*\(\s*)?\([^)]*\)\s*=>\s*[^;{]*notesById/,
+    );
+
+    useStore.setState({
+      ...normalizeNotes([
+        {
+          id: 'note-1',
+          kind: 'text',
+          boardId: 'board-2',
+          x: 0,
+          y: 0,
+          title: '',
+          content: '坐标热更新',
+          color: '#FFFFFF',
+          z: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ]),
+    });
+
+    await renderBoardDock();
+
+    const otherBoard = container.querySelector('[data-board-id="board-2"]') as HTMLButtonElement | null;
+    expect(otherBoard?.getAttribute('aria-label')).toBe('实验板，1 个便签');
+
+    await act(async () => {
+      useStore.getState().moveNote('note-1', 120, 220);
+    });
+
+    expect(otherBoard?.getAttribute('aria-label')).toBe('实验板，1 个便签');
+  });
 });
 
 describe('BoardDock 图片文件一致性管理入口', () => {

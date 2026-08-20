@@ -46,7 +46,6 @@ const ContextMenuContent: React.FC = () => {
   const selectedIds = useUIStore((s) => s.selectedIds);
   const viewMode = useUIStore((s) => s.viewMode);
   const smartPasteSplitPanel = useUIStore((s) => s.smartPasteSplitPanel);
-  const notesById = useDomainStore((s) => s.notesById);
   const boards = useDomainStore((s) => s.boards);
   const currentBoardId = useDomainStore((s) => s.currentBoardId);
   const viewport = useViewportStore((s) => s.viewport);
@@ -141,7 +140,9 @@ const ContextMenuContent: React.FC = () => {
                          contextMenu.targetId && 
                          selectedIds.includes(contextMenu.targetId) && 
                          selectedIds.length > 1;
-  const targetNote = contextMenu.type === 'NOTE' && contextMenu.targetId ? notesById[contextMenu.targetId] : undefined;
+  const targetNote = contextMenu.type === 'NOTE' && contextMenu.targetId
+    ? useDomainStore.getState().notesById[contextMenu.targetId]
+    : undefined;
   const canSplitTargetNote = !!targetNote && !targetNote.deletedAt && !smartPasteSplitPanel && splitParagraphs(targetNote.content).length > 1;
 
   return (
