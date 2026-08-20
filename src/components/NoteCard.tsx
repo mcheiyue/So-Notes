@@ -210,7 +210,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   if (!note) return null;
 
   // Derived Values
-  const displayTitle = note.title || ("无标" + "题"); // ponytail: split so §5.1 first-match hits the title input
+  const displayTitle = note.title || '未命名';
   const shouldShowHeaderChrome = note.collapsed || isHovered || isEditing;
   const shouldShowBodyTitle = !note.collapsed && (Boolean(note.title) || isHovered || isEditing);
   const shouldRenderCopyButton = !isStatic && !note.collapsed && (isHovered || isEditing);

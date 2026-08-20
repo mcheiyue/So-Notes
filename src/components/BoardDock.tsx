@@ -3314,7 +3314,7 @@ export const BoardDock = () => {
                         className="w-24 px-1 flex items-center justify-center"
                     >
                         <input
-                            ref={renameInputRef /* editInputRef */}
+                            ref={renameInputRef /* editInputRef: plan §5.1 首匹配锚点 */}
                             aria-label="重命名看板"
                             value={editName}
                             onChange={(e) => setEditName(e.target.value)}

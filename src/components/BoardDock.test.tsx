@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 
+vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async () => null),
 }));
@@ -1341,14 +1343,18 @@ describe('BoardDock v1.2.4 最小修复', () => {
   });
 
   it('P0-08 单 note 坐标更新不因整表 notesById 订阅触发 Dock 多余渲染', async () => {
-    // render 计数会被 Dock 的 backup/webdav effects 打脆；源码断言兜底整表 notesById 渲染订阅
+    // Dock 全树 Profiler 会被 persistence/saveStatus 弄脏；用源码合同 + 角标稳定证明 P0-08。
     const fs = await import('fs');
     const path = await import('path');
     const boardDockSource = fs.readFileSync(path.resolve(__dirname, './BoardDock.tsx'), 'utf-8');
+    expect(boardDockSource).not.toMatch(/const\s+notesById\s*=\s*useDomainStore/);
+    expect(boardDockSource).not.toMatch(/const\s+boardNoteIds\s*=\s*useDomainStore/);
     expect(boardDockSource).not.toMatch(/useDomainStore\([^)]*notesById/);
     expect(boardDockSource).not.toMatch(
       /useDomainStore\s*\(\s*(?:useShallow\s*\(\s*)?\([^)]*\)\s*=>\s*[^;{]*notesById/,
     );
+    expect(boardDockSource).toMatch(/boardActiveNoteCounts\s*=\s*useDomainStore\(\s*useShallow/);
+    expect(boardDockSource).toMatch(/getState\(\)\.notesById/);
 
     useStore.setState({
       ...normalizeNotes([
@@ -1375,6 +1381,8 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     await act(async () => {
       useStore.getState().moveNote('note-1', 120, 220);
+      useStore.getState().moveNote('note-1', 140, 260);
+      useStore.getState().moveNote('note-1', 160, 300);
     });
 
     expect(otherBoard?.getAttribute('aria-label')).toBe('实验板，1 个便签');
