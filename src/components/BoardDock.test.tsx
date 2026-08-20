@@ -221,6 +221,7 @@ import { confirm } from '../store/confirmStore';
 import { Z_INDEX } from '../constants/layout';
 import { createEmptyNormalizedNotesState, normalizeNotes } from '../store/normalization';
 import { useStore } from '../store/useStore';
+import { useUIStore } from '../store/uiStore';
 import { _resetCoordinatorForTesting, tryStartBackupJob } from '../services/backup/BackupJobCoordinator';
 
 /** 用本地时间格式化时间戳，与 BoardDock 摘要格式化逻辑一致，避免跨时区断言失败。 */
@@ -293,6 +294,11 @@ describe('BoardDock v1.2.4 最小修复', () => {
       exportCurrentBoard: vi.fn(async () => undefined),
       setThemeMode: vi.fn(),
     });
+    useUIStore.setState({
+      isDockVisible: true,
+      viewMode: 'BOARD',
+      setDockVisible: vi.fn(),
+    });
 
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -327,7 +333,7 @@ describe('BoardDock v1.2.4 最小修复', () => {
 
     await clickElement(backdrop);
 
-    expect(useStore.getState().setDockVisible).toHaveBeenCalledWith(false);
+    expect(useUIStore.getState().setDockVisible).toHaveBeenCalledWith(false);
   });
 
   it('右键看板时菜单锚点按容器内真实中心点定位', async () => {

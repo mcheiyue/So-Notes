@@ -144,6 +144,8 @@ describe('Canvas 空白命中判定', () => {
     vi.stubGlobal('cancelAnimationFrame', cancelRafMock);
 
     useStore.setState(useStore.getInitialState(), true);
+    // 避免前测 mock 的 clearSelection/setSelectedIds 泄漏
+    useUIStore.setState(useUIStore.getInitialState(), true);
     resetViewportSpawnSequenceForTests();
     setEdgePushDragLeader(null);
     mockSaveImageFromSystemClipboard.mockClear();
@@ -221,7 +223,8 @@ describe('Canvas 空白命中判定', () => {
   it('画布获得粘贴事件时默认保留为一张便签', async () => {
     const addNotesWithContentBatch = vi.fn(() => ['new-note']);
     const openSmartPasteSplitPanel = vi.fn();
-    useStore.setState({ addNotesWithContentBatch, openSmartPasteSplitPanel });
+    useStore.setState({ addNotesWithContentBatch });
+    useUIStore.setState({ openSmartPasteSplitPanel });
 
     await renderCanvas();
 
@@ -300,7 +303,7 @@ describe('Canvas 空白命中判定', () => {
 
   it('点击空白画布仍会触发原有的清空选择逻辑', async () => {
     const clearSelection = vi.fn();
-    useStore.setState({ clearSelection });
+    useUIStore.setState({ clearSelection });
 
     await renderCanvas();
 
@@ -331,7 +334,7 @@ describe('Canvas 空白命中判定', () => {
 
   it('非零 shell 偏移下框选框仍按画布局部坐标定位', async () => {
     const clearSelection = vi.fn();
-    useStore.setState({ clearSelection });
+    useUIStore.setState({ clearSelection });
 
     await renderCanvas();
 
@@ -379,7 +382,7 @@ describe('Canvas 空白命中判定', () => {
   it('空白单击不触发框选命中，仅清空选择', async () => {
     const clearSelection = vi.fn();
     const setSelectedIds = vi.fn();
-    useStore.setState({
+    useUIStore.setState({
       clearSelection,
       setSelectedIds,
       selectedIds: ['note-1'],
@@ -409,13 +412,31 @@ describe('Canvas 空白命中判定', () => {
   });
 
   it('非零 shell 偏移下框选 mouseup 命中正确扣除画布偏移', async () => {
+    const noteTarget = {
+      id: 'note-target',
+      kind: 'text' as const,
+      boardId: 'default',
+      x: 500,
+      y: 500,
+      width: 260,
+      height: 200,
+      z: 1,
+      deletedAt: null,
+      title: 't',
+      content: 'c',
+      color: '#fff',
+      collapsed: false,
+      createdAt: 1,
+      updatedAt: 1,
+    };
     useStore.setState({
       selectedIds: [],
-      layoutNotesById: createLayoutNotesById({
-        'note-target': { id: 'note-target', kind: 'text', boardId: 'default', x: 500, y: 500, width: 260, height: 200, z: 1, deletedAt: null, title: 't', content: 'c', color: '#fff', collapsed: false, createdAt: 1, updatedAt: 1 },
-      }),
-      boardNoteIds: { 'default': ['note-target'] },
+      notesById: { 'note-target': noteTarget },
+      layoutNotesById: createLayoutNotesById({ 'note-target': noteTarget }),
+      boardNoteIds: { default: ['note-target'] },
+      allNoteIds: ['note-target'],
     });
+    useUIStore.setState({ selectedIds: [] });
 
     await renderCanvas();
 
@@ -453,7 +474,8 @@ describe('Canvas 空白命中判定', () => {
       }));
     });
 
-    expect(useStore.getState().selectedIds).toContain('note-target');
+    // 框选写 useUIStore.selectedIds（v1.6.6 去 import）
+    expect(useUIStore.getState().selectedIds).toContain('note-target');
   });
 
   it('折叠便签只按当前可视高度命中，不会命中展开后才会占据的下方区域', async () => {
@@ -1427,7 +1449,7 @@ describe('Canvas 空白命中判定', () => {
 
   it('contextMenu 事件阻止默认行为并打开菜单', async () => {
     const setContextMenu = vi.fn();
-    useStore.setState({ setContextMenu });
+    useUIStore.setState({ setContextMenu });
 
     await renderCanvas();
 
@@ -1607,7 +1629,8 @@ describe('Canvas 空白命中判定', () => {
     mockSaveImageFromSystemClipboard.mockClear();
     const addNotesWithContentBatch = vi.fn(() => ['text-note']);
     const openSmartPasteSplitPanel = vi.fn();
-    useStore.setState({ addNotesWithContentBatch, openSmartPasteSplitPanel });
+    useStore.setState({ addNotesWithContentBatch });
+    useUIStore.setState({ openSmartPasteSplitPanel });
 
     await renderCanvas();
 

@@ -1312,7 +1312,7 @@ describe('NoteCard TRASH 右键菜单守卫', () => {
 
   it('isStatic=true（TRASH 列表）时右键不打开 NOTE 菜单', async () => {
     const setContextMenu = vi.fn();
-    useStore.setState({ setContextMenu });
+    useUIStore.setState({ setContextMenu });
 
     await act(async () => {
       root.render(<NoteCard id="note-1" isStatic={true} />);
@@ -1335,7 +1335,7 @@ describe('NoteCard TRASH 右键菜单守卫', () => {
 
   it('isStatic=false（BOARD 模式）时右键正常打开 NOTE 菜单', async () => {
     const setContextMenu = vi.fn();
-    useStore.setState({ setContextMenu });
+    useUIStore.setState({ setContextMenu });
 
     await act(async () => {
       root.render(<NoteCard id="note-1" isStatic={false} />);
