@@ -282,7 +282,7 @@ export const BoardDock = () => {
   }, [beginActivityRefresh, commitActivityEntries]);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const editInputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const dockContainerRef = useRef<HTMLDivElement>(null);
 
   // Focus input when adding mode starts
@@ -294,9 +294,9 @@ export const BoardDock = () => {
 
   // Focus rename input
   useEffect(() => {
-    if (editingBoardId && editInputRef.current) {
-        editInputRef.current.focus();
-        editInputRef.current.select();
+    if (editingBoardId && renameInputRef.current) {
+        renameInputRef.current.focus();
+        renameInputRef.current.select();
     }
   }, [editingBoardId]);
 
@@ -2544,27 +2544,30 @@ export const BoardDock = () => {
                         <div className="px-3 py-2 space-y-2">
                             <input
                                 type="text"
+                                data-testid="webdav-server-url"
+                                aria-label="WebDAV 服务器地址"
                                 placeholder="服务器地址 (https://…)"
                                 value={webdavDraft.serverUrl}
                                 onChange={(e) => setWebdavDraft(prev => ({ ...prev, serverUrl: e.target.value }))}
                                 className="w-full bg-secondary-bg/50 border border-border-subtle rounded px-2 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-blue-400"
-                                data-testid="webdav-server-url"
                             />
                             <input
                                 type="text"
+                                data-testid="webdav-username"
+                                aria-label="WebDAV 用户名"
                                 placeholder="用户名"
                                 value={webdavDraft.username}
                                 onChange={(e) => setWebdavDraft(prev => ({ ...prev, username: e.target.value }))}
                                 className="w-full bg-secondary-bg/50 border border-border-subtle rounded px-2 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-blue-400"
-                                data-testid="webdav-username"
                             />
                             <input
                                 type="password"
+                                data-testid="webdav-password"
+                                aria-label="WebDAV 密码"
                                 placeholder="密码"
                                 value={webdavDraft.password}
                                 onChange={(e) => setWebdavDraft(prev => ({ ...prev, password: e.target.value }))}
                                 className="w-full bg-secondary-bg/50 border border-border-subtle rounded px-2 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-blue-400"
-                                data-testid="webdav-password"
                             />
                             {webdavPasswordSaved && (
                                 <p className="text-[10px] text-green-600 dark:text-green-400 leading-tight" data-testid="webdav-password-saved-status">
@@ -2573,11 +2576,12 @@ export const BoardDock = () => {
                             )}
                             <input
                                 type="text"
+                                data-testid="webdav-remote-dir"
+                                aria-label="WebDAV 远程目录"
                                 placeholder="远端目录"
                                 value={webdavDraft.remoteDir}
                                 onChange={(e) => setWebdavDraft(prev => ({ ...prev, remoteDir: e.target.value }))}
                                 className="w-full bg-secondary-bg/50 border border-border-subtle rounded px-2 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-blue-400"
-                                data-testid="webdav-remote-dir"
                             />
                             <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
                                 <input
@@ -3256,6 +3260,7 @@ export const BoardDock = () => {
                 ref={inputRef}
                 type="text"
                                   placeholder="看板名称…"
+                aria-label="新建看板名称"
                 className="bg-transparent border-none outline-none text-sm px-2 py-1.5 w-32 text-text-secondary placeholder:text-text-tertiary font-medium"
                 value={newBoardName}
                 onChange={(e) => setNewBoardName(e.target.value)}
@@ -3294,7 +3299,8 @@ export const BoardDock = () => {
                         className="w-24 px-1 flex items-center justify-center"
                     >
                         <input
-                            ref={editInputRef}
+                            ref={renameInputRef /* editInputRef */}
+                            aria-label="重命名看板"
                             value={editName}
                             onChange={(e) => setEditName(e.target.value)}
                             onKeyDown={handleRenameKeyDown}

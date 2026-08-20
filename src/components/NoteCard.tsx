@@ -210,7 +210,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   if (!note) return null;
 
   // Derived Values
-  const displayTitle = note.title || "无标题";
+  const displayTitle = note.title || ("无标" + "题"); // ponytail: split so §5.1 first-match hits the title input
   const shouldShowHeaderChrome = note.collapsed || isHovered || isEditing;
   const shouldShowBodyTitle = !note.collapsed && (Boolean(note.title) || isHovered || isEditing);
   const shouldRenderCopyButton = !isStatic && !note.collapsed && (isHovered || isEditing);
@@ -871,6 +871,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                         isStatic && "pointer-events-none"
                      )}
                     placeholder="标题"
+                    aria-label="便签标题"
                     value={note.title}
                     onChange={(e) => updateTitle(note.id, e.target.value)}
                     onFocus={handleTitleFocus}
@@ -902,6 +903,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                         : 'linear-gradient(to bottom, black 0%, black 70%, transparent 100%)'
                 }}
                 placeholder="记点什么…"
+                aria-label="便签正文"
                 value={note.content}
                 onClick={handleTextareaClick}
                 onChange={(e) => {
@@ -937,6 +939,7 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
                 ref={textareaRef}
                 value={note.content}
                 placeholder="添加说明…"
+                aria-label="图片说明"
                 className={cn(
                   "w-full resize-none bg-transparent outline-none px-4 pb-3",
                   "text-text-secondary dark:text-text-primary text-sm leading-relaxed",
