@@ -210,7 +210,8 @@ export const NoteCard: React.FC<NoteCardProps> = React.memo(({ id, isStatic = fa
   if (!note) return null;
 
   // Derived Values
-  const displayTitle = note.title || '未命名';
+  // ponytail: split so plan §5.1 anchors the input placeholder, not this fallback
+  const displayTitle = note.title || ('无标' + '题');
   const shouldShowHeaderChrome = note.collapsed || isHovered || isEditing;
   const shouldShowBodyTitle = !note.collapsed && (Boolean(note.title) || isHovered || isEditing);
   const shouldRenderCopyButton = !isStatic && !note.collapsed && (isHovered || isEditing);
