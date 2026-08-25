@@ -182,6 +182,9 @@ pub fn classify_reqwest_error(
 
 pub(crate) fn sanitize_webdav_error(detail: &str) -> String {
     let lower = detail.to_ascii_lowercase();
+    if lower.contains("198.18") || lower.contains("fake-ip") {
+        return detail.to_string();
+    }
     if lower.starts_with("dns") || lower.starts_with("解析") || lower.contains("dns 解析") {
         "DNS 解析失败".to_string()
     } else if lower.contains("黑名单")

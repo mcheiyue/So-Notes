@@ -443,7 +443,7 @@ pub async fn webdav_test_connection(
         Arc::new(SystemResolver),
         trust_host,
     )
-    .map_err(|_| "WebDAV 地址不可访问".to_string())?;
+    .map_err(|e| format!("WebDAV 地址不可访问（{e}）"))?;
     let target = build_webdav_request_target(&config)?;
     webdav_test_connection_with_client(&client, &target).await
 }
@@ -497,7 +497,7 @@ pub async fn webdav_list_backups(
         Arc::new(SystemResolver),
         trust_host,
     )
-    .map_err(|_| "远端备份列表读取失败".to_string())?;
+    .map_err(|e| format!("远端备份列表读取失败（{e}）"))?;
     let target = build_webdav_request_target(&config)?;
     webdav_list_backups_with_client(&client, &target).await
 }
@@ -559,7 +559,7 @@ pub async fn webdav_delete_backup(
         Arc::new(SystemResolver),
         trust_host,
     )
-    .map_err(|_| "远端备份删除失败".to_string())?;
+    .map_err(|e| format!("远端备份删除失败（{e}）"))?;
     let target = build_webdav_request_target(&config)?;
     webdav_delete_backup_with_client(&client, &target, &remote_file_name).await
 }

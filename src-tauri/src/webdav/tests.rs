@@ -304,14 +304,14 @@
     }
     #[test]
     fn dns_fail_with_trust_still_rejects_private() {
+        // C-WF1: trust_host 豁免域名解析 S2（含私网解析结果）；字面量仍拒见 W3
         let private: SocketAddr = "192.168.1.1:443".parse().unwrap();
         let mock = MockResolver {
             responses: vec![Ok(vec![private])],
             call_count: std::sync::atomic::AtomicUsize::new(0),
         };
-        let err = resolve_and_check("example.com", 443, &mock, true).unwrap_err();
-        assert!(err.contains("主机校验失败") || err.contains("不能指向本机或内网"));
-        assert!(!err.contains("192.168"));
+        let addrs = resolve_and_check("example.com", 443, &mock, true).unwrap();
+        assert_eq!(addrs, vec![private]);
     }
     #[test]
     fn dns_fail_with_trust_retry_succeeds() {
@@ -481,6 +481,124 @@
             err.contains("主机校验失败") || err.contains("不能指向本机或内网") || err.contains("重定向"),
             "redirect 必须忽略 trust: {err}"
         );
+    }
+    #[test]
+    fn trust_host_skips_s2_resolved_blacklist() {
+        let fake: SocketAddr = "198.18.0.5:443".parse().unwrap();
+        let mock_ok = MockResolver {
+            responses: vec![Ok(vec![fake])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let addrs = resolve_and_check("example.com", 443, &mock_ok, true).unwrap();
+        assert_eq!(addrs, vec![fake]);
+        let mock_err = MockResolver {
+            responses: vec![Ok(vec![fake])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let err = resolve_and_check("example.com", 443, &mock_err, false).unwrap_err();
+        assert!(
+            err.contains("fake-ip") || err.contains("主机校验失败"),
+            "{err}"
+        );
+    }
+    #[test]
+    fn benchmark_hit_returns_fakeip_hint_when_untrusted() {
+        let fake: SocketAddr = "198.18.0.5:443".parse().unwrap();
+        let mock = MockResolver {
+            responses: vec![Ok(vec![fake])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let err = resolve_and_check("example.com", 443, &mock, false).unwrap_err();
+        assert!(err.contains("fake-ip"), "{err}");
+        assert!(err.contains("信任此主机"), "{err}");
+        let again = sanitize_webdav_error(&err);
+        assert_eq!(again, err);
+    }
+    #[test]
+    fn private_ip_literal_still_rejected_even_with_trust_host() {
+        let err = normalize_webdav_url("https://192.168.1.2/dav").unwrap_err();
+        assert!(err.contains("本机") || err.contains("内网"), "{err}");
+        let err2 = resolve_and_check("192.168.1.2", 443, &SystemResolver, true).unwrap_err();
+        assert!(
+            err2.contains("主机校验失败") || err2.contains("不能指向本机或内网"),
+            "{err2}"
+        );
+    }
+    #[test]
+    fn redirect_check_stays_untrusting() {
+        let fake: SocketAddr = "198.18.0.5:443".parse().unwrap();
+        let mock = MockResolver {
+            responses: vec![Ok(vec![fake])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let url = Url::parse("https://example.com/other").unwrap();
+        let err = validate_webdav_redirect_url(&url, "example.com", 443, &mock).unwrap_err();
+        assert!(
+            err.contains("fake-ip") || err.contains("主机校验") || err.contains("重定向"),
+            "redirect 必须忽略 trust: {err}"
+        );
+    }
+    #[test]
+    fn webdav_entry_errors_carry_inner_reason() {
+        let fake: SocketAddr = "198.18.0.5:443".parse().unwrap();
+        let mock = MockResolver {
+            responses: vec![Ok(vec![fake])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let inner = build_webdav_http_client(
+            "example.com",
+            443,
+            Duration::from_secs(15),
+            Arc::new(mock),
+            false,
+        )
+        .unwrap_err();
+        assert!(inner.contains("fake-ip") || inner.contains("主机校验失败"), "{inner}");
+        let private: SocketAddr = "192.168.1.1:443".parse().unwrap();
+        let mock_priv = MockResolver {
+            responses: vec![Ok(vec![private])],
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let inner_priv = build_webdav_http_client(
+            "example.com",
+            443,
+            Duration::from_secs(15),
+            Arc::new(mock_priv),
+            false,
+        )
+        .unwrap_err();
+        assert!(inner_priv.contains("主机校验失败"), "{inner_priv}");
+        let transport = include_str!("transport.rs");
+        let ops = include_str!("ops.rs");
+        assert!(
+            transport.contains(r#"map_err(|e| format!("WebDAV 地址不可访问（{e}）"))"#),
+            "test_connection 须带出内层"
+        );
+        assert!(
+            transport.contains(r#"map_err(|e| format!("远端备份列表读取失败（{e}）"))"#),
+            "list_backups 须带出内层"
+        );
+        assert!(
+            transport.contains(r#"map_err(|e| format!("远端备份删除失败（{e}）"))"#),
+            "delete_backup 须带出内层"
+        );
+        assert!(
+            ops.contains(r#"map_err(|e| format!("远端备份下载失败，本地数据未受影响（{e}）"))"#),
+            "download_backup 须带出内层"
+        );
+        for (outer, reason) in [
+            ("WebDAV 地址不可访问", inner.as_str()),
+            ("远端备份列表读取失败", inner.as_str()),
+            ("远端备份删除失败", inner_priv.as_str()),
+            ("远端备份下载失败，本地数据未受影响", inner_priv.as_str()),
+        ] {
+            let msg = format!("{outer}（{reason}）");
+            assert!(
+                msg.contains("主机校验失败") || msg.contains("fake-ip"),
+                "{msg}"
+            );
+            assert!(!msg.contains(TEST_SECRET), "{msg}");
+        }
     }
     #[test]
     fn redirect_same_host_only() {

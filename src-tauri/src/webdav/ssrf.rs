@@ -84,9 +84,18 @@ pub(crate) fn resolve_and_check(
     if addrs.is_empty() {
         return Err(sanitize_webdav_error("DNS 解析失败：未返回任何地址"));
     }
-    for addr in &addrs {
-        if is_disallowed_webdav_ip(addr.ip()) {
-            return Err(sanitize_webdav_error("主机校验失败：不能指向本机或内网"));
+    // C-WF1: trust_host 只豁免域名解析路径的 S2；IP 字面量分支不走这里
+    if !trust_host {
+        for addr in &addrs {
+            if is_disallowed_webdav_ip(addr.ip()) {
+                let detail = match addr.ip() {
+                    IpAddr::V4(v4) if is_benchmark(v4) => {
+                        "地址解析到代理保留段 198.18.x.x（常见于 Clash TUN fake-ip 模式）：可勾选『信任此主机』，或将该域名加入代理 fake-ip 白名单"
+                    }
+                    _ => "主机校验失败：不能指向本机或内网",
+                };
+                return Err(sanitize_webdav_error(detail));
+            }
         }
     }
     Ok(addrs)

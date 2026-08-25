@@ -700,7 +700,7 @@ pub async fn webdav_download_backup(
         Arc::new(SystemResolver),
         trust_host,
     )
-    .map_err(|_| "远端备份下载失败，本地数据未受影响".to_string())?;
+    .map_err(|e| format!("远端备份下载失败，本地数据未受影响（{e}）"))?;
     let target = build_webdav_request_target(&config)?;
     webdav_download_backup_with_client(&client, &target, &remote_file_name, &downloads_dir).await
 }
