@@ -33,10 +33,14 @@ const enterBoardMode = (): void => {
   getUIState().setViewMode('BOARD');
 };
 
-const switchBoard = (boardId: string): void => {
+const switchBoard = (
+  boardId: string,
+  deps?: { readonly clearCliffDropDeferred?: () => void },
+): void => {
   const state = useStore.getState();
   state.switchBoard(boardId);
   enterBoardMode();
+  deps?.clearCliffDropDeferred?.();
 };
 
 const runOnBoardView = (action: () => void): void => {

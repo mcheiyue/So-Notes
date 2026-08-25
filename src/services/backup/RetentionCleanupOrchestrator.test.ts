@@ -16,7 +16,41 @@ vi.mock('./RemoteBackupRetentionService', () => ({
   executeRetentionCleanup: executeRetentionCleanupMock,
 }));
 
-import { orchestratePostBackupRetentionCleanup } from './RetentionCleanupOrchestrator';
+vi.mock('../../store/useStore', () => ({
+  useStore: Object.assign(vi.fn(), {
+    getState: vi.fn(() => ({ switchBoard: vi.fn() })),
+    setState: vi.fn(),
+  }),
+}));
+
+vi.mock('../../store/uiStore', () => ({
+  useUIStore: {
+    getState: vi.fn(() => ({
+      viewMode: 'BOARD',
+      setViewMode: vi.fn(),
+      selectedIds: [],
+    })),
+  },
+}));
+
+vi.mock('../../store/viewportStore', () => ({
+  useViewportStore: {
+    getState: vi.fn(() => ({
+      viewport: { x: 0, y: 0, w: 800, h: 600 },
+      shellRect: { left: 0, top: 0, right: 0, bottom: 0 },
+    })),
+  },
+}));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+}));
+
+import {
+  orchestratePostBackupRetentionCleanup,
+  clearCliffDropDeferred,
+} from './RetentionCleanupOrchestrator';
+import { appController } from '../../controllers/appController';
 import type {
   ScheduledRemoteBackupConfig,
   ScheduledRemoteBackupState,
@@ -830,6 +864,81 @@ describe('RetentionCleanupOrchestrator', () => {
         lastRetentionCleanupSkipped: true,
         lastRetentionCleanupBusy: true,
       }));
+    });
+  });
+
+  describe('cliff 清理', () => {
+    it('cliff 清理: board 切换时清除 cliffDropDeferred', () => {
+      const state: ScheduledRemoteBackupState = {
+        ...DEFAULT_STATE,
+        cliffDropDeferred: true,
+        cliffDropDetectedAt: 1_700_000_000_000,
+        cliffDropLatestSummaryNoteCount: 5,
+        cliffDropLatestSummaryBoardCount: 2,
+        cliffDropLatestSummaryImageNoteCount: 1,
+        cliffDropLatestSummaryImageFileCount: 1,
+        cliffDropLatestSummaryImageFileTotalBytes: 100,
+        cliffDropLatestRemoteFileName: 'SoNotes_Backup_cliff.zip',
+        cliffDropLatestZipSizeBytes: 50,
+        cliffDropLatestAnomalyCodes: ['CLIFF_DROP_RELATIVE'],
+        baselineConfirmedRemoteCount: 100,
+        lastRetentionCleanupAt: 999,
+        lastRemoteFileName: 'keep.zip',
+      };
+
+      const patch = clearCliffDropDeferred(state);
+      expect(patch.cliffDropDeferred).toBe(false);
+      expect(patch.cliffDropDetectedAt).toBeNull();
+      expect(patch.cliffDropLatestSummaryNoteCount).toBeNull();
+      expect(patch.cliffDropLatestSummaryBoardCount).toBeNull();
+      expect(patch.cliffDropLatestSummaryImageNoteCount).toBeNull();
+      expect(patch.cliffDropLatestSummaryImageFileCount).toBeNull();
+      expect(patch.cliffDropLatestSummaryImageFileTotalBytes).toBeNull();
+      expect(patch.cliffDropLatestRemoteFileName).toBeNull();
+      expect(patch.cliffDropLatestZipSizeBytes).toBeNull();
+      expect(patch.cliffDropLatestAnomalyCodes).toBeNull();
+      expect(patch).not.toHaveProperty('baselineConfirmedRemoteCount');
+      expect(patch).not.toHaveProperty('lastRetentionCleanupAt');
+      expect(patch).not.toHaveProperty('lastRemoteFileName');
+
+      let scheduled = { ...state };
+      const spy = vi.fn(() => {
+        scheduled = { ...scheduled, ...clearCliffDropDeferred(scheduled) };
+      });
+      appController.switchBoard('board-2', { clearCliffDropDeferred: spy });
+      expect(spy.mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect(scheduled.cliffDropDeferred).toBe(false);
+    });
+
+    it('cliff 清理: 清除后下次备份重新检测断崖', async () => {
+      const cleared: ScheduledRemoteBackupState = {
+        ...DEFAULT_STATE,
+        baselineConfirmedRemoteCount: 100,
+        ...clearCliffDropDeferred({
+          ...DEFAULT_STATE,
+          cliffDropDeferred: true,
+          cliffDropLatestSummaryNoteCount: 5,
+          baselineConfirmedRemoteCount: 100,
+        }),
+      };
+      expect(cleared.cliffDropDeferred).toBe(false);
+
+      detectBackupCliffDropMock.mockReturnValue({
+        baselineNotes: 100,
+        currentNotes: 10,
+        dropPct: 0.9,
+        threshold: 0.3,
+        anomalyCodes: ['CLIFF_DROP_RELATIVE'],
+      });
+
+      const result = await orchestratePostBackupRetentionCleanup(
+        makeInput({ state: cleared }),
+      );
+
+      expect(detectBackupCliffDropMock.mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect(result.cliffDropDeferred).toBe(true);
+      expect(result.cliffDropLatestSummaryNoteCount).toBe(10);
+      expect(result.cliffDropLatestSummaryBoardCount).toBe(1);
     });
   });
 });

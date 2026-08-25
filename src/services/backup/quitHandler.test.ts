@@ -385,6 +385,30 @@ describe('getLatestBackupSuccessAt', () => {
 
 describe('handleQuitRequest', () => {
   describe('不需要退出前备份 → 直接退出', () => {
+    it('cliff 清理: 退出路径清除 cliffDropDeferred', async () => {
+      const clearCliffDropDeferred = vi.fn().mockResolvedValue(undefined);
+      const deps = makeDeps({
+        clearCliffDropDeferred,
+        loadScheduledConfig: vi.fn().mockResolvedValue(
+          makeScheduledConfigResult({
+            config: {
+              enabled: true,
+              frequency: 'daily',
+              quietPeriodMinutes: 5,
+              exitPromptEnabled: false,
+              retentionEnabled: false,
+              retentionCount: null,
+            },
+          }),
+        ),
+      });
+
+      await handleQuitRequest(vi.fn(), deps);
+
+      expect(clearCliffDropDeferred.mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
+    });
+
     it('条件不满足时直接调用 confirm_app_quit', async () => {
       const deps = makeDeps({
         loadScheduledConfig: vi.fn().mockResolvedValue(

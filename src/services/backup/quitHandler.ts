@@ -32,6 +32,7 @@ export interface QuitHandlerDeps {
   setBackingUp: (value: boolean) => void;
   closeDialog: () => void;
   runBeforeExit: () => Promise<void>;
+  clearCliffDropDeferred?: () => Promise<void>;
 }
 
 const DEFAULT_DEPS: QuitHandlerDeps = {
@@ -46,6 +47,7 @@ const DEFAULT_DEPS: QuitHandlerDeps = {
   setBackingUp: () => {},
   closeDialog: () => {},
   runBeforeExit: async () => {},
+  clearCliffDropDeferred: async () => {},
 };
 
 // ---------------------------------------------------------------------------
@@ -148,6 +150,11 @@ export async function handleQuitRequest(
   runBeforeExit: () => Promise<void>,
   deps: QuitHandlerDeps = DEFAULT_DEPS,
 ): Promise<void> {
+  const confirmAppQuit = async (): Promise<void> => {
+    await deps.clearCliffDropDeferred?.();
+    deps.invoke('confirm_app_quit');
+  };
+
   let needsBackup: boolean;
   try {
     needsBackup = await shouldPromptExitBackup(deps);
@@ -157,13 +164,13 @@ export async function handleQuitRequest(
     const errorMsg = error instanceof Error ? error.message : String(error);
     const choice = await deps.promptBackupFailed(errorMsg);
     if (choice === 'quit-anyway') {
-      deps.invoke('confirm_app_quit');
+      await confirmAppQuit();
     }
     return;
   }
 
   if (!needsBackup) {
-    deps.invoke('confirm_app_quit');
+    await confirmAppQuit();
     return;
   }
 
@@ -172,7 +179,7 @@ export async function handleQuitRequest(
   if (choice === 'cancel') return;
 
   if (choice === 'quit-now') {
-    deps.invoke('confirm_app_quit');
+    await confirmAppQuit();
     return;
   }
 
@@ -182,7 +189,7 @@ export async function handleQuitRequest(
   try {
     await runBeforeExit();
     deps.closeDialog();
-    deps.invoke('confirm_app_quit');
+    await confirmAppQuit();
   } catch (error) {
     console.warn('退出前备份失败:', error);
     deps.setBackingUp(false);
@@ -190,7 +197,7 @@ export async function handleQuitRequest(
     const choice = await deps.promptBackupFailed(errorMsg);
     if (choice === 'quit-anyway') {
       deps.closeDialog();
-      deps.invoke('confirm_app_quit');
+      await confirmAppQuit();
     }
   }
 }

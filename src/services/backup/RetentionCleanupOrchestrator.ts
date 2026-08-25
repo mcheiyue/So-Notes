@@ -53,6 +53,26 @@ const isBusyCleanupResult = (result: {
   readonly error?: string | null;
 }): boolean => result.error === 'busy' && (result.attemptedCount ?? 0) === 0;
 
+// 单一清理函数（C-CL1 单点）；board 切换 + 退出共用
+// 不拆成多个小函数（反碎片化，对齐代码抽象与方法封装规范）
+export function clearCliffDropDeferred(
+  state: ScheduledRemoteBackupState,
+): Partial<ScheduledRemoteBackupState> {
+  void state;
+  return {
+    cliffDropDeferred: false,
+    cliffDropDetectedAt: null,
+    cliffDropLatestSummaryNoteCount: null,
+    cliffDropLatestSummaryBoardCount: null,
+    cliffDropLatestSummaryImageNoteCount: null,
+    cliffDropLatestSummaryImageFileCount: null,
+    cliffDropLatestSummaryImageFileTotalBytes: null,
+    cliffDropLatestRemoteFileName: null,
+    cliffDropLatestZipSizeBytes: null,
+    cliffDropLatestAnomalyCodes: null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // orchestratePostBackupRetentionCleanup
 // ---------------------------------------------------------------------------
