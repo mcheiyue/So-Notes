@@ -7,10 +7,12 @@
  *   node scripts/check-smoke-baseline.mjs --ids ID1,ID2 <file> # 只校验指定 ID
  *   node scripts/check-smoke-baseline.mjs --allow-fail <file>  # 允许 FAIL 结果不阻断
  *   node scripts/check-smoke-baseline.mjs --preset v1.6.0 <file> # 强制 v1.6.0 ID 集
+ *   node scripts/check-smoke-baseline.mjs --preset v1.6.8 <file> # 强制 v1.6.8 ID 集
  *
  * 校验规则：
  *   - v1.5.9：docs/plans/v1.5.9-prep-and-experience-baseline.md 伪代码（约 L787-872）
  *   - v1.6.0：docs/plans/v1.6.0-capture-and-organize-implementation.md §7.2
+ *   - v1.6.8：docs/plans/v1.6.8-coordinator-lifecycle-and-lock-semantics.md §7.2
  */
 
 import { readFileSync } from 'node:fs';
@@ -141,6 +143,58 @@ const requiredById_V160 = {
 /** v1.6.0 仅 QC-LOCATE-001 允许 N/A */
 const NA_WHITELIST_V160 = new Set(['QC-LOCATE-001']);
 
+// ── v1.6.8 preset（与 v1.5.9 / v1.6.0 分支并列，勿互相覆盖；§7.2）────────────
+
+const REQUIRED_IDS_V168 = [
+  'WEBDAV-FAKEIP-001',
+  'COORD-TIMEOUT-001',
+  'CLIFF-CLEAR-001',
+  'LOCK-ADR-001',
+];
+
+const requiredById_V168 = {
+  'COORD-TIMEOUT-001': {
+    all: [
+      'BackupJobCoordinator.test.ts',
+      'coordinator 超时: 超时后释放 activeJob',
+      'coordinator 超时: 超时后可再次启动',
+      'coordinator 超时: release 前主动释放取消超时',
+      'coordinator 超时: 超时不丢已提交数据',
+    ],
+  },
+  'CLIFF-CLEAR-001': {
+    all: [
+      'RetentionCleanupOrchestrator.test.ts',
+      'quitHandler.test.ts',
+      'cliff 清理: board 切换时清除 cliffDropDeferred',
+      'cliff 清理: 退出路径清除 cliffDropDeferred',
+      'cliff 清理: 清除后下次备份重新检测断崖',
+    ],
+  },
+  'LOCK-ADR-001': {
+    all: [
+      '0002-three-layer-lock-semantics.md',
+      '三层锁职责矩阵',
+      '已澄清',
+      '有意降级',
+    ],
+  },
+  'WEBDAV-FAKEIP-001': {
+    all: [
+      'tests.rs',
+      'trust_host_skips_s2_resolved_blacklist',
+      'benchmark_hit_returns_fakeip_hint_when_untrusted',
+      'private_ip_literal_still_rejected_even_with_trust_host',
+      'webdav_entry_errors_carry_inner_reason',
+      'redirect_check_stays_untrusting',
+      'check-cw7-entry-order.mjs',
+      'check-dod18-commit2-3.mjs',
+    ],
+  },
+};
+
+const NA_WHITELIST_V168 = new Set([]); // 本版无 N/A 项
+
 /** 必填字段列表（计划伪代码步骤 7b） */
 const REQUIRED_FIELDS = ['类型:', '自动化命令:', '人工步骤:', '证据:', '跳过原因:'];
 
@@ -148,15 +202,17 @@ const REQUIRED_FIELDS = ['类型:', '自动化命令:', '人工步骤:', '证据
 const SYNC_BANNED = /同步|云同步|自动同步|双向|合并|sync|synchronize|自动拉取|自动下载|自动恢复/i;
 
 /**
- * 解析 preset：路径含 v1.6.0-smoke-baseline 或 --preset v1.6.0 → v1.6.0，否则 v1.5.9
+ * 解析 preset：路径含 v1.6.8/v1.6.0-smoke-baseline 或 --preset → 对应版本，否则 v1.5.9
  * @param {string} filePath
  * @param {string|null} presetFlag
- * @returns {'v1.5.9'|'v1.6.0'}
+ * @returns {'v1.5.9'|'v1.6.0'|'v1.6.8'}
  */
 function resolvePreset(filePath, presetFlag) {
+  if (presetFlag === 'v1.6.8' || presetFlag === '1.6.8') return 'v1.6.8';
   if (presetFlag === 'v1.6.0' || presetFlag === '1.6.0') return 'v1.6.0';
   if (presetFlag === 'v1.5.9' || presetFlag === '1.5.9') return 'v1.5.9';
   const posix = String(filePath).replace(/\\/g, '/');
+  if (posix.includes('v1.6.8-smoke-baseline')) return 'v1.6.8';
   if (posix.includes('v1.6.0-smoke-baseline')) return 'v1.6.0';
   return 'v1.5.9';
 }
@@ -356,7 +412,7 @@ function main() {
   }
 
   if (!filePath) {
-    console.error('用法: node scripts/check-smoke-baseline.mjs [--ids ID1,ID2] [--allow-fail] [--preset v1.5.9|v1.6.0] <file>');
+    console.error('用法: node scripts/check-smoke-baseline.mjs [--ids ID1,ID2] [--allow-fail] [--preset v1.5.9|v1.6.0|v1.6.8] <file>');
     process.exit(1);
   }
 
@@ -375,11 +431,14 @@ function main() {
   // 按 /^## /m 切段（拒绝重复 ID）
   const { segments, duplicateIds } = splitSegments(content);
 
-  // preset 切换：路径含 v1.6.0-smoke-baseline 或 --preset v1.6.0
+  // preset 切换：路径含 v1.6.8/v1.6.0-smoke-baseline 或 --preset
   const preset = resolvePreset(filePath, presetFlag);
-  const activeRequiredIds = preset === 'v1.6.0' ? REQUIRED_IDS_V160 : REQUIRED_IDS;
-  const activeRequiredById = preset === 'v1.6.0' ? requiredById_V160 : requiredById;
-  const activeNaWhitelist = preset === 'v1.6.0' ? NA_WHITELIST_V160 : NA_WHITELIST;
+  const activeRequiredIds =
+    preset === 'v1.6.8' ? REQUIRED_IDS_V168 : preset === 'v1.6.0' ? REQUIRED_IDS_V160 : REQUIRED_IDS;
+  const activeRequiredById =
+    preset === 'v1.6.8' ? requiredById_V168 : preset === 'v1.6.0' ? requiredById_V160 : requiredById;
+  const activeNaWhitelist =
+    preset === 'v1.6.8' ? NA_WHITELIST_V168 : preset === 'v1.6.0' ? NA_WHITELIST_V160 : NA_WHITELIST;
 
   // 确定要校验的 ID
   const idsToCheck = onlyIds || activeRequiredIds;
