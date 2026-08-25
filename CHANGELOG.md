@@ -1,3 +1,49 @@
+## [v1.6.8] - 2026-08-25
+
+本版本聚焦备份协调器生命周期与 WebDAV fake-ip 兼容：备份卡死时超时自动释放、cliff deferred 在看板切换/退出时清理，以及代理 fake-ip 环境下 WebDAV 可用且报错可自诊。三层锁职责以 ADR 文档化（R3 有意降级，未合并锁源）。
+
+关单状态字：R3 **已澄清（有意降级）**；R4/S7 **已修复**；C-WF1/2/3 **已修复**。
+
+### ✨ 新特性 (Features)
+
+* **代理 fake-ip 环境下 WebDAV 可用且报错可自诊（C-WF1/2/3）**
+  > Clash TUN fake-ip 解析到 198.18 段时，勾选「信任此主机」可跳过 S2 黑名单；未信任时给出 fake-ip 签名提示；四入口报错带出内层原因。不改 WebDAV SSRF 主语义（v1.6.1 已做；本版仅 fake-ip 兼容增补）。
+
+* **coordinator 超时自动释放（5min 默认；可配置）**
+  > 备份卡死时自动超时释放 activeJob，无需重启即可再次备份。
+
+### 🐛 问题修复 (Bug Fixes)
+
+* **cliff deferred 在看板切换/退出时清理**
+  > 切换看板或退出时清理延迟标记，下次备份重新检测断崖。
+
+### 🔧 内部改进 (Internal)
+
+* **三层锁职责矩阵 ADR（R3 有意降级）**
+  > 文档化三层锁职责边界；R3 有意降级，未合并锁源，未按审查报告统一单一锁源。
+
+* **C-D68 SSOT 脚本**
+  > whitelist / doc-guard / soft / all / ops-hard。
+
+* **v1.6.8 冒烟基线**
+  > 4 ID：COORD / CLIFF / LOCK-ADR / WEBDAV-FAKEIP；`check:smoke` 三串联（v1.5.9 + v1.6.0 + v1.6.8）。
+
+* **lint 扩展含 backup 服务路径**
+  > lint 覆盖 BackupJobCoordinator / RetentionCleanupOrchestrator / quitHandler。
+
+### 可选手测
+
+* **开启 Clash TUN（fake-ip）→ WebDAV 测试连接**
+  > 勾选信任主机后应成功；不勾时应出现 fake-ip 签名提示。
+
+### 明确不做
+
+* **不合并三层锁（R3 有意降级）**
+  > 未合并锁源；不以单一锁源替代现有三层。
+
+* **不改 WebDAV SSRF 主语义**
+  > v1.6.1 已做；本版仅 fake-ip 兼容增补。
+
 ## [v1.6.7] - 2026-08-20
 
 本版本聚焦 BoardDock / ContextMenu 订阅边界与关键表单可访问性：去掉 Dock 顶层整表 `notesById` 渲染订阅，菜单关闭时不再挂载热路径 Content；WebDAV 与便签/看板关键输入补齐 `aria-label`（UX P0-08 / P1-08 已修复）。B1 默认 **已收窄**（不强制目录大搬家）。
