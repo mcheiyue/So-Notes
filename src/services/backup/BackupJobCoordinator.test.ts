@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import {
   tryStartBackupJob,
   getActiveBackupJob,
   subscribeBackupJob,
   _resetCoordinatorForTesting,
+  DEFAULT_BACKUP_JOB_TIMEOUT_MS,
   type BackupJobKind,
 } from './BackupJobCoordinator';
 
@@ -350,6 +351,77 @@ describe('BackupJobCoordinator', () => {
         handle!.release();
         expect(getActiveBackupJob()).toBeNull();
       }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // coordinator 超时（C-R4 + C-S10）
+  // -------------------------------------------------------------------------
+
+  describe('coordinator 超时', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      _resetCoordinatorForTesting();
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    it('coordinator 超时: 超时后释放 activeJob', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const listener = vi.fn();
+      subscribeBackupJob(listener);
+
+      const handle = tryStartBackupJob('manual-remote-backup');
+      expect(handle).not.toBeNull();
+
+      vi.advanceTimersByTime(DEFAULT_BACKUP_JOB_TIMEOUT_MS + 1);
+
+      expect(getActiveBackupJob()).toBeNull();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledTimes(2);
+    });
+
+    it('coordinator 超时: 超时后可再次启动', () => {
+      tryStartBackupJob('manual-remote-backup');
+      vi.advanceTimersByTime(DEFAULT_BACKUP_JOB_TIMEOUT_MS + 1);
+
+      const handle = tryStartBackupJob('scheduled-remote-backup');
+      expect(handle).not.toBeNull();
+      expect(handle!.kind).toBe('scheduled-remote-backup');
+      expect(handle!.startedAt).toBeGreaterThan(0);
+      handle!.release();
+    });
+
+    it('coordinator 超时: release 前主动释放取消超时', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const listener = vi.fn();
+      subscribeBackupJob(listener);
+
+      const handle = tryStartBackupJob('manual-remote-backup');
+      expect(handle).not.toBeNull();
+
+      vi.advanceTimersByTime(60_000);
+      handle!.release();
+      vi.advanceTimersByTime(10 * 60_000);
+
+      expect(getActiveBackupJob()).toBeNull();
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(listener).toHaveBeenCalledTimes(2);
+    });
+
+    it('coordinator 超时: 超时不丢已提交数据', () => {
+      const mockWriteCommit = vi.fn(() => 'committed-data');
+      const committed = mockWriteCommit();
+
+      tryStartBackupJob('manual-remote-backup');
+      vi.advanceTimersByTime(DEFAULT_BACKUP_JOB_TIMEOUT_MS + 1);
+
+      expect(mockWriteCommit).toHaveBeenCalledTimes(1);
+      expect(committed).toBe('committed-data');
+      expect(getActiveBackupJob()).toBeNull();
     });
   });
 });

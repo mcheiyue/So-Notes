@@ -62,7 +62,11 @@ export interface BackupJobHandle {
 // ---------------------------------------------------------------------------
 
 let activeJob: BackupJobSnapshot | null = null;
+let activeJobTimeoutId: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
+
+/** 未 release 时强制释放 activeJob 的默认超时（5 分钟）。超时只放锁，不回滚已提交写路径。 */
+export const DEFAULT_BACKUP_JOB_TIMEOUT_MS = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // 内部工具
@@ -81,6 +85,10 @@ function notifyListeners(): void {
  * 生产代码不应调用此函数。
  */
 export function _resetCoordinatorForTesting(): void {
+  if (activeJobTimeoutId !== null) {
+    clearTimeout(activeJobTimeoutId);
+    activeJobTimeoutId = null;
+  }
   activeJob = null;
   listeners.clear();
 }
@@ -97,28 +105,55 @@ export function _resetCoordinatorForTesting(): void {
  *
  * 调用方必须在任务完成或取消时调用 `handle.release()`。
  * 推荐在 `try/finally` 中使用，确保异常路径也能释放锁。
+ *
+ * 未在 `options.timeoutMs`（默认 {@link DEFAULT_BACKUP_JOB_TIMEOUT_MS}）内
+ * release 时，协调器强制释放 `activeJob`。超时不回滚已提交的备份写路径。
  */
-export function tryStartBackupJob(kind: BackupJobKind): BackupJobHandle | null {
+export function tryStartBackupJob(
+  kind: BackupJobKind,
+  options?: { timeoutMs?: number },
+): BackupJobHandle | null {
   if (activeJob !== null) {
     return null;
   }
 
-  const now = Date.now();
-  const snapshot: BackupJobSnapshot = { kind, startedAt: now };
+  const startedAt = Date.now();
+  const snapshot: BackupJobSnapshot = { kind, startedAt };
   activeJob = snapshot;
   notifyListeners();
 
+  activeJobTimeoutId = setTimeout(() => {
+    if (
+      activeJob !== null &&
+      activeJob.kind === kind &&
+      activeJob.startedAt === startedAt
+    ) {
+      activeJobTimeoutId = null;
+      activeJob = null;
+      notifyListeners();
+      console.warn('[BackupJobCoordinator] timeout', {
+        kind,
+        startedAt,
+        now: Date.now(),
+      });
+    }
+  }, options?.timeoutMs ?? DEFAULT_BACKUP_JOB_TIMEOUT_MS);
+
   return {
     kind,
-    startedAt: now,
+    startedAt,
     release(): void {
       // 守卫：只有当前活跃任务与启动时一致时才释放，
       // 防止重复释放或释放已不存在的旧任务。
       if (
         activeJob !== null &&
         activeJob.kind === kind &&
-        activeJob.startedAt === now
+        activeJob.startedAt === startedAt
       ) {
+        if (activeJobTimeoutId !== null) {
+          clearTimeout(activeJobTimeoutId);
+          activeJobTimeoutId = null;
+        }
         activeJob = null;
         notifyListeners();
       }
