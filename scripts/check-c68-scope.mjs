@@ -43,6 +43,8 @@ const EXACT_ALLOWED = new Set([
   'scripts/check-smoke-baseline.mjs',
   'scripts/check-cw7-entry-order.mjs',
   'scripts/check-dod18-commit2-3.mjs',
+  // v1.6.8 收束（FIX-RENAME）：必需测名清单随 C-WF1 语义翻转同步改名
+  'scripts/run-v161-dod.mjs',
   'scripts/check-c68-scope.mjs',
   'package.json',
   'package-lock.json',

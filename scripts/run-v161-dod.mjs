@@ -81,7 +81,7 @@ const COMMIT1 = [
 const COMMIT2 = [
   'dns_fail_is_closed',
   'dns_fail_with_trust_retries',
-  'dns_fail_with_trust_still_rejects_private',
+  'trust_host_allows_resolved_private_addrs',
   'dns_fail_with_trust_retry_succeeds',
   'normalize_domain_no_dns',
   'error_sanitization_no_ip_leak',

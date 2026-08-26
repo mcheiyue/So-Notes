@@ -303,8 +303,9 @@
         );
     }
     #[test]
-    fn dns_fail_with_trust_still_rejects_private() {
-        // C-WF1: trust_host 豁免域名解析 S2（含私网解析结果）；字面量仍拒见 W3
+    fn trust_host_allows_resolved_private_addrs() {
+        // C-WF1: trust_host 豁免域名解析 S2（含私网解析结果）；字面量仍拒见 W3。
+        // 前名 dns_fail_with_trust_still_rejects_private 已随语义翻转失真，FIX-RENAME 改名。
         let private: SocketAddr = "192.168.1.1:443".parse().unwrap();
         let mock = MockResolver {
             responses: vec![Ok(vec![private])],
