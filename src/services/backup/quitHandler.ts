@@ -151,7 +151,12 @@ export async function handleQuitRequest(
   deps: QuitHandlerDeps = DEFAULT_DEPS,
 ): Promise<void> {
   const confirmAppQuit = async (): Promise<void> => {
-    await deps.clearCliffDropDeferred?.();
+    try {
+      await deps.clearCliffDropDeferred?.();
+    } catch (error) {
+      // 清理是 best-effort：失败仅告警，绝不阻塞退出（审查 MAJOR 修复）
+      console.warn('cliff deferred 清理失败（不阻塞退出）:', error);
+    }
     deps.invoke('confirm_app_quit');
   };
 

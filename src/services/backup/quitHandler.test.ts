@@ -418,7 +418,31 @@ describe('handleQuitRequest', () => {
         join(process.cwd(), 'src/components/ScheduledRemoteBackupController.tsx'),
         'utf8',
       );
-      expect(src.includes('clearCliffDropDeferred:')).toBe(true);
+      expect(src.includes('clearCliffDropDeferred: clearCliffDropDeferredPersisted')).toBe(true);
+    });
+
+    it('cliff 清理: 清理 reject 仍退出', async () => {
+      const clearCliffDropDeferred = vi.fn().mockRejectedValue(new Error('io boom'));
+      const deps = makeDeps({
+        clearCliffDropDeferred,
+        loadScheduledConfig: vi.fn().mockResolvedValue(
+          makeScheduledConfigResult({
+            config: {
+              enabled: true,
+              frequency: 'daily',
+              quietPeriodMinutes: 5,
+              exitPromptEnabled: false,
+              retentionEnabled: false,
+              retentionCount: null,
+            },
+          }),
+        ),
+      });
+
+      await handleQuitRequest(vi.fn(), deps);
+
+      expect(clearCliffDropDeferred).toHaveBeenCalledTimes(1);
+      expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
     });
 
     it('条件不满足时直接调用 confirm_app_quit', async () => {

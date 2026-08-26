@@ -6,7 +6,7 @@
  *
  * 约束：
  * - 仅在自动备份（scheduled-interval / quiet-period）成功后触发。
- * - 不直接修改 state 或调用保存方法，仅返回 state patch 由调用方合并。
+ * - patch 函数保持纯计算；唯一例外是 clearCliffDropDeferredPersisted（生产接线单点，仅 deferred===true 时读改写盘）。
  * - 清理失败不影响备份成功状态。
  */
 
