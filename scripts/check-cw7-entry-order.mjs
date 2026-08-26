@@ -7,13 +7,23 @@
  * 失败 → process.exit(1)
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
-const WEBDAV = join(REPO_ROOT, 'src-tauri/src/webdav.rs');
+// FIX-GATE：webdav 已拆为目录模块（3e007f0），单文件路径已不存在。
+// 非测试语料排除 tests.rs，避免测试代码放行「工厂外 Client::new/builder」硬门。
+const WEBDAV_DIR = join(REPO_ROOT, 'src-tauri/src/webdav');
+
+/** 加载目录模块非测试语料（排序保证确定性） */
+function loadWebdavFiles() {
+  return readdirSync(WEBDAV_DIR)
+    .filter((f) => f.endsWith('.rs') && f !== 'tests.rs')
+    .sort()
+    .map((name) => ({ name, src: readFileSync(join(WEBDAV_DIR, name), 'utf-8') }));
+}
 
 /**
  * 大括号匹配提取完整函数体（禁止固定 1200 字符窗口）
@@ -54,13 +64,14 @@ function extractFnBody(src, name) {
 }
 
 function main() {
-  let src;
+  let files;
   try {
-    src = readFileSync(WEBDAV, 'utf-8');
+    files = loadWebdavFiles();
   } catch (e) {
-    console.error(`FAIL C-W7: 无法读取 webdav.rs: ${e.message}`);
+    console.error(`FAIL C-W7: 无法读取 webdav 目录模块: ${e.message}`);
     process.exit(1);
   }
+  const src = files.map((f) => f.src).join('\n');
 
   const entries = [
     'webdav_test_connection',
@@ -131,17 +142,21 @@ function main() {
     process.exit(1);
   }
 
-  // 工厂外 Client::new/builder 仅允许 #[cfg(test)] 后
-  const cfgTestAt = src.lastIndexOf('#[cfg(test)]');
-  const fs0 = factoryBody ? src.indexOf(factoryBody) : -1;
-  for (const hit of src.matchAll(/reqwest::Client::(?:new|builder)\s*\(/g)) {
-    const pos = hit.index ?? -1;
-    const inFactory =
-      fs0 >= 0 && pos >= fs0 && pos < fs0 + factoryBody.length;
-    const inTest = cfgTestAt >= 0 && pos > cfgTestAt;
-    if (!inFactory && !inTest) {
-      console.error(`FAIL: 工厂外出现 Client::new/builder @${pos}`);
-      process.exit(1);
+  // 工厂外 Client::new/builder 仅允许 #[cfg(test)] 后 —— 逐文件判定（拼接语料的
+  // 全局 lastIndexOf 会把后续文件的合法代码误判为测试段）
+  for (const { name, src: fileSrc } of files) {
+    const fileFactoryBody = extractFnBody(fileSrc, 'build_webdav_http_client') || '';
+    const cfgTestAt = fileSrc.lastIndexOf('#[cfg(test)]');
+    const fs0 = fileFactoryBody ? fileSrc.indexOf(fileFactoryBody) : -1;
+    for (const hit of fileSrc.matchAll(/reqwest::Client::(?:new|builder)\s*\(/g)) {
+      const pos = hit.index ?? -1;
+      const inFactory =
+        fs0 >= 0 && pos >= fs0 && pos < fs0 + fileFactoryBody.length;
+      const inTest = cfgTestAt >= 0 && pos > cfgTestAt;
+      if (!inFactory && !inTest) {
+        console.error(`FAIL: 工厂外出现 Client::new/builder @${name}:${pos}`);
+        process.exit(1);
+      }
     }
   }
 

@@ -8,20 +8,26 @@
  * 规格真源：docs/plans/v1.6.1-webdav-ssrf-hardening.md §11 #18
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
-const WEBDAV = join(REPO_ROOT, 'src-tauri/src/webdav.rs');
+// FIX-GATE：webdav 已拆为目录模块（3e007f0）。本脚本为子串/正则断言（含 pin 测名，
+// 位于 tests.rs），语料取目录下全部 .rs 拼接。
+const WEBDAV_DIR = join(REPO_ROOT, 'src-tauri/src/webdav');
 
 function main() {
   let src;
   try {
-    src = readFileSync(WEBDAV, 'utf-8');
+    src = readdirSync(WEBDAV_DIR)
+      .filter((f) => f.endsWith('.rs'))
+      .sort()
+      .map((f) => readFileSync(join(WEBDAV_DIR, f), 'utf-8'))
+      .join('\n');
   } catch (e) {
-    console.error(`FAIL DoD#18: 无法读取 webdav.rs: ${e.message}`);
+    console.error(`FAIL DoD#18: 无法读取 webdav 目录模块: ${e.message}`);
     process.exit(1);
   }
 
