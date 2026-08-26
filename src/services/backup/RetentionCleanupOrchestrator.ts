@@ -19,6 +19,7 @@ import type { WebDavUploadResult, WebDavConfig } from './WebDavBackupService';
 import type { BackupSummary } from './BackupService';
 import { detectBackupCliffDrop } from './RemoteBackupRetention';
 import { executeRetentionCleanup } from './RemoteBackupRetentionService';
+import { loadState, saveState } from './ScheduledRemoteBackupConfigService';
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -71,6 +72,16 @@ export function clearCliffDropDeferred(
     cliffDropLatestZipSizeBytes: null,
     cliffDropLatestAnomalyCodes: null,
   };
+}
+
+// 生产接线用（FIX-S7W）：读改写持久化 scheduled state。
+// 仅当存在持久化状态且 deferred=true 时写盘一次；
+// 未启用定时备份的用户不会因切换看板/退出被物化状态文件。
+export async function clearCliffDropDeferredPersisted(): Promise<void> {
+  const result = await loadState();
+  if (!result.success || result.state === null || !result.state.cliffDropDeferred) return;
+  const saved = await saveState({ ...result.state, ...clearCliffDropDeferred(result.state) });
+  if (!saved.success) throw new Error(saved.error ?? 'saveState failed');
 }
 
 // ---------------------------------------------------------------------------

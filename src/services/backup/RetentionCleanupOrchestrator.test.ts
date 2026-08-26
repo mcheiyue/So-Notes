@@ -3,9 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const {
   detectBackupCliffDropMock,
   executeRetentionCleanupMock,
+  loadStateMock,
+  saveStateMock,
 } = vi.hoisted(() => ({
   detectBackupCliffDropMock: vi.fn(),
   executeRetentionCleanupMock: vi.fn(),
+  loadStateMock: vi.fn(),
+  saveStateMock: vi.fn(),
 }));
 
 vi.mock('./RemoteBackupRetention', () => ({
@@ -14,6 +18,11 @@ vi.mock('./RemoteBackupRetention', () => ({
 
 vi.mock('./RemoteBackupRetentionService', () => ({
   executeRetentionCleanup: executeRetentionCleanupMock,
+}));
+
+vi.mock('./ScheduledRemoteBackupConfigService', () => ({
+  loadState: loadStateMock,
+  saveState: saveStateMock,
 }));
 
 vi.mock('../../store/useStore', () => ({
@@ -49,6 +58,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 import {
   orchestratePostBackupRetentionCleanup,
   clearCliffDropDeferred,
+  clearCliffDropDeferredPersisted,
 } from './RetentionCleanupOrchestrator';
 import { appController } from '../../controllers/appController';
 import type {
@@ -939,6 +949,45 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(result.cliffDropDeferred).toBe(true);
       expect(result.cliffDropLatestSummaryNoteCount).toBe(10);
       expect(result.cliffDropLatestSummaryBoardCount).toBe(1);
+    });
+
+    it('cliff 清理: 持久化清理仅在 deferred 时写盘', async () => {
+      // deferred=true → 读改写一次，补丁落全 null
+      const deferredState: ScheduledRemoteBackupState = {
+        ...DEFAULT_STATE,
+        cliffDropDeferred: true,
+        cliffDropDetectedAt: 1_700_000_000_000,
+        cliffDropLatestSummaryNoteCount: 5,
+      };
+      loadStateMock.mockResolvedValue({ success: true, state: deferredState, error: null });
+      saveStateMock.mockResolvedValue({ success: true, error: null });
+      await clearCliffDropDeferredPersisted();
+      expect(saveStateMock).toHaveBeenCalledTimes(1);
+      const written = saveStateMock.mock.calls[0]?.[0] as ScheduledRemoteBackupState;
+      expect(written.cliffDropDeferred).toBe(false);
+      expect(written.cliffDropDetectedAt).toBeNull();
+      expect(written.cliffDropLatestSummaryNoteCount).toBeNull();
+
+      // deferred=false → 不写盘（未触发断崖的用户切板不物化状态文件）
+      saveStateMock.mockClear();
+      loadStateMock.mockResolvedValue({ success: true, state: { ...DEFAULT_STATE }, error: null });
+      await clearCliffDropDeferredPersisted();
+      expect(saveStateMock).not.toHaveBeenCalled();
+
+      // state=null → 不写盘
+      loadStateMock.mockResolvedValue({ success: true, state: null, error: null });
+      await clearCliffDropDeferredPersisted();
+      expect(saveStateMock).not.toHaveBeenCalled();
+
+      // load 失败 → 不写盘
+      loadStateMock.mockResolvedValue({ success: false, state: deferredState, error: 'io' });
+      await clearCliffDropDeferredPersisted();
+      expect(saveStateMock).not.toHaveBeenCalled();
+
+      // 写盘失败 → 抛错（调用方 fire-and-forget 捕获告警）
+      loadStateMock.mockResolvedValue({ success: true, state: deferredState, error: null });
+      saveStateMock.mockResolvedValue({ success: false, error: 'boom' });
+      await expect(clearCliffDropDeferredPersisted()).rejects.toThrow('boom');
     });
   });
 });

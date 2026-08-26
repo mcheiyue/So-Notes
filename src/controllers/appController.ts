@@ -8,6 +8,7 @@ import type { AttachmentRef, Board, Note, ShellRectState, StickyDragStatus, Them
 import { parseSmartPaste, buildSmartPasteNoteInputs } from '../utils/smartPaste';
 import { getViewportSpawnOrigin } from '../utils/spawnPosition';
 import { getNoteElement } from '../utils/noteElementRegistry';
+import { clearCliffDropDeferredPersisted } from '../services/backup/RetentionCleanupOrchestrator';
 
 type ArrangeNotesStrategy = 'position' | 'updatedAt' | 'color';
 type ArrangeNotesScope = 'auto' | 'board' | 'selection';
@@ -40,7 +41,14 @@ const switchBoard = (
   const state = useStore.getState();
   state.switchBoard(boardId);
   enterBoardMode();
-  deps?.clearCliffDropDeferred?.();
+  if (deps?.clearCliffDropDeferred) {
+    deps.clearCliffDropDeferred();
+    return;
+  }
+  // S7 生产默认接线：无注入时走真实持久化清理；失败仅告警，不阻塞切板
+  void clearCliffDropDeferredPersisted().catch((e: unknown) =>
+    console.warn('cliff deferred 清理失败:', e),
+  );
 };
 
 const runOnBoardView = (action: () => void): void => {

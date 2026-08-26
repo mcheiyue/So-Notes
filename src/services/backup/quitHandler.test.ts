@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   shouldPromptExitBackup,
   handleQuitRequest,
@@ -407,6 +409,16 @@ describe('handleQuitRequest', () => {
 
       expect(clearCliffDropDeferred.mock.calls.length).toBeGreaterThanOrEqual(1);
       expect(deps.invoke).toHaveBeenCalledWith('confirm_app_quit');
+    });
+
+    it('cliff 清理: 生产退出调用传入持久化清理', () => {
+      // 源码接线锁（仿 cargo webdav_entry_errors_carry_inner_reason 的 include_str! 锁法）：
+      // 防止生产 handleQuitRequest 调用点静默丢失 clearCliffDropDeferred 注入
+      const src = readFileSync(
+        join(process.cwd(), 'src/components/ScheduledRemoteBackupController.tsx'),
+        'utf8',
+      );
+      expect(src.includes('clearCliffDropDeferred:')).toBe(true);
     });
 
     it('条件不满足时直接调用 confirm_app_quit', async () => {

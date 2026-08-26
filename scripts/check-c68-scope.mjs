@@ -36,6 +36,8 @@ const EXACT_ALLOWED = new Set([
   'src/services/backup/quitHandler.test.ts',
   'src/controllers/appController.ts',
   'src/controllers/appController.test.ts',
+  // v1.6.8 收束（FIX-S7W）：退出路径生产接线的唯一落点
+  'src/components/ScheduledRemoteBackupController.tsx',
   'docs/adr/0002-three-layer-lock-semantics.md',
   'docs/qa/v1.6.8-smoke-baseline.md',
   'scripts/check-smoke-baseline.mjs',

@@ -26,6 +26,10 @@ vi.mock('../utils/noteElementRegistry', () => {
   };
 });
 
+vi.mock('../services/backup/RetentionCleanupOrchestrator', () => ({
+  clearCliffDropDeferredPersisted: vi.fn(async () => undefined),
+}));
+
 import { appController } from './appController';
 import { useStore } from '../store/useStore';
 import { useUIStore, createInitialUIState } from '../store/uiStore';
@@ -35,6 +39,7 @@ import { LAYOUT } from '../constants/layout';
 import type { Note } from '../store/types';
 import { getNoteElement } from '../utils/noteElementRegistry';
 import { invoke } from '@tauri-apps/api/core';
+import { clearCliffDropDeferredPersisted } from '../services/backup/RetentionCleanupOrchestrator';
 
 const createNote = (overrides: Partial<Note> = {}): Note => ({
   id: 'note-1',
@@ -871,5 +876,28 @@ describe('appController locateDetachedNote', () => {
     const state = useStore.getState();
     expect(state.selectedIds).toEqual([]);
     expect(state.noteHighlights['note-local']).toBeUndefined();
+  });
+});
+
+// S7 生产默认接线锁：switchBoard 不注入 deps 时必须触发真实持久化清理，
+// 防止清理退化为「仅测试注入 spy 才生效」的死代码（v1.6.8 审查发现①）。
+describe('appController.switchBoard cliff 清理接线', () => {
+  beforeEach(() => {
+    vi.mocked(clearCliffDropDeferredPersisted).mockClear();
+  });
+
+  it('cliff 清理: switchBoard 无注入默认触发持久化清理', () => {
+    appController.switchBoard('board-2');
+
+    expect(clearCliffDropDeferredPersisted).toHaveBeenCalledTimes(1);
+  });
+
+  it('cliff 清理: 注入 deps spy 时走注入不触达持久化', () => {
+    const spy = vi.fn();
+
+    appController.switchBoard('board-2', { clearCliffDropDeferred: spy });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(clearCliffDropDeferredPersisted).not.toHaveBeenCalled();
   });
 });

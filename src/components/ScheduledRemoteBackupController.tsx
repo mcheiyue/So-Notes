@@ -14,6 +14,7 @@ import { flushNow } from '../services/storage/PersistenceFacade';
 import { readDiskStorageData, getLatestUpdateTimestamp } from '../services/storage/tauriPersistence';
 import { tryStartBackupJob } from '../services/backup/BackupJobCoordinator';
 import { handleQuitRequest } from '../services/backup/quitHandler';
+import { clearCliffDropDeferredPersisted } from '../services/backup/RetentionCleanupOrchestrator';
 import { useQuitConfirmStore } from '../store/quitConfirmStore';
 import { promptQuitConfirm, promptBackupFailed } from '../store/quitConfirmStore';
 import { appendBackupActivity } from '../services/backup/BackupActivityLogService';
@@ -207,6 +208,7 @@ export const ScheduledRemoteBackupController = () => {
         setBackingUp: (value) => useQuitConfirmStore.getState().setBackingUp(value),
         closeDialog: () => useQuitConfirmStore.getState().close(),
         runBeforeExit,
+        clearCliffDropDeferred: clearCliffDropDeferredPersisted,
       });
     });
 
