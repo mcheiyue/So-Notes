@@ -56,10 +56,7 @@ const isBusyCleanupResult = (result: {
 
 // 单一清理函数（C-CL1 单点）；board 切换 + 退出共用
 // 不拆成多个小函数（反碎片化，对齐代码抽象与方法封装规范）
-export function clearCliffDropDeferred(
-  state: ScheduledRemoteBackupState,
-): Partial<ScheduledRemoteBackupState> {
-  void state;
+export function clearCliffDropDeferred(): Partial<ScheduledRemoteBackupState> {
   return {
     cliffDropDeferred: false,
     cliffDropDetectedAt: null,
@@ -80,7 +77,7 @@ export function clearCliffDropDeferred(
 export async function clearCliffDropDeferredPersisted(): Promise<void> {
   const result = await loadState();
   if (!result.success || result.state === null || !result.state.cliffDropDeferred) return;
-  const saved = await saveState({ ...result.state, ...clearCliffDropDeferred(result.state) });
+  const saved = await saveState({ ...result.state, ...clearCliffDropDeferred() });
   if (!saved.success) throw new Error(saved.error ?? 'saveState failed');
 }
 

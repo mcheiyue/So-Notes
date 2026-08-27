@@ -896,7 +896,7 @@ describe('RetentionCleanupOrchestrator', () => {
         lastRemoteFileName: 'keep.zip',
       };
 
-      const patch = clearCliffDropDeferred(state);
+      const patch = clearCliffDropDeferred();
       expect(patch.cliffDropDeferred).toBe(false);
       expect(patch.cliffDropDetectedAt).toBeNull();
       expect(patch.cliffDropLatestSummaryNoteCount).toBeNull();
@@ -913,7 +913,7 @@ describe('RetentionCleanupOrchestrator', () => {
 
       let scheduled = { ...state };
       const spy = vi.fn(() => {
-        scheduled = { ...scheduled, ...clearCliffDropDeferred(scheduled) };
+        scheduled = { ...scheduled, ...clearCliffDropDeferred() };
       });
       appController.switchBoard('board-2', { clearCliffDropDeferred: spy });
       expect(spy.mock.calls.length).toBeGreaterThanOrEqual(1);
@@ -924,12 +924,7 @@ describe('RetentionCleanupOrchestrator', () => {
       const cleared: ScheduledRemoteBackupState = {
         ...DEFAULT_STATE,
         baselineConfirmedRemoteCount: 100,
-        ...clearCliffDropDeferred({
-          ...DEFAULT_STATE,
-          cliffDropDeferred: true,
-          cliffDropLatestSummaryNoteCount: 5,
-          baselineConfirmedRemoteCount: 100,
-        }),
+        ...clearCliffDropDeferred(),
       };
       expect(cleared.cliffDropDeferred).toBe(false);
 
