@@ -423,5 +423,29 @@ describe('BackupJobCoordinator', () => {
       expect(committed).toBe('committed-data');
       expect(getActiveBackupJob()).toBeNull();
     });
+
+    it('coordinator 超时: 旧 handle release 不打断新 job', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // options.timeoutMs 生效：A 以 60s 超时而非默认 5min
+      const handleA = tryStartBackupJob('manual-remote-backup', { timeoutMs: 60_000 });
+      expect(handleA).not.toBeNull();
+      vi.advanceTimersByTime(60_000 + 1);
+      expect(getActiveBackupJob()).toBeNull();
+
+      // 超时后启动新 job B
+      const handleB = tryStartBackupJob('scheduled-remote-backup');
+      expect(handleB).not.toBeNull();
+      expect(getActiveBackupJob()?.kind).toBe('scheduled-remote-backup');
+
+      // 旧 handle release 命中 startedAt 身份守卫，不得清掉 B
+      handleA!.release();
+      expect(getActiveBackupJob()).not.toBeNull();
+      expect(getActiveBackupJob()?.kind).toBe('scheduled-remote-backup');
+
+      handleB!.release();
+      expect(getActiveBackupJob()).toBeNull();
+      expect(warnSpy).toHaveBeenCalledTimes(1); // 仅 A 超时告警
+    });
   });
 });
