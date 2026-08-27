@@ -9,6 +9,7 @@ import { parseSmartPaste, buildSmartPasteNoteInputs } from '../utils/smartPaste'
 import { getViewportSpawnOrigin } from '../utils/spawnPosition';
 import { getNoteElement } from '../utils/noteElementRegistry';
 import { clearCliffDropDeferredPersisted } from '../services/backup/RetentionCleanupOrchestrator';
+import { getSchedulerService } from '../services/backup/ScheduledRemoteBackupService';
 
 type ArrangeNotesStrategy = 'position' | 'updatedAt' | 'color';
 type ArrangeNotesScope = 'auto' | 'board' | 'selection';
@@ -45,10 +46,14 @@ const switchBoard = (
     deps.clearCliffDropDeferred();
     return;
   }
-  // S7 生产默认接线：无注入时走真实持久化清理；失败仅告警，不阻塞切板
-  void clearCliffDropDeferredPersisted().catch((e: unknown) =>
-    console.warn('cliff deferred 清理失败:', e),
-  );
+  // S7 生产默认接线：无注入时走真实持久化清理；清盘后同步活调度器内存，
+  // 否则下次自动备份仍读旧 internalState（cliffDropDeferred=true）并写回盘，
+  // 撤销切板清理（对照 BoardDock saveState+reloadState 模式）；失败仅告警，不阻塞切板
+  void clearCliffDropDeferredPersisted()
+    .then(() => {
+      void getSchedulerService()?.reloadState();
+    })
+    .catch((e: unknown) => console.warn('cliff deferred 清理失败:', e));
 };
 
 const runOnBoardView = (action: () => void): void => {

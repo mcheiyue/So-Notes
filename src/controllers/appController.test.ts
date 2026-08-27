@@ -30,6 +30,14 @@ vi.mock('../services/backup/RetentionCleanupOrchestrator', () => ({
   clearCliffDropDeferredPersisted: vi.fn(async () => undefined),
 }));
 
+const { reloadStateSpy } = vi.hoisted(() => ({
+  reloadStateSpy: vi.fn(async () => undefined),
+}));
+
+vi.mock('../services/backup/ScheduledRemoteBackupService', () => ({
+  getSchedulerService: vi.fn(() => ({ reloadState: reloadStateSpy })),
+}));
+
 import { appController } from './appController';
 import { useStore } from '../store/useStore';
 import { useUIStore, createInitialUIState } from '../store/uiStore';
@@ -884,6 +892,7 @@ describe('appController locateDetachedNote', () => {
 describe('appController.switchBoard cliff 清理接线', () => {
   beforeEach(() => {
     vi.mocked(clearCliffDropDeferredPersisted).mockClear();
+    reloadStateSpy.mockClear();
   });
 
   it('cliff 清理: switchBoard 无注入默认触发持久化清理', () => {
@@ -899,5 +908,16 @@ describe('appController.switchBoard cliff 清理接线', () => {
 
     expect(spy).toHaveBeenCalledTimes(1);
     expect(clearCliffDropDeferredPersisted).not.toHaveBeenCalled();
+  });
+
+  it('cliff 清理: 切板清盘后同步调度器内存 reloadState', async () => {
+    // 回归锁（v1.6.8 审查 MAJOR）：只写盘不 reloadState 会导致当次会话内
+    // 下次自动备份把 cliffDropDeferred=true 写回盘，撤销切板清理。
+    appController.switchBoard('board-2');
+
+    await vi.waitFor(() => {
+      expect(reloadStateSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(clearCliffDropDeferredPersisted).toHaveBeenCalledTimes(1);
   });
 });
