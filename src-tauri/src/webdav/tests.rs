@@ -303,16 +303,19 @@
         );
     }
     #[test]
-    fn trust_host_allows_resolved_private_addrs() {
-        // C-WF1: trust_host 豁免域名解析 S2（含私网解析结果）；字面量仍拒见 W3。
-        // 前名 dns_fail_with_trust_still_rejects_private 已随语义翻转失真，FIX-RENAME 改名。
+    fn trust_host_only_allows_fakeip_not_private() {
+        // C-WF1（收窄）：trust_host 仅豁免 fake-ip 基准段；私网解析结果仍拒（回归 v1.6.1 语义）。
+        // 前名 trust_host_allows_resolved_private_addrs 曾随 C-WF1 泛化放行私网（SSRF 范围扩大），已收窄。
         let private: SocketAddr = "192.168.1.1:443".parse().unwrap();
         let mock = MockResolver {
             responses: vec![Ok(vec![private])],
             call_count: std::sync::atomic::AtomicUsize::new(0),
         };
-        let addrs = resolve_and_check("example.com", 443, &mock, true).unwrap();
-        assert_eq!(addrs, vec![private]);
+        let err = resolve_and_check("example.com", 443, &mock, true).unwrap_err();
+        assert!(
+            err.contains("主机校验失败") || err.contains("不能指向本机或内网"),
+            "trust_host 不应放行私网解析结果: {err}"
+        );
     }
     #[test]
     fn dns_fail_with_trust_retry_succeeds() {

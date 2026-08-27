@@ -84,18 +84,23 @@ pub(crate) fn resolve_and_check(
     if addrs.is_empty() {
         return Err(sanitize_webdav_error("DNS 解析失败：未返回任何地址"));
     }
-    // C-WF1: trust_host 只豁免域名解析路径的 S2；IP 字面量分支不走这里
-    if !trust_host {
-        for addr in &addrs {
-            if is_disallowed_webdav_ip(addr.ip()) {
-                let detail = match addr.ip() {
-                    IpAddr::V4(v4) if is_benchmark(v4) => {
-                        "地址解析到代理保留段 198.18.x.x（常见于 Clash TUN fake-ip 模式）：可勾选『信任此主机』，或将该域名加入代理 fake-ip 白名单"
-                    }
-                    _ => "主机校验失败：不能指向本机或内网",
-                };
-                return Err(sanitize_webdav_error(detail));
+    // C-WF1（收窄）：trust_host 仅豁免 fake-ip 基准段（198.18.0.0/15 / IPv6 benchmark）；
+    // 私网/环回/链路本地等解析结果仍拒——与 UI「IP 黑名单仍生效」一致。IP 字面量分支不走这里。
+    for addr in &addrs {
+        if is_disallowed_webdav_ip(addr.ip()) {
+            let is_fakeip = match addr.ip() {
+                IpAddr::V4(v4) => is_benchmark(v4),
+                IpAddr::V6(v6) => is_benchmarking_ipv6(v6),
+            };
+            if trust_host && is_fakeip {
+                continue;
             }
+            let detail = if is_fakeip {
+                "地址解析到代理保留段 198.18.x.x（常见于 Clash TUN fake-ip 模式）：可勾选『信任此主机』，或将该域名加入代理 fake-ip 白名单"
+            } else {
+                "主机校验失败：不能指向本机或内网"
+            };
+            return Err(sanitize_webdav_error(detail));
         }
     }
     Ok(addrs)
