@@ -1,5 +1,7 @@
 //! WebDAV 错误分类与消息映射（提取自 mod.rs）
 
+use super::ssrf::FAKE_IP_HINT;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebDavErrorKind {
     /// 鉴权失败（HTTP 401）。
@@ -182,7 +184,8 @@ pub fn classify_reqwest_error(
 
 pub(crate) fn sanitize_webdav_error(detail: &str) -> String {
     let lower = detail.to_ascii_lowercase();
-    if lower.contains("198.18") || lower.contains("fake-ip") {
+    // 精确放行已知 fake-ip 签名提示（C-WF3 保真桶）；不做子串旁路，防未来 raw 细节碰巧带 "198.18"/"fake-ip"
+    if detail == FAKE_IP_HINT {
         return detail.to_string();
     }
     if lower.starts_with("dns") || lower.starts_with("解析") || lower.contains("dns 解析") {

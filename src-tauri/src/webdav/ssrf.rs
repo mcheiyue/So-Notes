@@ -6,6 +6,10 @@ use url::{Host, Url};
 
 use super::error::sanitize_webdav_error;
 use super::types::{MAX_WEBDAV_REDIRECTS, WEBDAV_USER_AGENT};
+
+/// fake-ip 签名提示（C-WF3）：sanitize_webdav_error 对精确相等时原样放行。
+pub(crate) const FAKE_IP_HINT: &str =
+    "地址解析到代理保留段 198.18.x.x（常见于 Clash TUN fake-ip 模式）：可勾选『信任此主机』，或将该域名加入代理 fake-ip 白名单";
 // ---------------------------------------------------------------------------
 // URL 规范化
 // ---------------------------------------------------------------------------
@@ -96,7 +100,7 @@ pub(crate) fn resolve_and_check(
                 continue;
             }
             let detail = if is_fakeip {
-                "地址解析到代理保留段 198.18.x.x（常见于 Clash TUN fake-ip 模式）：可勾选『信任此主机』，或将该域名加入代理 fake-ip 白名单"
+                FAKE_IP_HINT
             } else {
                 "主机校验失败：不能指向本机或内网"
             };
