@@ -35,20 +35,13 @@ const enterBoardMode = (): void => {
   getUIState().setViewMode('BOARD');
 };
 
-const switchBoard = (
-  boardId: string,
-  deps?: { readonly clearCliffDropDeferred?: () => void },
-): void => {
+const switchBoard = (boardId: string): void => {
   const state = useStore.getState();
   state.switchBoard(boardId);
   enterBoardMode();
-  if (deps?.clearCliffDropDeferred) {
-    deps.clearCliffDropDeferred();
-    return;
-  }
-  // S7 生产默认接线：无注入时走真实持久化清理；清盘后同步活调度器内存，
-  // 否则下次自动备份仍读旧 internalState（cliffDropDeferred=true）并写回盘，
-  // 撤销切板清理（对照 BoardDock saveState+reloadState 模式）；失败仅告警，不阻塞切板
+  // S7 生产默认接线：切板一律走真实持久化清理（清盘后 reloadState 同步调度器内存，
+  // 否则下次自动备份仍读旧 internalState 并写回盘，撤销切板清理）；
+  // 失败仅告警，不阻塞切板。接线由 appController.test.ts 模块 mock 锁定。
   void clearCliffDropDeferredPersisted()
     .then(() => {
       void getSchedulerService()?.reloadState();

@@ -878,7 +878,7 @@ describe('RetentionCleanupOrchestrator', () => {
   });
 
   describe('cliff 清理', () => {
-    it('cliff 清理: board 切换时清除 cliffDropDeferred', () => {
+    it('cliff 清理: board 切换时清除 cliffDropDeferred', async () => {
       const state: ScheduledRemoteBackupState = {
         ...DEFAULT_STATE,
         cliffDropDeferred: true,
@@ -911,13 +911,20 @@ describe('RetentionCleanupOrchestrator', () => {
       expect(patch).not.toHaveProperty('lastRetentionCleanupAt');
       expect(patch).not.toHaveProperty('lastRemoteFileName');
 
-      let scheduled = { ...state };
-      const spy = vi.fn(() => {
-        scheduled = { ...scheduled, ...clearCliffDropDeferred() };
+      // 生产默认接线：切板走真实持久化清理（load/save 已 mock，等价磁盘读改写）
+      loadStateMock.mockReset();
+      saveStateMock.mockReset();
+      loadStateMock.mockResolvedValue({ success: true, state, error: null });
+      saveStateMock.mockResolvedValue({ success: true, error: null });
+
+      appController.switchBoard('board-2');
+      await vi.waitFor(() => {
+        expect(saveStateMock).toHaveBeenCalledTimes(1);
       });
-      appController.switchBoard('board-2', { clearCliffDropDeferred: spy });
-      expect(spy.mock.calls.length).toBeGreaterThanOrEqual(1);
-      expect(scheduled.cliffDropDeferred).toBe(false);
+      const written = saveStateMock.mock.calls[0]?.[0] as ScheduledRemoteBackupState;
+      expect(written.cliffDropDeferred).toBe(false);
+      expect(written.cliffDropLatestSummaryNoteCount).toBeNull();
+      expect(written.baselineConfirmedRemoteCount).toBe(100); // baseline 不受清理影响
     });
 
     it('cliff 清理: 清除后下次备份重新检测断崖', async () => {

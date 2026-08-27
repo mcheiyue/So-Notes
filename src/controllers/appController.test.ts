@@ -901,15 +901,6 @@ describe('appController.switchBoard cliff 清理接线', () => {
     expect(clearCliffDropDeferredPersisted).toHaveBeenCalledTimes(1);
   });
 
-  it('cliff 清理: 注入 deps spy 时走注入不触达持久化', () => {
-    const spy = vi.fn();
-
-    appController.switchBoard('board-2', { clearCliffDropDeferred: spy });
-
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(clearCliffDropDeferredPersisted).not.toHaveBeenCalled();
-  });
-
   it('cliff 清理: 切板清盘后同步调度器内存 reloadState', async () => {
     // 回归锁（v1.6.8 审查 MAJOR）：只写盘不 reloadState 会导致当次会话内
     // 下次自动备份把 cliffDropDeferred=true 写回盘，撤销切板清理。
